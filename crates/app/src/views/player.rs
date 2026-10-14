@@ -344,7 +344,10 @@ impl PlayerPage {
             title.0
         };
 
+        // Both bars occlude the mouse, so clicks on them don't reach the video below, whose
+        // click toggles pause.
         let top = h_flex()
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -365,6 +368,7 @@ impl PlayerPage {
             .child(div().text_lg().text_color(white()).truncate().child(title));
 
         let bottom = v_flex()
+            .occlude()
             .absolute()
             .bottom_0()
             .left_0()
