@@ -9,6 +9,14 @@ publish.workspace = true
 jellyfin.workspace = true
 player.workspace = true
 gpui-kit.workspace = true
+
 anyhow.workspace = true
+directories.workspace = true
+gethostname.workspace = true
+keyring.workspace = true
+serde.workspace = true
+tokio.workspace = true
+toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true

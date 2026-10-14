@@ -36,7 +36,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 | Widgets | `gpui_kit::component` | More than 75 components, including text input, virtual lists, scroll areas, theming, dialogs, and sidebar. `gpui_kit::base` is there if we later want our own look on top of its unstyled behavior. |
 | HTTP | `reqwest` (rustls) + `serde`/`serde_json` | Runs on our own tokio runtime on a background thread. GPUI's executor isn't tokio (§6). |
 | Player | **The `mpv` binary as a child process, controlled over JSON IPC** | §5 explains why we use the binary rather than libmpv. |
-| Persistence | `directories` + TOML config. `keyring` holds the access token. | `keyring` uses the OS keychain on all three platforms. |
+| Persistence | `directories` + TOML config. `keyring` (v4) holds the access token. | `keyring` uses the OS keychain on all three platforms. Where no credential store exists (WSL, or Linux without a Secret Service daemon), the token goes in a file only the user can read (`<config>/tokens/`, 0600), and a warning is logged. |
 | Image cache | On-disk cache in the platform cache dir, keyed by `(item id, image type, tag, width)` | Jellyfin's `ImageTags` act as cache busters. |
 | Errors / logs | `thiserror` in the library crates, `anyhow` in the app, plus `tracing` | |
 

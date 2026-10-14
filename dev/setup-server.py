@@ -13,6 +13,7 @@ import urllib.request
 BASE = os.environ.get("JELLYFIN_URL", "http://localhost:8096")
 USER = os.environ.get("JELLYFIN_USER", "dev")
 PASS = os.environ.get("JELLYFIN_PASS", "dev")
+SERVER_NAME = "jelly-gpui dev"
 CLIENT = 'Client="jelly-gpui-dev", Device="setup-script", DeviceId="jelly-gpui-dev-setup", Version="0.1.0"'
 
 LIBRARIES = [
@@ -108,7 +109,11 @@ def main():
         stable = stable + 1 if count == last and count > 0 else 0
         last = count
 
-    legacy = request("/System/Configuration", token=token)["EnableLegacyAuthorization"]
+    config = request("/System/Configuration", token=token)
+    if config.get("ServerName") != SERVER_NAME:
+        config["ServerName"] = SERVER_NAME
+        request("/System/Configuration", "POST", config, token)
+    legacy = config["EnableLegacyAuthorization"]
     print(f"server ready: {BASE}  user={USER} pass={PASS}  items={last}  EnableLegacyAuthorization={legacy}")
 
 

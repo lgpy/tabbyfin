@@ -1,18 +1,15 @@
+mod app_view;
+mod config;
+mod credentials;
+mod runtime;
+mod session;
+mod views;
+
+use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 use tracing_subscriber::EnvFilter;
 
-struct JellyApp;
-
-impl Render for JellyApp {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child("jelly-gpui")
-    }
-}
+use crate::app_view::AppView;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -21,19 +18,21 @@ fn main() {
         )
         .init();
 
-    gpui_kit::application().run(|cx| {
-        gpui_kit::init(cx);
+    gpui_kit::application()
+        .with_assets(gpui_kit::assets::Assets)
+        .run(|cx| {
+            gpui_kit::init(cx);
+            Theme::change(ThemeMode::Dark, None, cx);
 
-        let options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("jelly-gpui".into()),
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::centered(size(px(1280.), px(800.)), cx)),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("jelly-gpui".into()),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
-        gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| JellyApp))
-            .expect("failed to open window");
-
-        tracing::info!("window opened");
-    });
+            };
+            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| AppView::new(window, cx)))
+                .expect("failed to open window");
+        });
 }
