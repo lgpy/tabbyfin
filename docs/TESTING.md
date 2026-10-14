@@ -117,3 +117,16 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 ✅ The API smoke test on 10.11.11 with legacy authorization off.
 
 - ⬜ **Clicking through the app on 10.11**: sign-in (password and Quick Connect), Home, libraries, search, item pages, mark watched, playback with resume and reporting.
+
+## 9. Window placement (4.4)
+
+✅ In WSLg's X11 (no window manager): a resize and a move are saved to the config half a second later, and a restart reopens at the saved size. The position itself is approximated by the compositor there, so it says little about real desktops.
+
+✅ On Windows, two 1920×1080 monitors at 100%: a window moved to the second monitor is saved there and reopens on it at its size, and a maximized window reopens maximized on the same monitor at its last windowed size. (Before, the app did not name the display to place on; GPUI assumed the primary monitor and replaced the saved spot with the default 1536×1061 window on the primary.)
+
+- ⬜ **macOS and Linux with a window manager**: the same round trip to a second monitor, through maximize.
+- ⬜ **Mixed DPI** (e.g. a 125% monitor next to a 100% one): the saved spot and size survive.
+- ⬜ **Unplug the second monitor** the window was on: the next launch opens centred at the default size instead of off-screen.
+- ⬜ **Fullscreen playback**, then quit: the next launch opens windowed at the last normal bounds.
+- ⬜ A move or resize followed by a **quit within half a second**: the previous bounds are kept (the save waits for the change to settle).
+
