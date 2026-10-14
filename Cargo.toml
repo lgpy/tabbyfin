@@ -33,3 +33,8 @@ anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# GPUI crates patched for in-app video; see third_party/gpui/PATCHES.md.
+[patch.crates-io]
+gpui-pre = { path = "third_party/gpui/gpui-pre" }
+gpui-pre-windows = { path = "third_party/gpui/gpui-pre-windows" }
