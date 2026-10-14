@@ -1,6 +1,7 @@
 //! Persistent app settings, stored as TOML in the platform config dir. Never holds secrets:
 //! access tokens live in [`crate::credentials`].
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -22,6 +23,17 @@ pub struct Config {
     /// Play the next episode when one ends. `None` means yes.
     #[serde(default)]
     pub autoplay_next_episode: Option<bool>,
+    /// Sort and filter per library, by library id.
+    #[serde(default)]
+    pub library_views: BTreeMap<String, LibraryView>,
+}
+
+/// How a library grid is sorted and filtered. Keys are the library page's own names.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LibraryView {
+    pub sort: String,
+    pub descending: bool,
+    pub filter: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
