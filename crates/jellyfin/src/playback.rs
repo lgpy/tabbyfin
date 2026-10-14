@@ -60,6 +60,10 @@ pub struct PlaybackReport {
     pub audio_stream_index: Option<i32>,
     pub subtitle_stream_index: Option<i32>,
     pub play_method: PlayMethod,
+    /// Volume in percent, as the server's remote-control UIs show it.
+    pub volume_level: i32,
+    /// Whether the player is muted.
+    pub is_muted: bool,
 }
 
 #[derive(Serialize)]
@@ -77,8 +81,12 @@ struct ProgressBody<'a> {
     audio_stream_index: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subtitle_stream_index: Option<i32>,
+    volume_level: i32,
+    is_muted: bool,
 }
 
+/// The stop endpoint's body. The server's `PlaybackStopInfo` has no volume or mute fields,
+/// which only `PlaybackStartInfo` and `PlaybackProgressInfo` carry.
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct StopBody<'a> {
@@ -101,6 +109,8 @@ impl PlaybackReport {
             play_method: self.play_method.as_str(),
             audio_stream_index: self.audio_stream_index,
             subtitle_stream_index: self.subtitle_stream_index,
+            volume_level: self.volume_level,
+            is_muted: self.is_muted,
         }
     }
 }
@@ -261,5 +271,28 @@ impl Client {
         };
         self.post_no_content("/Sessions/Playing/Stopped", &Query::new(), Some(&body))
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{PlayMethod, PlaybackReport};
+
+    /// The bodies the server actually receives, as JSON. `PlaybackStartInfo` and
+    /// `PlaybackProgressInfo` both take `VolumeLevel` (int32) and `IsMuted` (bool);
+    /// `PlaybackStopInfo` has neither, so only the progress body carries them.
+    #[test]
+    fn progress_reports_carry_the_volume_and_mute_state() {
+        let report = PlaybackReport {
+            play_method: PlayMethod::DirectPlay,
+            volume_level: 55,
+            is_muted: true,
+            ..Default::default()
+        };
+        let body = serde_json::to_value(report.progress_body()).expect("serializes");
+        assert_eq!(body["VolumeLevel"], json!(55));
+        assert_eq!(body["IsMuted"], json!(true));
     }
 }

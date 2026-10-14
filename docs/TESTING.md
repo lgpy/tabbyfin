@@ -140,3 +140,8 @@ Code-level and startup checks only so far: the development harness cannot send m
 - ⬜ **Cursor and controls**: after 3 s without movement both disappear while playing; any movement brings both back; neither happens while paused.
 - ⬜ The wheel over the control bars does not change the volume.
 
+## 11. Volume and mute in reports (2.2.4)
+
+✅ Against the 12.2 dev server: three volume-down presses and `m` inside the app left `VolumeLevel = 85` and `IsMuted = true` in the session's `PlayState` (`GET /Sessions`). The 10.11 spec carries the same fields on `PlaybackProgressInfo` (checked), not run at runtime.
+
+- ⬜ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app.
