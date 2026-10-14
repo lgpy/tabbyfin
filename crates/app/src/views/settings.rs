@@ -20,6 +20,7 @@ pub struct SettingsPage {
     scroll: ScrollHandle,
     bitrate: ChoiceSelect,
     autoplay: bool,
+    auto_skip: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -27,6 +28,7 @@ impl SettingsPage {
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let config = Config::load();
         let autoplay = config.autoplay_next_episode.unwrap_or(true);
+        let auto_skip = config.auto_skip_intro.unwrap_or(false);
         let current = config.max_streaming_bitrate.map_or(0, |bps| (bps / 1_000_000) as i32);
         let choices: Vec<Choice> = BITRATES_MBPS
             .iter()
@@ -54,17 +56,20 @@ impl SettingsPage {
             scroll: ScrollHandle::new(),
             bitrate,
             autoplay,
+            auto_skip,
             _subscriptions,
         }
     }
 
     fn set_autoplay(&mut self, autoplay: bool, cx: &mut Context<Self>) {
         self.autoplay = autoplay;
-        let mut config = Config::load();
-        config.autoplay_next_episode = Some(autoplay);
-        if let Err(err) = config.save() {
-            tracing::warn!("failed to save config: {err:#}");
-        }
+        save(|config| config.autoplay_next_episode = Some(autoplay));
+        cx.notify();
+    }
+
+    fn set_auto_skip(&mut self, auto_skip: bool, cx: &mut Context<Self>) {
+        self.auto_skip = auto_skip;
+        save(|config| config.auto_skip_intro = Some(auto_skip));
         cx.notify();
     }
 
@@ -90,6 +95,14 @@ impl SettingsPage {
             .ok();
         })
         .detach();
+    }
+}
+
+fn save(change: impl FnOnce(&mut Config)) {
+    let mut config = Config::load();
+    change(&mut config);
+    if let Err(err) = config.save() {
+        tracing::warn!("failed to save config: {err:#}");
     }
 }
 
@@ -141,6 +154,19 @@ impl Render for SettingsPage {
                                         cx.listener(|this, checked: &bool, _, cx| this.set_autoplay(*checked, cx)),
                                     ),
                             )
+                            .child(
+                                Switch::new("auto-skip")
+                                    .checked(self.auto_skip)
+                                    .label("Skip intros and recaps automatically")
+                                    .on_click(
+                                        cx.listener(|this, checked: &bool, _, cx| this.set_auto_skip(*checked, cx)),
+                                    ),
+                            )
+                            .child(hint(
+                                "Audio and subtitle languages follow your Jellyfin profile (Settings → Playback in \
+                                 the web client), as does whether subtitles show by default.",
+                                cx,
+                            ))
                             .child(
                                 h_flex()
                                     .gap_4()

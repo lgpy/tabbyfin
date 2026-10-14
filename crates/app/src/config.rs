@@ -23,6 +23,9 @@ pub struct Config {
     /// Play the next episode when one ends. `None` means yes.
     #[serde(default)]
     pub autoplay_next_episode: Option<bool>,
+    /// Skip intros and recaps without asking. `None` means no.
+    #[serde(default)]
+    pub auto_skip_intro: Option<bool>,
     /// Sort and filter per library, by library id.
     #[serde(default)]
     pub library_views: BTreeMap<String, LibraryView>,

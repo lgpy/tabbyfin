@@ -127,7 +127,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 4.1 | **Player preferences** | P2 | S | Settings has Playback (bitrate, autoplay), Storage, Logs, Account and About. Add: preferred audio and subtitle languages (or follow the user's server-side preferences: `AudioLanguagePreference`, `SubtitleMode`), and skip-intro behaviour (e.g. skip automatically). Max streaming bitrate and autoplay are done. |
+| 4.1 | **Player preferences** | P2 | S | ✅ Done: *Settings → Playback* has autoplay, skip intros automatically, and the max bitrate. Tracks not chosen explicitly (autoplay, next episode, SyncPlay) now follow the server's defaults, which apply the user's profile (language preferences, subtitle mode, remembered selections) instead of the file's default flags. |
 | 4.2 | **Subtitle appearance** | P3 | S | Font size, colour, background (mpv `sub-*` options) for text subtitles. |
 | 4.3 | **Theme** | P3 | S | Dark only. Add light and follow-system, from GPUI Kit's theme system. |
 | 4.4 | **Remember window size and position** | P3 | S | The window always opens centred at 1280×800. |

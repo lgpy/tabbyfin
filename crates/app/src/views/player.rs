@@ -16,7 +16,7 @@ use gpui_kit::*;
 use player::libmpv::Frame;
 
 use crate::components::timestamp;
-use crate::markers;
+use crate::markers::{self, SegmentKind};
 use crate::playback::{NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
 
@@ -65,6 +65,10 @@ pub struct PlayerPage {
     volume: Entity<SliderState>,
     /// The user is dragging the volume slider; don't move it with mpv's updates.
     adjusting_volume: bool,
+    /// Skip intros and recaps as they start (a setting).
+    auto_skip: bool,
+    /// The segment last skipped automatically, so seeking back into it doesn't skip again.
+    auto_skipped: Option<Duration>,
     /// Created once the item's versions are known, if there's more than one.
     version: Option<ChoiceSelect>,
     audio: Option<ChoiceSelect>,
@@ -102,6 +106,7 @@ impl PlayerPage {
                 this.sync_seek_bar(window, cx);
                 this.sync_volume(window, cx);
                 this.ensure_version_picker(window, cx);
+                this.auto_skip(cx);
                 cx.notify();
             }),
             cx.subscribe(&volume, |this, _, event: &SliderEvent, cx| {
@@ -181,6 +186,8 @@ impl PlayerPage {
             scrubbing: false,
             volume,
             adjusting_volume: false,
+            auto_skip: crate::config::Config::load().auto_skip_intro.unwrap_or(false),
+            auto_skipped: None,
             version: None,
             audio,
             subtitle,
@@ -295,6 +302,22 @@ impl PlayerPage {
             self.send(UiCommand::SeekTo(segment.end), cx);
         } else if state.show_up_next() {
             self.now_playing.update(cx, |state, cx| state.play_next(cx));
+        }
+    }
+
+    /// With the setting on, skips each intro or recap once when it starts. Not in a SyncPlay
+    /// group, where every member would ask the group to seek.
+    fn auto_skip(&mut self, cx: &mut Context<Self>) {
+        let state = self.now_playing.read(cx);
+        if !self.auto_skip || state.group_item.is_some() {
+            return;
+        }
+        if let Some(segment) = state.skippable()
+            && matches!(segment.kind, SegmentKind::Intro | SegmentKind::Recap)
+            && self.auto_skipped != Some(segment.start)
+        {
+            self.auto_skipped = Some(segment.start);
+            self.send(UiCommand::SeekTo(segment.end), cx);
         }
     }
 
