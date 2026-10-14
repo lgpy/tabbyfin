@@ -13,6 +13,30 @@ pub struct PlaybackInfoRequest {
     pub start_position: Option<Ticks>,
     pub audio_stream_index: Option<i32>,
     pub subtitle_stream_index: Option<i32>,
+    /// Bits per second. Sources above it are transcoded down; `None` means no limit.
+    pub max_streaming_bitrate: Option<u64>,
+}
+
+/// No limit: high enough that the server never transcodes for bitrate.
+const UNLIMITED_BITRATE: u64 = 1_000_000_000;
+
+/// How the stream reaches the player, for progress reports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PlayMethod {
+    /// The original file.
+    #[default]
+    DirectPlay,
+    /// HLS from the server's transcoder.
+    Transcode,
+}
+
+impl PlayMethod {
+    fn as_str(self) -> &'static str {
+        match self {
+            PlayMethod::DirectPlay => "DirectPlay",
+            PlayMethod::Transcode => "Transcode",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,6 +59,7 @@ pub struct PlaybackReport {
     pub is_paused: bool,
     pub audio_stream_index: Option<i32>,
     pub subtitle_stream_index: Option<i32>,
+    pub play_method: PlayMethod,
 }
 
 #[derive(Serialize)]
@@ -73,7 +98,7 @@ impl PlaybackReport {
             position_ticks: self.position,
             is_paused: self.is_paused,
             can_seek: true,
-            play_method: "DirectPlay",
+            play_method: self.play_method.as_str(),
             audio_stream_index: self.audio_stream_index,
             subtitle_stream_index: self.subtitle_stream_index,
         }
@@ -81,9 +106,10 @@ impl PlaybackReport {
 }
 
 /// mpv plays nearly everything, so the profile allows direct play of any container and
-/// codec and offers no transcoding. External text subtitles are delivered as files; anything
-/// else stays embedded.
-fn device_profile() -> serde_json::Value {
+/// codec. The server only transcodes (to H.264/AAC over HLS) when it won't direct play, e.g.
+/// above `max_bitrate`. External text subtitles are delivered as files; anything else stays
+/// embedded (or is burned into a transcode).
+fn device_profile(max_bitrate: u64) -> serde_json::Value {
     let external = ["srt", "subrip", "ass", "ssa", "vtt", "webvtt", "sub", "smi", "ttml"];
     let mut subtitle_profiles: Vec<serde_json::Value> = external
         .iter()
@@ -98,13 +124,24 @@ fn device_profile() -> serde_json::Value {
     );
     serde_json::json!({
         "Name": "jelly-gpui (mpv)",
-        "MaxStreamingBitrate": 1_000_000_000u64,
-        "MaxStaticBitrate": 1_000_000_000u64,
+        "MaxStreamingBitrate": max_bitrate,
+        "MaxStaticBitrate": max_bitrate,
         "DirectPlayProfiles": [
             { "Type": "Video" },
             { "Type": "Audio" },
         ],
-        "TranscodingProfiles": [],
+        "TranscodingProfiles": [
+            {
+                "Type": "Video",
+                "Context": "Streaming",
+                "Protocol": "hls",
+                "Container": "ts",
+                "VideoCodec": "h264",
+                "AudioCodec": "aac,mp3,ac3",
+                "MaxAudioChannels": "6",
+                "BreakOnNonKeyFrames": true,
+            },
+        ],
         "SubtitleProfiles": subtitle_profiles,
     })
 }
@@ -124,20 +161,23 @@ impl Client {
             audio_stream_index: Option<i32>,
             #[serde(skip_serializing_if = "Option::is_none")]
             subtitle_stream_index: Option<i32>,
+            max_streaming_bitrate: u64,
             enable_direct_play: bool,
             enable_direct_stream: bool,
             enable_transcoding: bool,
             device_profile: serde_json::Value,
         }
+        let max_bitrate = req.max_streaming_bitrate.unwrap_or(UNLIMITED_BITRATE);
         let body = Body {
             media_source_id: req.media_source_id.as_deref(),
             start_time_ticks: req.start_position,
             audio_stream_index: req.audio_stream_index,
             subtitle_stream_index: req.subtitle_stream_index,
+            max_streaming_bitrate: max_bitrate,
             enable_direct_play: true,
             enable_direct_stream: true,
-            enable_transcoding: false,
-            device_profile: device_profile(),
+            enable_transcoding: true,
+            device_profile: device_profile(max_bitrate),
         };
         self.post(&format!("/Items/{item_id}/PlaybackInfo"), &Query::new(), Some(&body))
             .await
@@ -156,6 +196,32 @@ impl Client {
             }
         }
         url
+    }
+
+    /// A server-relative URL from a `PlaybackInfo` response (`TranscodingUrl`, `DeliveryUrl`)
+    /// made absolute, without the `ApiKey` the server puts in it: authenticate with
+    /// [`Client::authorization_header`] instead, so the token stays out of logs.
+    pub fn transcode_url(&self, relative: &str) -> Url {
+        let mut url = self.url(relative);
+        let pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .filter(|(key, _)| !key.eq_ignore_ascii_case("apikey") && !key.eq_ignore_ascii_case("api_key"))
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        url.set_query(None);
+        if !pairs.is_empty() {
+            url.query_pairs_mut().extend_pairs(pairs);
+        }
+        url
+    }
+
+    /// Ends the server's transcode for a play session (it would otherwise run on for a while).
+    pub async fn stop_transcoding(&self, play_session_id: &str) -> Result<()> {
+        let mut query = Query::new();
+        query
+            .push("deviceId", &self.info().device_id)
+            .push("playSessionId", play_session_id);
+        self.delete_with_query("/Videos/ActiveEncodings", &query).await
     }
 
     /// URL of an external subtitle stream (one with `is_external`), in its native text format.

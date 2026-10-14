@@ -16,6 +16,9 @@ pub struct Config {
     /// Player volume in percent, remembered between sessions.
     #[serde(default)]
     pub volume: Option<f64>,
+    /// Bits per second; the server transcodes anything above it. `None` means no limit.
+    #[serde(default)]
+    pub max_streaming_bitrate: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

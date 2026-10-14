@@ -7,11 +7,12 @@ use std::time::Duration;
 
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType};
-use jellyfin::{Client, PlaybackInfoRequest, PlaybackReport, Ticks};
+use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
 use player::libmpv::VideoOutput;
 use player::{EndReason, LoadRequest, Player, PlayerEvent};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
+use url::Url;
 
 use crate::changes::Changes;
 use crate::config::Config;
@@ -68,10 +69,22 @@ enum SessionUpdate {
         video: VideoOutput,
         audio: Option<i32>,
         subtitle: SubtitleChoice,
+        stream: StreamInfo,
     },
     /// Fetched after playback starts.
     Details(Box<Details>),
     Player(PlayerEvent),
+}
+
+/// How the session's stream was set up, for switching tracks.
+#[derive(Debug, Clone, Default)]
+pub struct StreamInfo {
+    pub method: PlayMethod,
+    /// Subtitles added to mpv as files (Jellyfin stream indexes), in mpv's order after the
+    /// tracks embedded in the stream.
+    pub subtitle_files: Vec<i32>,
+    /// A subtitle the transcoder burns into the video.
+    pub burned_subtitle: Option<i32>,
 }
 
 /// Another version (media source) of the playing item.
@@ -106,12 +119,61 @@ pub struct NowPlaying {
     pub versions: Vec<Version>,
     /// The following episode, for episodes.
     pub next: Option<BaseItemDto>,
+    pub stream: StreamInfo,
     commands: mpsc::UnboundedSender<UiCommand>,
 }
 
 impl NowPlaying {
     pub fn send(&self, command: UiCommand) {
         let _ = self.commands.send(command);
+    }
+
+    pub fn is_transcoding(&self) -> bool {
+        self.stream.method == PlayMethod::Transcode
+    }
+
+    /// Switches the audio track. A transcode carries only the chosen track, so it restarts
+    /// at the current position.
+    pub fn change_audio(&mut self, index: i32, cx: &mut Context<Self>) {
+        if self.audio == Some(index) {
+            return;
+        }
+        self.audio = Some(index);
+        if self.is_transcoding() {
+            self.restart(cx);
+        } else {
+            self.send(UiCommand::Audio(index));
+        }
+    }
+
+    /// Switches subtitles. A transcode restarts if a burned-in subtitle has to go, or the new
+    /// one has to be burned in.
+    pub fn change_subtitle(&mut self, choice: SubtitleChoice, cx: &mut Context<Self>) {
+        if self.subtitle == choice {
+            return;
+        }
+        self.subtitle = choice;
+        let as_file = match choice {
+            SubtitleChoice::Stream(index) => self.stream.subtitle_files.contains(&index),
+            SubtitleChoice::Off | SubtitleChoice::Auto => true,
+        };
+        if self.is_transcoding() && (self.stream.burned_subtitle.is_some() || !as_file) {
+            self.restart(cx);
+        } else {
+            self.send(UiCommand::Subtitle(choice));
+        }
+    }
+
+    /// Plays the same version again from the current position with the current tracks.
+    fn restart(&self, cx: &mut App) {
+        let options = PlayOptions {
+            start: Some(Ticks::from(self.position)),
+            media_source_id: Some(self.source.id.clone()),
+            audio_stream_index: self.audio,
+            subtitle: self.subtitle,
+        };
+        let item = self.item.clone();
+        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
     }
 
     fn apply(&mut self, event: &PlayerEvent) {
@@ -215,6 +277,7 @@ impl PlaybackManager {
                         video,
                         audio,
                         subtitle,
+                        stream,
                     } => {
                         let commands = commands_tx.clone();
                         let item = item.clone();
@@ -232,6 +295,7 @@ impl PlaybackManager {
                             muted,
                             versions: Vec::new(),
                             next: None,
+                            stream,
                             commands,
                         });
                         this.update(cx, |_, cx| cx.emit(PlaybackEvent::Started(entity.clone())))
@@ -359,6 +423,60 @@ fn mpv_subtitle_id(source: &MediaSourceInfo, index: i32) -> Option<usize> {
     Some(subtitles(false).count() + position + 1)
 }
 
+/// The original file when the server allows direct play, else its HLS transcode.
+fn stream_url(
+    client: &Client,
+    item_id: &str,
+    source: &MediaSourceInfo,
+    play_session_id: Option<&str>,
+) -> Result<(Url, PlayMethod), String> {
+    if source.supports_direct_play || source.supports_direct_stream {
+        return Ok((
+            client.stream_url(item_id, &source.id, play_session_id),
+            PlayMethod::DirectPlay,
+        ));
+    }
+    let relative = source
+        .transcoding_url
+        .as_deref()
+        .ok_or("The server can't stream this item to this app.")?;
+    let url = client.transcode_url(relative);
+    let reasons = query_param(&url, "TranscodeReasons").unwrap_or_default();
+    tracing::info!(%reasons, "the server is transcoding");
+    Ok((url, PlayMethod::Transcode))
+}
+
+fn query_param(url: &Url, name: &str) -> Option<String> {
+    url.query_pairs()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.into_owned())
+}
+
+/// Subtitles mpv loads as separate files: external ones when direct playing; when
+/// transcoding, those the server sends as files (embedded text subtitles included).
+fn subtitle_files(
+    client: &Client,
+    item_id: &str,
+    source: &MediaSourceInfo,
+    method: PlayMethod,
+) -> Vec<(MediaStream, Url)> {
+    source
+        .media_streams
+        .iter()
+        .filter(|s| s.kind == MediaStreamType::Subtitle)
+        .filter_map(|stream| {
+            let url = match method {
+                PlayMethod::DirectPlay if stream.is_external => client.subtitle_url(item_id, &source.id, stream),
+                PlayMethod::Transcode if stream.delivery_method.as_deref() == Some("External") => {
+                    client.transcode_url(stream.delivery_url.as_deref()?)
+                }
+                _ => return None,
+            };
+            Some((stream.clone(), url))
+        })
+        .collect()
+}
+
 fn subtitle_index(choice: SubtitleChoice) -> Option<i32> {
     match choice {
         SubtitleChoice::Stream(index) => Some(index),
@@ -433,6 +551,7 @@ async fn run_session(
                 start_position: options.start,
                 audio_stream_index: options.audio_stream_index,
                 subtitle_stream_index: subtitle_index(options.subtitle),
+                max_streaming_bitrate: Config::load().max_streaming_bitrate,
             },
         )
         .await
@@ -445,29 +564,57 @@ async fn run_session(
         None => info.media_sources.into_iter().next(),
     }
     .ok_or("The server returned no playable media.")?;
+    let (url, method) = stream_url(&client, &item.id, &source, info.play_session_id.as_deref())?;
+    let subtitle_files = subtitle_files(&client, &item.id, &source, method);
+    // A transcode has the audio track the server picked (by the user's language preference
+    // when none was asked for), which it names in the URL.
+    let audio = options.audio_stream_index.or_else(|| match method {
+        PlayMethod::Transcode => query_param(&url, "AudioStreamIndex").and_then(|i| i.parse().ok()),
+        PlayMethod::DirectPlay => source.default_audio_stream_index,
+    });
+    let stream = StreamInfo {
+        method,
+        subtitle_files: subtitle_files.iter().map(|(stream, _)| stream.index).collect(),
+        burned_subtitle: (method == PlayMethod::Transcode)
+            .then(|| {
+                source
+                    .media_streams
+                    .iter()
+                    .find(|s| s.delivery_method.as_deref() == Some("Encode"))
+            })
+            .flatten()
+            .map(|s| s.index),
+    };
 
     let (player, mut events, video) = start_player().await?;
 
-    // Track choices are options, so they're set before loading the file.
+    // Track choices are options, so they're set before loading the file. A transcode has
+    // just the chosen audio track and no embedded subtitles.
+    let direct = method == PlayMethod::DirectPlay;
     if let Some(aid) = options
         .audio_stream_index
+        .filter(|_| direct)
         .and_then(|index| mpv_track_id(&source, MediaStreamType::Audio, index))
     {
         player.set_property("aid", aid).await.map_err(|err| err.to_string())?;
     }
-    let external_selected = match options.subtitle {
+    let file_selected = match options.subtitle {
+        // The server's default, when it sends that one as a file.
+        SubtitleChoice::Auto if !direct => source
+            .default_subtitle_stream_index
+            .filter(|index| stream.subtitle_files.contains(index)),
         SubtitleChoice::Auto => None,
         SubtitleChoice::Off => {
             player.set_property("sid", "no").await.map_err(|err| err.to_string())?;
             None
         }
         SubtitleChoice::Stream(index) => match mpv_track_id(&source, MediaStreamType::Subtitle, index) {
-            Some(sid) => {
+            Some(sid) if direct => {
                 player.set_property("sid", sid).await.map_err(|err| err.to_string())?;
                 None
             }
-            // External: no embedded track until it's added and selected after loading.
-            None => {
+            // A file: no embedded track until it's added and selected after loading.
+            _ => {
                 player.set_property("sid", "no").await.map_err(|err| err.to_string())?;
                 Some(index)
             }
@@ -483,7 +630,6 @@ async fn run_session(
         .await
         .map_err(|err| err.to_string())?;
 
-    let url = client.stream_url(&item.id, &source.id, info.play_session_id.as_deref());
     player
         .load(LoadRequest {
             url: url.to_string(),
@@ -497,8 +643,9 @@ async fn run_session(
     let _ = channels.updates.send(SessionUpdate::Started {
         source: Box::new(source.clone()),
         video,
-        audio: options.audio_stream_index.or(source.default_audio_stream_index),
+        audio,
         subtitle: options.subtitle,
+        stream: stream.clone(),
     });
     let details_task = {
         let (client, item, updates) = (client.clone(), item.clone(), channels.updates.clone());
@@ -508,14 +655,14 @@ async fn run_session(
         })
     };
 
-    let external_subtitles: Vec<_> = source.media_streams.iter().filter(|s| s.is_external).cloned().collect();
     let mut report = PlaybackReport {
         item_id: item.id.clone(),
         media_source_id: source.id.clone(),
         play_session_id: info.play_session_id.clone(),
         position: options.start.unwrap_or_default(),
-        audio_stream_index: options.audio_stream_index,
+        audio_stream_index: audio,
         subtitle_stream_index: subtitle_index(options.subtitle),
+        play_method: method,
         ..Default::default()
     };
     let mut started = false;
@@ -532,10 +679,9 @@ async fn run_session(
                 let _ = channels.updates.send(SessionUpdate::Player(event.clone()));
                 match event {
                     PlayerEvent::FileLoaded => {
-                        for stream in &external_subtitles {
-                            let url = client.subtitle_url(&item.id, &source.id, stream);
+                        for (stream, url) in &subtitle_files {
                             let title = stream.display_title.as_deref().unwrap_or("External");
-                            let select = external_selected == Some(stream.index);
+                            let select = file_selected == Some(stream.index);
                             if let Err(err) = player.add_subtitle(url.as_str(), title, stream.language.as_deref(), select).await {
                                 tracing::warn!("couldn't add subtitle: {err}");
                             }
@@ -562,7 +708,7 @@ async fn run_session(
                 }
             }
             Some(command) = channels.commands.recv() => {
-                if let Err(err) = apply_command(&player, &source, &mut report, command).await {
+                if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
                 if started {
@@ -585,6 +731,9 @@ async fn run_session(
     if started {
         report_or_log(client.report_playback_stopped(&report).await, "stop");
     }
+    if let (PlayMethod::Transcode, Some(id)) = (method, &info.play_session_id) {
+        report_or_log(client.stop_transcoding(id).await, "transcode stop");
+    }
     tracing::info!(item = %item.name, position = report.position.as_secs_f64(), "playback ended");
     match error {
         Some(error) => Err(error),
@@ -596,6 +745,7 @@ async fn run_session(
 async fn apply_command(
     player: &Player,
     source: &MediaSourceInfo,
+    stream: &StreamInfo,
     report: &mut PlaybackReport,
     command: UiCommand,
 ) -> player::Result<()> {
@@ -609,6 +759,8 @@ async fn apply_command(
         }
         UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., 100.)).await,
         UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
+        // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
+        UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),
         UiCommand::Audio(index) => {
             if let Some(aid) = mpv_track_id(source, MediaStreamType::Audio, index) {
                 player.set_property("aid", aid).await?;
@@ -618,6 +770,11 @@ async fn apply_command(
         }
         UiCommand::Subtitle(choice) => {
             let sid = match choice {
+                SubtitleChoice::Stream(index) if stream.method == PlayMethod::Transcode => stream
+                    .subtitle_files
+                    .iter()
+                    .position(|&i| i == index)
+                    .map(|i| json!(i + 1)),
                 SubtitleChoice::Stream(index) => mpv_subtitle_id(source, index).map(|id| json!(id)),
                 SubtitleChoice::Off => Some(json!("no")),
                 SubtitleChoice::Auto => Some(json!("auto")),

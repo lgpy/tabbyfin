@@ -117,7 +117,8 @@ impl PlayerPage {
         if let Some(select) = &audio {
             subscriptions.push(cx.subscribe(select, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
                 if let SelectEvent::Confirm(Some(index)) = event {
-                    this.send(UiCommand::Audio(*index), cx);
+                    let index = *index;
+                    this.now_playing.update(cx, |state, cx| state.change_audio(index, cx));
                 }
             }));
         }
@@ -128,7 +129,8 @@ impl PlayerPage {
                         SUBTITLES_OFF => SubtitleChoice::Off,
                         index => SubtitleChoice::Stream(index),
                     };
-                    this.send(UiCommand::Subtitle(choice), cx);
+                    this.now_playing
+                        .update(cx, |state, cx| state.change_subtitle(choice, cx));
                 }
             }));
         }
@@ -387,7 +389,19 @@ impl PlayerPage {
                     .icon(IconName::ArrowLeft)
                     .on_click(cx.listener(|this, _, window, cx| this.exit_player(&ExitPlayer, window, cx))),
             )
-            .child(div().text_lg().text_color(white()).truncate().child(title));
+            .child(div().flex_1().text_lg().text_color(white()).truncate().child(title))
+            .when(state.is_transcoding(), |el| {
+                el.child(
+                    div()
+                        .flex_none()
+                        .px_2()
+                        .rounded_md()
+                        .bg(black().opacity(0.5))
+                        .text_sm()
+                        .text_color(white().opacity(0.8))
+                        .child("Transcoding"),
+                )
+            });
 
         let bottom = v_flex()
             .occlude()
