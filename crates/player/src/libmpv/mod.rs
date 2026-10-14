@@ -6,13 +6,15 @@
 
 mod embedded;
 mod video;
+#[cfg(windows)]
+mod wgl;
 
 use std::ffi::{CStr, CString, c_char, c_double, c_int, c_void};
 
 use libloading::Library;
 
 pub use embedded::EmbeddedPlayer;
-pub use video::{VideoFrame, VideoOutput};
+pub use video::{Frame, SharedFrame, VideoFrame, VideoOutput};
 
 use crate::Error;
 

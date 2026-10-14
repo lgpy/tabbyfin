@@ -34,7 +34,12 @@ fn project_dirs() -> Option<ProjectDirs> {
     ProjectDirs::from("", "", "jelly-gpui")
 }
 
+/// The config folder. `JELLY_GPUI_CONFIG_DIR` overrides it, e.g. so test runs
+/// (`dev/win-run.sh`) don't touch the real sign-in.
 pub fn dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("JELLY_GPUI_CONFIG_DIR") {
+        return PathBuf::from(dir);
+    }
     project_dirs()
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".jelly-gpui"))

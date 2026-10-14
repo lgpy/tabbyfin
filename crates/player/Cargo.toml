@@ -13,8 +13,8 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true
 
-[target.'cfg(windows)'.dev-dependencies]
-# GPU interop probe (examples/dx_interop_probe.rs).
+[target.'cfg(windows)'.dependencies]
+# GPU video output (OpenGL <-> D3D11 interop), also used by examples/dx_interop_probe.rs.
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",

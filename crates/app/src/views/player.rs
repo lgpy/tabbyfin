@@ -11,6 +11,8 @@ use gpui_kit::component::{IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use player::libmpv::Frame;
+
 use crate::components::timestamp;
 use crate::playback::{NowPlaying, SubtitleChoice, UiCommand};
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
@@ -21,10 +23,20 @@ pub const KEY_CONTEXT: &str = "Player";
 const SEEK_STEP: f64 = 10.;
 const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 
+/// The frame on screen.
+#[derive(Clone)]
+enum Shown {
+    /// Software-rendered pixels uploaded as an image.
+    Image(Arc<RenderImage>),
+    /// A GPU texture shared by the player (Windows), drawn as a surface.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Shared(player::libmpv::SharedFrame),
+}
+
 pub struct PlayerPage {
     now_playing: Entity<NowPlaying>,
     focus_handle: FocusHandle,
-    frame: Option<Arc<RenderImage>>,
+    frame: Option<Shown>,
     /// `None` until the duration is known.
     seek: Option<Entity<SliderState>>,
     /// The user is dragging the seek bar; don't move it with playback.
@@ -74,17 +86,25 @@ impl PlayerPage {
             }));
         }
 
-        // Each frame becomes a new texture; free the previous one from GPUI's atlas.
         let mut frames = now_playing.read(cx).video.frames();
         let _frames = cx.spawn_in(window, async move |this, cx| {
             while frames.changed().await.is_ok() {
                 let Some(frame) = frames.borrow_and_update().clone() else { continue };
-                let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.pixels.clone()) else {
-                    continue;
+                let shown = match frame {
+                    Frame::Pixels(frame) => {
+                        let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.pixels.clone())
+                        else {
+                            continue;
+                        };
+                        Shown::Image(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)])))
+                    }
+                    // Already on the GPU: just repaint with the new texture.
+                    Frame::Shared(frame) => Shown::Shared(frame),
                 };
-                let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)]));
                 let updated = this.update_in(cx, |this, window, cx| {
-                    if let Some(old) = this.frame.replace(image) {
+                    // Each software frame is a new texture; free the previous one from GPUI's
+                    // atlas.
+                    if let Some(Shown::Image(old)) = this.frame.replace(shown) {
                         let _ = window.drop_image(old);
                     }
                     cx.notify();
@@ -317,7 +337,22 @@ impl Render for PlayerPage {
                     .absolute()
                     .inset_0()
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_pause(&TogglePause, window, cx)))
-                    .child(img(ImageSource::Render(frame)).size_full().object_fit(ObjectFit::Contain))
+                    .child(match frame {
+                        Shown::Image(image) => {
+                            img(ImageSource::Render(image)).size_full().object_fit(ObjectFit::Contain).into_any_element()
+                        }
+                        #[cfg(windows)]
+                        Shown::Shared(texture) => surface(SharedTexture {
+                            handle: texture.handle,
+                            width: texture.width,
+                            height: texture.height,
+                        })
+                        .size_full()
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element(),
+                        #[cfg(not(windows))]
+                        Shown::Shared(_) => div().into_any_element(),
+                    })
             }))
             .when(loading, |el| {
                 el.child(
