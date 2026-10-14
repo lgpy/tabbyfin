@@ -95,7 +95,11 @@ async fn main() -> anyhow::Result<()> {
             view.name,
             page.items.len(),
             page.total_record_count,
-            page.items.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join(", ")
+            page.items
+                .iter()
+                .map(|i| i.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
         let latest = client.latest(&view.id, 10, &fields).await?;
         ok(format!("{}: {} latest", view.name, latest.len()));
@@ -118,7 +122,11 @@ async fn main() -> anyhow::Result<()> {
         season.name,
         episodes
             .iter()
-            .map(|e| format!("S{:02}E{:02}", e.parent_index_number.unwrap_or(0), e.index_number.unwrap_or(0)))
+            .map(|e| format!(
+                "S{:02}E{:02}",
+                e.parent_index_number.unwrap_or(0),
+                e.index_number.unwrap_or(0)
+            ))
             .collect::<Vec<_>>()
             .join(", ")
     ));
@@ -144,7 +152,11 @@ async fn main() -> anyhow::Result<()> {
                     .filter(|s| s.kind == kind)
                     .map(|s| {
                         let lang = s.language.as_deref().unwrap_or("und");
-                        if s.is_external { format!("{lang} (external)") } else { lang.to_string() }
+                        if s.is_external {
+                            format!("{lang} (external)")
+                        } else {
+                            lang.to_string()
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -159,10 +171,21 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     let movie = client
-        .item(&movies.first().context("no movies on the server")?.id, &[ItemField::Overview])
+        .item(
+            &movies.first().context("no movies on the server")?.id,
+            &[ItemField::Overview],
+        )
         .await?;
-    let resume_at = movie.user_data.as_ref().map(|d| d.playback_position_ticks).unwrap_or_default();
-    ok(format!("{} detail loaded, resume position {:.1}s", movie.name, resume_at.as_secs_f64()));
+    let resume_at = movie
+        .user_data
+        .as_ref()
+        .map(|d| d.playback_position_ticks)
+        .unwrap_or_default();
+    ok(format!(
+        "{} detail loaded, resume position {:.1}s",
+        movie.name,
+        resume_at.as_secs_f64()
+    ));
 
     // Watched state round trip (restores the original state).
     let was_played = movie.user_data.as_ref().is_some_and(|d| d.played);
@@ -176,10 +199,20 @@ async fn main() -> anyhow::Result<()> {
     ok(format!("{} marked watched and unwatched", movie.name));
 
     // Images.
-    let req = movie.primary_image().context("movie has no primary image")?.fill_width(300);
+    let req = movie
+        .primary_image()
+        .context("movie has no primary image")?
+        .fill_width(300);
     let bytes = client.image(&req).await?;
-    ensure!(bytes.starts_with(&[0xFF, 0xD8]) || bytes.starts_with(b"RIFF"), "not a JPEG/WebP image");
-    ok(format!("primary image: {} bytes from {}", bytes.len(), client.image_url(&req).path()));
+    ensure!(
+        bytes.starts_with(&[0xFF, 0xD8]) || bytes.starts_with(b"RIFF"),
+        "not a JPEG/WebP image"
+    );
+    ok(format!(
+        "primary image: {} bytes from {}",
+        bytes.len(),
+        client.image_url(&req).path()
+    ));
 
     // Quick Connect.
     if anon.quick_connect_enabled().await? {

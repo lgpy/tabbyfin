@@ -40,8 +40,14 @@ impl ItemsQuery {
     fn to_query(&self) -> Query {
         let mut q = Query::new();
         q.opt("parentId", self.parent_id.as_ref())
-            .list("includeItemTypes", &wire_list(&self.include_item_types, BaseItemKind::as_str))
-            .list("excludeItemTypes", &wire_list(&self.exclude_item_types, BaseItemKind::as_str))
+            .list(
+                "includeItemTypes",
+                &wire_list(&self.include_item_types, BaseItemKind::as_str),
+            )
+            .list(
+                "excludeItemTypes",
+                &wire_list(&self.exclude_item_types, BaseItemKind::as_str),
+            )
             .push("recursive", self.recursive)
             .list("ids", &self.ids)
             .list("filters", &wire_list(&self.filters, ItemFilter::as_str))

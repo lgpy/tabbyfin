@@ -259,9 +259,15 @@ pub(crate) fn hardware_renderer(renderer: &str) -> bool {
         return true;
     }
     let renderer = renderer.to_ascii_lowercase();
-    !["llvmpipe", "softpipe", "swiftshader", "gdi generic", "software rasterizer"]
-        .iter()
-        .any(|name| renderer.contains(name))
+    ![
+        "llvmpipe",
+        "softpipe",
+        "swiftshader",
+        "gdi generic",
+        "software rasterizer",
+    ]
+    .iter()
+    .any(|name| renderer.contains(name))
 }
 
 /// The video's display size scaled down to fit the target, or `None` without video.
@@ -287,8 +293,14 @@ impl SoftwareRenderer {
     fn new(core: &Core, control: &RenderControl) -> Result<Self> {
         let api_type = cstring("sw");
         let mut params = [
-            RenderParam { kind: PARAM_API_TYPE, data: api_type.as_ptr() as *mut c_void },
-            RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+            RenderParam {
+                kind: PARAM_API_TYPE,
+                data: api_type.as_ptr() as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_INVALID,
+                data: ptr::null_mut(),
+            },
         ];
         let mut context = ptr::null_mut();
         // SAFETY: valid core handle and parameter list.
@@ -302,7 +314,10 @@ impl SoftwareRenderer {
                 &control.wakeup as *const Wakeup as *mut c_void,
             );
         }
-        Ok(Self { context, buffer: Vec::new() })
+        Ok(Self {
+            context,
+            buffer: Vec::new(),
+        })
     }
 
     fn run(&mut self, core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>) {
@@ -330,17 +345,33 @@ impl SoftwareRenderer {
     fn render(&mut self, core: &Core, (width, height): (u32, u32)) -> Option<VideoFrame> {
         let row = width as usize * 4;
         let stride = row.div_ceil(64) * 64;
-        self.buffer.resize((stride * height as usize).div_ceil(64), Aligned([0; 64]));
+        self.buffer
+            .resize((stride * height as usize).div_ceil(64), Aligned([0; 64]));
 
         let mut size = [width as c_int, height as c_int];
         let format = cstring("bgr0");
         let mut stride_param = stride;
         let mut params = [
-            RenderParam { kind: PARAM_SW_SIZE, data: size.as_mut_ptr() as *mut c_void },
-            RenderParam { kind: PARAM_SW_FORMAT, data: format.as_ptr() as *mut c_void },
-            RenderParam { kind: PARAM_SW_STRIDE, data: &mut stride_param as *mut usize as *mut c_void },
-            RenderParam { kind: PARAM_SW_POINTER, data: self.buffer.as_mut_ptr() as *mut c_void },
-            RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+            RenderParam {
+                kind: PARAM_SW_SIZE,
+                data: size.as_mut_ptr() as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_SW_FORMAT,
+                data: format.as_ptr() as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_SW_STRIDE,
+                data: &mut stride_param as *mut usize as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_SW_POINTER,
+                data: self.buffer.as_mut_ptr() as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_INVALID,
+                data: ptr::null_mut(),
+            },
         ];
         // SAFETY: the buffer holds `stride * height` bytes and outlives the call.
         let code = unsafe { (core.api.render_render)(self.context, params.as_mut_ptr()) };

@@ -24,10 +24,7 @@ pub enum Error {
     Status { status: u16, message: String },
 
     #[error("unexpected response at `{path}`: {source}")]
-    Decode {
-        path: String,
-        source: serde_json::Error,
-    },
+    Decode { path: String, source: serde_json::Error },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

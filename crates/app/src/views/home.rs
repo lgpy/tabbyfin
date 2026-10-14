@@ -74,7 +74,10 @@ async fn load(client: Client) -> jellyfin::Result<HomeData> {
     )?;
     let mut latest = Vec::new();
     for view in &views.items {
-        if matches!(view.collection_type, Some(CollectionType::Movies | CollectionType::TvShows)) {
+        if matches!(
+            view.collection_type,
+            Some(CollectionType::Movies | CollectionType::TvShows)
+        ) {
             let items = client.latest(&view.id, SHELF_LIMIT, FIELDS).await?;
             if !items.is_empty() {
                 latest.push((view.clone(), items));
@@ -149,7 +152,13 @@ impl Render for HomePage {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .child(v_flex().py_6().gap_8().text_color(cx.theme().foreground).children(sections))
+            .child(
+                v_flex()
+                    .py_6()
+                    .gap_8()
+                    .text_color(cx.theme().foreground)
+                    .children(sections),
+            )
             .into_any_element()
     }
 }

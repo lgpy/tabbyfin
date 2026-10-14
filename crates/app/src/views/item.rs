@@ -11,8 +11,8 @@ use jellyfin::{Client, Ticks};
 
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
-    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, card_text, centered_spinner, episode_label, error_state,
-    landscape_image, poster_card, remote_image, runtime_text, timestamp,
+    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, card_text, centered_spinner, episode_label, error_state, landscape_image,
+    poster_card, remote_image, runtime_text, timestamp,
 };
 use crate::images::ImageCache;
 use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
@@ -94,9 +94,8 @@ impl ItemPage {
             ..Default::default()
         };
         if let Some(pickers) = &self.pickers {
-            let selected = |select: &Option<ChoiceSelect>| {
-                select.as_ref().and_then(|s| s.read(cx).selected_value().copied())
-            };
+            let selected =
+                |select: &Option<ChoiceSelect>| select.as_ref().and_then(|s| s.read(cx).selected_value().copied());
             options.media_source_id = selected(&pickers.version)
                 .and_then(|i| data.item.media_sources.get(i as usize))
                 .map(|source| source.id.clone());
@@ -155,22 +154,38 @@ impl ItemPage {
             cx.new(|cx| SelectState::new(choices, Some(IndexPath::default()), window, cx))
         });
         let _version_changed = version.as_ref().map(|select| {
-            cx.subscribe_in(select, window, move |this, _, event: &SelectEvent<Vec<Choice>>, window, cx| {
-                let SelectEvent::Confirm(Some(index)) = event else { return };
-                if let Some(source) = sources.get(*index as usize) {
-                    let (audio, subtitle) =
-                        track_pickers(source, source.default_audio_stream_index, source.default_subtitle_stream_index, window, cx);
-                    if let Some(pickers) = &mut this.pickers {
-                        pickers.audio = audio;
-                        pickers.subtitle = subtitle;
+            cx.subscribe_in(
+                select,
+                window,
+                move |this, _, event: &SelectEvent<Vec<Choice>>, window, cx| {
+                    let SelectEvent::Confirm(Some(index)) = event else {
+                        return;
+                    };
+                    if let Some(source) = sources.get(*index as usize) {
+                        let (audio, subtitle) = track_pickers(
+                            source,
+                            source.default_audio_stream_index,
+                            source.default_subtitle_stream_index,
+                            window,
+                            cx,
+                        );
+                        if let Some(pickers) = &mut this.pickers {
+                            pickers.audio = audio;
+                            pickers.subtitle = subtitle;
+                        }
+                        cx.notify();
                     }
-                    cx.notify();
-                }
-            })
+                },
+            )
         });
         let first = &data.item.media_sources[0];
-        let (audio, subtitle) =
-            track_pickers(first, first.default_audio_stream_index, first.default_subtitle_stream_index, window, cx);
+        let (audio, subtitle) = track_pickers(
+            first,
+            first.default_audio_stream_index,
+            first.default_subtitle_stream_index,
+            window,
+            cx,
+        );
         self.pickers = Some(Pickers {
             version,
             audio,
@@ -182,7 +197,10 @@ impl ItemPage {
 
 async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
     let item = client
-        .item(&item_id, &[ItemField::Overview, ItemField::Genres, ItemField::MediaSources])
+        .item(
+            &item_id,
+            &[ItemField::Overview, ItemField::Genres, ItemField::MediaSources],
+        )
         .await?;
     let children = match item.kind {
         BaseItemKind::Series => client.seasons(&item.id, &[]).await?.items,
@@ -229,7 +247,10 @@ fn is_played(item: &BaseItemDto) -> bool {
 impl ItemPage {
     /// Play / Resume buttons and the watched toggle.
     fn render_actions(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
-        let playable = matches!(item.kind, BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video);
+        let playable = matches!(
+            item.kind,
+            BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video
+        );
         let resume_at = item
             .user_data
             .as_ref()
@@ -269,9 +290,9 @@ impl ItemPage {
                     .outline()
                     .icon(if played { IconName::CircleCheck } else { IconName::Check })
                     .label(if played { "Watched" } else { "Mark watched" })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.set_played(item_id.clone(), !played, window, cx)
-                    })),
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.set_played(item_id.clone(), !played, window, cx)),
+                    ),
             )
     }
 
@@ -297,9 +318,19 @@ impl ItemPage {
                 el.child(div().text_color(cx.theme().muted_foreground).child(title))
             })
             .child(div().text_3xl().font_weight(FontWeight::BOLD).child(item.name.clone()))
-            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(meta_line(item)))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(meta_line(item)),
+            )
             .when(!item.genres.is_empty(), |el| {
-                el.child(div().text_sm().text_color(cx.theme().muted_foreground).child(item.genres.join(", ")))
+                el.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(item.genres.join(", ")),
+                )
             })
             .child(self.render_actions(item, cx))
             .when_some(item.overview.clone(), |el, overview| {
@@ -352,7 +383,13 @@ impl ItemPage {
         let row = |label: &'static str, select: &ChoiceSelect| {
             h_flex()
                 .gap_4()
-                .child(div().w(px(90.)).flex_none().text_color(cx.theme().muted_foreground).child(label))
+                .child(
+                    div()
+                        .w(px(90.))
+                        .flex_none()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(label),
+                )
                 .child(Select::new(select).w(px(PICKER_W)).menu_width(px(PICKER_W * 1.5)))
         };
         Some(
@@ -373,8 +410,13 @@ impl ItemPage {
             .map(|(i, season)| {
                 let nav = self.nav.clone();
                 let target = season.clone();
-                poster_card(("season", i), season, move |_, window, cx| nav.open(&target, window, cx), cx)
-                    .into_any_element()
+                poster_card(
+                    ("season", i),
+                    season,
+                    move |_, window, cx| nav.open(&target, window, cx),
+                    cx,
+                )
+                .into_any_element()
             })
             .collect();
         v_flex()
@@ -446,7 +488,13 @@ impl ItemPage {
         v_flex()
             .px_4()
             .gap_1()
-            .child(div().px_2().text_lg().font_weight(FontWeight::SEMIBOLD).child("Episodes"))
+            .child(
+                div()
+                    .px_2()
+                    .text_lg()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Episodes"),
+            )
             .children(rows)
     }
 }

@@ -84,7 +84,13 @@ impl PlayerPage {
         let source = state.source.clone();
         let initial_volume = state.volume as f32;
         let (audio, subtitle) = track_pickers(&source, state.audio, subtitle_index, window, cx);
-        let volume = cx.new(|_| SliderState::new().min(0.).max(100.).step(1.).default_value(initial_volume));
+        let volume = cx.new(|_| {
+            SliderState::new()
+                .min(0.)
+                .max(100.)
+                .step(1.)
+                .default_value(initial_volume)
+        });
 
         let mut subscriptions = vec![
             cx.observe_in(&now_playing, window, |this, _, window, cx| {
@@ -130,14 +136,18 @@ impl PlayerPage {
         let mut frames = now_playing.read(cx).video.frames();
         let _frames = cx.spawn_in(window, async move |this, cx| {
             while frames.changed().await.is_ok() {
-                let Some(frame) = frames.borrow_and_update().clone() else { continue };
+                let Some(frame) = frames.borrow_and_update().clone() else {
+                    continue;
+                };
                 let shown = match frame {
                     Frame::Pixels(frame) => {
                         let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.pixels.clone())
                         else {
                             continue;
                         };
-                        Shown::Image(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)])))
+                        Shown::Image(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
+                            buffer
+                        )])))
                     }
                     // Already on the GPU: just repaint with the new texture.
                     Frame::Shared(frame) => Shown::Shared(frame),
@@ -187,7 +197,9 @@ impl PlayerPage {
             let state = self.now_playing.read(cx);
             (state.position.as_secs_f64() as f32, state.duration)
         };
-        let Some(duration) = duration.filter(|d| !d.is_zero()) else { return };
+        let Some(duration) = duration.filter(|d| !d.is_zero()) else {
+            return;
+        };
         match &self.seek {
             Some(seek) if !self.scrubbing => seek.update(cx, |seek, cx| seek.set_value(position, window, cx)),
             Some(_) => {}
@@ -199,13 +211,17 @@ impl PlayerPage {
                         .step(1.)
                         .default_value(position)
                 });
-                self._subscriptions.push(cx.subscribe(&seek, |this, _, event: &SliderEvent, cx| match event {
-                    SliderEvent::Change(_) => this.scrubbing = true,
-                    SliderEvent::Release(value) => {
-                        this.scrubbing = false;
-                        this.send(UiCommand::SeekTo(Duration::from_secs_f64(value.start().max(0.) as f64)), cx);
-                    }
-                }));
+                self._subscriptions
+                    .push(cx.subscribe(&seek, |this, _, event: &SliderEvent, cx| match event {
+                        SliderEvent::Change(_) => this.scrubbing = true,
+                        SliderEvent::Release(value) => {
+                            this.scrubbing = false;
+                            this.send(
+                                UiCommand::SeekTo(Duration::from_secs_f64(value.start().max(0.) as f64)),
+                                cx,
+                            );
+                        }
+                    }));
                 self.seek = Some(seek);
             }
         }
@@ -217,7 +233,8 @@ impl PlayerPage {
         }
         let volume = self.now_playing.read(cx).volume as f32;
         if self.volume.read(cx).value().start() != volume {
-            self.volume.update(cx, |slider, cx| slider.set_value(volume, window, cx));
+            self.volume
+                .update(cx, |slider, cx| slider.set_value(volume, window, cx));
         }
     }
 
@@ -238,18 +255,21 @@ impl PlayerPage {
             .collect();
         let current = state.versions.iter().position(|v| v.id == state.source.id).unwrap_or(0);
         let select = cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(current)), window, cx));
-        self._subscriptions.push(cx.subscribe(&select, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
-            if let SelectEvent::Confirm(Some(index)) = event {
-                this.switch_version(*index as usize, cx);
-            }
-        }));
+        self._subscriptions
+            .push(cx.subscribe(&select, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
+                if let SelectEvent::Confirm(Some(index)) = event {
+                    this.switch_version(*index as usize, cx);
+                }
+            }));
         self.version = Some(select);
     }
 
     /// Restarts playback of the same item with another version, at the current position.
     fn switch_version(&mut self, index: usize, cx: &mut Context<Self>) {
         let state = self.now_playing.read(cx);
-        let Some(version) = state.versions.get(index).filter(|v| v.id != state.source.id) else { return };
+        let Some(version) = state.versions.get(index).filter(|v| v.id != state.source.id) else {
+            return;
+        };
         let options = PlayOptions {
             start: Some(jellyfin::Ticks::from(state.position)),
             media_source_id: Some(version.id.clone()),
@@ -260,7 +280,9 @@ impl PlayerPage {
     }
 
     fn next_episode(&mut self, _: &NextEpisode, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(next) = self.now_playing.read(cx).next.clone() else { return };
+        let Some(next) = self.now_playing.read(cx).next.clone() else {
+            return;
+        };
         PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_from_resume(&next, cx));
     }
 
@@ -421,18 +443,17 @@ impl PlayerPage {
                                 .ghost()
                                 .icon(Lucide::SkipForward)
                                 .label("Next episode")
-                                .on_click(cx.listener(|this, _, window, cx| this.next_episode(&NextEpisode, window, cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.next_episode(&NextEpisode, window, cx)),
+                                ),
                         )
                     })
                     .children(self.version.as_ref().map(|s| picker(s, 140., 240.)))
                     .children(self.audio.as_ref().map(|s| picker(s, 200., 320.)))
                     .children(self.subtitle.as_ref().map(|s| picker(s, 200., 320.)))
-                    .child(
-                        Button::new("fullscreen")
-                            .ghost()
-                            .label("Fullscreen")
-                            .on_click(cx.listener(|this, _, window, cx| this.toggle_fullscreen(&ToggleFullscreen, window, cx))),
-                    ),
+                    .child(Button::new("fullscreen").ghost().label("Fullscreen").on_click(
+                        cx.listener(|this, _, window, cx| this.toggle_fullscreen(&ToggleFullscreen, window, cx)),
+                    )),
             );
 
         div().absolute().inset_0().child(top).child(bottom)
@@ -488,9 +509,10 @@ impl Render for PlayerPage {
                     .inset_0()
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_pause(&TogglePause, window, cx)))
                     .child(match frame {
-                        Shown::Image(image) => {
-                            img(ImageSource::Render(image)).size_full().object_fit(ObjectFit::Contain).into_any_element()
-                        }
+                        Shown::Image(image) => img(ImageSource::Render(image))
+                            .size_full()
+                            .object_fit(ObjectFit::Contain)
+                            .into_any_element(),
                         #[cfg(any(windows, target_os = "linux"))]
                         Shown::Shared(texture) => surface(shared_texture(texture))
                             .size_full()

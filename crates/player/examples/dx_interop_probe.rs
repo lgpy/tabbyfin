@@ -101,7 +101,11 @@ mod probe {
             let glrc = wglCreateContext(hdc)?;
             wglMakeCurrent(hdc, glrc)?;
 
-            let string = |name| CStr::from_ptr(glGetString(name) as *const i8).to_string_lossy().into_owned();
+            let string = |name| {
+                CStr::from_ptr(glGetString(name) as *const i8)
+                    .to_string_lossy()
+                    .into_owned()
+            };
             println!("GL vendor:   {}", string(GL_VENDOR));
             println!("GL renderer: {}", string(GL_RENDERER));
             println!("GL version:  {}", string(GL_VERSION));
@@ -172,9 +176,19 @@ mod probe {
         unsafe {
             let mut texture = 0u32;
             glGenTextures(1, &mut texture);
-            let handle = (gl.wglDXRegisterObjectNV)(interop_device, object, texture, GL_TEXTURE_2D, WGL_ACCESS_WRITE_DISCARD_NV);
+            let handle = (gl.wglDXRegisterObjectNV)(
+                interop_device,
+                object,
+                texture,
+                GL_TEXTURE_2D,
+                WGL_ACCESS_WRITE_DISCARD_NV,
+            );
             if handle.is_invalid() || handle.0.is_null() {
-                return Err(format!("wglDXRegisterObjectNV failed: {:?}", windows::core::Error::from_thread()).into());
+                return Err(format!(
+                    "wglDXRegisterObjectNV failed: {:?}",
+                    windows::core::Error::from_thread()
+                )
+                .into());
             }
             let mut objects = [handle];
             if !(gl.wglDXLockObjectsNV)(interop_device, 1, objects.as_mut_ptr()).as_bool() {
@@ -248,7 +262,9 @@ mod probe {
             let mut texture = None;
             writer.CreateTexture2D(&desc, None, Some(&mut texture))?;
             let texture: ID3D11Texture2D = texture.ok_or("no texture")?;
-            let shared = texture.cast::<windows::Win32::Graphics::Dxgi::IDXGIResource>()?.GetSharedHandle()?;
+            let shared = texture
+                .cast::<windows::Win32::Graphics::Dxgi::IDXGIResource>()?
+                .GetSharedHandle()?;
 
             let interop_device = (gl.wglDXOpenDeviceNV)(writer.as_raw());
             if interop_device.0.is_null() {

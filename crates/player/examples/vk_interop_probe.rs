@@ -70,8 +70,12 @@ mod probe {
             unsafe {
                 let entry = ash::Entry::load()?;
                 let app = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_1);
-                let instance = entry.create_instance(&vk::InstanceCreateInfo::default().application_info(&app), None)?;
-                let physical = *instance.enumerate_physical_devices()?.first().ok_or("no Vulkan device")?;
+                let instance =
+                    entry.create_instance(&vk::InstanceCreateInfo::default().application_info(&app), None)?;
+                let physical = *instance
+                    .enumerate_physical_devices()?
+                    .first()
+                    .ok_or("no Vulkan device")?;
                 let mut id = vk::PhysicalDeviceIDProperties::default();
                 let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
                 instance.get_physical_device_properties2(physical, &mut props);
@@ -95,24 +99,41 @@ mod probe {
                     None,
                 )?;
                 let queue = device.get_device_queue(queue_family, 0);
-                Ok(Self { _entry: entry, instance, physical, device, queue, queue_family, uuid, name })
+                Ok(Self {
+                    _entry: entry,
+                    instance,
+                    physical,
+                    device,
+                    queue,
+                    queue_family,
+                    uuid,
+                    name,
+                })
             }
         }
 
         /// The shared image layout: the creation parameters must match on every importer.
         fn create_image(&self, initial_layout: vk::ImageLayout) -> Result<vk::Image, Error> {
-            let mut external = vk::ExternalMemoryImageCreateInfo::default()
-                .handle_types(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD);
+            let mut external =
+                vk::ExternalMemoryImageCreateInfo::default().handle_types(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD);
             let info = vk::ImageCreateInfo::default()
                 .push_next(&mut external)
                 .image_type(vk::ImageType::TYPE_2D)
                 .format(FORMAT)
-                .extent(vk::Extent3D { width: SIZE, height: SIZE, depth: 1 })
+                .extent(vk::Extent3D {
+                    width: SIZE,
+                    height: SIZE,
+                    depth: 1,
+                })
                 .mip_levels(1)
                 .array_layers(1)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .tiling(vk::ImageTiling::LINEAR)
-                .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+                .usage(
+                    vk::ImageUsageFlags::SAMPLED
+                        | vk::ImageUsageFlags::COLOR_ATTACHMENT
+                        | vk::ImageUsageFlags::TRANSFER_SRC,
+                )
                 .initial_layout(initial_layout);
             Ok(unsafe { self.device.create_image(&info, None)? })
         }
@@ -120,7 +141,12 @@ mod probe {
         fn memory_type(&self, bits: u32) -> Result<u32, Error> {
             let props = unsafe { self.instance.get_physical_device_memory_properties(self.physical) };
             (0..props.memory_type_count)
-                .find(|i| bits & (1 << i) != 0 && props.memory_types[*i as usize].property_flags.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL))
+                .find(|i| {
+                    bits & (1 << i) != 0
+                        && props.memory_types[*i as usize]
+                            .property_flags
+                            .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                })
                 .or_else(|| (0..props.memory_type_count).find(|i| bits & (1 << i) != 0))
                 .ok_or_else(|| "no memory type".into())
         }
@@ -129,7 +155,8 @@ mod probe {
         fn export(&self, image: vk::Image) -> Result<(vk::DeviceMemory, u64), Error> {
             unsafe {
                 let req = self.device.get_image_memory_requirements(image);
-                let mut export = vk::ExportMemoryAllocateInfo::default().handle_types(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD);
+                let mut export =
+                    vk::ExportMemoryAllocateInfo::default().handle_types(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD);
                 let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(image);
                 let info = vk::MemoryAllocateInfo::default()
                     .push_next(&mut export)
@@ -144,7 +171,9 @@ mod probe {
 
         fn fd(&self, memory: vk::DeviceMemory) -> Result<i32, Error> {
             let loader = khr::external_memory_fd::Device::new(&self.instance, &self.device);
-            let info = vk::MemoryGetFdInfoKHR::default().memory(memory).handle_type(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD);
+            let info = vk::MemoryGetFdInfoKHR::default()
+                .memory(memory)
+                .handle_type(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD);
             Ok(unsafe { loader.get_memory_fd(&info)? })
         }
 
@@ -153,7 +182,9 @@ mod probe {
             unsafe {
                 let image = self.create_image(vk::ImageLayout::PREINITIALIZED)?;
                 let req = self.device.get_image_memory_requirements(image);
-                let mut import = vk::ImportMemoryFdInfoKHR::default().handle_type(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD).fd(fd);
+                let mut import = vk::ImportMemoryFdInfoKHR::default()
+                    .handle_type(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD)
+                    .fd(fd);
                 let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(image);
                 let info = vk::MemoryAllocateInfo::default()
                     .push_next(&mut import)
@@ -171,7 +202,9 @@ mod probe {
             unsafe {
                 let d = &self.device;
                 let buffer = d.create_buffer(
-                    &vk::BufferCreateInfo::default().size(4).usage(vk::BufferUsageFlags::TRANSFER_DST),
+                    &vk::BufferCreateInfo::default()
+                        .size(4)
+                        .usage(vk::BufferUsageFlags::TRANSFER_DST),
                     None,
                 )?;
                 let req = d.get_buffer_memory_requirements(buffer);
@@ -179,18 +212,33 @@ mod probe {
                 let host = (0..props.memory_type_count)
                     .find(|i| {
                         req.memory_type_bits & (1 << i) != 0
-                            && props.memory_types[*i as usize].property_flags.contains(vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT)
+                            && props.memory_types[*i as usize].property_flags.contains(
+                                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                            )
                     })
                     .ok_or("no host memory")?;
-                let memory = d.allocate_memory(&vk::MemoryAllocateInfo::default().allocation_size(req.size).memory_type_index(host), None)?;
+                let memory = d.allocate_memory(
+                    &vk::MemoryAllocateInfo::default()
+                        .allocation_size(req.size)
+                        .memory_type_index(host),
+                    None,
+                )?;
                 d.bind_buffer_memory(buffer, memory, 0)?;
 
-                let pool = d.create_command_pool(&vk::CommandPoolCreateInfo::default().queue_family_index(self.queue_family), None)?;
+                let pool = d.create_command_pool(
+                    &vk::CommandPoolCreateInfo::default().queue_family_index(self.queue_family),
+                    None,
+                )?;
                 let cmd = d.allocate_command_buffers(
-                    &vk::CommandBufferAllocateInfo::default().command_pool(pool).command_buffer_count(1),
+                    &vk::CommandBufferAllocateInfo::default()
+                        .command_pool(pool)
+                        .command_buffer_count(1),
                 )?[0];
                 d.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default())?;
-                let range = vk::ImageSubresourceRange::default().aspect_mask(vk::ImageAspectFlags::COLOR).level_count(1).layer_count(1);
+                let range = vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .level_count(1)
+                    .layer_count(1);
                 // PREINITIALIZED keeps the linear image's contents through the transition.
                 let barrier = vk::ImageMemoryBarrier::default()
                     .image(image)
@@ -201,14 +249,34 @@ mod probe {
                     .src_queue_family_index(vk::QUEUE_FAMILY_EXTERNAL)
                     .dst_queue_family_index(self.queue_family)
                     .subresource_range(range);
-                d.cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[], &[], &[barrier]);
+                d.cmd_pipeline_barrier(
+                    cmd,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier],
+                );
                 let region = vk::BufferImageCopy::default()
-                    .image_subresource(vk::ImageSubresourceLayers::default().aspect_mask(vk::ImageAspectFlags::COLOR).layer_count(1))
-                    .image_extent(vk::Extent3D { width: 1, height: 1, depth: 1 });
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1),
+                    )
+                    .image_extent(vk::Extent3D {
+                        width: 1,
+                        height: 1,
+                        depth: 1,
+                    });
                 d.cmd_copy_image_to_buffer(cmd, image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, buffer, &[region]);
                 d.end_command_buffer(cmd)?;
                 let cmds = [cmd];
-                d.queue_submit(self.queue, &[vk::SubmitInfo::default().command_buffers(&cmds)], vk::Fence::null())?;
+                d.queue_submit(
+                    self.queue,
+                    &[vk::SubmitInfo::default().command_buffers(&cmds)],
+                    vk::Fence::null(),
+                )?;
                 d.queue_wait_idle(self.queue)?;
                 let ptr = d.map_memory(memory, 0, 4, vk::MemoryMapFlags::empty())? as *const u8;
                 let pixel = [*ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3)];
@@ -275,21 +343,44 @@ mod probe {
             };
         }
         let gl = gl!(
-            glGetString, glGetStringi, glGetIntegerv, glGetUnsignedBytei_vEXT, glCreateMemoryObjectsEXT,
-            glMemoryObjectParameterivEXT, glImportMemoryFdEXT, glGenTextures, glBindTexture, glTexParameteri,
-            glTexStorageMem2DEXT, glGenFramebuffers, glBindFramebuffer, glFramebufferTexture2D,
-            glCheckFramebufferStatus, glViewport, glClearColor, glClear, glFinish
+            glGetString,
+            glGetStringi,
+            glGetIntegerv,
+            glGetUnsignedBytei_vEXT,
+            glCreateMemoryObjectsEXT,
+            glMemoryObjectParameterivEXT,
+            glImportMemoryFdEXT,
+            glGenTextures,
+            glBindTexture,
+            glTexParameteri,
+            glTexStorageMem2DEXT,
+            glGenFramebuffers,
+            glBindFramebuffer,
+            glFramebufferTexture2D,
+            glCheckFramebufferStatus,
+            glViewport,
+            glClearColor,
+            glClear,
+            glFinish
         );
 
         unsafe {
-            let string = |name| CStr::from_ptr((gl.glGetString)(name) as *const i8).to_string_lossy().into_owned();
+            let string = |name| {
+                CStr::from_ptr((gl.glGetString)(name) as *const i8)
+                    .to_string_lossy()
+                    .into_owned()
+            };
             println!("GL renderer: {}", string(GL_RENDERER));
             println!("GL version:  {}", string(GL_VERSION));
             let _ = GL_EXTENSIONS;
             let mut count = 0;
             (gl.glGetIntegerv)(GL_NUM_EXTENSIONS, &mut count);
             let extensions: Vec<String> = (0..count as u32)
-                .map(|i| CStr::from_ptr((gl.glGetStringi)(GL_EXTENSIONS, i) as *const i8).to_string_lossy().into_owned())
+                .map(|i| {
+                    CStr::from_ptr((gl.glGetStringi)(GL_EXTENSIONS, i) as *const i8)
+                        .to_string_lossy()
+                        .into_owned()
+                })
                 .collect();
             let has = |name: &str| extensions.iter().any(|e| e == name);
             println!("GL_EXT_memory_object_fd: {}", has("GL_EXT_memory_object_fd"));
@@ -300,7 +391,10 @@ mod probe {
             (gl.glGetIntegerv)(GL_NUM_DEVICE_UUIDS_EXT, &mut uuids);
             let mut gl_uuid = [0u8; 16];
             (gl.glGetUnsignedBytei_vEXT)(GL_DEVICE_UUID_EXT, 0, gl_uuid.as_mut_ptr());
-            println!("GL device uuid matches Vulkan: {} ({uuids} uuid(s))", gl_uuid == exporter.uuid);
+            println!(
+                "GL device uuid matches Vulkan: {} ({uuids} uuid(s))",
+                gl_uuid == exporter.uuid
+            );
 
             // Exporter: the image and its memory, exported twice.
             let image = exporter.create_image(vk::ImageLayout::UNDEFINED)?;
@@ -335,7 +429,9 @@ mod probe {
             let imported = reader.import(reader_fd)?;
             let pixel = reader.read_pixel(imported)?;
             let verdict = if pixel == EXPECTED_RGBA { "OK" } else { "WRONG COLOR" };
-            println!("GL -> exported Vulkan memory -> second Vulkan device: {verdict} (read {pixel:?}, expected {EXPECTED_RGBA:?})");
+            println!(
+                "GL -> exported Vulkan memory -> second Vulkan device: {verdict} (read {pixel:?}, expected {EXPECTED_RGBA:?})"
+            );
             let _: *const c_void = std::ptr::null();
         }
         Ok(())

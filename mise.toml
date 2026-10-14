@@ -25,13 +25,21 @@ run = "cargo build --workspace"
 description = "Lint like CI: clippy with warnings as errors"
 run = "cargo clippy --workspace --all-targets -- -D warnings"
 
+[tasks.fmt]
+description = "Format the workspace (CI checks it)"
+run = "cargo fmt --all"
+
+[tasks."fmt:check"]
+description = "Check formatting like CI"
+run = "cargo fmt --all --check"
+
 [tasks.test]
 description = "Run all tests"
 run = "cargo test --workspace"
 
 [tasks.ci]
 description = "What CI runs on every push"
-depends = ["check", "test"]
+depends = ["fmt:check", "check", "test"]
 
 [tasks.smoke]
 description = "Exercise the Jellyfin API client against the dev server"

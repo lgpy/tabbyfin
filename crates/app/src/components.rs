@@ -43,7 +43,11 @@ pub fn landscape_image(item: &BaseItemDto) -> Option<ImageRequest> {
             let tag = item.parent_thumb_image_tag.clone()?;
             (item.kind != BaseItemKind::Episode).then(|| ImageRequest::new(id, ImageType::Thumb, Some(tag)))
         })
-        .or_else(|| (item.kind == BaseItemKind::Episode).then(|| item.image(ImageType::Primary)).flatten())
+        .or_else(|| {
+            (item.kind == BaseItemKind::Episode)
+                .then(|| item.image(ImageType::Primary))
+                .flatten()
+        })
         .or_else(|| item.backdrop_image())
         .or_else(|| item.image(ImageType::Primary))
 }
@@ -84,7 +88,11 @@ pub fn episode_label(item: &BaseItemDto) -> String {
 pub fn timestamp(time: std::time::Duration) -> String {
     let secs = time.as_secs();
     let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
-    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
 }
 
 /// `1h 42m`, `45m`.
@@ -202,10 +210,22 @@ pub fn placeholder_card(cx: &App) -> impl IntoElement {
 }
 
 /// A titled, horizontally scrolling row of cards.
-pub fn shelf(id: impl Into<ElementId>, title: impl Into<SharedString>, cards: Vec<AnyElement>, cx: &App) -> impl IntoElement {
+pub fn shelf(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    cards: Vec<AnyElement>,
+    cx: &App,
+) -> impl IntoElement {
     v_flex()
         .gap_2()
-        .child(div().px_6().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(cx.theme().foreground).child(title.into()))
+        .child(
+            div()
+                .px_6()
+                .text_lg()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(cx.theme().foreground)
+                .child(title.into()),
+        )
         .child(
             div()
                 .id(id)
@@ -215,7 +235,11 @@ pub fn shelf(id: impl Into<ElementId>, title: impl Into<SharedString>, cards: Ve
 }
 
 pub fn centered_spinner() -> impl IntoElement {
-    v_flex().size_full().items_center().justify_center().child(Spinner::new())
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .child(Spinner::new())
 }
 
 pub fn centered_message(message: impl Into<SharedString>, cx: &App) -> impl IntoElement {

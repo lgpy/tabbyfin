@@ -102,7 +102,9 @@ fn failed(what: impl std::fmt::Display) -> Error {
 unsafe extern "C" fn get_proc_address(ctx: *mut c_void, name: *const c_char) -> *mut c_void {
     // SAFETY: `ctx` points to the renderer's `Egl`, alive while the mpv context exists.
     let egl = unsafe { &*(ctx as *const Egl) };
-    let Ok(name) = unsafe { CStr::from_ptr(name) }.to_str() else { return ptr::null_mut() };
+    let Ok(name) = unsafe { CStr::from_ptr(name) }.to_str() else {
+        return ptr::null_mut();
+    };
     egl.get_proc_address(name).map_or(ptr::null_mut(), |f| f as *mut c_void)
 }
 
@@ -138,12 +140,16 @@ impl Exporter {
             let instance = entry
                 .create_instance(&vk::InstanceCreateInfo::default().application_info(&app), None)
                 .map_err(failed)?;
-            let physical = instance.enumerate_physical_devices().map_err(failed)?.into_iter().find(|&device| {
-                let mut id = vk::PhysicalDeviceIDProperties::default();
-                let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
-                instance.get_physical_device_properties2(device, &mut props);
-                id.device_uuid == gl_uuid
-            });
+            let physical = instance
+                .enumerate_physical_devices()
+                .map_err(failed)?
+                .into_iter()
+                .find(|&device| {
+                    let mut id = vk::PhysicalDeviceIDProperties::default();
+                    let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
+                    instance.get_physical_device_properties2(device, &mut props);
+                    id.device_uuid == gl_uuid
+                });
             let Some(physical) = physical else {
                 instance.destroy_instance(None);
                 return Err(failed("no Vulkan device matches the OpenGL device"));
@@ -192,20 +198,33 @@ impl Exporter {
                 .push_next(&mut external)
                 .image_type(vk::ImageType::TYPE_2D)
                 .format(FORMAT)
-                .extent(vk::Extent3D { width, height, depth: 1 })
+                .extent(vk::Extent3D {
+                    width,
+                    height,
+                    depth: 1,
+                })
                 .mip_levels(1)
                 .array_layers(1)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .tiling(vk::ImageTiling::LINEAR)
-                .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+                .usage(
+                    vk::ImageUsageFlags::SAMPLED
+                        | vk::ImageUsageFlags::COLOR_ATTACHMENT
+                        | vk::ImageUsageFlags::TRANSFER_SRC,
+                )
                 .initial_layout(vk::ImageLayout::PREINITIALIZED);
             let image = self.device.create_image(&info, None).map_err(failed)?;
             let requirements = self.device.get_image_memory_requirements(image);
             let properties = self.instance.get_physical_device_memory_properties(self.physical);
-            let candidates = (0..properties.memory_type_count).filter(|i| requirements.memory_type_bits & (1 << i) != 0);
+            let candidates =
+                (0..properties.memory_type_count).filter(|i| requirements.memory_type_bits & (1 << i) != 0);
             let memory_type = candidates
                 .clone()
-                .find(|i| properties.memory_types[*i as usize].property_flags.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL))
+                .find(|i| {
+                    properties.memory_types[*i as usize]
+                        .property_flags
+                        .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                })
                 .or_else(|| candidates.clone().next());
             let Some(memory_type) = memory_type else {
                 self.device.destroy_image(image, None);
@@ -283,7 +302,9 @@ impl GpuRenderer {
         // SAFETY: EGL/GL setup on this thread; every object is checked and cleaned up.
         unsafe {
             let egl = Box::new(Egl::load_required().map_err(failed)?);
-            let display = egl.get_display(egl::DEFAULT_DISPLAY).ok_or_else(|| failed("no EGL display"))?;
+            let display = egl
+                .get_display(egl::DEFAULT_DISPLAY)
+                .ok_or_else(|| failed("no EGL display"))?;
             egl.initialize(display).map_err(failed)?;
             egl.bind_api(egl::OPENGL_API).map_err(failed)?;
             let attributes = [egl::RENDERABLE_TYPE, egl::OPENGL_BIT, egl::NONE];
@@ -291,7 +312,9 @@ impl GpuRenderer {
                 .choose_first_config(display, &attributes)
                 .map_err(failed)?
                 .ok_or_else(|| failed("no EGL config"))?;
-            let context = egl.create_context(display, config, None, &[egl::NONE]).map_err(failed)?;
+            let context = egl
+                .create_context(display, config, None, &[egl::NONE])
+                .map_err(failed)?;
             let fail = |egl: &Egl, err: Error| {
                 let _ = egl.make_current(display, None, None, None);
                 let _ = egl.destroy_context(display, context);
@@ -310,10 +333,25 @@ impl GpuRenderer {
                 };
             }
             let gl = gl!(
-                glGetString, glGetStringi, glGetIntegerv, glGetUnsignedBytei_vEXT, glCreateMemoryObjectsEXT,
-                glDeleteMemoryObjectsEXT, glMemoryObjectParameterivEXT, glImportMemoryFdEXT, glGenTextures,
-                glDeleteTextures, glBindTexture, glTexParameteri, glTexStorageMem2DEXT, glGenFramebuffers,
-                glDeleteFramebuffers, glBindFramebuffer, glFramebufferTexture2D, glCheckFramebufferStatus, glFinish
+                glGetString,
+                glGetStringi,
+                glGetIntegerv,
+                glGetUnsignedBytei_vEXT,
+                glCreateMemoryObjectsEXT,
+                glDeleteMemoryObjectsEXT,
+                glMemoryObjectParameterivEXT,
+                glImportMemoryFdEXT,
+                glGenTextures,
+                glDeleteTextures,
+                glBindTexture,
+                glTexParameteri,
+                glTexStorageMem2DEXT,
+                glGenFramebuffers,
+                glDeleteFramebuffers,
+                glBindFramebuffer,
+                glFramebufferTexture2D,
+                glCheckFramebufferStatus,
+                glFinish
             );
             let renderer = CStr::from_ptr((gl.glGetString)(GL_RENDERER) as *const c_char).to_string_lossy();
             tracing::info!(%renderer, "OpenGL context for mpv");
@@ -339,9 +377,18 @@ impl GpuRenderer {
                 get_proc_address_ctx: &*egl as *const Egl as *mut c_void,
             };
             let mut params = [
-                RenderParam { kind: PARAM_API_TYPE, data: api_type.as_ptr() as *mut c_void },
-                RenderParam { kind: PARAM_OPENGL_INIT_PARAMS, data: &mut init as *mut _ as *mut c_void },
-                RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+                RenderParam {
+                    kind: PARAM_API_TYPE,
+                    data: api_type.as_ptr() as *mut c_void,
+                },
+                RenderParam {
+                    kind: PARAM_OPENGL_INIT_PARAMS,
+                    data: &mut init as *mut _ as *mut c_void,
+                },
+                RenderParam {
+                    kind: PARAM_INVALID,
+                    data: ptr::null_mut(),
+                },
             ];
             let mut mpv_context = ptr::null_mut();
             let code = (core.api.render_create)(&mut mpv_context, core.mpv, params.as_mut_ptr());
@@ -415,9 +462,18 @@ impl GpuRenderer {
         // mpv's FBO output already has the row order Vulkan samples in (verified on Mesa).
         let mut flip: c_int = 0;
         let mut params = [
-            RenderParam { kind: PARAM_OPENGL_FBO, data: &mut fbo as *mut _ as *mut c_void },
-            RenderParam { kind: PARAM_FLIP_Y, data: &mut flip as *mut _ as *mut c_void },
-            RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+            RenderParam {
+                kind: PARAM_OPENGL_FBO,
+                data: &mut fbo as *mut _ as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_FLIP_Y,
+                data: &mut flip as *mut _ as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_INVALID,
+                data: ptr::null_mut(),
+            },
         ];
         // SAFETY: render context calls on its thread; the FBO is complete.
         let code = unsafe { (core.api.render_render)(self.mpv_context, params.as_mut_ptr()) };
@@ -449,7 +505,12 @@ impl GpuRenderer {
             let mut gl_memory = 0;
             (gl.glCreateMemoryObjectsEXT)(1, &mut gl_memory);
             (gl.glMemoryObjectParameterivEXT)(gl_memory, GL_DEDICATED_MEMORY_OBJECT_EXT, &1);
-            (gl.glImportMemoryFdEXT)(gl_memory, allocation_size, GL_HANDLE_TYPE_OPAQUE_FD_EXT, std::os::fd::IntoRawFd::into_raw_fd(gl_fd));
+            (gl.glImportMemoryFdEXT)(
+                gl_memory,
+                allocation_size,
+                GL_HANDLE_TYPE_OPAQUE_FD_EXT,
+                std::os::fd::IntoRawFd::into_raw_fd(gl_fd),
+            );
             let mut gl_texture = 0;
             (gl.glGenTextures)(1, &mut gl_texture);
             (gl.glBindTexture)(GL_TEXTURE_2D, gl_texture);
@@ -507,4 +568,3 @@ impl Drop for GpuRenderer {
         let _ = self.egl.destroy_context(self.display, self.context);
     }
 }
-

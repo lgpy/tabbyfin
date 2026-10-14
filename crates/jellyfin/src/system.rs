@@ -66,9 +66,30 @@ mod tests {
     #[test]
     fn version_parsing_and_support() {
         let v = |s| ServerVersion::parse(s).unwrap();
-        assert_eq!(v("12.2.0"), ServerVersion { major: 12, minor: 2, patch: 0 });
-        assert_eq!(v("10.11"), ServerVersion { major: 10, minor: 11, patch: 0 });
-        assert_eq!(v("12.0.0-rc1"), ServerVersion { major: 12, minor: 0, patch: 0 });
+        assert_eq!(
+            v("12.2.0"),
+            ServerVersion {
+                major: 12,
+                minor: 2,
+                patch: 0
+            }
+        );
+        assert_eq!(
+            v("10.11"),
+            ServerVersion {
+                major: 10,
+                minor: 11,
+                patch: 0
+            }
+        );
+        assert_eq!(
+            v("12.0.0-rc1"),
+            ServerVersion {
+                major: 12,
+                minor: 0,
+                patch: 0
+            }
+        );
         assert!(ServerVersion::parse("abc").is_none());
         assert!(v("10.11.0").is_supported());
         assert!(v("12.2.0").is_supported());

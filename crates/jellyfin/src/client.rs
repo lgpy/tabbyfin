@@ -239,7 +239,10 @@ mod tests {
             ("localhost:8096", "http://localhost:8096/"),
             ("http://localhost:8096/", "http://localhost:8096/"),
             ("https://example.com/jellyfin", "https://example.com/jellyfin/"),
-            ("  https://example.com/jellyfin/?x=1#y ", "https://example.com/jellyfin/"),
+            (
+                "  https://example.com/jellyfin/?x=1#y ",
+                "https://example.com/jellyfin/",
+            ),
         ];
         for (input, expected) in cases {
             assert_eq!(parse_server_url(input).unwrap().as_str(), expected, "{input}");

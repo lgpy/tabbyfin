@@ -90,9 +90,11 @@ fn device_profile() -> serde_json::Value {
         .map(|f| serde_json::json!({ "Format": f, "Method": "External" }))
         .collect();
     subtitle_profiles.extend(
-        ["srt", "subrip", "ass", "ssa", "vtt", "webvtt", "pgssub", "dvdsub", "dvbsub", "vobsub"]
-            .iter()
-            .map(|f| serde_json::json!({ "Format": f, "Method": "Embed" })),
+        [
+            "srt", "subrip", "ass", "ssa", "vtt", "webvtt", "pgssub", "dvdsub", "dvbsub", "vobsub",
+        ]
+        .iter()
+        .map(|f| serde_json::json!({ "Format": f, "Method": "Embed" })),
     );
     serde_json::json!({
         "Name": "jelly-gpui (mpv)",
@@ -147,7 +149,8 @@ impl Client {
         let mut url = self.url(&format!("/Videos/{item_id}/stream"));
         {
             let mut q = url.query_pairs_mut();
-            q.append_pair("static", "true").append_pair("mediaSourceId", media_source_id);
+            q.append_pair("static", "true")
+                .append_pair("mediaSourceId", media_source_id);
             if let Some(id) = play_session_id {
                 q.append_pair("playSessionId", id);
             }
@@ -175,8 +178,12 @@ impl Client {
     }
 
     pub async fn report_playback_progress(&self, report: &PlaybackReport) -> Result<()> {
-        self.post_no_content("/Sessions/Playing/Progress", &Query::new(), Some(&report.progress_body()))
-            .await
+        self.post_no_content(
+            "/Sessions/Playing/Progress",
+            &Query::new(),
+            Some(&report.progress_body()),
+        )
+        .await
     }
 
     pub async fn report_playback_stopped(&self, report: &PlaybackReport) -> Result<()> {

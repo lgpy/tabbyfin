@@ -101,7 +101,9 @@ fn failed(what: impl std::fmt::Display) -> Error {
 unsafe extern "C" fn get_proc_address(ctx: *mut c_void, name: *const c_char) -> *mut c_void {
     // SAFETY: `ctx` points to the renderer's `Egl`, alive while the mpv context exists.
     let egl = unsafe { &*(ctx as *const Egl) };
-    let Ok(name) = unsafe { CStr::from_ptr(name) }.to_str() else { return ptr::null_mut() };
+    let Ok(name) = unsafe { CStr::from_ptr(name) }.to_str() else {
+        return ptr::null_mut();
+    };
     egl.get_proc_address(name).map_or(ptr::null_mut(), |f| f as *mut c_void)
 }
 
@@ -182,11 +184,21 @@ impl GpuRenderer {
                 }
             }
 
-            egl.bind_api(egl::OPENGL_ES_API).map_err(|e| terminate(&egl, failed(e)))?;
+            egl.bind_api(egl::OPENGL_ES_API)
+                .map_err(|e| terminate(&egl, failed(e)))?;
             let config_attributes = [
-                egl::RED_SIZE, 8, egl::GREEN_SIZE, 8, egl::BLUE_SIZE, 8, egl::ALPHA_SIZE, 8,
-                egl::RENDERABLE_TYPE, egl::OPENGL_ES3_BIT,
-                egl::SURFACE_TYPE, egl::PBUFFER_BIT,
+                egl::RED_SIZE,
+                8,
+                egl::GREEN_SIZE,
+                8,
+                egl::BLUE_SIZE,
+                8,
+                egl::ALPHA_SIZE,
+                8,
+                egl::RENDERABLE_TYPE,
+                egl::OPENGL_ES3_BIT,
+                egl::SURFACE_TYPE,
+                egl::PBUFFER_BIT,
                 egl::NONE,
             ];
             let config = egl
@@ -196,7 +208,8 @@ impl GpuRenderer {
             let context = egl
                 .create_context(display, config, None, &[egl::CONTEXT_CLIENT_VERSION, 3, egl::NONE])
                 .map_err(|e| terminate(&egl, failed(e)))?;
-            let surface = match egl.create_pbuffer_surface(display, config, &[egl::WIDTH, 1, egl::HEIGHT, 1, egl::NONE]) {
+            let surface = match egl.create_pbuffer_surface(display, config, &[egl::WIDTH, 1, egl::HEIGHT, 1, egl::NONE])
+            {
                 Ok(surface) => surface,
                 Err(err) => {
                     let _ = egl.destroy_context(display, context);
@@ -222,10 +235,21 @@ impl GpuRenderer {
                 };
             }
             let gl = procs!(Gl {
-                glGetString, glGenTextures, glDeleteTextures, glBindTexture, glGenFramebuffers,
-                glDeleteFramebuffers, glBindFramebuffer, glFramebufferTexture2D, glCheckFramebufferStatus, glFinish
+                glGetString,
+                glGenTextures,
+                glDeleteTextures,
+                glBindTexture,
+                glGenFramebuffers,
+                glDeleteFramebuffers,
+                glBindFramebuffer,
+                glFramebufferTexture2D,
+                glCheckFramebufferStatus,
+                glFinish
             });
-            let ext = procs!(EglExt { eglQueryDisplayAttribEXT, eglQueryDeviceAttribEXT });
+            let ext = procs!(EglExt {
+                eglQueryDisplayAttribEXT,
+                eglQueryDeviceAttribEXT
+            });
             let renderer = CStr::from_ptr((gl.glGetString)(GL_RENDERER) as *const c_char).to_string_lossy();
             tracing::info!(%renderer, "OpenGL ES (ANGLE) context for mpv");
             // ANGLE falls back to WARP (a CPU rasterizer) without a usable GPU.
@@ -252,9 +276,18 @@ impl GpuRenderer {
                 get_proc_address_ctx: &*egl as *const Egl as *mut c_void,
             };
             let mut params = [
-                RenderParam { kind: PARAM_API_TYPE, data: api_type.as_ptr() as *mut c_void },
-                RenderParam { kind: PARAM_OPENGL_INIT_PARAMS, data: &mut init as *mut _ as *mut c_void },
-                RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+                RenderParam {
+                    kind: PARAM_API_TYPE,
+                    data: api_type.as_ptr() as *mut c_void,
+                },
+                RenderParam {
+                    kind: PARAM_OPENGL_INIT_PARAMS,
+                    data: &mut init as *mut _ as *mut c_void,
+                },
+                RenderParam {
+                    kind: PARAM_INVALID,
+                    data: ptr::null_mut(),
+                },
             ];
             let mut mpv_context = ptr::null_mut();
             let code = (core.api.render_create)(&mut mpv_context, core.mpv, params.as_mut_ptr());
@@ -329,9 +362,18 @@ impl GpuRenderer {
         };
         let mut flip: c_int = 0;
         let mut params = [
-            RenderParam { kind: PARAM_OPENGL_FBO, data: &mut fbo as *mut _ as *mut c_void },
-            RenderParam { kind: PARAM_FLIP_Y, data: &mut flip as *mut _ as *mut c_void },
-            RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+            RenderParam {
+                kind: PARAM_OPENGL_FBO,
+                data: &mut fbo as *mut _ as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_FLIP_Y,
+                data: &mut flip as *mut _ as *mut c_void,
+            },
+            RenderParam {
+                kind: PARAM_INVALID,
+                data: ptr::null_mut(),
+            },
         ];
         // SAFETY: GL calls on the thread owning the context; `slot` is complete.
         unsafe {
@@ -363,15 +405,25 @@ impl GpuRenderer {
                 ..Default::default()
             };
             let mut texture = None;
-            self.device.CreateTexture2D(&desc, None, Some(&mut texture)).map_err(failed)?;
+            self.device
+                .CreateTexture2D(&desc, None, Some(&mut texture))
+                .map_err(failed)?;
             let texture: ID3D11Texture2D = texture.ok_or_else(|| failed("no texture"))?;
-            let share = texture.cast::<IDXGIResource>().map_err(failed)?.GetSharedHandle().map_err(failed)?;
+            let share = texture
+                .cast::<IDXGIResource>()
+                .map_err(failed)?
+                .GetSharedHandle()
+                .map_err(failed)?;
 
             let attributes = [
-                egl::WIDTH, width as egl::Int,
-                egl::HEIGHT, height as egl::Int,
-                egl::TEXTURE_FORMAT, egl::TEXTURE_RGBA,
-                egl::TEXTURE_TARGET, egl::TEXTURE_2D,
+                egl::WIDTH,
+                width as egl::Int,
+                egl::HEIGHT,
+                height as egl::Int,
+                egl::TEXTURE_FORMAT,
+                egl::TEXTURE_RGBA,
+                egl::TEXTURE_TARGET,
+                egl::TEXTURE_2D,
                 egl::NONE,
             ];
             let surface = self
@@ -392,7 +444,13 @@ impl GpuRenderer {
             (self.gl.glBindTexture)(GL_TEXTURE_2D, 0);
             let mut fbo = 0;
             (self.gl.glGenFramebuffers)(1, &mut fbo);
-            let slot = Slot { _texture: texture, share, surface, gl_texture, fbo };
+            let slot = Slot {
+                _texture: texture,
+                share,
+                surface,
+                gl_texture,
+                fbo,
+            };
             if let Err(err) = bound {
                 self.release_slot(&slot);
                 return Err(failed(format!("binding the D3D11 texture: {err}")));

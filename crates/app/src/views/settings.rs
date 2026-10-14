@@ -37,7 +37,9 @@ impl SettingsPage {
                 .await;
             cx.update(|window, cx| match result {
                 Ok(()) => window.push_notification(Notification::success("Image cache cleared."), cx),
-                Err(err) => window.push_notification(Notification::error(format!("Couldn't clear the cache: {err}")), cx),
+                Err(err) => {
+                    window.push_notification(Notification::error(format!("Couldn't clear the cache: {err}")), cx)
+                }
             })
             .ok();
         })
@@ -46,13 +48,20 @@ impl SettingsPage {
 }
 
 fn section(title: &'static str, cx: &App) -> Div {
-    v_flex()
-        .gap_3()
-        .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(cx.theme().foreground).child(title))
+    v_flex().gap_3().child(
+        div()
+            .text_lg()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(cx.theme().foreground)
+            .child(title),
+    )
 }
 
 fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
-    div().text_sm().text_color(cx.theme().muted_foreground).child(text.into())
+    div()
+        .text_sm()
+        .text_color(cx.theme().muted_foreground)
+        .child(text.into())
 }
 
 impl Render for SettingsPage {
@@ -87,7 +96,9 @@ impl Render for SettingsPage {
                                     Button::new("clear-cache")
                                         .outline()
                                         .label("Clear image cache")
-                                        .on_click(cx.listener(|this, _, window, cx| this.clear_image_cache(window, cx))),
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| this.clear_image_cache(window, cx)),
+                                        ),
                                 ),
                             ),
                     )

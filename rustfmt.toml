@@ -1,0 +1,2 @@
+# The codebase is written to 120 columns. CI checks this with `cargo fmt --check`.
+max_width = 120
