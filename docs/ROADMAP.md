@@ -161,6 +161,8 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 
 ## Suggested order
 
+What has been built but still needs testing on real hardware, servers and with a second person is tracked in [`TESTING.md`](TESTING.md).
+
 1. **Release blockers (§1)** and **10.11 testing (4.6):** small items that make a v0.1.0 tag responsible.
 2. **Keyboard navigation (3.1)** and **transcoding fallback (2.2.1):** the two biggest functional gaps for v1.
 3. **Hardware testing (2.3.4, 2.3.5):** borrow or rent an NVIDIA/Intel machine; ask testers with Linux desktops.
