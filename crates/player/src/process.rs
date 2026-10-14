@@ -14,16 +14,21 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 const MPV_BINARY: &str = if cfg!(windows) { "mpv.exe" } else { "mpv" };
 
-/// Finds mpv: an explicit path, then a copy bundled next to the executable, then `mpv` on
-/// the `PATH`.
+/// Finds mpv: an explicit path, then a bundled copy (next to the executable, or inside the
+/// macOS app bundle as `Contents/Resources/mpv.app`), then `mpv` on the `PATH`.
 pub fn locate_mpv(explicit: Option<PathBuf>) -> PathBuf {
     if let Some(path) = explicit {
         return path;
     }
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|exe| Some(exe.parent()?.join(MPV_BINARY)))
-        .filter(|path| path.is_file());
+    let bundled = std::env::current_exe().ok().and_then(|exe| {
+        let dir = exe.parent()?;
+        [
+            dir.join(MPV_BINARY),
+            dir.join("../Resources/mpv.app/Contents/MacOS/mpv"),
+        ]
+        .into_iter()
+        .find(|path| path.is_file())
+    });
     bundled.unwrap_or_else(|| PathBuf::from(MPV_BINARY))
 }
 

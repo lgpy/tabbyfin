@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=jelly-gpui
+GenericName=Media Player
+Comment=Desktop client for Jellyfin, with playback in mpv
+Exec=jelly-gpui
+Icon=jelly-gpui
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=jellyfin;media;movies;tv;

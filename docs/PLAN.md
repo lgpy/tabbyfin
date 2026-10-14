@@ -218,6 +218,25 @@ We plan a time-boxed spike on C after v1. The `player` crate gets a `libmpv` bac
 
 | Platform | Plan |
 |---|---|
+| Linux | Use the mpv you have installed: found on `PATH` and overridable in Settings. The `.deb` lists `mpv` as a dependency. A Flatpak would get mpv from its runtime or an extension, if we ever ship one. |
+| Windows | `mpv.exe` and `vulkan-1.dll` are placed next to `jelly-gpui.exe` in the zip. |
+| macOS | The upstream `mpv.app` is placed in `jelly-gpui.app/Contents/Resources/`. The whole app is ad-hoc signed, not notarized. |
+
+**Lookup order:** path from Settings, then a bundled copy (next to the executable or in the app bundle), then `PATH`. If none is found, the app shows an error that points to Settings.
+
+**Bundled version:** we bundle the official mpv release builds from `github.com/mpv-player/mpv/releases`.
+- `packaging/mpv.lock` pins the version, currently v0.41.0, along with the SHA-256 of each archive.
+- `packaging/fetch-mpv.sh` checks the checksum before it extracts anything.
+- `packaging/THIRD_PARTY.md` holds mpv's license and source information (GPL-2.0-or-later), and it ships inside the packages.
+
+**Builds:** `.github/workflows/ci.yml` runs clippy and the tests on all three OSes. On a `v*` tag, or when started by hand, it also packages all four targets:
+- Linux `.tar.gz` and `.deb`
+- Windows `.zip`
+- macOS arm64 and x86_64 `.zip`
+
+A tag also creates a draft GitHub release with these files. To package locally, run `cargo build --release --target <t>`, then `packaging/package.sh <t>`.
+
+---|---|
 | Linux | **Decided:** use the user's installed `mpv` (`PATH`, overridable in settings). We don't bundle it, including in distro packages, which declare `mpv` as a dependency. A Flatpak would get mpv through the sandbox runtime or an extension if we ever ship one. |
 | Windows | Bundle `mpv.exe` next to our executable. Use the shinchiro / mpv-winbuild builds and record the version. |
 | macOS | Bundle the `mpv` binary inside the `.app` (`Contents/MacOS/` or `Resources/`). It must be signed along with the app. |

@@ -22,3 +22,17 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 
+
+[package.metadata.deb]
+maintainer = "jelly-gpui developers"
+copyright = "jelly-gpui developers"
+section = "video"
+# Playback uses the system mpv. Vulkan and Wayland are loaded at runtime, so `$auto` can't
+# see them.
+depends = "$auto, mpv, libvulkan1, libwayland-client0"
+extended-description = "Desktop client for Jellyfin built with GPUI, playing media in mpv."
+assets = [
+    ["target/release/jelly-gpui", "usr/bin/", "755"],
+    ["../../packaging/jelly-gpui.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/jelly-gpui.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
