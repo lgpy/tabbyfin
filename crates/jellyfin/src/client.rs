@@ -117,7 +117,11 @@ impl Client {
     }
 
     pub(crate) async fn delete(&self, path: &str) -> Result<()> {
-        self.send(self.http.delete(self.url(path))).await?;
+        self.delete_with_query(path, &Query::new()).await
+    }
+
+    pub(crate) async fn delete_with_query(&self, path: &str, query: &Query) -> Result<()> {
+        self.send(self.http.delete(self.url(path)).query(&query.0)).await?;
         Ok(())
     }
 
@@ -263,6 +267,27 @@ mod tests {
         assert_eq!(
             client.url("/Users/Me").as_str(),
             "https://example.com/jellyfin/Users/Me"
+        );
+    }
+
+    #[test]
+    fn transcode_url_drops_the_api_key() {
+        let info = ClientInfo {
+            client: "c".into(),
+            device: "d".into(),
+            device_id: "id".into(),
+            version: "1".into(),
+        };
+        let client = Client::new("https://example.com/jellyfin", info).unwrap();
+        let url = client.transcode_url("/videos/x/master.m3u8?MediaSourceId=s&ApiKey=secret&AudioCodec=aac,mp3");
+        assert_eq!(
+            url.as_str(),
+            "https://example.com/jellyfin/videos/x/master.m3u8?MediaSourceId=s&AudioCodec=aac%2Cmp3"
+        );
+        let url = client.transcode_url("/Videos/x/s/Subtitles/3/0/Stream.subrip?api_key=secret");
+        assert_eq!(
+            url.as_str(),
+            "https://example.com/jellyfin/Videos/x/s/Subtitles/3/0/Stream.subrip"
         );
     }
 

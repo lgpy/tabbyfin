@@ -15,7 +15,7 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
   - Search.
   - Mark items as watched.
 - **Play inside the window:**
-  - Direct play of nearly anything mpv can decode.
+  - Direct play of nearly anything mpv can decode. Above a bitrate you set, or when your server requires it, the server transcodes instead.
   - Hardware decoding. On Windows, frames go from the decoder to the screen without a copy.
   - Audio, subtitle and version pickers, including external subtitles from Jellyfin.
   - Volume, next episode, and automatic advance at the end of an episode.

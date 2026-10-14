@@ -62,7 +62,7 @@ The big gaps:
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 2.2.1 | **Server transcoding fallback** | P1 | M | `PlaybackInfo` is sent with direct play only (`TranscodingProfiles: []`). That fails when direct play isn't allowed (the user lacks the direct-play permission, a bitrate limit, remote access over a slow link). Add a transcoding profile (HLS, H.264/AAC) and use `TranscodingUrl` when the server returns it. Also expose a "max bitrate" setting for remote use. |
+| 2.2.1 | **Server transcoding fallback** | P1 | M | ✅ Done: an HLS H.264/AAC transcoding profile, the `TranscodingUrl` when the server won't direct play, and *Settings → Streaming → Max streaming bitrate*. Tested on 12.2 (playback, seeking, subtitles, audio choice, stop cleanup) and the HLS requests on 10.11. Not yet: HEVC or AV1 transcodes (cheaper bandwidth, but costly for servers), and automatic bitrate from a speed test. |
 | 2.2.2 | **Recover from network drops** | P2 | M | If the stream stalls or the server goes away mid-play, mpv eventually ends with an error. Detect `end-file` errors after start, retry from the last position a couple of times, then show a clear message. Progress reports also need to survive a temporary 401/5xx. |
 | 2.2.3 | **Recover from an mpv crash** | P2 | M | libmpv now runs in our process, so a crash in mpv or a driver takes the whole app down. Options: run libmpv in a child process (big change), or at least report the stop on next launch from the last saved position. The old IPC design had this; the embedded one doesn't. |
 | 2.2.4 | **Report volume and mute** | P3 | S | `PlaybackProgressInfo` has `VolumeLevel` and `IsMuted`; other Jellyfin clients' remote-control UIs show them. |
@@ -127,7 +127,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 4.1 | **Player preferences** | P2 | S | Settings only has Storage, Account and About. Add: preferred audio and subtitle languages (or follow the user's server-side preferences: `AudioLanguagePreference`, `SubtitleMode`), autoplay next episode, skip-intro behaviour, and "max streaming bitrate" (with 2.2.1). |
+| 4.1 | **Player preferences** | P2 | S | Settings has Streaming, Storage, Logs, Account and About. Add: preferred audio and subtitle languages (or follow the user's server-side preferences: `AudioLanguagePreference`, `SubtitleMode`), autoplay next episode and skip-intro behaviour. (Max streaming bitrate is done, with 2.2.1.) |
 | 4.2 | **Subtitle appearance** | P3 | S | Font size, colour, background (mpv `sub-*` options) for text subtitles. |
 | 4.3 | **Theme** | P3 | S | Dark only. Add light and follow-system, from GPUI Kit's theme system. |
 | 4.4 | **Remember window size and position** | P3 | S | The window always opens centred at 1280×800. |

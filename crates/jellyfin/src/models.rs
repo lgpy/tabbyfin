@@ -150,6 +150,11 @@ pub struct MediaSourceInfo {
     #[serde(default, deserialize_with = "nullable")]
     pub supports_direct_stream: bool,
     #[serde(default, deserialize_with = "nullable")]
+    pub supports_transcoding: bool,
+    /// Server-relative HLS URL, set when the server will only transcode (see `PlaybackInfo`).
+    /// Carries an `ApiKey`; use [`crate::Client::transcode_url`], which removes it.
+    pub transcoding_url: Option<String>,
+    #[serde(default, deserialize_with = "nullable")]
     pub media_streams: Vec<MediaStream>,
     pub default_audio_stream_index: Option<i32>,
     pub default_subtitle_stream_index: Option<i32>,
@@ -173,7 +178,10 @@ pub struct MediaStream {
     pub is_external: bool,
     #[serde(default, deserialize_with = "nullable")]
     pub is_text_subtitle_stream: bool,
-    /// Server-relative URL for external subtitles.
+    /// How the server delivers a subtitle in this playback (`PlaybackInfo` responses only):
+    /// `External` as a file at `delivery_url`, `Encode` burned into a transcode, `Embed`.
+    pub delivery_method: Option<String>,
+    /// Server-relative URL for subtitles delivered as files.
     pub delivery_url: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,

@@ -1,24 +1,57 @@
-//! Settings: image cache and account info.
+//! Settings: streaming, image cache, logs and account info.
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{ActiveTheme, WindowExt, h_flex, v_flex};
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::*;
 
-use crate::config;
+use crate::config::{self, Config};
 use crate::images::ImageCache;
 use crate::session::Session;
+use crate::tracks::{Choice, ChoiceSelect};
+
+/// Max streaming bitrate choices in Mbit/s; 0 is no limit.
+const BITRATES_MBPS: [i32; 10] = [0, 120, 60, 40, 20, 10, 8, 4, 2, 1];
 
 pub struct SettingsPage {
     session: Session,
     scroll: ScrollHandle,
+    bitrate: ChoiceSelect,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl SettingsPage {
-    pub fn new(session: Session) -> Self {
+    pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let current = Config::load()
+            .max_streaming_bitrate
+            .map_or(0, |bps| (bps / 1_000_000) as i32);
+        let choices: Vec<Choice> = BITRATES_MBPS
+            .iter()
+            .map(|&mbps| Choice {
+                label: match mbps {
+                    0 => "No limit".into(),
+                    mbps => format!("{mbps} Mbit/s").into(),
+                },
+                value: mbps,
+            })
+            .collect();
+        let selected = BITRATES_MBPS.iter().position(|&m| m == current).unwrap_or(0);
+        let bitrate = cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx));
+        let _subscriptions = vec![cx.subscribe(&bitrate, |_, _, event: &SelectEvent<Vec<Choice>>, _| {
+            if let SelectEvent::Confirm(Some(mbps)) = event {
+                let mut config = Config::load();
+                config.max_streaming_bitrate = (*mbps > 0).then(|| *mbps as u64 * 1_000_000);
+                if let Err(err) = config.save() {
+                    tracing::warn!("failed to save config: {err:#}");
+                }
+            }
+        })];
         Self {
             session,
             scroll: ScrollHandle::new(),
+            bitrate,
+            _subscriptions,
         }
     }
 
@@ -86,6 +119,20 @@ impl Render for SettingsPage {
                     .gap_8()
                     .max_w(px(720.))
                     .child(
+                        section("Streaming", cx)
+                            .child(
+                                h_flex()
+                                    .gap_4()
+                                    .child(div().text_sm().child("Max streaming bitrate"))
+                                    .child(Select::new(&self.bitrate).w(px(180.))),
+                            )
+                            .child(hint(
+                                "Videos above this bitrate are transcoded by the server, which uses its CPU or GPU. \
+                                 Lower it for slow connections; other videos play the original file.",
+                                cx,
+                            )),
+                    )
+                    .child(
                         section("Storage", cx)
                             .child(hint(
                                 format!("Images are cached in {}.", config::cache_dir().join("images").display()),
@@ -99,6 +146,24 @@ impl Render for SettingsPage {
                                         .on_click(
                                             cx.listener(|this, _, window, cx| this.clear_image_cache(window, cx)),
                                         ),
+                                ),
+                            ),
+                    )
+                    .child(
+                        section("Logs", cx)
+                            .child(hint(
+                                format!(
+                                    "A log file is written each day to {}. Attach it to bug reports.",
+                                    config::log_dir().display()
+                                ),
+                                cx,
+                            ))
+                            .child(
+                                h_flex().child(
+                                    Button::new("open-logs")
+                                        .outline()
+                                        .label("Open log folder")
+                                        .on_click(|_, _, cx| cx.open_with_system(&config::log_dir())),
                                 ),
                             ),
                     )

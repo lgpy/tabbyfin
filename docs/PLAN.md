@@ -121,8 +121,9 @@ All of these exist in the 12.2 OpenAPI spec and none are marked obsolete (checke
 | Item detail | `GET /Items/{itemId}` |
 | Seasons / episodes | `GET /Shows/{seriesId}/Seasons`, `GET /Shows/{seriesId}/Episodes?SeasonId=` |
 | Images | `GET /Items/{itemId}/Images/{imageType}?tag=&fillWidth=&quality=` |
-| Playback info | `POST /Items/{itemId}/PlaybackInfo`, sending a DeviceProfile that allows direct play of everything |
+| Playback info | `POST /Items/{itemId}/PlaybackInfo`, sending a DeviceProfile that allows direct play of everything, plus an HLS H.264/AAC transcoding profile for when the server won't direct play |
 | Stream | `GET /Videos/{itemId}/stream?static=true&MediaSourceId=` (mpv opens this URL) |
+| Transcode | The source's `TranscodingUrl` (`/videos/{itemId}/master.m3u8?…`), without its `ApiKey`: the `Authorization` header covers the playlists and segments. `DELETE /Videos/ActiveEncodings?deviceId=&playSessionId=` after the stop report |
 | External subtitles | `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` |
 | Reporting | `POST /Sessions/Playing`, `/Sessions/Playing/Progress`, `/Sessions/Playing/Stopped` |
 | Watched state | `POST` / `DELETE /UserPlayedItems/{itemId}` |
@@ -193,6 +194,10 @@ Video plays **inside the app** through libmpv. There's no separate mpv window an
    - **Next episode** (button, Shift+N, or automatically when an episode plays to the end) starts a session for the next episode from its resume point.
    - Sessions are numbered, so when one replaces another, the old one's end doesn't close the new player.
    - The volume carries over between sessions and is saved in the config.
+   - **Transcoding:** the server transcodes only when it won't direct play: above the *Max streaming bitrate* setting (sent as `MaxStreamingBitrate`), or when the user's policy forbids it.
+     - The session then plays the HLS `TranscodingUrl` and reports `PlayMethod: Transcode`, and the player shows a "Transcoding" label.
+     - Subtitles the server delivers as files (`DeliveryMethod: External`, embedded text ones included) are added to mpv; image subtitles are burned in (`Encode`).
+     - A transcode carries only the chosen audio track, so changing audio, or changing to or from a burned-in subtitle, restarts the session at the current position. The server picks the default audio by the user's language preference and names it in the URL (`AudioStreamIndex`), which the picker follows.
 2. It reports to the server:
    - `/Sessions/Playing` on start.
    - `/Sessions/Playing/Progress` about every 10 s, plus immediately on pause, seek or track change.
