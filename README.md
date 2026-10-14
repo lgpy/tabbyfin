@@ -13,6 +13,7 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
   - Home: Continue Watching, Next Up, Latest.
   - Library grids, and movie, series, season and episode pages.
   - Sort and filter libraries (remembered per library), and browse by cast and crew.
+  - Collections and playlists, with Play all and Shuffle.
   - Search.
   - Mark items as watched or as favorites; favorites get their own shelf on Home.
 - **Play inside the window:**
