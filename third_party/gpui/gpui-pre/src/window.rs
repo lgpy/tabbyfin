@@ -5171,6 +5171,24 @@ impl Window {
         });
     }
 
+    /// Paints a D3D11 texture shared by another device into the current window. Used for
+    /// embedded video.
+    #[cfg(target_os = "windows")]
+    pub fn paint_shared_texture(&mut self, bounds: Bounds<Pixels>, texture: crate::SharedTexture) {
+        use crate::PaintSurface;
+
+        self.invalidator.debug_assert_paint();
+
+        let bounds = self.snap_bounds(bounds);
+        let content_mask = self.snapped_content_mask();
+        self.next_frame.scene.insert_primitive(PaintSurface {
+            order: 0,
+            bounds,
+            content_mask,
+            shared_texture: texture,
+        });
+    }
+
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {

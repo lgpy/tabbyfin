@@ -14,6 +14,16 @@ pub enum SurfaceSource {
     /// A CoreVideo image buffer
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     Surface(CFRetained<CVPixelBuffer>),
+    /// A D3D11 texture shared by another device (e.g. a video player).
+    #[cfg(target_os = "windows")]
+    SharedTexture(crate::SharedTexture),
+}
+
+#[cfg(target_os = "windows")]
+impl From<crate::SharedTexture> for SurfaceSource {
+    fn from(value: crate::SharedTexture) -> Self {
+        SurfaceSource::SharedTexture(value)
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -31,7 +41,7 @@ pub struct Surface {
 }
 
 /// Create a new surface element.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
 pub fn surface(source: impl Into<SurfaceSource>) -> Surface {
     Surface {
         source: source.into(),
@@ -89,14 +99,14 @@ impl Element for Surface {
         _global_id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         #[cfg_attr(
-            not(any(target_os = "macos", target_os = "ios")),
+            not(any(target_os = "macos", target_os = "ios", target_os = "windows")),
             allow(unused_variables)
         )]
         bounds: Bounds<Pixels>,
         _: &mut Self::RequestLayoutState,
         _: &mut Self::PrepaintState,
         #[cfg_attr(
-            not(any(target_os = "macos", target_os = "ios")),
+            not(any(target_os = "macos", target_os = "ios", target_os = "windows")),
             allow(unused_variables)
         )]
         window: &mut Window,
@@ -112,6 +122,15 @@ impl Element for Surface {
                 let new_bounds = self.object_fit.get_bounds(bounds, size);
                 // TODO: Add support for corner_radii
                 window.paint_surface(new_bounds, surface.clone());
+            }
+            #[cfg(target_os = "windows")]
+            SurfaceSource::SharedTexture(texture) => {
+                let size = crate::size(
+                    crate::DevicePixels(texture.width as i32),
+                    crate::DevicePixels(texture.height as i32),
+                );
+                let new_bounds = self.object_fit.get_bounds(bounds, size);
+                window.paint_shared_texture(new_bounds, *texture);
             }
             #[allow(unreachable_patterns)]
             _ => {}

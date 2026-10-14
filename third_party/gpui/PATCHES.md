@@ -19,4 +19,8 @@ Trimmed from the crates.io copies: `gpui-pre/examples/` (only used by tests) and
 
 ## Patches
 
-(none yet; the first commit is the unmodified copy)
+1. **`gpui-pre`: Windows shared-texture surfaces.**
+   - Adds `SharedTexture` (share handle and size) and a `PaintSurface.shared_texture` field on Windows.
+   - Adds `SurfaceSource::SharedTexture`, with `surface()` enabled on Windows.
+   - Adds `Window::paint_shared_texture`.
+2. **`gpui-pre-windows`: drawing surfaces.** *Not done yet.* `draw_surfaces` is still the upstream stub. See `docs/in-app-video.md`, phase 2.

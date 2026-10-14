@@ -763,6 +763,20 @@ impl From<PolychromeSprite> for Primitive {
     }
 }
 
+/// A texture owned by another D3D11 device and shared through a legacy share handle
+/// (`IDXGIResource::GetSharedHandle`). Drawn as a surface; used for embedded video.
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SharedTexture {
+    /// The share `HANDLE`, as an integer. The producer keeps the texture alive while it may be
+    /// drawn.
+    pub handle: usize,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub struct PaintSurface {
@@ -771,6 +785,8 @@ pub struct PaintSurface {
     pub content_mask: ContentMask<ScaledPixels>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub image_buffer: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>,
+    #[cfg(target_os = "windows")]
+    pub shared_texture: SharedTexture,
 }
 
 impl From<PaintSurface> for Primitive {
