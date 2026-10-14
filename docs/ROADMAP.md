@@ -82,6 +82,33 @@ The big gaps:
 | 2.3.7 | **Frame pacing** | P3 | M | Sync between mpv's device and GPUI's relies on `glFinish` plus a 3-texture ring, with no keyed mutex or fences. It looks fine at 24–60 fps; check judder at high refresh rates, and add DXGI keyed mutexes or Vulkan semaphores if needed. GPUI also redraws on mpv's frame timer, not the display's vsync. |
 | 2.3.8 | **Share code between the Windows renderers** | P3 | S | The WGL renderer and the ANGLE renderer share much of their slot/ring code; fold it together once both have been tested on more hardware. |
 
+### 2.4 SyncPlay (watch together)
+
+Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are in the 12.2 OpenAPI spec and none are obsolete (checked against the dev server). Effort: **L** overall, but it splits into the steps below. Priority: **P2**.
+
+**How Jellyfin's SyncPlay works:**
+- The server keeps a group: its members, a shared play queue, and a state (idle, waiting, paused, playing).
+- Clients send requests over HTTP:
+  - Group: `POST /SyncPlay/New`, `Join`, `Leave`, `GET /SyncPlay/List`.
+  - Playback: `Pause`, `Unpause`, `Seek`, `Stop`, `NextItem`, `PreviousItem`.
+  - Queue: `SetNewQueue`, `Queue`, `SetPlaylistItem`, `RemoveFromPlaylist`, `MovePlaylistItem`, `SetRepeatMode`, `SetShuffleMode`.
+  - Readiness: `Buffering`, `Ready`, `SetIgnoreWait`, `Ping`.
+- The server answers through the session **websocket** (`/socket`):
+  - `SyncPlayGroupUpdate` messages: joined, left, state changes, queue changes.
+  - `SyncPlayCommand` messages: Unpause, Pause, Seek or Stop, each with a `When` timestamp in server time and a `PositionTicks`.
+- Clients estimate the offset between their clock and the server's with `GET /GetUtcTime`, repeated a few times (NTP-style, keeping the lowest-latency sample). They then execute each command at the given moment. The web client corrects drift during playback by briefly changing the playback speed, or by skipping when the drift is large.
+
+| # | Step | Effort | Notes |
+|---|---|---|---|
+| 2.4.1 | **Session websocket** | M | Connect to `/socket` with the same `Authorization: MediaBrowser` header as HTTP (a native websocket client can set headers; `ApiKey` in the query also works, legacy `api_key` doesn't in 12.x). Check that 10.11 accepts the header on the socket too. Answer `KeepAlive`, reconnect with backoff, and report capabilities (`POST /Sessions/Capabilities/Full`). This is shared with remote control (2.2.5) and lets other pages refresh on `UserDataChanged`. Lives in the `jellyfin` crate as a stream of typed messages. |
+| 2.4.2 | **Server time sync** | S | Sample `/GetUtcTime` (request and response times) to estimate the offset and round-trip time. Re-sample every minute or so. Convert server `When` times to local `Instant`s. |
+| 2.4.3 | **Group UI** | M | A SyncPlay button in the top bar or player: list groups, create one, join or leave. Show members and the group state, and handle "user joined/left" messages as notifications. |
+| 2.4.4 | **Playback under group control** | L | While in a group, local controls send requests instead of acting directly. Play, pause and seek go to `/SyncPlay/*`, and the player waits for the server's command. Then: <br>• Scheduled commands: pause or seek mpv at the given moment, then unpause exactly at `When`. <br>• Buffering: report `Buffering`/`Ready` around loads and seeks (mpv's `paused-for-cache` and `seeking`). <br>• Queue: starting an item in a group means `SetNewQueue`. The server then tells every member which item to play, and each member negotiates its own `PlaybackInfo` and stream. |
+| 2.4.5 | **Drift correction** | M | Compare mpv's `time-pos` with the expected group position. Nudge `speed` (e.g. ±5%) for small drift, seek for large drift. This is the part that makes it feel synchronised; mpv's precise `speed` control makes it easier than in browsers. |
+| 2.4.6 | **Testing** | M | Needs two clients. Use the Jellyfin web client in a browser against the dev server as the second member, plus two instances of jelly-gpui (separate `JELLY_GPUI_CONFIG_DIR`s so they get different device ids). |
+
+**Order:** 2.4.1 and 2.4.2 first; they're also the base for remote control. Then group UI with play/pause/seek. Then queues (next episode in a group), then drift correction.
+
 ## 3. Browsing and library
 
 | # | Item | Pri | Effort | Notes |
@@ -139,5 +166,6 @@ The big gaps:
 2. **Keyboard navigation (3.1)** and **transcoding fallback (2.2.1):** the two biggest functional gaps for v1.
 3. **Hardware testing (2.3.4, 2.3.5):** borrow or rent an NVIDIA/Intel machine; ask testers with Linux desktops.
 4. **Skip intro, up-next card, chapters (2.1.1–2.1.3):** most noticeable everyday player features.
-5. **Library sorting/filters, favorites, cast (3.2–3.4).**
-6. **macOS (2.3.1, 2.3.2, 5.1)** once a Mac is available.
+5. **SyncPlay (2.4)**, starting with the websocket, which remote control (2.2.5) also needs.
+6. **Library sorting/filters, favorites, cast (3.2–3.4).**
+7. **macOS (2.3.1, 2.3.2, 5.1)** once a Mac is available.

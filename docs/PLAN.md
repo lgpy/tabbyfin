@@ -23,7 +23,8 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 **Not in v1 (later)**
 - Music, Live TV, books, and photos.
 - Downloads and offline mode.
-- SyncPlay, multiple servers at once, and admin features.
+- Multiple servers at once, and admin features.
+- SyncPlay was here too, but is now wanted: see `docs/ROADMAP.md` §2.4.
 - Casting, and remote-controlling other sessions.
 
 ---
