@@ -8,6 +8,7 @@ mod components;
 mod config;
 mod credentials;
 mod images;
+mod live;
 mod markers;
 mod playback;
 mod router;

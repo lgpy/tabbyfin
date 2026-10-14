@@ -23,6 +23,10 @@ pub enum Error {
     #[error("server returned {status}: {message}")]
     Status { status: u16, message: String },
 
+    /// The session websocket failed to open or broke.
+    #[error("websocket: {0}")]
+    Socket(String),
+
     #[error("unexpected response at `{path}`: {source}")]
     Decode { path: String, source: serde_json::Error },
 }

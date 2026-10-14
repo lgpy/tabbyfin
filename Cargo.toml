@@ -19,6 +19,9 @@ player = { path = "crates/player" }
 gpui-kit = "=0.7.3"
 
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
+# The session websocket, upgraded through reqwest so it shares its TLS setup.
+reqwest-websocket = "0.5"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_path_to_error = "0.1"

@@ -46,6 +46,8 @@ pub struct ShellView {
     stack: Vec<Page>,
     focus_handle: FocusHandle,
     _playback: Subscription,
+    /// The session websocket; dropped (disconnecting) with the shell on sign-out.
+    _live: Task<()>,
 }
 
 impl EventEmitter<ShellEvent> for ShellView {}
@@ -65,11 +67,13 @@ impl ShellView {
                 }
             },
         );
+        let _live = crate::live::connect(session.client.clone(), cx);
         let mut this = Self {
             session,
             stack: Vec::new(),
             focus_handle: cx.focus_handle(),
             _playback,
+            _live,
         };
         this.push(Route::Home, window, cx);
         #[cfg(debug_assertions)]
