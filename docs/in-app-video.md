@@ -44,22 +44,26 @@ GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI contr
    - `player::libmpv` (core and event loop) produces `PlayerEvent`s that the session turns into progress reports.
    - A full-window player page: seek bar, play/pause, ±10 s, audio and subtitle tracks, fullscreen, keyboard shortcuts. Not done yet: volume control, version switching during playback, a "next episode" action.
    - Rendering uses the software path at first, so in-app playback works on every OS straight away.
-2. **Windows GPU sharing.** *In progress.*
-   - ✅ The probe (`cargo build -p player --example dx_interop_probe --target x86_64-pc-windows-gnu`) passed on the RX 6600 (AMD driver 26.8.1, GL 4.6). It confirmed `WGL_NV_DX_interop2` with D3D11 shared textures, and with D3D9Ex as a fallback.
-   - ✅ The `gpui-pre` patch: the `SharedTexture` surface source and `Window::paint_shared_texture`.
-   - Next, `gpui-pre-windows` `directx_renderer.rs`:
-     - Add a `surfaces: PipelineState<PolychromeSprite>` pipeline, using the polychrome shader with its own instance buffer.
-     - In `upload_scene_buffers`, turn each `PaintSurface` into a `PolychromeSprite` whose tile covers the full texture. The shader computes UVs from `GetDimensions`, so no HLSL changes are needed.
-     - Keep a `HashMap<handle, ID3D11ShaderResourceView>` filled with `OpenSharedResource`. Prune it to the handles in each frame, and clear it in `handle_device_lost_impl`.
-     - `draw_surfaces(range)` draws each surface with `draw_range_with_texture`.
-   - Next, the player side (`player::libmpv`, Windows only):
-     - A render thread with a hidden WGL context, a ring of 3 shared D3D11 BGRA textures registered through `wglDXRegisterObjectNV`, and an FBO for each texture.
-     - An mpv render context with API `opengl`, rendering with `FLIP_Y=1`. Lock, render, unlock, then `glFinish`, then publish the share handle.
-     - `VideoOutput` carries either software frames or shared textures. The player page draws `surface(SharedTexture)`.
-     - If setup fails, fall back to the software path.
-   - Patch `gpui-pre` and `gpui-pre-windows` for a D3D11 shared-texture surface.
-   - In the player, a WGL context and `WGL_NV_DX_interop2` render into that texture.
-   - Fall back to software if the extension is missing.
+2. ✅ **Windows GPU sharing.** Done on 2026-10-14 and verified on the RX 6600.
+   - **Probe:** `examples/dx_interop_probe.rs` confirmed `WGL_NV_DX_interop2` with D3D11 shared textures (and D3D9Ex as a fallback) on AMD driver 26.8.1.
+   - **GPUI patches** (`third_party/gpui/PATCHES.md`): `SurfaceSource::SharedTexture`, and the DirectX renderer drawing surfaces with the polychrome sprite shaders.
+   - **Player** (`player::libmpv::wgl`):
+     - A render thread with a hidden WGL context.
+     - A ring of 3 shared D3D11 BGRA textures, each registered with GL through the interop and attached to a framebuffer.
+     - mpv renders with the `opengl` API into the next texture, then `glFinish` runs and the share handle is published. No Y flip is needed.
+     - The player page draws the frame with `surface(SharedTexture)`.
+   - **Fallback:** if GPU setup fails, the software path is used automatically. `JELLY_GPUI_VIDEO=software` forces it.
+   - **Measured** (debug build, 1080p H.264, RX 6600):
+
+     | Path | CPU |
+     |---|---|
+     | GPU | ~5% of one core |
+     | Software | ~54% |
+
+   - **Follow-ups:**
+     - Decoding still copies frames back to the CPU (`hwdec=auto-copy-safe`). Zero-copy hardware decoding (dxva2 through the same interop) would remove that too.
+     - Pacing between the 3 textures relies on `glFinish` plus the ring, with no keyed mutex.
+     - Test on NVIDIA and Intel.
 3. **Linux GPU sharing.** Vulkan external memory, plus the `gpui-pre-wgpu` patch. When wgpu runs on its GL backend, fall back to software.
 4. **Packaging libmpv.**
    - Windows: `libmpv-2.dll`.

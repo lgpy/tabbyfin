@@ -40,8 +40,11 @@ if [[ ! -f "$dest/libmpv-2.dll" ]]; then
 fi
 
 cd "$dest"
+# A separate config folder, so test runs don't touch your real sign-in. Set it to an empty
+# string to use the normal one.
+export JELLY_GPUI_CONFIG_DIR="${JELLY_GPUI_CONFIG_DIR-C:\\Temp\\jelly-dev\\config}"
 # Pass these through WSL interop to the Windows process.
-export WSLENV="${WSLENV:+$WSLENV:}RUST_LOG:JELLY_GPUI_ROUTE"
+export WSLENV="${WSLENV:+$WSLENV:}RUST_LOG:JELLY_GPUI_ROUTE:JELLY_GPUI_CONFIG_DIR:JELLY_GPUI_VIDEO"
 if [[ $# -gt 0 ]]; then
   RUST_LOG="${RUST_LOG:-info}" timeout "$1" ./jelly-gpui.exe || true
   taskkill.exe /IM jelly-gpui.exe /F >/dev/null 2>&1 || true

@@ -23,4 +23,7 @@ Trimmed from the crates.io copies: `gpui-pre/examples/` (only used by tests) and
    - Adds `SharedTexture` (share handle and size) and a `PaintSurface.shared_texture` field on Windows.
    - Adds `SurfaceSource::SharedTexture`, with `surface()` enabled on Windows.
    - Adds `Window::paint_shared_texture`.
-2. **`gpui-pre-windows`: drawing surfaces.** *Not done yet.* `draw_surfaces` is still the upstream stub. See `docs/in-app-video.md`, phase 2.
+2. **`gpui-pre-windows`: drawing shared-texture surfaces.**
+   - Adds a `surfaces` pipeline that reuses the polychrome sprite shaders. Each `PaintSurface` becomes a sprite whose tile covers the whole texture; UVs come from `GetDimensions`, so no HLSL changed.
+   - Opens shared textures with `OpenSharedResource` and caches one view per share handle. The cache is pruned to each frame's surfaces and cleared on device loss.
+   - Replaces the empty `draw_surfaces` stub with drawing each surface.

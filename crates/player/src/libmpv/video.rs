@@ -1,6 +1,11 @@
-//! Video output. For now this is libmpv's software renderer: mpv decodes and scales each frame
-//! into a CPU buffer on a render thread, and frames are published on a `watch` channel for the
-//! UI to upload. GPU texture sharing replaces this per platform (`docs/in-app-video.md`).
+//! Video output. A render thread owns an mpv render context and publishes frames for the UI.
+//!
+//! - **GPU (Windows):** mpv renders through OpenGL into D3D11 textures shared with GPUI's
+//!   renderer (`wgl.rs`); the UI draws them as surfaces, with no CPU copy.
+//! - **Software:** mpv renders into a CPU buffer that the UI uploads as an image. Used where the
+//!   GPU path isn't available.
+//!
+//! See `docs/in-app-video.md`.
 
 use std::ffi::{c_int, c_void};
 use std::ptr;
@@ -13,13 +18,13 @@ use tokio::sync::watch;
 use super::{Core, RenderParam, cstring};
 use crate::{Error, Result};
 
-const PARAM_INVALID: c_int = 0;
-const PARAM_API_TYPE: c_int = 1;
+pub(crate) const PARAM_INVALID: c_int = 0;
+pub(crate) const PARAM_API_TYPE: c_int = 1;
 const PARAM_SW_SIZE: c_int = 17;
 const PARAM_SW_FORMAT: c_int = 18;
 const PARAM_SW_STRIDE: c_int = 19;
 const PARAM_SW_POINTER: c_int = 20;
-const UPDATE_FRAME: u64 = 1;
+pub(crate) const UPDATE_FRAME: u64 = 1;
 
 /// Rendering size used until the UI reports its size.
 const DEFAULT_TARGET: (u32, u32) = (1920, 1080);
@@ -31,52 +36,80 @@ pub struct VideoFrame {
     pub pixels: Vec<u8>,
 }
 
-/// Handle to the video of an [`super::EmbeddedPlayer`]. Cheap to clone; the renderer itself
-/// stops when the player is dropped.
-#[derive(Clone)]
-pub struct VideoOutput {
-    inner: Arc<Renderer>,
-    frames: watch::Receiver<Option<Arc<VideoFrame>>>,
+/// A D3D11 texture holding a finished frame, shared through a legacy share handle. The render
+/// thread keeps it alive and doesn't write to it again for the next two frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SharedFrame {
+    pub handle: usize,
+    pub width: u32,
+    pub height: u32,
 }
 
-struct Renderer {
-    core: Arc<Core>,
-    context: *mut c_void,
-    wakeup: Wakeup,
+#[derive(Clone)]
+pub enum Frame {
+    Pixels(Arc<VideoFrame>),
+    Shared(SharedFrame),
+}
+
+/// Handle to the video of an [`super::EmbeddedPlayer`]. Cheap to clone; rendering stops when
+/// the player is dropped.
+#[derive(Clone)]
+pub struct VideoOutput {
+    control: Arc<RenderControl>,
+    frames: watch::Receiver<Option<Frame>>,
+}
+
+/// State shared between the render thread, the player and the UI.
+pub(crate) struct RenderControl {
+    pub wakeup: Wakeup,
     /// Requested output size in device pixels, packed as `w << 32 | h`.
     target: AtomicU64,
-    stop: AtomicBool,
+    pub stop: AtomicBool,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
-// SAFETY: the render context is only used from the render thread, and freed in `Drop` after
-// that thread is joined.
-unsafe impl Send for Renderer {}
-unsafe impl Sync for Renderer {}
+impl RenderControl {
+    pub fn target(&self) -> (u32, u32) {
+        let packed = self.target.load(Ordering::Relaxed);
+        ((packed >> 32) as u32, packed as u32)
+    }
+
+    /// Blocks until mpv or the UI asks for a redraw. Returns `false` when stopping.
+    pub fn wait(&self) -> bool {
+        let mut pending = self.wakeup.pending.lock().unwrap();
+        while !*pending && !self.stop.load(Ordering::Relaxed) {
+            pending = self.wakeup.signal.wait(pending).unwrap();
+        }
+        *pending = false;
+        !self.stop.load(Ordering::Relaxed)
+    }
+}
 
 #[derive(Default)]
-struct Wakeup {
+pub(crate) struct Wakeup {
     pending: Mutex<bool>,
     signal: Condvar,
 }
 
 impl Wakeup {
-    fn notify(&self) {
+    pub fn notify(&self) {
         *self.pending.lock().unwrap() = true;
         self.signal.notify_one();
     }
 }
 
-unsafe extern "C" fn on_update(ctx: *mut c_void) {
-    // SAFETY: `ctx` is the `Wakeup` inside the `Renderer`, which clears the callback before
-    // it's freed.
+/// mpv's update callback: `ctx` is the `Wakeup` in `RenderControl`, which outlives the render
+/// context (the callback is cleared before the context is freed).
+pub(crate) unsafe extern "C" fn on_update(ctx: *mut c_void) {
+    // SAFETY: see above.
     let wakeup = unsafe { &*(ctx as *const Wakeup) };
     wakeup.notify();
 }
 
-/// Stops and joins the render thread when dropped. Owned by the player, so rendering ends
-/// with playback even while the UI still holds [`VideoOutput`] clones.
-pub(crate) struct RenderThread(Arc<Renderer>);
+/// Stops and joins the render thread when dropped. Owned by the player, so rendering (and the
+/// render context) ends before the core is destroyed, even while the UI still holds
+/// [`VideoOutput`] clones.
+pub(crate) struct RenderThread(Arc<RenderControl>);
 
 impl Drop for RenderThread {
     fn drop(&mut self) {
@@ -89,53 +122,32 @@ impl Drop for RenderThread {
 }
 
 impl VideoOutput {
+    /// Starts the render thread and waits until its render context exists (mpv needs one
+    /// before a file with video starts).
     pub(crate) fn new(core: Arc<Core>) -> Result<(Self, RenderThread)> {
-        let api_type = cstring("sw");
-        let mut params = [
-            RenderParam {
-                kind: PARAM_API_TYPE,
-                data: api_type.as_ptr() as *mut c_void,
-            },
-            RenderParam {
-                kind: PARAM_INVALID,
-                data: ptr::null_mut(),
-            },
-        ];
-        let mut context = ptr::null_mut();
-        // SAFETY: valid core handle and parameter list.
-        let code = unsafe { (core.api.render_create)(&mut context, core.mpv, params.as_mut_ptr()) };
-        core.api.check("mpv_render_context_create", code)?;
-
-        let (frames_tx, frames) = watch::channel(None);
-        let inner = Arc::new(Renderer {
-            core,
-            context,
+        let control = Arc::new(RenderControl {
             wakeup: Wakeup::default(),
             target: AtomicU64::new(pack(DEFAULT_TARGET)),
             stop: AtomicBool::new(false),
             thread: Mutex::new(None),
         });
-        // SAFETY: the callback context (`inner.wakeup`) outlives the render context.
-        unsafe {
-            (inner.core.api.render_set_update_callback)(
-                context,
-                Some(on_update),
-                &inner.wakeup as *const Wakeup as *mut c_void,
-            );
-        }
+        let (frames_tx, frames) = watch::channel(None);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("mpv-render".into())
             .spawn({
-                let inner = inner.clone();
-                move || render_loop(&inner, &frames_tx)
+                let control = control.clone();
+                move || render_thread(&core, &control, &frames_tx, ready_tx)
             })
             .map_err(Error::Spawn)?;
-        *inner.thread.lock().unwrap() = Some(thread);
-        Ok((Self { inner: inner.clone(), frames }, RenderThread(inner)))
+        *control.thread.lock().unwrap() = Some(thread);
+        let render_thread = RenderThread(control.clone());
+        ready_rx.recv().map_err(|_| Error::Closed)??;
+        Ok((Self { control, frames }, render_thread))
     }
 
     /// Latest frame, updated as mpv renders.
-    pub fn frames(&self) -> watch::Receiver<Option<Arc<VideoFrame>>> {
+    pub fn frames(&self) -> watch::Receiver<Option<Frame>> {
         self.frames.clone()
     }
 
@@ -143,19 +155,8 @@ impl VideoOutput {
     /// it (never larger than the video), and the current frame is redrawn on change.
     pub fn set_target_size(&self, width: u32, height: u32) {
         let packed = pack((width.max(2), height.max(2)));
-        if self.inner.target.swap(packed, Ordering::Relaxed) != packed {
-            self.inner.wakeup.notify();
-        }
-    }
-}
-
-impl Drop for Renderer {
-    fn drop(&mut self) {
-        // SAFETY: the last reference is gone, so the render thread has exited; freeing the
-        // context here also happens before `core` (a field) can destroy the core.
-        unsafe {
-            (self.core.api.render_set_update_callback)(self.context, None, ptr::null_mut());
-            (self.core.api.render_free)(self.context);
+        if self.control.target.swap(packed, Ordering::Relaxed) != packed {
+            self.control.wakeup.notify();
         }
     }
 }
@@ -164,50 +165,46 @@ fn pack((w, h): (u32, u32)) -> u64 {
     (w as u64) << 32 | h as u64
 }
 
-fn unpack(packed: u64) -> (u32, u32) {
-    ((packed >> 32) as u32, packed as u32)
-}
+type Ready = std::sync::mpsc::Sender<Result<()>>;
 
-fn render_loop(renderer: &Renderer, frames: &watch::Sender<Option<Arc<VideoFrame>>>) {
-    let mut surface = Surface::default();
-    let mut last_size = None;
-    loop {
-        {
-            let mut pending = renderer.wakeup.pending.lock().unwrap();
-            while !*pending && !renderer.stop.load(Ordering::Relaxed) {
-                pending = renderer.wakeup.signal.wait(pending).unwrap();
+fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>, ready: Ready) {
+    // `JELLY_GPUI_VIDEO=software` forces the software path, e.g. to rule out GPU driver issues.
+    #[cfg(windows)]
+    if std::env::var("JELLY_GPUI_VIDEO").as_deref() != Ok("software") {
+        match super::wgl::GpuRenderer::new(core, control) {
+            Ok(mut gpu) => {
+                tracing::info!("video output: GPU (OpenGL/D3D11 interop)");
+                let _ = ready.send(Ok(()));
+                gpu.run(core, control, frames);
+                return;
             }
-            *pending = false;
+            Err(err) => tracing::warn!("GPU video output unavailable, using software rendering: {err}"),
         }
-        if renderer.stop.load(Ordering::Relaxed) {
-            break;
+    }
+    match SoftwareRenderer::new(core, control) {
+        Ok(mut software) => {
+            tracing::info!("video output: software");
+            let _ = ready.send(Ok(()));
+            software.run(core, control, frames);
         }
-        // SAFETY: render context calls happen only on this thread.
-        let flags = unsafe { (renderer.core.api.render_update)(renderer.context) };
-        let Some(size) = fit(renderer) else { continue };
-        // Redraw on a new frame, or when the output size changed (e.g. while paused).
-        if flags & UPDATE_FRAME == 0 && last_size == Some(size) {
-            continue;
-        }
-        last_size = Some(size);
-        if let Some(frame) = surface.render(renderer, size) {
-            frames.send_replace(Some(Arc::new(frame)));
+        Err(err) => {
+            let _ = ready.send(Err(err));
         }
     }
 }
 
 /// The video's display size scaled down to fit the target, or `None` without video.
-fn fit(renderer: &Renderer) -> Option<(u32, u32)> {
-    let w = renderer.core.get_i64("dwidth").filter(|v| *v > 0)? as f64;
-    let h = renderer.core.get_i64("dheight").filter(|v| *v > 0)? as f64;
-    let (max_w, max_h) = unpack(renderer.target.load(Ordering::Relaxed));
+pub(crate) fn fit(core: &Core, control: &RenderControl) -> Option<(u32, u32)> {
+    let w = core.get_i64("dwidth").filter(|v| *v > 0)? as f64;
+    let h = core.get_i64("dheight").filter(|v| *v > 0)? as f64;
+    let (max_w, max_h) = control.target();
     let scale = (max_w as f64 / w).min(max_h as f64 / h).min(1.0);
     Some(((w * scale).round().max(2.) as u32, (h * scale).round().max(2.) as u32))
 }
 
-/// 64-byte aligned render target, as the software renderer prefers.
-#[derive(Default)]
-struct Surface {
+/// libmpv's software renderer into a 64-byte aligned buffer (as it prefers).
+struct SoftwareRenderer {
+    context: *mut c_void,
     buffer: Vec<Aligned>,
 }
 
@@ -215,8 +212,51 @@ struct Surface {
 #[repr(C, align(64))]
 struct Aligned([u8; 64]);
 
-impl Surface {
-    fn render(&mut self, renderer: &Renderer, (width, height): (u32, u32)) -> Option<VideoFrame> {
+impl SoftwareRenderer {
+    fn new(core: &Core, control: &RenderControl) -> Result<Self> {
+        let api_type = cstring("sw");
+        let mut params = [
+            RenderParam { kind: PARAM_API_TYPE, data: api_type.as_ptr() as *mut c_void },
+            RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+        ];
+        let mut context = ptr::null_mut();
+        // SAFETY: valid core handle and parameter list.
+        let code = unsafe { (core.api.render_create)(&mut context, core.mpv, params.as_mut_ptr()) };
+        core.api.check("mpv_render_context_create", code)?;
+        // SAFETY: the wakeup outlives the context; the callback is cleared in `run`.
+        unsafe {
+            (core.api.render_set_update_callback)(
+                context,
+                Some(on_update),
+                &control.wakeup as *const Wakeup as *mut c_void,
+            );
+        }
+        Ok(Self { context, buffer: Vec::new() })
+    }
+
+    fn run(&mut self, core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>) {
+        let mut last_size = None;
+        while control.wait() {
+            // SAFETY: render context calls happen only on this thread.
+            let flags = unsafe { (core.api.render_update)(self.context) };
+            let Some(size) = fit(core, control) else { continue };
+            // Redraw on a new frame, or when the output size changed (e.g. while paused).
+            if flags & UPDATE_FRAME == 0 && last_size == Some(size) {
+                continue;
+            }
+            last_size = Some(size);
+            if let Some(frame) = self.render(core, size) {
+                frames.send_replace(Some(Frame::Pixels(Arc::new(frame))));
+            }
+        }
+        // SAFETY: stop the callback, then free the context on its own thread, before the core.
+        unsafe {
+            (core.api.render_set_update_callback)(self.context, None, ptr::null_mut());
+            (core.api.render_free)(self.context);
+        }
+    }
+
+    fn render(&mut self, core: &Core, (width, height): (u32, u32)) -> Option<VideoFrame> {
         let row = width as usize * 4;
         let stride = row.div_ceil(64) * 64;
         self.buffer.resize((stride * height as usize).div_ceil(64), Aligned([0; 64]));
@@ -231,10 +271,9 @@ impl Surface {
             RenderParam { kind: PARAM_SW_POINTER, data: self.buffer.as_mut_ptr() as *mut c_void },
             RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
         ];
-        let api = &renderer.core.api;
         // SAFETY: the buffer holds `stride * height` bytes and outlives the call.
-        let code = unsafe { (api.render_render)(renderer.context, params.as_mut_ptr()) };
-        if let Err(err) = api.check("mpv_render_context_render", code) {
+        let code = unsafe { (core.api.render_render)(self.context, params.as_mut_ptr()) };
+        if let Err(err) = core.api.check("mpv_render_context_render", code) {
             tracing::warn!("{err}");
             return None;
         }

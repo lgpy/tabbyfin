@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     slice,
     sync::{Arc, OnceLock},
 };
@@ -7,7 +8,7 @@ use anyhow::{Context, Result};
 use gpui_util::ResultExt;
 use windows::{
     Win32::{
-        Foundation::HWND,
+        Foundation::{HANDLE, HWND},
         Graphics::{
             Direct3D::*,
             Direct3D11::*,
@@ -48,6 +49,10 @@ pub(crate) struct DirectXRenderer {
 
     width: u32,
     height: u32,
+
+    /// Shader resource views of shared textures drawn as surfaces, by share handle. Pruned to
+    /// the handles in each frame; cleared when the device is lost.
+    surface_views: HashMap<usize, ID3D11ShaderResourceView>,
 
     /// Whether we want to skip drwaing due to device lost events.
     ///
@@ -92,6 +97,8 @@ struct DirectXRenderPipelines {
     mono_sprites: PipelineState<MonochromeSprite>,
     subpixel_sprites: PipelineState<SubpixelSprite>,
     poly_sprites: PipelineState<PolychromeSprite>,
+    /// Shared textures (`PaintSurface`), drawn with the polychrome sprite shaders.
+    surfaces: PipelineState<PolychromeSprite>,
 }
 
 struct DirectXGlobalElements {
@@ -193,6 +200,7 @@ impl DirectXRenderer {
             font_info: Self::get_font_info(),
             width: 1,
             height: 1,
+            surface_views: HashMap::new(),
             skip_draws: false,
         })
     }
@@ -272,6 +280,7 @@ impl DirectXRenderer {
             }
 
             self.resources.take();
+            self.surface_views.clear();
             if let Some(devices) = &self.devices {
                 devices.device_context.OMSetRenderTargets(None, None);
                 devices.device_context.ClearState();
@@ -384,7 +393,9 @@ impl DirectXRenderer {
                 PrimitiveBatch::PolychromeSprites { texture_id, range } => {
                     self.draw_polychrome_sprites(texture_id, range.start, range.len())
                 }
-                PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
+                PrimitiveBatch::Surfaces(range) => {
+                    self.draw_surfaces(&scene.surfaces[range.clone()], range.start)
+                }
             }
             .with_context(|| {
                 format!(
@@ -576,6 +587,16 @@ impl DirectXRenderer {
                 &scene.polychrome_sprites,
             )?;
         }
+
+        if !scene.surfaces.is_empty() {
+            let sprites: Vec<PolychromeSprite> = scene.surfaces.iter().map(surface_sprite).collect();
+            self.pipelines
+                .surfaces
+                .update_buffer(&devices.device, &devices.device_context, &sprites)?;
+        }
+        // Forget shared textures no longer on screen (e.g. a closed video).
+        let live: HashSet<usize> = scene.surfaces.iter().map(|s| s.shared_texture.handle).collect();
+        self.surface_views.retain(|handle, _| live.contains(handle));
 
         Ok(())
     }
@@ -813,11 +834,49 @@ impl DirectXRenderer {
         )
     }
 
-    fn draw_surfaces(&mut self, surfaces: &[PaintSurface]) -> Result<()> {
-        if surfaces.is_empty() {
-            return Ok(());
+    fn draw_surfaces(&mut self, surfaces: &[PaintSurface], start: usize) -> Result<()> {
+        for (i, surface) in surfaces.iter().enumerate() {
+            // A texture that can't be opened (e.g. its producer just freed it) is skipped
+            // rather than failing the frame.
+            let Some(view) = self.surface_view(surface.shared_texture).log_err() else {
+                continue;
+            };
+            let devices = self.devices.as_ref().context("devices missing")?;
+            self.pipelines.surfaces.draw_range_with_texture(
+                &devices.device_context,
+                &[Some(view)],
+                self.globals
+                    .batch_params_buffer
+                    .as_ref()
+                    .context("batch params buffer missing")?,
+                slice::from_ref(&self.globals.sampler),
+                (start + i) as u32,
+                1,
+            )?;
         }
         Ok(())
+    }
+
+    /// Opens a texture shared by another device, once per share handle.
+    fn surface_view(&mut self, texture: SharedTexture) -> Result<ID3D11ShaderResourceView> {
+        if let Some(view) = self.surface_views.get(&texture.handle) {
+            return Ok(view.clone());
+        }
+        let devices = self.devices.as_ref().context("devices missing")?;
+        let mut opened: Option<ID3D11Texture2D> = None;
+        unsafe {
+            devices
+                .device
+                .OpenSharedResource(HANDLE(texture.handle as *mut _), &mut opened)
+        }
+        .context("opening shared texture")?;
+        let opened = opened.context("OpenSharedResource returned no texture")?;
+        let mut view = None;
+        unsafe { devices.device.CreateShaderResourceView(&opened, None, Some(&mut view)) }
+            .context("creating shared texture view")?;
+        let view = view.context("no shared texture view")?;
+        self.surface_views.insert(texture.handle, view.clone());
+        Ok(view)
     }
 
     pub(crate) fn gpu_specs(&self) -> Result<GpuSpecs> {
@@ -997,6 +1056,13 @@ impl DirectXRenderPipelines {
             16,
             create_blend_state(device)?,
         )?;
+        let surfaces = PipelineState::new(
+            device,
+            "surface_pipeline",
+            ShaderModule::PolychromeSprite,
+            4,
+            create_blend_state(device)?,
+        )?;
 
         Ok(Self {
             shadow_pipeline,
@@ -1007,6 +1073,7 @@ impl DirectXRenderPipelines {
             mono_sprites,
             subpixel_sprites,
             poly_sprites,
+            surfaces,
         })
     }
 }
@@ -2066,5 +2133,33 @@ mod dxgi {
             (number >> 16) & 0xFFFF,
             number & 0xFFFF
         ))
+    }
+}
+
+/// A surface drawn as a polychrome sprite whose tile is the whole shared texture. The sprite
+/// shader derives texture coordinates from the bound texture's size, so this needs no new
+/// shader.
+fn surface_sprite(surface: &PaintSurface) -> PolychromeSprite {
+    let texture = surface.shared_texture;
+    PolychromeSprite {
+        order: surface.order,
+        pad: 0,
+        grayscale: false.into(),
+        opacity: 1.0,
+        bounds: surface.bounds,
+        content_mask: surface.content_mask.clone(),
+        corner_radii: Corners::default(),
+        tile: AtlasTile {
+            texture_id: AtlasTextureId {
+                index: 0,
+                kind: AtlasTextureKind::Polychrome,
+            },
+            tile_id: TileId(0),
+            padding: 0,
+            bounds: Bounds {
+                origin: point(DevicePixels(0), DevicePixels(0)),
+                size: size(DevicePixels(texture.width as i32), DevicePixels(texture.height as i32)),
+            },
+        },
     }
 }
