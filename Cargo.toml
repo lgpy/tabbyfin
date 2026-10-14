@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["crates/jellyfin", "crates/player", "crates/app"]
+default-members = ["crates/app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+jellyfin = { path = "crates/jellyfin" }
+player = { path = "crates/player" }
+
+# gpui-kit pins and re-exports its exact GPUI snapshot. Never depend on `gpui` directly.
+# Bump deliberately, in its own commit, after reading the gpui-kit changelog.
+gpui-kit = "=0.7.3"
+
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -1,0 +1,9 @@
+[package]
+name = "player"
+description = "mpv control over JSON IPC (no UI dependencies)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
