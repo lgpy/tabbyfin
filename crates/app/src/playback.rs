@@ -913,6 +913,8 @@ async fn run_session(
         audio_stream_index: audio,
         subtitle_stream_index: subtitle_index(subtitle),
         play_method: method,
+        volume_level: volume_level(volume),
+        is_muted: muted,
         ..Default::default()
     };
     let mut started = false;
@@ -944,6 +946,8 @@ async fn run_session(
                     }
                     PlayerEvent::Position(position) => report.position = Ticks::from(position),
                     PlayerEvent::Duration(length) => duration = Some(length),
+                    PlayerEvent::Volume(volume) => report.volume_level = volume_level(volume),
+                    PlayerEvent::Muted(muted) => report.is_muted = muted,
                     PlayerEvent::Paused(paused) => {
                         report.is_paused = paused;
                         if started {
@@ -1011,6 +1015,11 @@ async fn run_session(
     }
 }
 
+/// mpv's volume in percent as the whole number the server's reports expect.
+fn volume_level(volume: f64) -> i32 {
+    volume.clamp(0., 100.).round() as i32
+}
+
 async fn apply_command(
     player: &Player,
     source: &MediaSourceInfo,
@@ -1028,8 +1037,17 @@ async fn apply_command(
                 .command(json!(["seek", position.as_secs_f64(), "absolute"]))
                 .await
         }
-        UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., 100.)).await,
-        UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
+        UiCommand::SetVolume(volume) => {
+            // mpv's event confirms this right after, but the report the command triggers goes
+            // out before it arrives.
+            report.volume_level = volume_level(volume);
+            player.set_property("volume", volume.clamp(0., 100.)).await
+        }
+        UiCommand::ToggleMute => {
+            // Mirrors mpv's `cycle mute`; the event that follows confirms it.
+            report.is_muted = !report.is_muted;
+            player.command(json!(["cycle", "mute"])).await
+        }
         // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
         UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),
         UiCommand::Audio(index) => {
@@ -1108,7 +1126,7 @@ mod tests {
     // Not `super::*`: that glob brings in GPUI's `test` attribute, which shadows the std one.
     use jellyfin::models::{MediaSourceInfo, MediaStream, MediaStreamType};
 
-    use super::{mpv_subtitle_id, mpv_track_id};
+    use super::{mpv_subtitle_id, mpv_track_id, volume_level};
 
     fn stream(index: i32, kind: MediaStreamType, is_external: bool) -> MediaStream {
         serde_json::from_value(serde_json::json!({
@@ -1151,5 +1169,13 @@ mod tests {
         assert_eq!(mpv_subtitle_id(&source, 0), Some(2));
         assert_eq!(mpv_subtitle_id(&source, 5), Some(3));
         assert_eq!(mpv_subtitle_id(&source, 9), None);
+    }
+
+    #[test]
+    fn the_reported_volume_is_a_whole_percent() {
+        assert_eq!(volume_level(54.6), 55);
+        assert_eq!(volume_level(100.4), 100);
+        assert_eq!(volume_level(-3.), 0);
+        assert_eq!(volume_level(150.), 100);
     }
 }
