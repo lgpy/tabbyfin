@@ -1,6 +1,6 @@
 # Dev Jellyfin server
 
-A local Jellyfin 12.2 with a small synthetic library, for developing against.
+A local Jellyfin 12.2 with a small synthetic library, for developing against, plus an optional 10.11 server for the minimum supported version.
 
 ```sh
 mise run dev:setup     # generate media, start the server, run the startup wizard, scan
@@ -19,7 +19,7 @@ docker compose -f dev/compose.yaml up -d     # start the server on http://localh
 Login: `dev` / `dev`. Legacy authorization is disabled, which is the 12.x default.
 
 **Library contents**
-- `Test Movie (2024)`: two versions (1080p and 720p).
+- `Test Movie (2024)`: three versions (1080p and 720p H.264, and 4K HEVC 10-bit for hardware decoding).
 - `Second Movie (2025)`: has an external `.en.srt` subtitle.
 - `Test Show`: Season 1 with three episodes, Season 2 with two.
 
@@ -28,5 +28,7 @@ Every video is 60 s long and has:
 - An embedded English subtitle track.
 
 Remote metadata and image fetchers are turned off, so the fake titles never match real TMDb or TVDb entries.
+
+**Minimum version (10.11):** `mise run dev:min` starts Jellyfin 10.11 on http://localhost:8097, with its own state in `dev/.data/min` and the same media, sets it up the same way (also turning legacy authorization off, which 10.11 leaves on), and runs `cargo run -p jellyfin --example smoke` against it. `mise run dev:down` stops both servers.
 
 **Reset everything:** `docker compose -f dev/compose.yaml down && rm -rf dev/.data/config dev/.data/cache`, then run the start and setup steps again. The container runs as your user, so no `sudo` is needed.
