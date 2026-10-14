@@ -35,7 +35,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 | UI | **`gpui-kit` 0.7.x** | Formerly `gpui-component`, renamed to GPUI Kit. It pins an exact GPUI snapshot (`gpui-pre =0.3.9` today) and re-exports it. `use gpui_kit::*` gives us GPUI. **We never add `gpui` as a separate dependency.** The crates.io `gpui` crate (0.2.2, 2025) is stale, and mixing in a second copy would break the build. |
 | Widgets | `gpui_kit::component` | More than 75 components, including text input, virtual lists, scroll areas, theming, dialogs, and sidebar. `gpui_kit::base` is there if we later want our own look on top of its unstyled behavior. |
 | HTTP | `reqwest` (rustls) + `serde`/`serde_json` | Runs on our own tokio runtime on a background thread. GPUI's executor isn't tokio (§6). |
-| Player | **The `mpv` binary as a child process, controlled over JSON IPC** | §5 explains why we use the binary rather than libmpv. |
+| Player | **libmpv, embedded**, loaded at runtime | Video renders inside the GPUI window (§5, `docs/in-app-video.md`). |
 | Persistence | `directories` + TOML config. `keyring` (v4) holds the access token. | `keyring` uses the OS keychain on all three platforms. Where no credential store exists (WSL, or Linux without a Secret Service daemon), the token goes in a file only the user can read (`<config>/tokens/`, 0600), and a warning is logged. |
 | Image cache | On-disk cache in the platform cache dir, keyed by `(item id, image type, tag, width)` | Jellyfin's `ImageTags` act as cache busters. |
 | Errors / logs | `thiserror` in the library crates, `anyhow` in the app, plus `tracing` | |
@@ -58,11 +58,10 @@ jelly-gpui/
 │   │   ├── images.rs         #   image URL builder
 │   │   ├── ticks.rs          #   Ticks newtype (1 tick = 100 ns) <-> Duration
 │   │   └── models.rs         #   hand-written DTOs, only the fields we use
-│   ├── player/               # mpv control: no gpui
-│   │   ├── lib.rs            #   Player trait: load, pause, seek, set_track, stop, events()
-│   │   ├── ipc.rs            #   JSON IPC transport (Unix socket / Windows named pipe)
-│   │   ├── process.rs        #   spawn/locate the mpv binary, lifecycle, crash handling
-│   │   └── events.rs         #   PlayerEvent enum
+│   ├── player/               # mpv via libmpv: no gpui
+│   │   ├── lib.rs            #   Player: load, set_property, command, add_subtitle, quit
+│   │   ├── events.rs         #   PlayerEvent enum and event translation
+│   │   └── libmpv/           #   runtime-loaded libmpv: core, event thread, video output
 │   └── app/                  # gpui-kit binary
 │       ├── main.rs
 │       ├── state.rs          #   AppState entity: session, user, router
@@ -165,85 +164,49 @@ Source: the 12.0 release notes, plus 12.1 and 12.2, which only contained bug fix
 
 ## 5. Playback architecture
 
-> **Update (2026-10-14):** playback now happens **inside the app** through libmpv (`player::libmpv`). The separate-window IPC backend described here is the fallback, used when libmpv can't be loaded or when "Play in a separate mpv window" is on in Settings. The plan for moving to GPU texture sharing is in `docs/in-app-video.md`.
+Video plays **inside the app** through libmpv. There's no separate mpv window and no fallback to one; that was removed on 2026-10-14. See `docs/in-app-video.md` for the rendering plan, which moves from software rendering to GPU texture sharing.
 
-### 5.1 Why we use the `mpv` binary over IPC instead of libmpv
+### 5.1 libmpv embedding
 
-We agreed to start with **option A**: mpv opens its own window. Doing that by spawning the `mpv` binary and controlling it through `--input-ipc-server` (JSON IPC) is the most portable approach:
+- **Loading:**
+  - `player::libmpv` loads libmpv at runtime (`dlopen`), so building needs no libmpv.
+  - When libmpv is missing, playback shows an error saying how to install it.
+- **Threads:**
+  - mpv runs on its own threads.
+  - An event thread turns libmpv events into `PlayerEvent`s.
+  - A render thread draws frames for the UI.
+- **Isolation from the user's mpv setup:** the embedded mpv never loads `mpv.conf`, scripts or key bindings (`config=no`, `load-scripts=no`, `osc=no`, `input-default-bindings=no`). The app draws its own controls, and user scripts such as uosc would otherwise draw theirs into the video.
+- **Loading a file:** every option is set as a property, because the argument list of `loadfile` changed in mpv 0.38.
+  1. `http-header-fields` carries the `Authorization` header, so the stream URL contains no token.
+  2. Then `force-media-title` and `start`, followed by `loadfile`.
+  3. After `file-loaded`, `sub-add` for each external subtitle. These requests are authenticated by the same header.
+- **Observed properties:** `time-pos` (throttled to about once a second), `duration` and `pause`.
 
-- **The same mechanism works on every platform:**
-  - Linux and macOS use a Unix socket.
-  - Windows uses a named pipe (`\\.\pipe\jelly-gpui-<pid>`).
-- **libmpv opening its own window is the weak spot on macOS.** mpv's macOS backends assume the mpv app owns the Cocoa run loop. Here, GPUI owns the main thread and NSApplication, and the mpv docs point embedders to the render API instead. A separate process avoids that conflict.
-- **Crash isolation.** If mpv crashes or gets stuck, the app keeps running. We detect it, report playback as stopped, and recover.
-- **Nothing native to link at build time.** We don't need `libmpv-dev` on build machines and avoid ABI mismatches. On Linux, users can keep their own mpv and its config.
-- **The cost:** IPC is JSON lines, and we have to manage the process. `player/ipc.rs` contains both.
+### 5.2 Threading and reporting
 
-libmpv returns later for in-window video (§5.4). The `Player` trait keeps that swap internal to the `player` crate.
-
-### 5.2 Launching mpv
-
-```
-mpv --input-ipc-server=<path> --idle=once --force-window=immediate --keep-open=no --terminal=no
-```
-
-We pass no `--vo` or `--hwdec`. Options on the command line override `mpv.conf`, and the user's own mpv config should decide those. mpv's defaults apply if the user hasn't set anything.
-
-After connecting over IPC, the app sends this sequence. Every option is set as a property, because the argument list of `loadfile` changed in mpv 0.38.
-1. `set_property http-header-fields ["Authorization: MediaBrowser ... Token=..."]`. **The token goes over IPC, not on the command line**, because other local users can read process arguments with `ps`. The stream URL doesn't contain the token either.
-2. `set_property force-media-title`, then `set_property start <resume seconds>`.
-3. `loadfile <stream url> replace`.
-4. After `file-loaded`, `sub-add <subtitle url> auto` for each external subtitle. These requests are authenticated by the same header fields.
-5. `observe_property` on `time-pos` (throttled to about once a second), `duration`, and `pause`.
-
-### 5.3 Threading and reporting
-
-1. An IPC reader thread parses JSON events and turns them into `PlayerEvent`s. It sends them over an `async-channel`.
-2. A GPUI task on the `app` side receives those events and updates a `PlaybackSession` entity.
-3. `PlaybackSession` reports to the server:
+1. The session runs on tokio. It forwards `PlayerEvent`s to a `NowPlaying` GPUI entity, which the player page draws, and it receives `UiCommand`s from that page: pause, seek, tracks and stop.
+2. It reports to the server:
    - `/Sessions/Playing` on start.
-   - `/Sessions/Playing/Progress` about every 10 s, plus immediately on pause, seek, or track change.
-   - `/Sessions/Playing/Stopped` when mpv exits or reaches end of file. This uses the last known position, so a crash still records progress.
-4. When playback ends, we refresh the item and Continue Watching so the UI shows the new watched state.
+   - `/Sessions/Playing/Progress` about every 10 s, plus immediately on pause, seek or track change.
+   - `/Sessions/Playing/Stopped` when playback ends, using the last known position.
+3. When playback ends, pages that show watched state refresh.
 
-### 5.4 Later: video inside the app window
+### 5.3 Shipping libmpv
 
-| Option | How it works | Status |
-|---|---|---|
-| B. `--wid` embed | Give mpv a native child window handle | Works on X11, Win32, and macOS only. It **does not work on Wayland**, and GPUI exposes no child surfaces. Unlikely. |
-| C. Software render API | libmpv `mpv_render_context` with the `sw` backend, copying frames into a GPUI image | Easiest way to get video in the window, with GPUI drawing the overlay. CPU-heavy, so likely capped around 1080p. |
-| D. GL render plus texture sharing | Share mpv's FBO with GPUI's renderer through dmabuf, IOSurface, or DXGI | The best result. Each platform needs changes to GPUI's renderer. This is a long-term project. |
-
-We ran a time-boxed spike on C after v1; results are in `docs/spike-inline-video.md`. C works at full frame rate up to 1080p. We'll measure on real GPU hardware before shipping it as an opt-in mode, and option D remains the long-term path for 4K and HDR.
-
-### 5.5 Shipping mpv
-
-| Platform | Plan |
+| Platform | libmpv |
 |---|---|
-| Linux | Use the mpv you have installed: found on `PATH` and overridable in Settings. The `.deb` lists `mpv` as a dependency. A Flatpak would get mpv from its runtime or an extension, if we ever ship one. |
-| Windows | `mpv.exe` and `vulkan-1.dll` are placed next to `jelly-gpui.exe` in the zip. |
-| macOS | The upstream `mpv.app` is placed in `jelly-gpui.app/Contents/Resources/`. The whole app is ad-hoc signed, not notarized. |
+| Linux | The system's `libmpv2`. The `.deb` depends on it. |
+| Windows | `libmpv-2.dll` next to `jelly-gpui.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. |
+| macOS | Not bundled yet. The app looks in Homebrew's folders, so `brew install mpv` makes playback work. Bundling `libmpv.dylib` is still to do. The app is ad-hoc signed, not notarized. |
 
-**Lookup order:** path from Settings, then a bundled copy (next to the executable or in the app bundle), then `PATH`. If none is found, the app shows an error that points to Settings.
-
-**Bundled version:** we bundle the official mpv release builds from `github.com/mpv-player/mpv/releases`.
-- `packaging/mpv.lock` pins the version, currently v0.41.0, along with the SHA-256 of each archive.
-- `packaging/fetch-mpv.sh` checks the checksum before it extracts anything.
-- `packaging/THIRD_PARTY.md` holds mpv's license and source information (GPL-2.0-or-later), and it ships inside the packages.
+`packaging/THIRD_PARTY.md` holds mpv's license (GPL-2.0-or-later) and source information, and ships in the packages.
 
 **Builds:** `.github/workflows/ci.yml` runs clippy and the tests on all three OSes. On a `v*` tag, or when started by hand, it also packages all four targets:
 - Linux `.tar.gz` and `.deb`
 - Windows `.zip`
 - macOS arm64 and x86_64 `.zip`
 
-A tag also creates a draft GitHub release with these files. To package locally, run `cargo build --release --target <t>`, then `packaging/package.sh <t>`.
-
----|---|
-| Linux | **Decided:** use the user's installed `mpv` (`PATH`, overridable in settings). We don't bundle it, including in distro packages, which declare `mpv` as a dependency. A Flatpak would get mpv through the sandbox runtime or an extension if we ever ship one. |
-| Windows | Bundle `mpv.exe` next to our executable. Use the shinchiro / mpv-winbuild builds and record the version. |
-| macOS | Bundle the `mpv` binary inside the `.app` (`Contents/MacOS/` or `Resources/`). It must be signed along with the app. |
-
-Lookup order: path set in settings, then bundled, then `PATH`. If none is found, the app shows a clear error that links to install instructions.
+A tag also creates a draft GitHub release with these files. Locally, `mise run package` packages Linux, and `mise run ci:build` builds every OS on CI.
 
 ---
 
@@ -312,12 +275,13 @@ Lookup order: path set in settings, then bundled, then `PATH`. If none is found,
 
 **Ubuntu / WSL2 (current machine):**
 ```sh
-sudo apt install build-essential pkg-config mpv \
+sudo apt install build-essential pkg-config libmpv2 \
   libvulkan-dev mesa-vulkan-drivers vulkan-tools \
   libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
   libfontconfig-dev libfreetype-dev libssl-dev
 ```
-- The IPC backend doesn't need `libmpv-dev`. Add it later for the §5.4 spike.
+- `libmpv2` is the runtime library the player loads. No `-dev` package is needed, because libmpv is loaded at runtime.
+- `mingw-w64` adds the Windows test loop: `dev/win-run.sh` cross-builds, copies to `C:\Temp\jelly-dev` and runs on the Windows host.
 - GPUI on WSL2 runs through WSLg (`WAYLAND_DISPLAY=wayland-0` is set). It needs a working Vulkan driver, such as mesa `dzn` or llvmpipe.
 - Run `vulkaninfo --summary` before debugging rendering problems.
 - If WSLg rendering is poor, use a native Windows build for daily UI work. GPUI supports Windows directly.

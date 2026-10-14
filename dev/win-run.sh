@@ -28,8 +28,8 @@ for crate in "$registry"gpui-pre-windows-* "$root"/third_party/gpui/gpui-pre-win
   mirror "${crate%/}/src"
 done
 
-# libmpv for the in-app player, pinned in packaging/mpv.lock. Extracted with Windows' own
-# tar.exe (libarchive reads .7z).
+# libmpv, pinned in packaging/mpv.lock. Extracted with Windows' own tar.exe (libarchive reads
+# .7z), since 7z usually isn't installed in WSL.
 if [[ ! -f "$dest/libmpv-2.dll" ]]; then
   # shellcheck source=../packaging/mpv.lock
   source "$root/packaging/mpv.lock"

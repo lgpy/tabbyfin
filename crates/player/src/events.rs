@@ -28,8 +28,8 @@ pub enum EndReason {
     Error(String),
 }
 
-/// Turns raw IPC events into [`PlayerEvent`]s, dropping position updates that are less than a
-/// second apart so consumers don't wake up on every frame.
+/// Turns mpv events (in the shape of mpv's JSON IPC events) into [`PlayerEvent`]s, dropping
+/// position updates that are less than a second apart so consumers don't wake up on every frame.
 #[derive(Default)]
 pub(crate) struct EventTranslator {
     last_position: Option<f64>,

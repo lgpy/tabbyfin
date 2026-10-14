@@ -18,12 +18,6 @@ const EVENT_SEEK: c_int = 20;
 const EVENT_PLAYBACK_RESTART: c_int = 21;
 const EVENT_PROPERTY_CHANGE: c_int = 22;
 
-#[derive(Debug, Clone, Default)]
-pub struct EmbeddedOptions {
-    /// Load the user's mpv.conf and scripts.
-    pub use_mpv_config: bool,
-}
-
 /// An mpv core running inside this process, rendering into a [`VideoOutput`].
 ///
 /// Methods block (libmpv calls are synchronous), so call them off the UI thread.
@@ -36,7 +30,7 @@ pub struct EmbeddedPlayer {
 }
 
 impl EmbeddedPlayer {
-    pub fn spawn(options: &EmbeddedOptions) -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
+    pub fn spawn() -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
         let api = Api::load()?;
         // SAFETY: mpv_create has no preconditions.
         let mpv = unsafe { (api.create)() };
@@ -50,11 +44,16 @@ impl EmbeddedPlayer {
             // SAFETY: valid handle and C strings.
             unsafe { (core.api.set_option_string)(core.mpv, name.as_ptr(), value.as_ptr()) }
         };
-        if options.use_mpv_config {
-            set_option("config", "yes");
-        }
-        // Like the external player: quit after the file ends, and never draw mpv's own UI.
-        for (name, value) in [("idle", "once"), ("keep-open", "no"), ("osc", "no"), ("input-default-bindings", "no")] {
+        // The app draws the UI, so the user's mpv.conf, scripts (OSC replacements like uosc)
+        // and key bindings stay out. Quit after the file ends.
+        for (name, value) in [
+            ("config", "no"),
+            ("load-scripts", "no"),
+            ("osc", "no"),
+            ("input-default-bindings", "no"),
+            ("idle", "once"),
+            ("keep-open", "no"),
+        ] {
             set_option(name, value);
         }
         // The software renderer reads frames back from the CPU.
@@ -62,8 +61,6 @@ impl EmbeddedPlayer {
         set_option("vo", "libmpv");
         // SAFETY: valid handle, options set.
         core.api.check("mpv_initialize", unsafe { (core.api.initialize)(core.mpv) })?;
-        // A user config may have picked another video output; we must render through libmpv.
-        core.set_property("vo", "libmpv")?;
 
         let formats = [FORMAT_DOUBLE, FORMAT_DOUBLE, FORMAT_FLAG];
         for (id, (name, format)) in OBSERVED_PROPERTIES.iter().zip(formats).enumerate() {
