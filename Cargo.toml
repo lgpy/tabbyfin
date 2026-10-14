@@ -16,6 +16,13 @@ player = { path = "crates/player" }
 # Bump deliberately, in its own commit, after reading the gpui-kit changelog.
 gpui-kit = "=0.7.3"
 
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_path_to_error = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+url = "2"
+
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
