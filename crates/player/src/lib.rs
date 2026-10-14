@@ -9,6 +9,8 @@
 mod events;
 mod ipc;
 mod process;
+#[cfg(feature = "software-render")]
+pub mod software;
 
 use std::path::PathBuf;
 use std::time::Duration;
