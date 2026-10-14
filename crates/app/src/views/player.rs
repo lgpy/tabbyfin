@@ -41,6 +41,11 @@ actions!(
 pub const KEY_CONTEXT: &str = "Player";
 const SEEK_STEP: f64 = 10.;
 const VOLUME_STEP: f64 = 5.;
+/// Wheel lines per volume step. X11 and Windows normalise a wheel notch to three lines, so
+/// one notch is one step; a trackpad's pixel deltas are turned into lines first.
+const SCROLL_LINES_PER_STEP: f32 = 3.;
+/// Trackpad pixels per wheel line, for platforms that send pixel deltas (macOS).
+const PIXELS_PER_LINE: f32 = 30.;
 const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 const CHAPTER_MARK_H: f32 = 8.;
 
@@ -65,6 +70,9 @@ pub struct PlayerPage {
     volume: Entity<SliderState>,
     /// The user is dragging the volume slider; don't move it with mpv's updates.
     adjusting_volume: bool,
+    /// Wheel lines not yet turned into a volume step, so trackpad deltas add up instead of
+    /// being ignored.
+    scroll_pending: f32,
     /// Skip intros and recaps as they start (a setting).
     auto_skip: bool,
     /// The segment last skipped automatically, so seeking back into it doesn't skip again.
@@ -186,6 +194,7 @@ impl PlayerPage {
             scrubbing: false,
             volume,
             adjusting_volume: false,
+            scroll_pending: 0.,
             auto_skip: crate::config::Config::load().auto_skip_intro.unwrap_or(false),
             auto_skipped: None,
             version: None,
@@ -380,6 +389,7 @@ impl PlayerPage {
             this.update(cx, |this, cx| {
                 if !this.now_playing.read(cx).paused {
                     this.controls_visible = false;
+                    cx.hide_cursor_until_mouse_moves();
                     cx.notify();
                 }
             })
@@ -390,6 +400,34 @@ impl PlayerPage {
     fn toggle_pause(&mut self, _: &TogglePause, window: &mut Window, cx: &mut Context<Self>) {
         self.send(UiCommand::TogglePause, cx);
         self.show_controls(window, cx);
+    }
+
+    /// Clicking the video toggles pause. A double click toggles fullscreen; its first click
+    /// already toggled pause, so the second toggles it back first.
+    fn click_video(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event.click_count() {
+            1 => self.toggle_pause(&TogglePause, window, cx),
+            2 => {
+                self.send(UiCommand::TogglePause, cx);
+                self.toggle_fullscreen(&ToggleFullscreen, window, cx);
+                self.show_controls(window, cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// A wheel notch over the video changes the volume by one step; trackpad deltas add up
+    /// until they make a whole notch.
+    fn scroll_volume(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let lines = match event.delta {
+            ScrollDelta::Lines(delta) => delta.y,
+            ScrollDelta::Pixels(delta) => delta.y.as_f32() / PIXELS_PER_LINE,
+        };
+        let (pending, steps) = scroll_steps(self.scroll_pending, lines);
+        self.scroll_pending = pending;
+        if steps != 0 {
+            self.change_volume(f64::from(steps) * VOLUME_STEP, window, cx);
+        }
     }
 
     fn seek_forward(&mut self, _: &SeekForward, window: &mut Window, cx: &mut Context<Self>) {
@@ -689,7 +727,10 @@ impl Render for PlayerPage {
                     .id("video")
                     .absolute()
                     .inset_0()
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_pause(&TogglePause, window, cx)))
+                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| this.click_video(event, window, cx)))
+                    .on_scroll_wheel(
+                        cx.listener(|this, event: &ScrollWheelEvent, window, cx| this.scroll_volume(event, window, cx)),
+                    )
                     .child(match frame {
                         Shown::Image(image) => img(ImageSource::Render(image))
                             .size_full()
@@ -736,5 +777,55 @@ fn shared_texture(frame: player::libmpv::SharedFrame) -> SharedTexture {
         allocation_size: frame.allocation_size,
         width: frame.width,
         height: frame.height,
+    }
+}
+
+/// Turns a wheel delta (in lines, positive is scrolling up) into whole volume steps, keeping
+/// the leftover lines for the next event.
+fn scroll_steps(pending: f32, lines: f32) -> (f32, i32) {
+    let total = pending + lines;
+    let steps = (total / SCROLL_LINES_PER_STEP).trunc() as i32;
+    (total - steps as f32 * SCROLL_LINES_PER_STEP, steps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SCROLL_LINES_PER_STEP, scroll_steps};
+
+    #[test]
+    fn a_wheel_notch_is_one_volume_step() {
+        let (pending, steps) = scroll_steps(0., SCROLL_LINES_PER_STEP);
+        assert_eq!(steps, 1);
+        assert_eq!(pending, 0.);
+    }
+
+    #[test]
+    fn a_fast_flick_keeps_every_step() {
+        let (pending, steps) = scroll_steps(0., SCROLL_LINES_PER_STEP * 4.);
+        assert_eq!(steps, 4);
+        assert_eq!(pending, 0.);
+    }
+
+    #[test]
+    fn small_deltas_add_up() {
+        let (pending, steps) = scroll_steps(0., 1.);
+        assert_eq!((pending, steps), (1., 0));
+        let (pending, steps) = scroll_steps(pending, 2.);
+        assert_eq!((pending, steps), (0., 1));
+    }
+
+    #[test]
+    fn scrolling_down_is_negative() {
+        let (pending, steps) = scroll_steps(0., -2. * SCROLL_LINES_PER_STEP);
+        assert_eq!(steps, -2);
+        assert_eq!(pending, 0.);
+    }
+
+    #[test]
+    fn scrolling_back_cancels() {
+        let (pending, steps) = scroll_steps(0., -1.5);
+        assert_eq!(steps, 0);
+        let (_, steps) = scroll_steps(pending, 1.5);
+        assert_eq!(steps, 0);
     }
 }

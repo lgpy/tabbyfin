@@ -32,3 +32,5 @@ Trimmed from the crates.io copies: `gpui-pre/examples/` (only used by tests) and
    - `src/shared_texture.rs` imports the producer's fd (duplicated) into a linear RGBA8 `VkImage` and wraps it with `texture_from_raw` and `create_texture_from_hal`. A drop callback frees the image and its memory.
    - The renderer caches one texture and bind group per id, pruned each frame. It writes a `surfaces` instance binding (sprites over the whole texture) and draws the `Surfaces` batch with the polychrome pipeline.
    - Adds an `ash` 0.38 dependency, the version wgpu-hal uses.
+4. **`gpui-pre`: `App::hide_cursor_until_mouse_moves`.**
+   - A public wrapper around the platform's cursor hider (already used for `CursorHideMode`), so the player can hide the cursor together with its controls.
