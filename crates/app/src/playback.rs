@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 use url::Url;
 
 use crate::changes::Changes;
-use crate::config::Config;
+use crate::config::{Config, UnfinishedPlayback};
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::session::describe_error;
@@ -929,6 +929,7 @@ async fn run_session(
                             }
                         }
                         report_or_log(client.report_playback_start(&report).await, "start");
+                        save_unfinished(Some(&report));
                         started = true;
                     }
                     PlayerEvent::Position(position) => report.position = Ticks::from(position),
@@ -961,6 +962,7 @@ async fn run_session(
             }
             _ = ticker.tick(), if started => {
                 report_or_log(client.report_playback_progress(&report).await, "progress");
+                save_unfinished(Some(&report));
             }
             _ = &mut channels.stop, if !stopping => {
                 // Replaced by a new session or signed out: ask mpv to quit and keep going until
@@ -974,6 +976,7 @@ async fn run_session(
     details_task.abort();
     if started {
         report_or_log(client.report_playback_stopped(&report).await, "stop");
+        save_unfinished(None);
     }
     if let (PlayMethod::Transcode, Some(id)) = (method, &info.play_session_id) {
         report_or_log(client.stop_transcoding(id).await, "transcode stop");
@@ -1043,6 +1046,43 @@ async fn apply_command(
         }
         UiCommand::Stop => player.quit().await,
     }
+}
+
+/// Remembers the running playback in the config (or forgets it when it ends), so a crash
+/// can be reported on the next launch.
+fn save_unfinished(report: Option<&PlaybackReport>) {
+    let mut config = Config::load();
+    config.unfinished_playback = report.map(|report| UnfinishedPlayback {
+        item_id: report.item_id.clone(),
+        media_source_id: report.media_source_id.clone(),
+        play_session_id: report.play_session_id.clone(),
+        position_ticks: report.position.0,
+    });
+    if let Err(err) = config.save() {
+        tracing::warn!("failed to save config: {err:#}");
+    }
+}
+
+/// On launch: if the last run ended mid-playback (a crash), tell the server where it stopped,
+/// so the resume point is right and the session doesn't look like it's still playing.
+pub fn report_unfinished(client: &Client) {
+    let mut config = Config::load();
+    let Some(unfinished) = config.unfinished_playback.take() else {
+        return;
+    };
+    if let Err(err) = config.save() {
+        tracing::warn!("failed to save config: {err:#}");
+    }
+    let report = PlaybackReport {
+        item_id: unfinished.item_id,
+        media_source_id: unfinished.media_source_id,
+        play_session_id: unfinished.play_session_id,
+        position: Ticks(unfinished.position_ticks),
+        ..Default::default()
+    };
+    tracing::warn!(item = %report.item_id, position = report.position.as_secs_f64(), "the last playback didn't end cleanly; reporting its stop");
+    let client = client.clone();
+    runtime::detach(async move { report_or_log(client.report_playback_stopped(&report).await, "stop") });
 }
 
 fn report_or_log(result: jellyfin::Result<()>, what: &str) {
