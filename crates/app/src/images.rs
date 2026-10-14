@@ -45,6 +45,11 @@ impl ImageCache {
         cx.global::<GlobalImageCache>().0.clone()
     }
 
+    /// Drops loaded images from memory. They reload from disk or the server when next shown.
+    pub fn clear_memory(&mut self) {
+        self.entries.retain(|_, entry| matches!(entry, Entry::Loading));
+    }
+
     /// Returns the image if it's loaded, otherwise starts loading it and returns `None`.
     pub fn get(&mut self, req: &ImageRequest, cx: &mut Context<Self>) -> Option<Arc<Image>> {
         match self.entries.get(req) {

@@ -5,14 +5,11 @@ use gpui_kit::*;
 use jellyfin::Client;
 use jellyfin::models::{BaseItemDto, CollectionType, ItemField};
 
-use crate::components::{
-    Load, centered_message, centered_spinner, landscape_card, poster_card, shelf,
-};
+use crate::changes::{Changes, UserDataChanged};
+use crate::components::{Load, centered_message, centered_spinner, error_state, landscape_card, poster_card, shelf};
 use crate::images::ImageCache;
-use crate::playback::{PlaybackEvent, PlaybackManager};
 use crate::router::Navigator;
 use crate::runtime;
-use crate::session::describe_error;
 
 const SHELF_LIMIT: u32 = 24;
 const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
@@ -37,12 +34,8 @@ impl HomePage {
     pub fn new(client: Client, nav: Navigator, cx: &mut Context<Self>) -> Self {
         let _subscriptions = vec![
             cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
-            // Resume points and Next Up change after playback.
-            cx.subscribe(&PlaybackManager::global(cx), |this, _, event, cx| {
-                if let PlaybackEvent::Stopped = event {
-                    this.reload(cx);
-                }
-            }),
+            // Resume points and Next Up change after playback or marking items watched.
+            cx.subscribe(&Changes::global(cx), |this, _, _: &UserDataChanged, cx| this.reload(cx)),
         ];
         let mut this = Self {
             client,
@@ -63,7 +56,7 @@ impl HomePage {
             this.update(cx, |this, cx| {
                 this.data = match result {
                     Ok(data) => Load::Loaded(data),
-                    Err(err) => Load::Failed(describe_error(&err).into()),
+                    Err(err) => Load::Failed(this.nav.handle_error(&err, cx)),
                 };
                 cx.notify();
             })
@@ -97,13 +90,7 @@ async fn load(client: Client) -> jellyfin::Result<HomeData> {
 }
 
 impl HomePage {
-    fn cards(
-        &self,
-        prefix: &'static str,
-        items: &[BaseItemDto],
-        landscape: bool,
-        cx: &mut App,
-    ) -> Vec<AnyElement> {
+    fn cards(&self, prefix: &'static str, items: &[BaseItemDto], landscape: bool, cx: &mut App) -> Vec<AnyElement> {
         items
             .iter()
             .enumerate()
@@ -126,7 +113,13 @@ impl Render for HomePage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let data = match &self.data {
             Load::Loading => return centered_spinner().into_any_element(),
-            Load::Failed(message) => return centered_message(message.clone(), cx).into_any_element(),
+            Load::Failed(message) => {
+                let retry = cx.listener(|this, _, _, cx| {
+                    this.data = Load::Loading;
+                    this.reload(cx);
+                });
+                return error_state(message.clone(), retry, cx).into_any_element();
+            }
             Load::Loaded(data) => data,
         };
 
@@ -145,9 +138,10 @@ impl Render for HomePage {
         }
         for (i, (view, items)) in data.latest.iter().enumerate() {
             let cards = self.cards("latest", items, false, cx);
-            sections.push(
-                shelf(("latest", i), format!("Latest {}", view.name), cards, cx).into_any_element(),
-            );
+            sections.push(shelf(("latest", i), format!("Latest {}", view.name), cards, cx).into_any_element());
+        }
+        if sections.is_empty() {
+            return centered_message("Your server has no libraries yet.", cx).into_any_element();
         }
 
         div()

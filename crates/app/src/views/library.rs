@@ -10,13 +10,13 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, Ite
 use jellyfin::{Client, ItemsQuery, SortOrder};
 
 use crate::components::{
-    CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_message, centered_spinner,
+    CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_message, centered_spinner, error_state,
     placeholder_card, poster_card,
 };
+use crate::changes::{Changes, UserDataChanged};
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
-use crate::session::describe_error;
 
 const PAGE_SIZE: usize = 100;
 const GRID_PADDING: f32 = 24.;
@@ -32,7 +32,7 @@ pub struct LibraryPage {
     pages_requested: HashSet<usize>,
     error: Option<SharedString>,
     scroll: UniformListScrollHandle,
-    _observe_images: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl LibraryPage {
@@ -69,10 +69,29 @@ impl LibraryPage {
             pages_requested: HashSet::new(),
             error: None,
             scroll: UniformListScrollHandle::new(),
-            _observe_images: cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
+            _subscriptions: vec![
+                cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
+                cx.subscribe(&Changes::global(cx), |this, _, _: &UserDataChanged, cx| this.refresh(cx)),
+            ],
         };
         this.request_page(0, cx);
         this
+    }
+
+    /// Re-fetches the pages already loaded (e.g. for new watched badges), keeping the current
+    /// items on screen until the new ones arrive.
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let pages: Vec<usize> = self.pages_requested.drain().collect();
+        for page in pages {
+            self.request_page(page, cx);
+        }
+    }
+
+    fn retry(&mut self, cx: &mut Context<Self>) {
+        self.error = None;
+        self.pages_requested.clear();
+        self.request_page(0, cx);
+        cx.notify();
     }
 
     fn request_page(&mut self, page: usize, cx: &mut Context<Self>) {
@@ -102,7 +121,7 @@ impl LibraryPage {
                     Err(err) => {
                         // Allow a retry when the page scrolls into view again.
                         this.pages_requested.remove(&page);
-                        this.error = Some(describe_error(&err).into());
+                        this.error = Some(this.nav.handle_error(&err, cx));
                     }
                 }
                 cx.notify();
@@ -148,7 +167,9 @@ impl Render for LibraryPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(total) = self.total else {
             return match &self.error {
-                Some(error) => centered_message(error.clone(), cx).into_any_element(),
+                Some(error) => {
+                    error_state(error.clone(), cx.listener(|this, _, _, cx| this.retry(cx)), cx).into_any_element()
+                }
                 None => centered_spinner().into_any_element(),
             };
         };

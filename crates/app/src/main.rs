@@ -1,4 +1,5 @@
 mod app_view;
+mod changes;
 mod components;
 mod config;
 mod credentials;
@@ -14,7 +15,8 @@ use gpui_kit::*;
 use tracing_subscriber::EnvFilter;
 
 use crate::app_view::AppView;
-use crate::views::shell::{self, Back};
+use crate::changes::Changes;
+use crate::views::shell::{self, Back, OpenSearch};
 
 fn main() {
     tracing_subscriber::fmt()
@@ -28,7 +30,10 @@ fn main() {
         .run(|cx| {
             gpui_kit::init(cx);
             Theme::change(ThemeMode::Dark, None, cx);
+            Changes::init(cx);
+            let search_key = if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" };
             cx.bind_keys([
+                KeyBinding::new(search_key, OpenSearch, Some(shell::KEY_CONTEXT)),
                 KeyBinding::new("escape", Back, Some(shell::KEY_CONTEXT)),
                 KeyBinding::new("backspace", Back, Some(shell::KEY_CONTEXT)),
                 KeyBinding::new("alt-left", Back, Some(shell::KEY_CONTEXT)),
