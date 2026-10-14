@@ -1,0 +1,207 @@
+{
+  "Items": [
+    {
+      "BackdropImageTags": [],
+      "ChannelId": null,
+      "Chapters": [
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Intro",
+          "StartPositionTicks": 0
+        },
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Episode",
+          "StartPositionTicks": 100000000
+        },
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Credits",
+          "StartPositionTicks": 450000000
+        }
+      ],
+      "Container": "mkv",
+      "HasSubtitles": true,
+      "Id": "14401f7e4f9a2da047069ad4a3124f9c",
+      "ImageBlurHashes": {
+        "Backdrop": {
+          "3538c0d6618f448e5d102865fa315f1f": "W49[9W.4M{%vxt.O_IoeWBodoeoyM{ayxtofM|Rj?;odt7oyRkbE"
+        },
+        "Primary": {
+          "167e0d99077bb37cb23ce953f1a2b13c": "W~L4?1;Gosz6iQ]~xuoHbEnUWCs,bHbFaza#WobGtRn#bFaPjIoL",
+          "550c4135c334bca23b212c4956f1c5ba": "d75Rz:uefQueptkBfQkBfQfQfQfQptkBfQkBfQfQfQfQ",
+          "8ee4df0d456bc0fdfaba550196c332e0": "d303uThVfQhVg]f%fQf%fQfQfQfQg]f%fQf%fQfQfQfQ"
+        }
+      },
+      "ImageTags": {
+        "Primary": "167e0d99077bb37cb23ce953f1a2b13c"
+      },
+      "IndexNumber": 1,
+      "IsFolder": false,
+      "LocationType": "FileSystem",
+      "MediaType": "Video",
+      "Name": "Test Show S01E01",
+      "ParentBackdropImageTags": [
+        "3538c0d6618f448e5d102865fa315f1f"
+      ],
+      "ParentBackdropItemId": "129db440ee6554a42e5d8f1350516bab",
+      "ParentIndexNumber": 1,
+      "ParentPrimaryImageItemId": "0173092548b085805d91ffea12e3fb36",
+      "ParentPrimaryImageTag": "550c4135c334bca23b212c4956f1c5ba",
+      "RunTimeTicks": 600460000,
+      "SeasonId": "0173092548b085805d91ffea12e3fb36",
+      "SeasonName": "Season 1",
+      "SeriesId": "129db440ee6554a42e5d8f1350516bab",
+      "SeriesName": "Test Show",
+      "SeriesPrimaryImageTag": "8ee4df0d456bc0fdfaba550196c332e0",
+      "ServerId": "a93d3c61bce64f4d8e8456ddf14de713",
+      "Type": "Episode",
+      "UserData": {
+        "IsFavorite": false,
+        "ItemId": "14401f7e4f9a2da047069ad4a3124f9c",
+        "Key": "129db440-ee65-54a4-2e5d-8f1350516bab001001",
+        "LastPlayedDate": "2026-10-14T20:27:34.5719688Z",
+        "PlayCount": 9,
+        "PlaybackPositionTicks": 0,
+        "Played": true
+      },
+      "VideoType": "VideoFile"
+    },
+    {
+      "BackdropImageTags": [],
+      "ChannelId": null,
+      "Chapters": [
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Intro",
+          "StartPositionTicks": 0
+        },
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Episode",
+          "StartPositionTicks": 100000000
+        },
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Credits",
+          "StartPositionTicks": 450000000
+        }
+      ],
+      "Container": "mkv",
+      "HasSubtitles": true,
+      "Id": "e51152973c703b1f990b1a3e339280c8",
+      "ImageBlurHashes": {
+        "Backdrop": {
+          "3538c0d6618f448e5d102865fa315f1f": "W49[9W.4M{%vxt.O_IoeWBodoeoyM{ayxtofM|Rj?;odt7oyRkbE"
+        },
+        "Primary": {
+          "07686384c712a9884c7a85e671ddbfa2": "W~L4?1;Gosz6iQ]~xuoHbEnTWCs,bIbFaya#WobGtRn#bFaPjIoL",
+          "550c4135c334bca23b212c4956f1c5ba": "d75Rz:uefQueptkBfQkBfQfQfQfQptkBfQkBfQfQfQfQ",
+          "8ee4df0d456bc0fdfaba550196c332e0": "d303uThVfQhVg]f%fQf%fQfQfQfQg]f%fQf%fQfQfQfQ"
+        }
+      },
+      "ImageTags": {
+        "Primary": "07686384c712a9884c7a85e671ddbfa2"
+      },
+      "IndexNumber": 2,
+      "IsFolder": false,
+      "LocationType": "FileSystem",
+      "MediaType": "Video",
+      "Name": "Test Show S01E02",
+      "ParentBackdropImageTags": [
+        "3538c0d6618f448e5d102865fa315f1f"
+      ],
+      "ParentBackdropItemId": "129db440ee6554a42e5d8f1350516bab",
+      "ParentIndexNumber": 1,
+      "ParentPrimaryImageItemId": "0173092548b085805d91ffea12e3fb36",
+      "ParentPrimaryImageTag": "550c4135c334bca23b212c4956f1c5ba",
+      "RunTimeTicks": 600460000,
+      "SeasonId": "0173092548b085805d91ffea12e3fb36",
+      "SeasonName": "Season 1",
+      "SeriesId": "129db440ee6554a42e5d8f1350516bab",
+      "SeriesName": "Test Show",
+      "SeriesPrimaryImageTag": "8ee4df0d456bc0fdfaba550196c332e0",
+      "ServerId": "a93d3c61bce64f4d8e8456ddf14de713",
+      "Type": "Episode",
+      "UserData": {
+        "IsFavorite": false,
+        "ItemId": "e51152973c703b1f990b1a3e339280c8",
+        "Key": "129db440-ee65-54a4-2e5d-8f1350516bab001002",
+        "LastPlayedDate": "2026-10-14T19:53:30.931156Z",
+        "PlayCount": 3,
+        "PlaybackPositionTicks": 0,
+        "Played": false
+      },
+      "VideoType": "VideoFile"
+    },
+    {
+      "BackdropImageTags": [],
+      "ChannelId": null,
+      "Chapters": [
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Intro",
+          "StartPositionTicks": 0
+        },
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Episode",
+          "StartPositionTicks": 100000000
+        },
+        {
+          "ImageDateModified": "0001-01-01T00:00:00.0000000Z",
+          "Name": "Credits",
+          "StartPositionTicks": 450000000
+        }
+      ],
+      "Container": "mkv",
+      "HasSubtitles": true,
+      "Id": "1934096244392b7cb140b7ca490b8ca2",
+      "ImageBlurHashes": {
+        "Backdrop": {
+          "3538c0d6618f448e5d102865fa315f1f": "W49[9W.4M{%vxt.O_IoeWBodoeoyM{ayxtofM|Rj?;odt7oyRkbE"
+        },
+        "Primary": {
+          "550c4135c334bca23b212c4956f1c5ba": "d75Rz:uefQueptkBfQkBfQfQfQfQptkBfQkBfQfQfQfQ",
+          "8ee4df0d456bc0fdfaba550196c332e0": "d303uThVfQhVg]f%fQf%fQfQfQfQg]f%fQf%fQfQfQfQ",
+          "cb6e5e65ab060e220e72f956a932f651": "W~L4?1;Gosz6iQ]~xuoHbEnTWCs,bHbFaya#WobGtRn#bFaPjIoL"
+        }
+      },
+      "ImageTags": {
+        "Primary": "cb6e5e65ab060e220e72f956a932f651"
+      },
+      "IndexNumber": 3,
+      "IsFolder": false,
+      "LocationType": "FileSystem",
+      "MediaType": "Video",
+      "Name": "Test Show S01E03",
+      "ParentBackdropImageTags": [
+        "3538c0d6618f448e5d102865fa315f1f"
+      ],
+      "ParentBackdropItemId": "129db440ee6554a42e5d8f1350516bab",
+      "ParentIndexNumber": 1,
+      "ParentPrimaryImageItemId": "0173092548b085805d91ffea12e3fb36",
+      "ParentPrimaryImageTag": "550c4135c334bca23b212c4956f1c5ba",
+      "RunTimeTicks": 600460000,
+      "SeasonId": "0173092548b085805d91ffea12e3fb36",
+      "SeasonName": "Season 1",
+      "SeriesId": "129db440ee6554a42e5d8f1350516bab",
+      "SeriesName": "Test Show",
+      "SeriesPrimaryImageTag": "8ee4df0d456bc0fdfaba550196c332e0",
+      "ServerId": "a93d3c61bce64f4d8e8456ddf14de713",
+      "Type": "Episode",
+      "UserData": {
+        "IsFavorite": false,
+        "ItemId": "1934096244392b7cb140b7ca490b8ca2",
+        "Key": "129db440-ee65-54a4-2e5d-8f1350516bab001003",
+        "LastPlayedDate": "2026-10-14T20:13:09.6755711Z",
+        "PlayCount": 4,
+        "PlaybackPositionTicks": 0,
+        "Played": true
+      },
+      "VideoType": "VideoFile"
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 3
+}

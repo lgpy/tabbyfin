@@ -150,7 +150,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 6.1 | **Tests** | P2 | M | Unit tests cover only small pieces: ticks, models, the client and system info in `jellyfin`, event translation in `player`, and track ids in the app. Add: JSON fixtures for the models (from the 12.2 and 10.11 servers), a mocked HTTP test for the playback report flow, and GPUI `TestAppContext` tests for navigation and the player page state. |
+| 6.1 | **Tests** | P2 | M | Partly done: JSON fixtures captured from 12.2 and 10.11 (`dev/capture-fixtures.py`) that every model must parse, with checks on versions, chapters and direct play vs transcode; unit tests for the keyboard cursor, chapters and segments, the server clock and time formats, websocket and SyncPlay messages. Still to do: a mocked HTTP test of the playback report flow, and GPUI `TestAppContext` tests for navigation and the player page. |
 | 6.2 | **Integration test in CI** | P3 | M | Spin up the Jellyfin container in the Linux CI job and run `examples/smoke.rs` against it. |
 | 6.3 | **Error messages** | P2 | S | ✅ Done: starting with the server down or still booting keeps the saved session, says it will sign back in automatically, and does so when the server answers (checked with the dev server stopped and restarted); a dropped connection reads "may be restarting"; wrong password, expired session and missing libmpv have their own wording; playback reconnects (2.2.2). Not rechecked here: an expired token while browsing. |
 | 6.4 | **Accessibility** | P3 | L | GPUI's screen-reader support is limited. At least ensure good contrast, keyboard reachability (3.1), and text that scales with the system setting. |

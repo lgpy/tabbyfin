@@ -1,0 +1,62 @@
+{
+  "AirDays": [],
+  "BackdropImageTags": [
+    "3538c0d6618f448e5d102865fa315f1f"
+  ],
+  "CanDelete": true,
+  "CanDownload": false,
+  "ChannelId": null,
+  "ChildCount": 2,
+  "DateCreated": "2026-10-14T15:30:35.5246489Z",
+  "DateLastMediaAdded": "2026-10-14T18:48:02.4924908Z",
+  "DisplayPreferencesId": "f63033ff6886ecc7083a696cbeced1b0",
+  "EnableMediaSourceDisplay": true,
+  "Etag": "35bc02c182cb9f000e44d5cc410a00fd",
+  "ExternalUrls": [],
+  "GenreItems": [],
+  "Genres": [],
+  "Id": "129db440ee6554a42e5d8f1350516bab",
+  "ImageBlurHashes": {
+    "Backdrop": {
+      "3538c0d6618f448e5d102865fa315f1f": "W49[9W.4M{%vxt.O_IoeWBodoeoyM{ayxtofM|Rj?;odt7oyRkbE"
+    },
+    "Primary": {
+      "8ee4df0d456bc0fdfaba550196c332e0": "d303uThVfQhVg]f%fQf%fQfQfQfQg]f%fQf%fQfQfQfQ"
+    }
+  },
+  "ImageTags": {
+    "Primary": "8ee4df0d456bc0fdfaba550196c332e0"
+  },
+  "IsFolder": true,
+  "LocalTrailerCount": 0,
+  "LocationType": "FileSystem",
+  "LockData": false,
+  "LockedFields": [],
+  "MediaType": "Unknown",
+  "Name": "Test Show",
+  "ParentId": "74bd751c7ef3115682e1889039d35e20",
+  "Path": "/media/Shows/Test Show",
+  "People": [],
+  "PlayAccess": "Full",
+  "PrimaryImageAspectRatio": 0.6666666666666666,
+  "ProviderIds": {},
+  "RecursiveItemCount": 5,
+  "RemoteTrailers": [],
+  "ServerId": "002fe86af53e4f8b9fdfa8b24682a1bf",
+  "SortName": "test show",
+  "SpecialFeatureCount": 0,
+  "Studios": [],
+  "Taglines": [],
+  "Tags": [],
+  "Type": "Series",
+  "UserData": {
+    "IsFavorite": false,
+    "ItemId": "129db440ee6554a42e5d8f1350516bab",
+    "Key": "129db440-ee65-54a4-2e5d-8f1350516bab",
+    "PlayCount": 0,
+    "PlaybackPositionTicks": 0,
+    "Played": false,
+    "PlayedPercentage": 0,
+    "UnplayedItemCount": 5
+  }
+}

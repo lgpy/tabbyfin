@@ -1,0 +1,73 @@
+[
+  {
+    "BackdropImageTags": [],
+    "ChannelId": null,
+    "ChildCount": 0,
+    "Container": "mkv",
+    "HasSubtitles": true,
+    "Id": "e3d531e90b24926325c2f94f12019dfc",
+    "ImageBlurHashes": {
+      "Primary": {
+        "24020d70595ac5d7571bccdb1f915935": "d7F^UC|cfQ|c;$o1fQo1fQfQfQfQ;$o1fQo1fQfQfQfQ"
+      }
+    },
+    "ImageTags": {
+      "Primary": "24020d70595ac5d7571bccdb1f915935"
+    },
+    "IsFolder": false,
+    "LocationType": "FileSystem",
+    "MediaType": "Video",
+    "Name": "Second Movie (2025)",
+    "ProductionYear": 2025,
+    "RunTimeTicks": 600460000,
+    "ServerId": "002fe86af53e4f8b9fdfa8b24682a1bf",
+    "Type": "Movie",
+    "UserData": {
+      "IsFavorite": false,
+      "ItemId": "e3d531e90b24926325c2f94f12019dfc",
+      "Key": "e3d531e9-0b24-9263-25c2-f94f12019dfc",
+      "PlayCount": 0,
+      "PlaybackPositionTicks": 0,
+      "Played": false
+    },
+    "VideoType": "VideoFile"
+  },
+  {
+    "BackdropImageTags": [
+      "0c031dffebc161d19a066ba0cfbee622"
+    ],
+    "ChannelId": null,
+    "ChildCount": 0,
+    "Container": "mkv",
+    "HasSubtitles": true,
+    "Id": "d265861eae31cee1d44b13adac305eac",
+    "ImageBlurHashes": {
+      "Backdrop": {
+        "0c031dffebc161d19a066ba0cfbee622": "W98W-9tBRjtBt7tB%7j]ayj]j[j]RjfQt7j[Rkayxgj]ofj]WBj]"
+      },
+      "Primary": {
+        "524c621e28c4445e18fe552c9ba2337a": "d609iBfZfQfZfXfSfQfSfQfQfQfQfXfSfQfSfQfQfQfQ"
+      }
+    },
+    "ImageTags": {
+      "Primary": "524c621e28c4445e18fe552c9ba2337a"
+    },
+    "IsFolder": false,
+    "LocationType": "FileSystem",
+    "MediaType": "Video",
+    "Name": "Test Movie (2024)",
+    "ProductionYear": 2024,
+    "RunTimeTicks": 600460000,
+    "ServerId": "002fe86af53e4f8b9fdfa8b24682a1bf",
+    "Type": "Movie",
+    "UserData": {
+      "IsFavorite": false,
+      "ItemId": "d265861eae31cee1d44b13adac305eac",
+      "Key": "d265861e-ae31-cee1-d44b-13adac305eac",
+      "PlayCount": 0,
+      "PlaybackPositionTicks": 0,
+      "Played": false
+    },
+    "VideoType": "VideoFile"
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "Id": "002fe86af53e4f8b9fdfa8b24682a1bf",
+  "LocalAddress": "http://172.18.0.3:8096",
+  "OperatingSystem": "",
+  "ProductName": "Jellyfin Server",
+  "ServerName": "jelly-gpui dev",
+  "StartupWizardCompleted": true,
+  "Version": "10.11.11"
+}

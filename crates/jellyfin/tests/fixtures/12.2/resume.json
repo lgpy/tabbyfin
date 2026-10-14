@@ -1,0 +1,57 @@
+{
+  "Items": [
+    {
+      "BackdropImageTags": [],
+      "ChannelId": null,
+      "Container": "mkv",
+      "HasSubtitles": true,
+      "Id": "7eb36de4ac7adf33cc892d940ad0f3f4",
+      "ImageBlurHashes": {
+        "Backdrop": {
+          "3538c0d6618f448e5d102865fa315f1f": "W49[9W.4M{%vxt.O_IoeWBodoeoyM{ayxtofM|Rj?;odt7oyRkbE"
+        },
+        "Primary": {
+          "1b336353a059de01dfaaf4c61d37f4c9": "W~K_Xg;Gf{z6mt^Ixun}bEnTWCoca~W-j=aiWXj?tRn#bFaPahs,",
+          "8197143c455c4a7aef38d906dacee438": "d75Rz:uefQueptkBfQkBfQfQfQfQptkBfQkBfQfQfQfQ",
+          "8ee4df0d456bc0fdfaba550196c332e0": "d303uThVfQhVg]f%fQf%fQfQfQfQg]f%fQf%fQfQfQfQ"
+        }
+      },
+      "ImageTags": {
+        "Primary": "1b336353a059de01dfaaf4c61d37f4c9"
+      },
+      "IndexNumber": 1,
+      "IsFolder": false,
+      "LocationType": "FileSystem",
+      "MediaType": "Video",
+      "Name": "Test Show S02E01",
+      "ParentBackdropImageTags": [
+        "3538c0d6618f448e5d102865fa315f1f"
+      ],
+      "ParentBackdropItemId": "129db440ee6554a42e5d8f1350516bab",
+      "ParentIndexNumber": 2,
+      "ParentPrimaryImageItemId": "4a64cab37fa47954742340981c2d7064",
+      "ParentPrimaryImageTag": "8197143c455c4a7aef38d906dacee438",
+      "RunTimeTicks": 600460000,
+      "SeasonId": "4a64cab37fa47954742340981c2d7064",
+      "SeasonName": "Season 2",
+      "SeriesId": "129db440ee6554a42e5d8f1350516bab",
+      "SeriesName": "Test Show",
+      "SeriesPrimaryImageTag": "8ee4df0d456bc0fdfaba550196c332e0",
+      "ServerId": "a93d3c61bce64f4d8e8456ddf14de713",
+      "Type": "Episode",
+      "UserData": {
+        "IsFavorite": false,
+        "ItemId": "7eb36de4ac7adf33cc892d940ad0f3f4",
+        "Key": "129db440-ee65-54a4-2e5d-8f1350516bab002001",
+        "LastPlayedDate": "2026-10-14T20:27:46.0298539Z",
+        "PlayCount": 3,
+        "PlaybackPositionTicks": 391250000,
+        "Played": false,
+        "PlayedPercentage": 65.15837857642474
+      },
+      "VideoType": "VideoFile"
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 1
+}
