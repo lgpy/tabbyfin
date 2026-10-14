@@ -1,6 +1,9 @@
 mod app_view;
+mod components;
 mod config;
 mod credentials;
+mod images;
+mod router;
 mod runtime;
 mod session;
 mod views;
@@ -10,6 +13,7 @@ use gpui_kit::*;
 use tracing_subscriber::EnvFilter;
 
 use crate::app_view::AppView;
+use crate::views::shell::{self, Back};
 
 fn main() {
     tracing_subscriber::fmt()
@@ -23,6 +27,11 @@ fn main() {
         .run(|cx| {
             gpui_kit::init(cx);
             Theme::change(ThemeMode::Dark, None, cx);
+            cx.bind_keys([
+                KeyBinding::new("escape", Back, Some(shell::KEY_CONTEXT)),
+                KeyBinding::new("backspace", Back, Some(shell::KEY_CONTEXT)),
+                KeyBinding::new("alt-left", Back, Some(shell::KEY_CONTEXT)),
+            ]);
 
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1280.), px(800.)), cx)),

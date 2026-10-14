@@ -30,10 +30,21 @@ impl SavedServer {
     }
 }
 
-pub fn dir() -> PathBuf {
+fn project_dirs() -> Option<ProjectDirs> {
     ProjectDirs::from("", "", "jelly-gpui")
+}
+
+pub fn dir() -> PathBuf {
+    project_dirs()
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".jelly-gpui"))
+}
+
+/// Platform cache dir, for data that can be deleted at any time (e.g. images).
+pub fn cache_dir() -> PathBuf {
+    project_dirs()
+        .map(|d| d.cache_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(".jelly-gpui/cache"))
 }
 
 fn path() -> PathBuf {

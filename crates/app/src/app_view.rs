@@ -7,14 +7,14 @@ use jellyfin::Client;
 
 use crate::config::{Config, SavedServer};
 use crate::session::{Session, client_info, describe_error};
-use crate::views::home::{HomeEvent, HomeView};
+use crate::views::shell::{ShellEvent, ShellView};
 use crate::views::login::{LoginEvent, LoginView, Prefill};
 use crate::{credentials, runtime};
 
 enum Screen {
     Restoring,
     Login(Entity<LoginView>),
-    Home(Entity<HomeView>),
+    Home(Entity<ShellView>),
 }
 
 pub struct AppView {
@@ -106,9 +106,9 @@ impl AppView {
     }
 
     fn show_home(&mut self, session: Session, window: &mut Window, cx: &mut Context<Self>) {
-        let home = cx.new(|_| HomeView::new(session.clone()));
+        let home = cx.new(|cx| ShellView::new(session.clone(), window, cx));
         self._screen_subscription = Some(cx.subscribe_in(&home, window, move |this, _, ev, window, cx| match ev {
-            HomeEvent::SignOut => this.sign_out(&session, window, cx),
+            ShellEvent::SignOut => this.sign_out(&session, window, cx),
         }));
         self.screen = Screen::Home(home);
         cx.notify();
