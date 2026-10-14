@@ -4,6 +4,8 @@
 //! libmpv is loaded with `dlopen` at runtime, so builds don't need it; without it the app shows
 //! an error when playback starts.
 
+#[cfg(windows)]
+mod angle;
 mod embedded;
 mod video;
 #[cfg(target_os = "linux")]
@@ -44,6 +46,15 @@ pub(crate) struct RawProperty {
     pub data: *mut c_void,
 }
 
+/// `mpv_event_log_message`.
+#[repr(C)]
+pub(crate) struct RawLogMessage {
+    pub prefix: *const c_char,
+    pub level: *const c_char,
+    pub text: *const c_char,
+    pub log_level: c_int,
+}
+
 /// Leading fields of `mpv_event_end_file`.
 #[repr(C)]
 pub(crate) struct RawEndFile {
@@ -64,6 +75,9 @@ pub(crate) struct Api {
     pub command: unsafe extern "C" fn(*mut c_void, *mut *const c_char) -> c_int,
     pub set_property_string: unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char) -> c_int,
     pub get_property: unsafe extern "C" fn(*mut c_void, *const c_char, c_int, *mut c_void) -> c_int,
+    pub get_property_string: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_char,
+    pub free: unsafe extern "C" fn(*mut c_void),
+    pub request_log_messages: unsafe extern "C" fn(*mut c_void, *const c_char) -> c_int,
     pub observe_property: unsafe extern "C" fn(*mut c_void, u64, *const c_char, c_int) -> c_int,
     pub wait_event: unsafe extern "C" fn(*mut c_void, c_double) -> *const RawEvent,
     pub wakeup: unsafe extern "C" fn(*mut c_void),
@@ -126,6 +140,9 @@ impl Api {
             command: sym!(b"mpv_command\0"),
             set_property_string: sym!(b"mpv_set_property_string\0"),
             get_property: sym!(b"mpv_get_property\0"),
+            get_property_string: sym!(b"mpv_get_property_string\0"),
+            free: sym!(b"mpv_free\0"),
+            request_log_messages: sym!(b"mpv_request_log_messages\0"),
             observe_property: sym!(b"mpv_observe_property\0"),
             wait_event: sym!(b"mpv_wait_event\0"),
             wakeup: sym!(b"mpv_wakeup\0"),
@@ -197,6 +214,20 @@ impl Core {
             (self.api.get_property)(self.mpv, name.as_ptr(), FORMAT_INT64, &mut value as *mut i64 as *mut c_void)
         };
         (code >= 0).then_some(value)
+    }
+
+    pub fn get_string(&self, name: &str) -> Option<String> {
+        let name = cstring(name);
+        // SAFETY: valid C string; the result is a C string owned by us, freed with mpv_free.
+        unsafe {
+            let value = (self.api.get_property_string)(self.mpv, name.as_ptr());
+            if value.is_null() {
+                return None;
+            }
+            let string = CStr::from_ptr(value).to_string_lossy().into_owned();
+            (self.api.free)(value as *mut c_void);
+            Some(string)
+        }
     }
 }
 

@@ -42,7 +42,7 @@ GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI contr
 
 1. ✅ **libmpv backend and in-app player view, on the software path.** Done on 2026-10-14. Verified on Linux (WSL) and on Windows (RX 6600) with `dev/win-run.sh`. The Windows zip now bundles `libmpv-2.dll`, and the `.deb` depends on `libmpv2`.
    - `player::libmpv` (core and event loop) produces `PlayerEvent`s that the session turns into progress reports.
-   - A full-window player page: seek bar, play/pause, ±10 s, audio and subtitle tracks, fullscreen, keyboard shortcuts. Not done yet: volume control, version switching during playback, a "next episode" action.
+   - A full-window player page: seek bar, play/pause, ±10 s, volume and mute, version, audio and subtitle pickers, next episode (also automatic at the end of an episode), fullscreen, keyboard shortcuts.
    - Rendering uses the software path at first, so in-app playback works on every OS straight away.
 2. ✅ **Windows GPU sharing.** Done on 2026-10-14 and verified on the RX 6600.
    - **Probe:** `examples/dx_interop_probe.rs` confirmed `WGL_NV_DX_interop2` with D3D11 shared textures (and D3D9Ex as a fallback) on AMD driver 26.8.1.
@@ -61,9 +61,28 @@ GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI contr
      | Software | ~54% |
 
    - **Follow-ups:**
-     - Decoding still copies frames back to the CPU (`hwdec=auto-copy-safe`). Zero-copy hardware decoding (dxva2 through the same interop) would remove that too.
+     - ~~Decoding still copies frames back to the CPU.~~ Done with ANGLE, see 2b.
      - Pacing between the 3 textures relies on `glFinish` plus the ring, with no keyed mutex.
      - Test on NVIDIA and Intel.
+
+   **2b. ✅ Zero-copy hardware decoding on Windows (ANGLE).** Done on 2026-10-14 and verified on the RX 6600.
+   - **Why ANGLE:** with libmpv's `opengl` render API on a WGL context, mpv has no interop for `d3d11va` frames. Its `dxva2` interop needs mpv's own `dxinterop` context, so with WGL every hardware-decoded frame is copied back to the CPU (`d3d11va-copy`). On an OpenGL ES context from ANGLE's D3D11 backend, mpv's `d3d11egl` interop maps the decoder's D3D11 textures directly, for NV12 and P010 (10-bit).
+   - **Player** (`player::libmpv::angle`):
+     - Loads `libEGL.dll` from next to the exe. mpv's ANGLE loader then finds the same module.
+     - An ES 3 context on a D3D11 ANGLE display.
+     - A ring of 3 shared RGBA8 textures on ANGLE's own D3D11 device, each wrapped as a pbuffer (`EGL_ANGLE_d3d_texture_client_buffer`), bound as a GL texture and attached to a framebuffer. No Y flip is needed.
+     - GPUI opens them by share handle, as with WGL.
+   - **Order on Windows:** ANGLE, then WGL interop, then software. Any failure, such as ANGLE missing or running on WARP, falls through to the next.
+   - **hwdec:** the GPU paths set `hwdec=auto-safe`. That gives `d3d11va` with ANGLE, and `d3d11va-copy` (or `nvdec` on NVIDIA) with WGL.
+   - **Measured** (debug build, 4K HEVC 10-bit, RX 6600):
+
+     | Path | Decoder | CPU |
+     |---|---|---|
+     | ANGLE | `d3d11va` | ~11% of one core |
+     | WGL | `d3d11va-copy` | ~22% |
+
+   - **Packaging:** ANGLE is MSYS2's ucrt64 build, about 12 MB with its runtime DLLs (`packaging/angle.lock`).
+   - **Linux:** could get the same with VA-API, by passing mpv a DRM render node so its `vaapi` interop maps frames into our EGL context. Not done yet; Linux still uses `vaapi-copy` and friends through `auto-safe`.
 3. ✅ **Linux GPU sharing.** Done on 2026-10-14. Verified on Mesa llvmpipe/lavapipe, i.e. without a real GPU.
    - **Probe:** `examples/vk_interop_probe.rs` checks that a Vulkan device can export linear RGBA8 image memory as an opaque fd, OpenGL can import and render into it (`GL_EXT_memory_object_fd`), and a second Vulkan device can import and read it back.
    - **Player** (`player::libmpv::egl`):

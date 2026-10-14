@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, MediaSourceInfo, MediaStream, MediaStreamType};
+use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType};
 use jellyfin::{Client, PlaybackInfoRequest, PlaybackReport, Ticks};
 use player::libmpv::VideoOutput;
 use player::{EndReason, LoadRequest, Player, PlayerEvent};
@@ -14,10 +14,12 @@ use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::changes::Changes;
+use crate::config::Config;
 use crate::runtime;
 use crate::session::describe_error;
 
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+const DEFAULT_VOLUME: f64 = 100.;
 
 pub enum PlaybackEvent {
     /// Playback started; show the player.
@@ -51,6 +53,9 @@ pub enum UiCommand {
     TogglePause,
     SeekBy(f64),
     SeekTo(Duration),
+    /// Percent, 0 to 100.
+    SetVolume(f64),
+    ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
     Stop,
@@ -64,7 +69,22 @@ enum SessionUpdate {
         audio: Option<i32>,
         subtitle: SubtitleChoice,
     },
+    /// Fetched after playback starts.
+    Details(Box<Details>),
     Player(PlayerEvent),
+}
+
+/// Another version (media source) of the playing item.
+#[derive(Debug, Clone)]
+pub struct Version {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Default)]
+struct Details {
+    versions: Vec<Version>,
+    next: Option<BaseItemDto>,
 }
 
 /// State of the embedded player, for the player page.
@@ -79,6 +99,13 @@ pub struct NowPlaying {
     pub loading: bool,
     pub audio: Option<i32>,
     pub subtitle: SubtitleChoice,
+    pub volume: f64,
+    pub muted: bool,
+    /// All versions of the item, once known; empty or one entry means there's nothing to
+    /// switch to.
+    pub versions: Vec<Version>,
+    /// The following episode, for episodes.
+    pub next: Option<BaseItemDto>,
     commands: mpsc::UnboundedSender<UiCommand>,
 }
 
@@ -93,6 +120,8 @@ impl NowPlaying {
             PlayerEvent::Position(position) => self.position = *position,
             PlayerEvent::Duration(duration) => self.duration = Some(*duration),
             PlayerEvent::Paused(paused) => self.paused = *paused,
+            PlayerEvent::Volume(volume) => self.volume = *volume,
+            PlayerEvent::Muted(muted) => self.muted = *muted,
             _ => {}
         }
     }
@@ -102,6 +131,10 @@ pub struct PlaybackManager {
     client: Client,
     /// Stops the running session when sent or dropped.
     stop: Option<oneshot::Sender<()>>,
+    /// Counts sessions, so the end of a replaced session doesn't close its successor's player.
+    generation: u64,
+    volume: f64,
+    muted: bool,
 }
 
 struct GlobalPlayback(Entity<PlaybackManager>);
@@ -113,7 +146,14 @@ impl EventEmitter<PlaybackEvent> for PlaybackManager {}
 impl PlaybackManager {
     /// Installs the manager for a signed-in session, replacing (and stopping) any previous one.
     pub fn init(client: Client, cx: &mut App) {
-        let manager = cx.new(|_| PlaybackManager { client, stop: None });
+        let volume = Config::load().volume.unwrap_or(DEFAULT_VOLUME);
+        let manager = cx.new(|_| PlaybackManager {
+            client,
+            stop: None,
+            generation: 0,
+            volume,
+            muted: false,
+        });
         cx.set_global(GlobalPlayback(manager));
     }
 
@@ -126,10 +166,19 @@ impl PlaybackManager {
         self.stop = None;
     }
 
+    /// Plays an item from its resume point, with default tracks (e.g. the next episode).
+    pub fn play_from_resume(&mut self, item: &BaseItemDto, cx: &mut Context<Self>) {
+        let start = item.user_data.as_ref().map(|d| d.playback_position_ticks).filter(|t| t.0 > 0);
+        self.play(item, PlayOptions { start, ..Default::default() }, cx);
+    }
+
     pub fn play(&mut self, item: &BaseItemDto, options: PlayOptions, cx: &mut Context<Self>) {
         // Dropping the previous sender stops that session; it still reports its final position.
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
+        self.generation += 1;
+        let generation = self.generation;
+        let (volume, muted) = (self.volume, self.muted);
         let (updates_tx, mut updates) = mpsc::unbounded_channel();
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
 
@@ -141,7 +190,7 @@ impl PlaybackManager {
                     updates: updates_tx,
                     commands: commands_rx,
                 };
-                run_session(client, item, options, channels).await
+                run_session(client, item, options, (volume, muted), channels).await
             })
         };
 
@@ -168,12 +217,37 @@ impl PlaybackManager {
                             loading: true,
                             audio,
                             subtitle,
+                            volume,
+                            muted,
+                            versions: Vec::new(),
+                            next: None,
                             commands,
                         });
                         this.update(cx, |_, cx| cx.emit(PlaybackEvent::Started(entity.clone()))).ok();
                         now_playing = Some(entity);
                     }
+                    SessionUpdate::Details(details) => {
+                        if let Some(entity) = &now_playing {
+                            entity.update(cx, |state, cx| {
+                                state.versions = details.versions;
+                                state.next = details.next;
+                                cx.notify();
+                            });
+                        }
+                    }
                     SessionUpdate::Player(event) => {
+                        if let PlayerEvent::Volume(_) | PlayerEvent::Muted(_) = event {
+                            this.update(cx, |this, _| {
+                                if this.generation == generation {
+                                    match event {
+                                        PlayerEvent::Volume(volume) => this.volume = volume,
+                                        PlayerEvent::Muted(muted) => this.muted = muted,
+                                        _ => {}
+                                    }
+                                }
+                            })
+                            .ok();
+                        }
                         if let Some(entity) = &now_playing {
                             entity.update(cx, |state, cx| {
                                 state.apply(&event);
@@ -184,18 +258,49 @@ impl PlaybackManager {
                 }
             }
             let result = session.await;
-            this.update(cx, |_, cx| {
-                if let Err(message) = result {
-                    tracing::warn!("playback failed: {message}");
-                    cx.emit(PlaybackEvent::Failed(message.into()));
-                }
-                cx.emit(PlaybackEvent::Ended);
+            let next = now_playing.and_then(|entity| entity.read_with(cx, |state, _| state.next.clone()));
+            this.update(cx, |this, cx| {
+                this.save_volume();
                 Changes::notify_user_data(cx);
+                // A newer session took over (another item, version or episode); its player is
+                // already showing.
+                if this.generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(Ended::Finished) if let Some(next) = next => {
+                        tracing::info!(next = %next.name, "playing the next episode");
+                        this.play_from_resume(&next, cx);
+                    }
+                    Ok(_) => cx.emit(PlaybackEvent::Ended),
+                    Err(message) => {
+                        tracing::warn!("playback failed: {message}");
+                        cx.emit(PlaybackEvent::Failed(message.into()));
+                        cx.emit(PlaybackEvent::Ended);
+                    }
+                }
             })
             .ok();
         })
         .detach();
     }
+
+    fn save_volume(&self) {
+        let mut config = Config::load();
+        if config.volume != Some(self.volume) {
+            config.volume = Some(self.volume);
+            if let Err(err) = config.save() {
+                tracing::warn!("failed to save config: {err:#}");
+            }
+        }
+    }
+}
+
+/// How a session ended without an error.
+enum Ended {
+    /// Played to the end.
+    Finished,
+    Stopped,
 }
 
 struct Channels {
@@ -267,13 +372,45 @@ async fn start_player() -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>,
     })
 }
 
+/// Versions and the next episode, for the player's controls. Failures only lose those controls.
+async fn details(client: &Client, item: &BaseItemDto) -> Details {
+    let sources = if item.media_sources.is_empty() {
+        match client.item(&item.id, &[ItemField::MediaSources]).await {
+            Ok(full) => full.media_sources,
+            Err(err) => {
+                tracing::warn!("couldn't load versions: {err}");
+                Vec::new()
+            }
+        }
+    } else {
+        item.media_sources.clone()
+    };
+    let versions = sources
+        .iter()
+        .enumerate()
+        .map(|(i, source)| Version {
+            id: source.id.clone(),
+            name: source.name.clone().unwrap_or_else(|| format!("Version {}", i + 1)),
+        })
+        .collect();
+    let next = match (item.kind, &item.series_id) {
+        (BaseItemKind::Episode, Some(series_id)) => client.next_episode(series_id, &item.id).await.unwrap_or_else(|err| {
+            tracing::warn!("couldn't find the next episode: {err}");
+            None
+        }),
+        _ => None,
+    };
+    Details { versions, next }
+}
+
 /// Runs one playback from negotiation to the final stop report. Returns a user-facing error.
 async fn run_session(
     client: Client,
     item: BaseItemDto,
     options: PlayOptions,
+    (volume, muted): (f64, bool),
     mut channels: Channels,
-) -> Result<(), String> {
+) -> Result<Ended, String> {
     let info = client
         .playback_info(
             &item.id,
@@ -323,6 +460,9 @@ async fn run_session(
         },
     };
 
+    player.set_property("volume", volume).await.map_err(|err| err.to_string())?;
+    player.set_property("mute", muted).await.map_err(|err| err.to_string())?;
+
     let url = client.stream_url(&item.id, &source.id, info.play_session_id.as_deref());
     player
         .load(LoadRequest {
@@ -340,6 +480,13 @@ async fn run_session(
         audio: options.audio_stream_index.or(source.default_audio_stream_index),
         subtitle: options.subtitle,
     });
+    let details_task = {
+        let (client, item, updates) = (client.clone(), item.clone(), channels.updates.clone());
+        tokio::spawn(async move {
+            let details = details(&client, &item).await;
+            let _ = updates.send(SessionUpdate::Details(Box::new(details)));
+        })
+    };
 
     let external_subtitles: Vec<_> = source.media_streams.iter().filter(|s| s.is_external).cloned().collect();
     let mut report = PlaybackReport {
@@ -353,6 +500,7 @@ async fn run_session(
     };
     let mut started = false;
     let mut stopping = false;
+    let mut finished = false;
     let mut error = None;
     let mut ticker = tokio::time::interval(PROGRESS_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -385,6 +533,7 @@ async fn run_session(
                     PlayerEvent::Seeked if started => {
                         report_or_log(client.report_playback_progress(&report).await, "progress");
                     }
+                    PlayerEvent::EndFile(EndReason::Eof) if !stopping => finished = true,
                     PlayerEvent::EndFile(EndReason::Error(message)) => {
                         error = Some(format!("mpv couldn't play this file: {message}"));
                     }
@@ -412,11 +561,16 @@ async fn run_session(
         }
     }
 
+    details_task.abort();
     if started {
         report_or_log(client.report_playback_stopped(&report).await, "stop");
     }
     tracing::info!(item = %item.name, position = report.position.as_secs_f64(), "playback ended");
-    error.map_or(Ok(()), Err)
+    match error {
+        Some(error) => Err(error),
+        None if finished => Ok(Ended::Finished),
+        None => Ok(Ended::Stopped),
+    }
 }
 
 async fn apply_command(
@@ -433,6 +587,8 @@ async fn apply_command(
                 .command(json!(["seek", position.as_secs_f64(), "absolute"]))
                 .await
         }
+        UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., 100.)).await,
+        UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
         UiCommand::Audio(index) => {
             if let Some(aid) = mpv_track_id(source, MediaStreamType::Audio, index) {
                 player.set_property("aid", aid).await?;

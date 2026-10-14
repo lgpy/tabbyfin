@@ -20,7 +20,10 @@ use tracing_subscriber::EnvFilter;
 
 use crate::app_view::AppView;
 use crate::changes::Changes;
-use crate::views::player::{self, ExitPlayer, SeekBackward, SeekForward, ToggleFullscreen, TogglePause};
+use crate::views::player::{
+    self, ExitPlayer, NextEpisode, SeekBackward, SeekForward, ToggleFullscreen, ToggleMute, TogglePause, VolumeDown,
+    VolumeUp,
+};
 use crate::views::shell::{self, Back, OpenSearch};
 
 fn main() {
@@ -31,7 +34,7 @@ fn main() {
         .init();
 
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
             Theme::change(ThemeMode::Dark, None, cx);
@@ -45,6 +48,10 @@ fn main() {
                 KeyBinding::new("space", TogglePause, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("right", SeekForward, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("left", SeekBackward, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("up", VolumeUp, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("down", VolumeDown, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("m", ToggleMute, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("shift-n", NextEpisode, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("f", ToggleFullscreen, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("escape", ExitPlayer, Some(player::KEY_CONTEXT)),
             ]);
