@@ -3,7 +3,7 @@
 //! One session at a time. Starting a new one stops the current one. The session itself runs on
 //! tokio and publishes a [`NowPlaying`] entity that the player page draws and controls.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType};
@@ -59,6 +59,8 @@ pub enum SubtitleChoice {
 pub enum UiCommand {
     TogglePause,
     SetPause(bool),
+    /// Playback speed, 1.0 is normal. SyncPlay's drift correction.
+    SetSpeed(f64),
     SeekBy(f64),
     SeekTo(Duration),
     /// Percent, 0 to 100.
@@ -118,6 +120,8 @@ pub struct NowPlaying {
     pub source: MediaSourceInfo,
     pub video: VideoOutput,
     pub position: Duration,
+    /// When `position` was reported, to extrapolate between mpv's (once a second) updates.
+    pub position_at: Instant,
     pub duration: Option<Duration>,
     pub paused: bool,
     /// Until the file has loaded.
@@ -261,7 +265,10 @@ impl NowPlaying {
     fn apply(&mut self, event: &PlayerEvent) {
         match event {
             PlayerEvent::FileLoaded => self.loading = false,
-            PlayerEvent::Position(position) => self.position = *position,
+            PlayerEvent::Position(position) => {
+                self.position = *position;
+                self.position_at = Instant::now();
+            }
             PlayerEvent::Duration(duration) => self.duration = Some(*duration),
             PlayerEvent::Paused(paused) => self.paused = *paused,
             PlayerEvent::Volume(volume) => self.volume = *volume,
@@ -388,6 +395,7 @@ impl PlaybackManager {
                             source: *source,
                             video,
                             position: Duration::ZERO,
+                            position_at: Instant::now(),
                             duration: None,
                             paused: false,
                             loading: true,
@@ -895,6 +903,7 @@ async fn apply_command(
     match command {
         UiCommand::TogglePause => player.command(json!(["cycle", "pause"])).await,
         UiCommand::SetPause(paused) => player.set_property("pause", paused).await,
+        UiCommand::SetSpeed(speed) => player.set_property("speed", speed).await,
         UiCommand::SeekBy(seconds) => player.command(json!(["seek", seconds, "relative"])).await,
         UiCommand::SeekTo(position) => {
             player

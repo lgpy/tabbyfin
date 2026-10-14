@@ -244,8 +244,13 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
    - `Stop`: stop playback.
 5. **Local controls** in a group session (`NowPlaying::control`): pause, seek and stop become `/SyncPlay/Pause`, `Unpause`, `Seek` and `Stop` requests, so they apply to everyone. Esc stops playback for the group, as in the web client. Volume and tracks stay local.
 6. **End of an item:** each member sends `NextItem`; the server advances the queue once, and the next item arrives as a queue update. Local autoplay is off in a group.
+7. **Drift correction:** after an Unpause, the group's timeline is "position P at local instant T". Once a second, the local position (mpv's last report plus the time since, at the current speed) is compared with it:
+   - Under 80 ms off: normal speed.
+   - Up to 1.5 s: play up to 5% faster or slower (0.25 speed change per second of drift); mpv keeps the pitch.
+   - More: seek to the group's position.
+   - In WSL with software rendering, a member drifts up to about 0.4 s while playback warms up, is back within 0.1 s after about 8 s, and stays within ±70 ms after that.
 
-Not yet: drift correction during playback (2.4.5), and track changes that need a new transcode, or version switches, don't stay in sync.
+Not yet: track changes that need a new transcode, and version switches, don't stay in sync.
 
 ## 6. App architecture (GPUI side)
 
