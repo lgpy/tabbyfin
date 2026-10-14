@@ -33,6 +33,22 @@ pub struct Config {
     /// Sort and filter per library, by library id.
     #[serde(default)]
     pub library_views: BTreeMap<String, LibraryView>,
+    /// The main window's last size and position; restored at launch when it still lands on a
+    /// display.
+    #[serde(default)]
+    pub window_bounds: Option<WindowGeometry>,
+    /// Whether the main window was maximized; restored on top of `window_bounds`.
+    #[serde(default)]
+    pub window_maximized: bool,
+}
+
+/// The main window's position and size in the global screen space, in logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WindowGeometry {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

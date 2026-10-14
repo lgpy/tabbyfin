@@ -17,6 +17,7 @@ mod session;
 mod syncplay;
 mod tracks;
 mod views;
+mod window;
 
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
@@ -138,15 +139,28 @@ fn main() {
             ]);
             cx.bind_keys(browse::key_bindings());
 
+            let window::Launch {
+                display_id,
+                bounds,
+                maximized,
+            } = window::launch_placement(cx);
             let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(1280.), px(800.)), cx)),
+                window_bounds: Some(bounds),
+                display_id,
                 titlebar: Some(TitlebarOptions {
                     title: Some("jelly-gpui".into()),
                     ..Default::default()
                 }),
                 ..Default::default()
             };
-            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| AppView::new(window, cx)))
-                .expect("failed to open window");
+            gpui_kit::open_window(options, cx, |window, cx| {
+                if maximized {
+                    // GPUI keeps only the rect of `window_bounds`, so the maximized state is
+                    // re-applied here.
+                    window.zoom_window();
+                }
+                cx.new(|cx| AppView::new(window, cx))
+            })
+            .expect("failed to open window");
         });
 }

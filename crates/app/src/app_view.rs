@@ -1,5 +1,7 @@
 //! Root view: restores the saved session on launch and switches between sign-in and the app.
 
+use std::time::Duration;
+
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::*;
@@ -9,7 +11,11 @@ use crate::config::{Config, SavedServer};
 use crate::session::{Session, client_info, describe_error};
 use crate::views::login::{LoginEvent, LoginView, Prefill};
 use crate::views::shell::{ShellEvent, ShellView};
-use crate::{credentials, runtime};
+use crate::{credentials, runtime, window};
+
+/// How long after the last window bounds change its size and position are saved. Dragging
+/// produces a stream of changes; only the end of the drag matters.
+const SAVE_PLACEMENT_AFTER: Duration = Duration::from_millis(500);
 
 enum Screen {
     Restoring,
@@ -22,22 +28,55 @@ pub struct AppView {
     saved: Option<SavedServer>,
     screen: Screen,
     _screen_subscription: Option<Subscription>,
+    /// The placement last seen. `placement_save` is the pending write; replacing it restarts the
+    /// timer, so only the last change of a drag is saved.
+    last_placement: Option<window::Placement>,
+    placement_save: Option<Task<()>>,
 }
 
 impl AppView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.observe_window_bounds(window, |this, window, cx| this.remember_window_bounds(window, cx))
+            .detach();
         let config = Config::load();
         let mut this = Self {
             device_id: config.device_id,
             saved: config.server.clone(),
             screen: Screen::Restoring,
             _screen_subscription: None,
+            last_placement: None,
+            placement_save: None,
         };
         match config.server {
             Some(saved) => this.restore(saved, true, window, cx),
             None => this.show_login(None, window, cx),
         }
         this
+    }
+
+    /// Saves the window's size, position and maximized state shortly after they stop changing,
+    /// so the next launch reopens the window the same way. The bounds come from `window_bounds`,
+    /// the value `WindowOptions` takes back at launch.
+    fn remember_window_bounds(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = window::WindowState {
+            bounds: window.window_bounds().get_bounds(),
+            maximized: window.is_maximized(),
+            fullscreen: window.is_fullscreen(),
+        };
+        let placement = window::remember(self.last_placement, state);
+        if placement == self.last_placement {
+            return;
+        }
+        self.last_placement = placement;
+        self.placement_save = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(SAVE_PLACEMENT_AFTER).await;
+            this.update_in(cx, |this, _, cx| {
+                if let Some(placement) = this.last_placement {
+                    window::save_placement(placement, cx);
+                }
+            })
+            .ok();
+        }));
     }
 
     /// Signs back in with the stored token. Falls back to the sign-in screen, pre-filled with
