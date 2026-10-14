@@ -5,3 +5,8 @@ MPV_VERSION=v0.41.0
 MPV_WINDOWS_X86_64_SHA256=4e197f729f5071c6772f35fffd96e0f36e3e8a044bd9479b136bb09b7c6a80ff
 MPV_MACOS_AARCH64_SHA256=489cf6a54f57c54f86ad8d7cedaf5bb26848770d58dc059021214e2f689ee799
 MPV_MACOS_X86_64_SHA256=41003617ab4f7784394b5ddea7ce51b3e0838e8cfc8166ad1a378b2eda3b583c
+
+# libmpv for the in-app player on Windows (official mpv releases don't ship it). shinchiro's
+# dated builds are permanent release tags. Self-contained DLL inside a .7z.
+LIBMPV_WINDOWS_X86_64_URL=https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260928/mpv-dev-x86_64-20260928-git-e470f8986e.7z
+LIBMPV_WINDOWS_X86_64_SHA256=81795d759e01016f1550fd71651a1a5d59ab5c28ef31c0b6793224e9cff39459

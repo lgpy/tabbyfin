@@ -80,6 +80,13 @@ pub fn episode_label(item: &BaseItemDto) -> String {
     }
 }
 
+/// `1:02:03`, `4:05`.
+pub fn timestamp(time: std::time::Duration) -> String {
+    let secs = time.as_secs();
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+}
+
 /// `1h 42m`, `45m`.
 pub fn runtime_text(ticks: Ticks) -> String {
     let minutes = (ticks.as_secs_f64() / 60.).round() as u64;

@@ -24,6 +24,8 @@ pub struct PlayerSettings {
     pub mpv_path: Option<String>,
     /// Load the user's own `mpv.conf` and scripts. Off passes `--no-config`.
     pub use_mpv_config: bool,
+    /// Play in mpv's own window instead of inside the app.
+    pub external_window: bool,
 }
 
 impl Default for PlayerSettings {
@@ -31,6 +33,7 @@ impl Default for PlayerSettings {
         Self {
             mpv_path: None,
             use_mpv_config: true,
+            external_window: false,
         }
     }
 }

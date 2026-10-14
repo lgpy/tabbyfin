@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
     let url = args.next().expect("usage: play <url> [header]");
     let http_headers = args.collect();
 
-    let (player, mut events) = Player::spawn(SpawnOptions::default()).await?;
+    let (player, mut events) = Player::spawn_external(SpawnOptions::default()).await?;
     player
         .load(LoadRequest {
             url,

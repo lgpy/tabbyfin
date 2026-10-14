@@ -85,9 +85,3 @@ run = "packaging/ci-build.sh"
 [tasks."ci:status"]
 description = "Show recent CI runs"
 run = "gh run list --workflow ci.yml --limit 10"
-
-# Spike
-
-[tasks.spike]
-description = "In-window video spike (needs libmpv): mise run spike -- <url> [header] [WxH]"
-run = "cargo run --release -p jelly-gpui --example inline_video --"
