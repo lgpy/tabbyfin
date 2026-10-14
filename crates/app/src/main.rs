@@ -1,3 +1,6 @@
+// Release builds on Windows run without a console window.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app_view;
 mod changes;
 mod components;

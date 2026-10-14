@@ -1,0 +1,7 @@
+# mpv builds bundled with the Windows and macOS packages (Linux uses the system mpv).
+# Official release assets from https://github.com/mpv-player/mpv/releases. Update the
+# version and every checksum together.
+MPV_VERSION=v0.41.0
+MPV_WINDOWS_X86_64_SHA256=4e197f729f5071c6772f35fffd96e0f36e3e8a044bd9479b136bb09b7c6a80ff
+MPV_MACOS_AARCH64_SHA256=489cf6a54f57c54f86ad8d7cedaf5bb26848770d58dc059021214e2f689ee799
+MPV_MACOS_X86_64_SHA256=41003617ab4f7784394b5ddea7ce51b3e0838e8cfc8166ad1a378b2eda3b583c
