@@ -2,3 +2,21 @@
 //!
 //! See `docs/PLAN.md` §4. Only the `Authorization: MediaBrowser ...` header (or the `ApiKey`
 //! query parameter) is used; legacy auth methods are disabled by default since Jellyfin 12.0.
+//!
+//! All requests are async and use `reqwest`, so they must run inside a tokio runtime.
+
+mod auth;
+mod client;
+mod error;
+mod images;
+mod items;
+pub mod models;
+mod system;
+mod ticks;
+
+pub use client::{Client, ClientInfo, parse_server_url};
+pub use error::{Error, Result};
+pub use images::ImageRequest;
+pub use items::{ItemsQuery, SortOrder};
+pub use system::{MIN_SUPPORTED_VERSION, ServerVersion};
+pub use ticks::Ticks;
