@@ -27,7 +27,7 @@ pub fn describe_error(err: &jellyfin::Error) -> String {
         Error::InvalidUrl(_) => "That doesn't look like a valid server address.".into(),
         Error::Http(e) if e.is_timeout() => "The server took too long to respond.".into(),
         Error::Http(e) if e.is_connect() => "Couldn't reach the server. Check the address and your connection.".into(),
-        Error::Http(_) => "The connection to the server failed.".into(),
+        Error::Http(_) => "The connection to the server broke off. It may be restarting.".into(),
         Error::ServerStarting => "The server is still starting up.".into(),
         Error::Unauthorized => "Your session has expired. Please sign in again.".into(),
         Error::Forbidden => "This account isn't allowed to do that.".into(),
