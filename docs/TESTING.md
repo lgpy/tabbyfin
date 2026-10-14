@@ -102,6 +102,16 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **macOS** on Apple silicon and Intel: the app starts, signs in, and plays with `brew install mpv` (software video).
 - ⬜ High refresh-rate displays (120/144 Hz): no judder at 24 fps (2.3.7).
 
+## 7b. Player host process (2.2.3)
+
+✅ Software video (Linux) and ANGLE/D3D11 + d3d11va (Windows, AMD) through the host; killing the host mid-play resumes in a new one on both; no leftover processes after quitting.
+
+- ⬜ **Linux with a real GPU:** GPU frames through the host (Vulkan memory fds over the socket). Watch for "a frame's memory never arrived" in the log.
+- ⬜ **macOS:** playback works through the host (software frames over the pipe), and CPU use is reasonable at 1080p.
+- ⬜ **Windows on NVIDIA and Intel**, and a hybrid laptop: the host's ANGLE device and GPUI must be on the same adapter for shared handles.
+- ⬜ **A release build on Windows** (no console): the host starts without a window flashing up, and its log reaches the app's log file.
+- ⬜ Quitting the app during playback leaves no `jelly-gpui --player-host` process behind (Task Manager / `ps`).
+
 ## 8. Minimum server version (4.6)
 
 ✅ The API smoke test on 10.11.11 with legacy authorization off.

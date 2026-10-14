@@ -89,7 +89,24 @@ impl<'writer> tracing_subscriber::fmt::FormatFields<'writer> for PlainFields {
     }
 }
 
+/// Logging in the player host process: plain lines on stderr, which the app reads and logs
+/// (with its own timestamps) under the `player` target.
+fn init_host_logging() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(false)
+        .without_time()
+        .with_writer(std::io::stderr)
+        .init();
+}
+
 fn main() {
+    // This executable is also the player host process (`::player::host`).
+    if ::player::is_host_process() {
+        init_host_logging();
+        std::process::exit(::player::host::run());
+    }
     let _log_guard = init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting jelly-gpui");
 

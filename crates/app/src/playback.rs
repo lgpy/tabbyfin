@@ -523,14 +523,19 @@ impl PlaybackManager {
                         this.play_from_resume(&next, cx);
                     }
                     // Keep the player up and try again from where it stopped.
-                    Ok(Ended::Lost { position, message })
-                        if group_item.is_none() && attempt < RECONNECT_DELAYS.len() =>
-                    {
+                    Ok(Ended::Lost {
+                        position,
+                        message,
+                        crashed,
+                    }) if group_item.is_none() && attempt < RECONNECT_DELAYS.len() => {
                         let delay = RECONNECT_DELAYS[attempt];
                         tracing::warn!(attempt, ?delay, "stream lost: {message}");
-                        cx.emit(PlaybackEvent::Notice(
-                            "Lost the connection to the server. Reconnecting…".into(),
-                        ));
+                        let notice = if crashed {
+                            "The player stopped unexpectedly. Restarting it…"
+                        } else {
+                            "Lost the connection to the server. Reconnecting…"
+                        };
+                        cx.emit(PlaybackEvent::Notice(notice.into()));
                         let options = PlayOptions {
                             start: Some(position),
                             ..retry_options
@@ -542,11 +547,14 @@ impl PlaybackManager {
                                 .ok();
                         }));
                     }
-                    Ok(Ended::Lost { message, .. }) => {
+                    Ok(Ended::Lost { message, crashed, .. }) => {
                         tracing::warn!("stream lost for good: {message}");
-                        cx.emit(PlaybackEvent::Failed(
-                            "Lost the connection to the server. Try again when it's back.".into(),
-                        ));
+                        let error = if crashed {
+                            "The player keeps crashing on this item. The log may say why."
+                        } else {
+                            "Lost the connection to the server. Try again when it's back."
+                        };
+                        cx.emit(PlaybackEvent::Failed(error.into()));
                         cx.emit(PlaybackEvent::Ended);
                     }
                     Ok(_) => cx.emit(PlaybackEvent::Ended),
@@ -583,6 +591,8 @@ enum Ended {
     Lost {
         position: Ticks,
         message: String,
+        /// The player process crashed, rather than the stream failing.
+        crashed: bool,
     },
 }
 
@@ -987,12 +997,14 @@ async fn run_session(
         // A failure right at the end isn't worth replaying from there.
         Some(message) if started && !stopping && ended_early => Ok(Ended::Lost {
             position: report.position,
+            crashed: message.ends_with(player::HOST_CRASHED),
             message,
         }),
         Some(error) => Err(error),
         None if finished && ended_early => Ok(Ended::Lost {
             position: report.position,
             message: "the stream ended early".into(),
+            crashed: false,
         }),
         None if finished => Ok(Ended::Finished),
         None => Ok(Ended::Stopped),
