@@ -29,6 +29,8 @@ pub struct ItemsQuery {
     /// combined with `includeItemTypes`, so leaving it out gives version-dependent results.
     pub recursive: bool,
     pub ids: Vec<String>,
+    /// Items a person appears in.
+    pub person_ids: Vec<String>,
     pub filters: Vec<ItemFilter>,
     pub search_term: Option<String>,
     pub sort_by: Vec<ItemSortBy>,
@@ -52,6 +54,7 @@ impl ItemsQuery {
             )
             .push("recursive", self.recursive)
             .list("ids", &self.ids)
+            .list("personIds", &self.person_ids)
             .list("filters", &wire_list(&self.filters, ItemFilter::as_str))
             .opt("searchTerm", self.search_term.as_ref())
             .list("sortBy", &wire_list(&self.sort_by, ItemSortBy::as_str))
@@ -151,5 +154,14 @@ impl Client {
 
     pub async fn mark_unplayed(&self, item_id: &str) -> Result<()> {
         self.delete(&format!("/UserPlayedItems/{item_id}")).await
+    }
+
+    pub async fn mark_favorite(&self, item_id: &str) -> Result<()> {
+        self.post_no_content::<()>(&format!("/UserFavoriteItems/{item_id}"), &Query::new(), None)
+            .await
+    }
+
+    pub async fn unmark_favorite(&self, item_id: &str) -> Result<()> {
+        self.delete(&format!("/UserFavoriteItems/{item_id}")).await
     }
 }

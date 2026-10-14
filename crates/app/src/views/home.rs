@@ -1,9 +1,9 @@
-//! Home: libraries, Continue Watching, Next Up, and Latest per library.
+//! Home: libraries, Continue Watching, Next Up, Favorites, and Latest per library.
 
 use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::*;
-use jellyfin::Client;
-use jellyfin::models::{BaseItemDto, CollectionType, ItemField};
+use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemSortBy};
+use jellyfin::{Client, ItemsQuery};
 
 use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
@@ -19,6 +19,7 @@ struct HomeData {
     views: Vec<BaseItemDto>,
     resume: Vec<BaseItemDto>,
     next_up: Vec<BaseItemDto>,
+    favorites: Vec<BaseItemDto>,
     /// Latest items per library.
     latest: Vec<(BaseItemDto, Vec<BaseItemDto>)>,
 }
@@ -75,10 +76,20 @@ impl HomePage {
 }
 
 async fn load(client: Client) -> jellyfin::Result<HomeData> {
-    let (views, resume, next_up) = tokio::try_join!(
+    let favorites = ItemsQuery {
+        include_item_types: vec![BaseItemKind::Movie, BaseItemKind::Series, BaseItemKind::Episode],
+        recursive: true,
+        filters: vec![ItemFilter::IsFavorite],
+        sort_by: vec![ItemSortBy::SortName],
+        fields: FIELDS.to_vec(),
+        limit: Some(SHELF_LIMIT),
+        ..Default::default()
+    };
+    let (views, resume, next_up, favorites) = tokio::try_join!(
         client.user_views(),
         client.resume(SHELF_LIMIT, FIELDS),
         client.next_up(SHELF_LIMIT, FIELDS),
+        client.items(&favorites),
     )?;
     let mut latest = Vec::new();
     for view in &views.items {
@@ -96,6 +107,7 @@ async fn load(client: Client) -> jellyfin::Result<HomeData> {
         views: views.items,
         resume: resume.items,
         next_up: next_up.items,
+        favorites: favorites.items,
         latest,
     })
 }
@@ -120,13 +132,23 @@ fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
         items,
         landscape: true,
     });
+    let favorites = std::iter::once(Shelf {
+        id: "favorites".into(),
+        title: "Favorites".into(),
+        items: &data.favorites,
+        landscape: false,
+    });
     let latest = data.latest.iter().enumerate().map(|(i, (view, items))| Shelf {
         id: ("latest", i).into(),
         title: format!("Latest {}", view.name).into(),
         items,
         landscape: false,
     });
-    fixed.chain(latest).filter(|shelf| !shelf.items.is_empty()).collect()
+    fixed
+        .chain(favorites)
+        .chain(latest)
+        .filter(|shelf| !shelf.items.is_empty())
+        .collect()
 }
 
 impl HomePage {

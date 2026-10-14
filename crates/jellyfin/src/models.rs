@@ -115,9 +115,25 @@ pub struct BaseItemDto {
     /// More than one entry means multiple versions (movies, and episodes since 12.0).
     #[serde(default, deserialize_with = "nullable")]
     pub media_sources: Vec<MediaSourceInfo>,
+    /// Cast and crew. Only present when requested with [`crate::models::ItemField::People`].
+    #[serde(default, deserialize_with = "nullable")]
+    pub people: Vec<BaseItemPerson>,
     /// Only present when requested with [`crate::models::ItemField::Chapters`].
     #[serde(default, deserialize_with = "nullable")]
     pub chapters: Vec<ChapterInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct BaseItemPerson {
+    pub id: String,
+    pub name: String,
+    /// The character, for actors.
+    pub role: Option<String>,
+    /// `Actor`, `Director`, `Writer`, `Producer`, `GuestStar`…
+    #[serde(rename = "Type")]
+    pub kind: Option<String>,
+    pub primary_image_tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
