@@ -5,7 +5,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, ImageType};
+use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ImageType};
 use jellyfin::{ImageRequest, Ticks};
 
 use crate::images::ImageCache;
@@ -220,6 +220,86 @@ pub fn landscape_card(
         on_click,
         cx,
     )
+}
+
+pub const PERSON_W: f32 = 120.;
+pub const PERSON_H: f32 = 180.;
+
+/// A cast or crew member: photo (or initials), name, and role or job.
+pub fn person_card(
+    id: impl Into<ElementId>,
+    person: &BaseItemPerson,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let photo = person
+        .primary_image_tag
+        .clone()
+        .map(|tag| ImageRequest::new(&person.id, ImageType::Primary, Some(tag)).fill_width((PERSON_W * 2.) as u32));
+    let has_photo = photo.is_some();
+    let photo = remote_image(photo, cx);
+    let initials: String = person
+        .name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .collect();
+    let detail = match (&person.role, person.kind.as_deref()) {
+        (Some(role), _) if !role.is_empty() => role.clone(),
+        (_, Some("Actor")) | (_, None) => String::new(),
+        (_, Some(kind)) => kind_label(kind),
+    };
+    v_flex()
+        .id(id.into())
+        .w(px(PERSON_W))
+        .flex_none()
+        .gap_1()
+        .cursor_pointer()
+        .on_click(on_click)
+        .child(
+            div()
+                .relative()
+                .w(px(PERSON_W))
+                .h(px(PERSON_H))
+                .rounded_md()
+                .overflow_hidden()
+                .bg(cx.theme().muted)
+                .hover(|style| style.opacity(0.8))
+                .flex()
+                .items_center()
+                .justify_center()
+                .map(|el| {
+                    if has_photo {
+                        el.child(photo)
+                    } else {
+                        el.text_2xl().text_color(cx.theme().muted_foreground).child(initials)
+                    }
+                })
+                .when(selected, |el| el.child(selection_ring(cx))),
+        )
+        .child(div().text_sm().truncate().child(person.name.clone()))
+        .child(
+            div()
+                .text_xs()
+                .truncate()
+                .text_color(cx.theme().muted_foreground)
+                .child(detail),
+        )
+}
+
+/// `GuestStar` -> `Guest star`.
+fn kind_label(kind: &str) -> String {
+    let mut label = String::new();
+    for (i, c) in kind.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            label.push(' ');
+            label.extend(c.to_lowercase());
+        } else {
+            label.push(c);
+        }
+    }
+    label
 }
 
 /// Grey card used while a grid page is still loading.

@@ -26,6 +26,15 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Window resize** while the cursor is in the library grid or search results (the column count changes).
 - ⬜ Clicking a picker or the search box and then pressing arrow keys doesn't move the cursor unexpectedly.
 
+## 2b. Library sort and filter, favorites, cast (3.2–3.4)
+
+✅ Saved sort and filter views (date added + favorites, name + all), the Favorite button by keyboard and the Home shelf, the cast shelf with initials and roles, a person page.
+
+- ⬜ **Picking a sort or filter with the mouse** reloads the grid from the top and is remembered when the library is opened again; the order button flips it (and reshuffles for Random).
+- ⬜ A library with **real metadata** (TMDb): sorting by rating, release date and runtime gives sensible orders; cast **photos** show.
+- ⬜ A person page for someone in **many** movies and shows.
+- ⬜ Favoriting from another device shows up in the Home shelf (via the live connection).
+
 ## 3. Transcoding (2.2.1)
 
 ✅ On 12.2: playback at a 2 Mbit/s cap (`ContainerBitrateExceedsLimit`), seeking, an embedded subtitle delivered as a file, the English audio track picked before playing, cleanup of the server's encode on stop. On 10.11: the HLS requests with header auth.

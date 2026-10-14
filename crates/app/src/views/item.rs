@@ -7,18 +7,18 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme, IconName, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField};
+use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ItemField};
 use jellyfin::{Client, Ticks};
 
 use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, centered_spinner, episode_label, error_state,
-    landscape_image, poster_card, remote_image, runtime_text, selection_ring, timestamp,
+    landscape_image, person_card, poster_card, remote_image, runtime_text, selection_ring, shelf, timestamp,
 };
 use crate::images::ImageCache;
 use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
-use crate::router::Navigator;
+use crate::router::{Navigator, Route};
 use crate::runtime;
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
 
@@ -49,6 +49,7 @@ pub struct ItemPage {
     data: Load<ItemData>,
     pickers: Option<Pickers>,
     scroll: ScrollHandle,
+    people_scroll: ScrollHandle,
     cursor: Cursor,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -68,6 +69,7 @@ impl ItemPage {
             data: Load::Loading,
             pickers: None,
             scroll: ScrollHandle::new(),
+            people_scroll: ScrollHandle::new(),
             cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
             _subscriptions,
@@ -211,7 +213,12 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
     let item = client
         .item(
             &item_id,
-            &[ItemField::Overview, ItemField::Genres, ItemField::MediaSources],
+            &[
+                ItemField::Overview,
+                ItemField::Genres,
+                ItemField::MediaSources,
+                ItemField::People,
+            ],
         )
         .await?;
     let children = match item.kind {
@@ -536,8 +543,39 @@ impl ItemPage {
     }
 
     /// Scroll-container child index of the children's title.
-    fn children_title_index(&self) -> usize {
+    fn children_title_index(&self, data: &ItemData) -> usize {
+        1 + usize::from(self.pickers.is_some()) + usize::from(!data.item.people.is_empty())
+    }
+
+    /// Scroll-container child index of the cast shelf.
+    fn people_index(&self) -> usize {
         1 + usize::from(self.pickers.is_some())
+    }
+
+    fn render_people(&self, people: &[BaseItemPerson], cx: &mut Context<Self>) -> AnyElement {
+        let cards = people
+            .iter()
+            .enumerate()
+            .map(|(i, person)| {
+                let nav = self.nav.clone();
+                let route = Route::Person {
+                    id: person.id.clone(),
+                    name: person.name.clone(),
+                };
+                person_card(
+                    ("person", i),
+                    person,
+                    self.cursor.is_selected(PEOPLE, i),
+                    move |_, window, cx| nav.push(route.clone(), window, cx),
+                    cx,
+                )
+                .into_any_element()
+            })
+            .collect();
+        div()
+            .pt_6()
+            .child(shelf("people", "Cast & crew", cards, &self.people_scroll, cx))
+            .into_any_element()
     }
 
     fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -571,6 +609,9 @@ impl ItemPage {
             .pb_8()
             .child(self.render_header(item, cx))
             .children(self.render_pickers(cx).map(|pickers| div().pt_6().child(pickers)))
+            .when(!item.people.is_empty(), |el| {
+                el.child(self.render_people(&item.people, cx))
+            })
             .when_some(title, |el, title| {
                 el.child(
                     div()
@@ -625,7 +666,8 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
 
 /// Cursor sections: the action buttons, then the seasons or episodes.
 const ACTIONS: usize = 0;
-const CHILDREN: usize = 1;
+const PEOPLE: usize = 1;
+const CHILDREN: usize = 2;
 /// Padding around each action button, where the cursor's ring goes.
 const ACTION_RING_GAP: f32 = 3.;
 
@@ -640,6 +682,7 @@ impl Browse for ItemPage {
         };
         vec![
             Section::row(item_actions(&data.item).len()),
+            Section::row(data.item.people.len()),
             self.children_section(data, window),
         ]
     }
@@ -650,7 +693,12 @@ impl Browse for ItemPage {
             return;
         }
         let Load::Loaded(data) = &self.data else { return };
-        let title = self.children_title_index();
+        if position.section == PEOPLE {
+            browse::reveal(&self.scroll, self.people_index(), px(CARD_GAP));
+            browse::reveal(&self.people_scroll, position.index, px(24.));
+            return;
+        }
+        let title = self.children_title_index(data);
         let row = position.index / self.children_section(data, window).columns;
         if row == 0 {
             browse::reveal(&self.scroll, title, px(0.));
@@ -663,6 +711,14 @@ impl Browse for ItemPage {
         if position.section == ACTIONS {
             if let Some(&action) = item_actions(&data.item).get(position.index) {
                 self.run_action(action, window, cx);
+            }
+        } else if position.section == PEOPLE {
+            if let Some(person) = data.item.people.get(position.index) {
+                let route = Route::Person {
+                    id: person.id.clone(),
+                    name: person.name.clone(),
+                };
+                self.nav.push(route, window, cx);
             }
         } else if let Some(child) = data.children.get(position.index) {
             self.nav.open(child, window, cx);
