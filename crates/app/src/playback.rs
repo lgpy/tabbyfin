@@ -240,6 +240,8 @@ pub struct PlaybackManager {
     stop: Option<oneshot::Sender<()>>,
     /// Counts sessions, so the end of a replaced session doesn't close its successor's player.
     generation: u64,
+    /// A session is running (from `play` until its end is handled).
+    active: bool,
     volume: f64,
     muted: bool,
 }
@@ -258,6 +260,7 @@ impl PlaybackManager {
             client,
             stop: None,
             generation: 0,
+            active: false,
             volume,
             muted: false,
         });
@@ -266,6 +269,10 @@ impl PlaybackManager {
 
     pub fn global(cx: &App) -> Entity<PlaybackManager> {
         cx.global::<GlobalPlayback>().0.clone()
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
     }
 
     /// Stops the current session, if any.
@@ -295,6 +302,7 @@ impl PlaybackManager {
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
         self.generation += 1;
+        self.active = true;
         let generation = self.generation;
         let (volume, muted) = (self.volume, self.muted);
         let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
@@ -395,6 +403,7 @@ impl PlaybackManager {
                 if this.generation != generation {
                     return;
                 }
+                this.active = false;
                 match result {
                     Ok(Ended::Finished) if let Some(next) = next => {
                         tracing::info!(next = %next.name, "playing the next episode");

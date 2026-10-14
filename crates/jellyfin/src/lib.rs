@@ -12,13 +12,17 @@ mod images;
 mod items;
 pub mod models;
 mod playback;
+mod socket;
 mod system;
 mod ticks;
+mod time;
 
 pub use client::{Client, ClientInfo, parse_server_url};
 pub use error::{Error, Result};
 pub use images::ImageRequest;
 pub use items::{ItemsQuery, SortOrder};
 pub use playback::{PlayMethod, PlaybackInfoRequest, PlaybackInfoResponse, PlaybackReport};
+pub use socket::{ServerMessage, SocketEvent};
 pub use system::{MIN_SUPPORTED_VERSION, ServerVersion};
 pub use ticks::Ticks;
+pub use time::{ClockSample, ServerClock};

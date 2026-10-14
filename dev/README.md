@@ -32,4 +32,6 @@ Remote metadata and image fetchers are turned off, so the fake titles never matc
 
 **Minimum version (10.11):** `mise run dev:min` starts Jellyfin 10.11 on http://localhost:8097, with its own state in `dev/.data/min` and the same media, sets it up the same way (also turning legacy authorization off, which 10.11 leaves on), and runs `cargo run -p jellyfin --example smoke` against it. `mise run dev:down` stops both servers.
 
+**Websocket check:** `cargo run -p jellyfin --example socket` (with `JELLYFIN_URL=localhost:8097` for 10.11) connects the session websocket, samples the server clock and waits for a `UserDataChanged` push after toggling a movie's watched state (which it toggles back). `JELLYFIN_SOCKET_HOLD=150` also checks that the keep-alive holds the connection.
+
 **Reset everything:** `docker compose -f dev/compose.yaml down && rm -rf dev/.data/config dev/.data/cache`, then run the start and setup steps again. The container runs as your user, so no `sudo` is needed.
