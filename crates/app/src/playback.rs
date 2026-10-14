@@ -710,12 +710,18 @@ async fn run_session(
     .ok_or("The server returned no playable media.")?;
     let (url, method) = stream_url(&client, &item.id, &source, info.play_session_id.as_deref())?;
     let subtitle_files = subtitle_files(&client, &item.id, &source, method);
-    // A transcode has the audio track the server picked (by the user's language preference
-    // when none was asked for), which it names in the URL.
+    // Tracks not chosen explicitly (autoplay, the next episode, SyncPlay) follow the server's
+    // defaults, which apply the user's language preferences and subtitle mode; mpv on its own
+    // would go by the file's default flags. A transcode names its audio track in the URL.
     let audio = options.audio_stream_index.or_else(|| match method {
         PlayMethod::Transcode => query_param(&url, "AudioStreamIndex").and_then(|i| i.parse().ok()),
         PlayMethod::DirectPlay => source.default_audio_stream_index,
     });
+    let subtitle = match (options.subtitle, source.default_subtitle_stream_index) {
+        (SubtitleChoice::Auto, Some(-1)) => SubtitleChoice::Off,
+        (SubtitleChoice::Auto, Some(index)) => SubtitleChoice::Stream(index),
+        (choice, _) => choice,
+    };
     let stream = StreamInfo {
         method,
         subtitle_files: subtitle_files.iter().map(|(stream, _)| stream.index).collect(),
@@ -735,14 +741,13 @@ async fn run_session(
     // Track choices are options, so they're set before loading the file. A transcode has
     // just the chosen audio track and no embedded subtitles.
     let direct = method == PlayMethod::DirectPlay;
-    if let Some(aid) = options
-        .audio_stream_index
+    if let Some(aid) = audio
         .filter(|_| direct)
         .and_then(|index| mpv_track_id(&source, MediaStreamType::Audio, index))
     {
         player.set_property("aid", aid).await.map_err(|err| err.to_string())?;
     }
-    let file_selected = match options.subtitle {
+    let file_selected = match subtitle {
         // The server's default, when it sends that one as a file.
         SubtitleChoice::Auto if !direct => source
             .default_subtitle_stream_index
@@ -794,7 +799,7 @@ async fn run_session(
         source: Box::new(source.clone()),
         video,
         audio,
-        subtitle: options.subtitle,
+        subtitle,
         stream: stream.clone(),
     });
     let details_task = {
@@ -811,7 +816,7 @@ async fn run_session(
         play_session_id: info.play_session_id.clone(),
         position: options.start.unwrap_or_default(),
         audio_stream_index: audio,
-        subtitle_stream_index: subtitle_index(options.subtitle),
+        subtitle_stream_index: subtitle_index(subtitle),
         play_method: method,
         ..Default::default()
     };
