@@ -140,6 +140,7 @@ impl AppView {
     }
 
     fn sign_out(&mut self, session: &Session, window: &mut Window, cx: &mut Context<Self>) {
+        crate::playback::PlaybackManager::global(cx).update(cx, |playback, _| playback.stop());
         // Revoke the token server-side; nothing to do if that fails, we forget it either way.
         let client = session.client.clone();
         runtime::detach(async move {

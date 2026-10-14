@@ -11,6 +11,7 @@ mod error;
 mod images;
 mod items;
 pub mod models;
+mod playback;
 mod system;
 mod ticks;
 
@@ -18,5 +19,6 @@ pub use client::{Client, ClientInfo, parse_server_url};
 pub use error::{Error, Result};
 pub use images::ImageRequest;
 pub use items::{ItemsQuery, SortOrder};
+pub use playback::{PlaybackInfoRequest, PlaybackInfoResponse, PlaybackReport};
 pub use system::{MIN_SUPPORTED_VERSION, ServerVersion};
 pub use ticks::Ticks;

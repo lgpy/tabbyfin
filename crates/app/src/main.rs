@@ -3,6 +3,7 @@ mod components;
 mod config;
 mod credentials;
 mod images;
+mod playback;
 mod router;
 mod runtime;
 mod session;
