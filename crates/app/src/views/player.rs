@@ -3,8 +3,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::IndexPath;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::select::{Select, SelectEvent};
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{IconName, Sizable, h_flex, v_flex};
@@ -14,13 +16,27 @@ use gpui_kit::*;
 use player::libmpv::Frame;
 
 use crate::components::timestamp;
-use crate::playback::{NowPlaying, SubtitleChoice, UiCommand};
+use crate::playback::{NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
 
-actions!(player, [TogglePause, SeekForward, SeekBackward, ToggleFullscreen, ExitPlayer]);
+actions!(
+    player,
+    [
+        TogglePause,
+        SeekForward,
+        SeekBackward,
+        VolumeUp,
+        VolumeDown,
+        ToggleMute,
+        NextEpisode,
+        ToggleFullscreen,
+        ExitPlayer
+    ]
+);
 
 pub const KEY_CONTEXT: &str = "Player";
 const SEEK_STEP: f64 = 10.;
+const VOLUME_STEP: f64 = 5.;
 const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 
 /// The frame on screen.
@@ -41,6 +57,11 @@ pub struct PlayerPage {
     seek: Option<Entity<SliderState>>,
     /// The user is dragging the seek bar; don't move it with playback.
     scrubbing: bool,
+    volume: Entity<SliderState>,
+    /// The user is dragging the volume slider; don't move it with mpv's updates.
+    adjusting_volume: bool,
+    /// Created once the item's versions are known, if there's more than one.
+    version: Option<ChoiceSelect>,
     audio: Option<ChoiceSelect>,
     subtitle: Option<ChoiceSelect>,
     controls_visible: bool,
@@ -61,12 +82,32 @@ impl PlayerPage {
             SubtitleChoice::Auto => state.source.default_subtitle_stream_index,
         };
         let source = state.source.clone();
+        let initial_volume = state.volume as f32;
         let (audio, subtitle) = track_pickers(&source, state.audio, subtitle_index, window, cx);
+        let volume = cx.new(|_| SliderState::new().min(0.).max(100.).step(1.).default_value(initial_volume));
 
-        let mut subscriptions = vec![cx.observe_in(&now_playing, window, |this, _, window, cx| {
-            this.sync_seek_bar(window, cx);
-            cx.notify();
-        })];
+        let mut subscriptions = vec![
+            cx.observe_in(&now_playing, window, |this, _, window, cx| {
+                this.sync_seek_bar(window, cx);
+                this.sync_volume(window, cx);
+                this.ensure_version_picker(window, cx);
+                cx.notify();
+            }),
+            cx.subscribe(&volume, |this, _, event: &SliderEvent, cx| {
+                // Applied while dragging, so the change is audible right away.
+                let value = match event {
+                    SliderEvent::Change(value) => {
+                        this.adjusting_volume = true;
+                        value.start()
+                    }
+                    SliderEvent::Release(value) => {
+                        this.adjusting_volume = false;
+                        value.start()
+                    }
+                };
+                this.send(UiCommand::SetVolume(value as f64), cx);
+            }),
+        ];
         if let Some(select) = &audio {
             subscriptions.push(cx.subscribe(select, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
                 if let SelectEvent::Confirm(Some(index)) = event {
@@ -121,6 +162,9 @@ impl PlayerPage {
             frame: None,
             seek: None,
             scrubbing: false,
+            volume,
+            adjusting_volume: false,
+            version: None,
             audio,
             subtitle,
             controls_visible: true,
@@ -165,6 +209,78 @@ impl PlayerPage {
                 self.seek = Some(seek);
             }
         }
+    }
+
+    fn sync_volume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.adjusting_volume {
+            return;
+        }
+        let volume = self.now_playing.read(cx).volume as f32;
+        if self.volume.read(cx).value().start() != volume {
+            self.volume.update(cx, |slider, cx| slider.set_value(volume, window, cx));
+        }
+    }
+
+    /// The version picker, once the session knows the item's versions.
+    fn ensure_version_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.now_playing.read(cx);
+        if self.version.is_some() || state.versions.len() < 2 {
+            return;
+        }
+        let choices: Vec<Choice> = state
+            .versions
+            .iter()
+            .enumerate()
+            .map(|(i, version)| Choice {
+                label: version.name.clone().into(),
+                value: i as i32,
+            })
+            .collect();
+        let current = state.versions.iter().position(|v| v.id == state.source.id).unwrap_or(0);
+        let select = cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(current)), window, cx));
+        self._subscriptions.push(cx.subscribe(&select, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
+            if let SelectEvent::Confirm(Some(index)) = event {
+                this.switch_version(*index as usize, cx);
+            }
+        }));
+        self.version = Some(select);
+    }
+
+    /// Restarts playback of the same item with another version, at the current position.
+    fn switch_version(&mut self, index: usize, cx: &mut Context<Self>) {
+        let state = self.now_playing.read(cx);
+        let Some(version) = state.versions.get(index).filter(|v| v.id != state.source.id) else { return };
+        let options = PlayOptions {
+            start: Some(jellyfin::Ticks::from(state.position)),
+            media_source_id: Some(version.id.clone()),
+            ..Default::default()
+        };
+        let item = state.item.clone();
+        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
+    }
+
+    fn next_episode(&mut self, _: &NextEpisode, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(next) = self.now_playing.read(cx).next.clone() else { return };
+        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_from_resume(&next, cx));
+    }
+
+    fn change_volume(&mut self, delta: f64, window: &mut Window, cx: &mut Context<Self>) {
+        let volume = (self.now_playing.read(cx).volume + delta).clamp(0., 100.);
+        self.send(UiCommand::SetVolume(volume), cx);
+        self.show_controls(window, cx);
+    }
+
+    fn volume_up(&mut self, _: &VolumeUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.change_volume(VOLUME_STEP, window, cx);
+    }
+
+    fn volume_down(&mut self, _: &VolumeDown, window: &mut Window, cx: &mut Context<Self>) {
+        self.change_volume(-VOLUME_STEP, window, cx);
+    }
+
+    fn toggle_mute(&mut self, _: &ToggleMute, window: &mut Window, cx: &mut Context<Self>) {
+        self.send(UiCommand::ToggleMute, cx);
+        self.show_controls(window, cx);
     }
 
     /// Shows the controls and hides them again after a few seconds of no mouse movement,
@@ -215,6 +331,7 @@ impl PlayerPage {
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.now_playing.read(cx);
         let paused = state.paused;
+        let (muted, has_next) = (state.muted || state.volume == 0., state.next.is_some());
         let time = format!(
             "{} / {}",
             timestamp(state.position),
@@ -275,7 +392,7 @@ impl PlayerPage {
                     .child(
                         Button::new("play-pause")
                             .primary()
-                            .icon(IconName::Play)
+                            .icon(if paused { Lucide::Play } else { Lucide::Pause })
                             .label(if paused { "Play" } else { "Pause" })
                             .on_click(cx.listener(|this, _, window, cx| this.toggle_pause(&TogglePause, window, cx))),
                     )
@@ -286,9 +403,26 @@ impl PlayerPage {
                             .on_click(cx.listener(|this, _, window, cx| this.seek_forward(&SeekForward, window, cx))),
                     )
                     .child(div().text_sm().child(time))
+                    .child(
+                        Button::new("mute")
+                            .ghost()
+                            .icon(if muted { Lucide::VolumeX } else { Lucide::Volume2 })
+                            .on_click(cx.listener(|this, _, window, cx| this.toggle_mute(&ToggleMute, window, cx))),
+                    )
+                    .child(div().flex_none().w(px(96.)).child(Slider::new(&self.volume).w_full()))
                     .child(div().flex_1())
-                    .children(self.audio.as_ref().map(|s| Select::new(s).small().w(px(200.)).menu_width(px(320.))))
-                    .children(self.subtitle.as_ref().map(|s| Select::new(s).small().w(px(200.)).menu_width(px(320.))))
+                    .when(has_next, |el| {
+                        el.child(
+                            Button::new("next-episode")
+                                .ghost()
+                                .icon(Lucide::SkipForward)
+                                .label("Next episode")
+                                .on_click(cx.listener(|this, _, window, cx| this.next_episode(&NextEpisode, window, cx))),
+                        )
+                    })
+                    .children(self.version.as_ref().map(|s| picker(s, 140., 240.)))
+                    .children(self.audio.as_ref().map(|s| picker(s, 200., 320.)))
+                    .children(self.subtitle.as_ref().map(|s| picker(s, 200., 320.)))
                     .child(
                         Button::new("fullscreen")
                             .ghost()
@@ -299,6 +433,14 @@ impl PlayerPage {
 
         div().absolute().inset_0().child(top).child(bottom)
     }
+}
+
+/// A fixed-width track or version picker for the control bar.
+fn picker(select: &ChoiceSelect, width: f32, menu_width: f32) -> impl IntoElement {
+    div()
+        .flex_none()
+        .w(px(width))
+        .child(Select::new(select).small().w_full().menu_width(px(menu_width)))
 }
 
 impl Focusable for PlayerPage {
@@ -328,6 +470,10 @@ impl Render for PlayerPage {
             .on_action(cx.listener(Self::toggle_pause))
             .on_action(cx.listener(Self::seek_forward))
             .on_action(cx.listener(Self::seek_backward))
+            .on_action(cx.listener(Self::volume_up))
+            .on_action(cx.listener(Self::volume_down))
+            .on_action(cx.listener(Self::toggle_mute))
+            .on_action(cx.listener(Self::next_episode))
             .on_action(cx.listener(Self::toggle_fullscreen))
             .on_action(cx.listener(Self::exit_player))
             .on_mouse_move(cx.listener(|this, _, window, cx| this.show_controls(window, cx)))

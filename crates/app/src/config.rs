@@ -13,6 +13,9 @@ pub struct Config {
     pub device_id: String,
     /// The server and user of the last successful sign-in.
     pub server: Option<SavedServer>,
+    /// Player volume in percent, remembered between sessions.
+    #[serde(default)]
+    pub volume: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

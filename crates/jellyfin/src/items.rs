@@ -114,6 +114,19 @@ impl Client {
         self.get(&format!("/Shows/{series_id}/Episodes"), &q).await
     }
 
+    /// The episode after `episode_id` in its series (across seasons), if any.
+    pub async fn next_episode(&self, series_id: &str, episode_id: &str) -> Result<Option<BaseItemDto>> {
+        let mut q = Query::new();
+        q.push("startItemId", episode_id).push("limit", 2);
+        let episodes: QueryResult<BaseItemDto> = self.get(&format!("/Shows/{series_id}/Episodes"), &q).await?;
+        let mut items = episodes.items.into_iter();
+        Ok(match items.next() {
+            Some(first) if first.id == episode_id => items.next(),
+            // The start item itself is missing (e.g. removed): don't guess.
+            _ => None,
+        })
+    }
+
     /// Marks an item (or every episode of a series/season) as watched.
     pub async fn mark_played(&self, item_id: &str) -> Result<()> {
         self.post_no_content::<()>(&format!("/UserPlayedItems/{item_id}"), &Query::new(), None)

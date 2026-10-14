@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 /// Properties observed on startup. The index is the observe id.
-pub(crate) const OBSERVED_PROPERTIES: &[&str] = &["time-pos", "duration", "pause"];
+pub(crate) const OBSERVED_PROPERTIES: &[&str] = &["time-pos", "duration", "pause", "volume", "mute"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlayerEvent {
@@ -12,6 +12,9 @@ pub enum PlayerEvent {
     Position(Duration),
     Duration(Duration),
     Paused(bool),
+    /// Volume in percent (100 is unchanged).
+    Volume(f64),
+    Muted(bool),
     Seeked,
     EndFile(EndReason),
     /// mpv exited or closed the connection. Always the last event.
@@ -77,6 +80,8 @@ impl EventTranslator {
             }
             "duration" => Some(PlayerEvent::Duration(Duration::from_secs_f64(data.as_f64()?.max(0.)))),
             "pause" => Some(PlayerEvent::Paused(data.as_bool()?)),
+            "volume" => Some(PlayerEvent::Volume(data.as_f64()?)),
+            "mute" => Some(PlayerEvent::Muted(data.as_bool()?)),
             _ => None,
         }
     }
@@ -102,6 +107,10 @@ mod tests {
         assert_eq!(
             t.translate(&json!({"event": "property-change", "name": "pause", "data": true})),
             Some(PlayerEvent::Paused(true))
+        );
+        assert_eq!(
+            t.translate(&json!({"event": "property-change", "name": "volume", "data": 55.0})),
+            Some(PlayerEvent::Volume(55.0))
         );
         assert_eq!(
             t.translate(&json!({"event": "end-file", "reason": "eof"})),

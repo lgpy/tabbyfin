@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Generates a small synthetic media library under dev/.data/media.
-# Covers: a movie with two versions, a series with two seasons, multiple audio
+# Covers: a movie with three versions (one 4K HEVC 10-bit, for hardware decoding), a series with two seasons, multiple audio
 # languages, embedded and external subtitles, and local artwork.
 set -euo pipefail
 
@@ -12,9 +12,11 @@ srt() {
   printf '1\n00:00:01,000 --> 00:00:05,000\n%s\n\n2\n00:00:10,000 --> 00:00:15,000\nTen seconds in.\n\n3\n00:00:30,000 --> 00:00:35,000\nHalfway there.\n' "$title"
 }
 
-# video <out.mkv> <title> <size>
+# video <out.mkv> <title> <size> [hevc10]
 video() {
   local out="$1" title="$2" size="$3" sub
+  local codec=(-c:v libx264 -preset ultrafast -crf 32 -pix_fmt yuv420p)
+  [[ "${4:-}" == hevc10 ]] && codec=(-c:v libx265 -preset ultrafast -crf 32 -pix_fmt yuv420p10le -x265-params log-level=error)
   [[ -f "$out" ]] && return
   mkdir -p "$(dirname "$out")"
   sub="$(mktemp --suffix=.srt)"
@@ -26,7 +28,7 @@ video() {
     -i "$sub" \
     -map 0:v -map 1:a -map 2:a -map 3:s \
     -vf "drawtext=text='${title}':fontcolor=white:fontsize=36:box=1:boxcolor=black@0.6:x=(w-tw)/2:y=h-80" \
-    -c:v libx264 -preset ultrafast -crf 32 -pix_fmt yuv420p \
+    "${codec[@]}" \
     -c:a aac -b:a 64k -c:s srt \
     -metadata title="$title" \
     -metadata:s:a:0 language=eng -metadata:s:a:0 title="English" \
@@ -48,6 +50,7 @@ image() {
 movie="$root/Movies/Test Movie (2024)"
 video "$movie/Test Movie (2024) - 1080p.mkv" "Test Movie 1080p" 1920x1080
 video "$movie/Test Movie (2024) - 720p.mkv" "Test Movie 720p" 1280x720
+video "$movie/Test Movie (2024) - 4K HEVC.mkv" "Test Movie 4K HEVC 10-bit" 3840x2160 hevc10
 image "$movie/poster.jpg" "Test Movie" 600x900 navy
 image "$movie/backdrop.jpg" "Test Movie" 1920x1080 darkslateblue
 

@@ -3,7 +3,7 @@
 # Run `cargo build --release --target <target>` first.
 #
 #   linux   (x86_64-unknown-linux-gnu): .tar.gz and .deb (needs cargo-deb); uses the system libmpv
-#   windows (x86_64-pc-windows-msvc):   .zip with libmpv-2.dll next to jelly-gpui.exe
+#   windows (x86_64-pc-windows-msvc):   .zip with libmpv-2.dll and ANGLE next to jelly-gpui.exe
 #   macos   (aarch64/x86_64-apple-darwin): .zip of jelly-gpui.app, ad-hoc signed; needs Homebrew's
 #           libmpv (brew install mpv) until libmpv is bundled
 set -euo pipefail
@@ -34,6 +34,7 @@ case "$target" in
     mkdir -p "$stage/$name"
     cp "$bin_dir/jelly-gpui.exe" "$packaging/THIRD_PARTY.md" "$stage/$name/"
     "$packaging/fetch-libmpv.sh" windows-x86_64 "$stage/$name"
+    "$packaging/fetch-angle.sh" "$stage/$name"
     if command -v 7z >/dev/null; then
       (cd "$stage" && 7z a -tzip "$out/$name.zip" "$name" >/dev/null)
     else

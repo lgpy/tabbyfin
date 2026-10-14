@@ -7,11 +7,12 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use super::video::{RenderThread, VideoOutput};
-use super::{Api, Core, FORMAT_DOUBLE, FORMAT_FLAG, FORMAT_INT64, RawEndFile, RawProperty, cstring};
+use super::{Api, Core, FORMAT_DOUBLE, FORMAT_FLAG, FORMAT_INT64, RawEndFile, RawLogMessage, RawProperty, cstring};
 use crate::events::{EventTranslator, OBSERVED_PROPERTIES};
 use crate::{Error, PlayerEvent, Result};
 
 const EVENT_SHUTDOWN: c_int = 1;
+const EVENT_LOG_MESSAGE: c_int = 2;
 const EVENT_END_FILE: c_int = 7;
 const EVENT_FILE_LOADED: c_int = 8;
 const EVENT_SEEK: c_int = 20;
@@ -61,8 +62,12 @@ impl EmbeddedPlayer {
         set_option("vo", "libmpv");
         // SAFETY: valid handle, options set.
         core.api.check("mpv_initialize", unsafe { (core.api.initialize)(core.mpv) })?;
+        // mpv's own log, forwarded to ours. `JELLY_GPUI_MPV_LOG` picks the level (e.g. `v`).
+        let level = cstring(&std::env::var("JELLY_GPUI_MPV_LOG").unwrap_or_else(|_| "warn".into()));
+        // SAFETY: valid handle and C string.
+        unsafe { (core.api.request_log_messages)(core.mpv, level.as_ptr()) };
 
-        let formats = [FORMAT_DOUBLE, FORMAT_DOUBLE, FORMAT_FLAG];
+        let formats = [FORMAT_DOUBLE, FORMAT_DOUBLE, FORMAT_FLAG, FORMAT_DOUBLE, FORMAT_FLAG];
         for (id, (name, format)) in OBSERVED_PROPERTIES.iter().zip(formats).enumerate() {
             let name = cstring(name);
             // SAFETY: valid handle and C string.
@@ -151,14 +156,42 @@ fn value_string(value: &Value) -> String {
 /// [`EventTranslator`].
 fn event_loop(core: &Core, stop: &AtomicBool, events: &mpsc::UnboundedSender<PlayerEvent>) {
     let mut translator = EventTranslator::default();
+    let mut decoder_logged = false;
     while !stop.load(Ordering::Relaxed) {
         // SAFETY: mpv_wait_event returns a valid event, owned by mpv until the next call.
         let event = unsafe { &*(core.api.wait_event)(core.mpv, 1.0) };
         let message = match event.event_id {
             EVENT_SHUTDOWN => break,
-            EVENT_FILE_LOADED => json!({ "event": "file-loaded" }),
+            EVENT_LOG_MESSAGE => {
+                // SAFETY: LOG_MESSAGE events carry an mpv_event_log_message with C strings.
+                let (prefix, text, level) = unsafe {
+                    let message = &*(event.data as *const RawLogMessage);
+                    (CStr::from_ptr(message.prefix), CStr::from_ptr(message.text), message.log_level)
+                };
+                let (prefix, text) = (prefix.to_string_lossy(), text.to_string_lossy());
+                let text = text.trim_end();
+                match level {
+                    // fatal, error, warn
+                    i32::MIN..=30 => tracing::warn!(target: "mpv", "[{prefix}] {text}"),
+                    31..=40 => tracing::info!(target: "mpv", "[{prefix}] {text}"),
+                    _ => tracing::debug!(target: "mpv", "[{prefix}] {text}"),
+                }
+                continue;
+            }
+            EVENT_FILE_LOADED => {
+                decoder_logged = false;
+                json!({ "event": "file-loaded" })
+            }
             EVENT_SEEK => json!({ "event": "seek" }),
-            EVENT_PLAYBACK_RESTART => json!({ "event": "playback-restart" }),
+            EVENT_PLAYBACK_RESTART => {
+                if !decoder_logged {
+                    decoder_logged = true;
+                    let hwdec = core.get_string("hwdec-current").filter(|h| !h.is_empty() && h != "no");
+                    let codec = core.get_string("video-codec").unwrap_or_default();
+                    tracing::info!(%codec, "video decoding: {}", hwdec.as_deref().unwrap_or("software"));
+                }
+                json!({ "event": "playback-restart" })
+            }
             EVENT_END_FILE => {
                 // SAFETY: END_FILE events carry an mpv_event_end_file.
                 let end = unsafe { &*(event.data as *const RawEndFile) };

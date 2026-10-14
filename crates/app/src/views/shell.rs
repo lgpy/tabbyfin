@@ -85,7 +85,7 @@ impl ShellView {
                                     Some(index) => crate::playback::SubtitleChoice::Stream(index),
                                     None => crate::playback::SubtitleChoice::Auto,
                                 },
-                                ..Default::default()
+                                media_source_id: autoplay_tracks.2,
                             };
                             PlaybackManager::global(cx).update(cx, |p, cx| p.play(&item, options, cx));
                         }),
@@ -268,11 +268,11 @@ impl Render for ShellView {
 
 /// Dev aid: open a page on top of Home at startup, for screenshots and quick iteration.
 /// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, `search`, `settings`, or
-/// `play:<id>[:<audio index>[:<subtitle index or -1>]]` (opens the item and plays it from its
-/// resume point). Returns the route and, for `play`, the track choices.
+/// `play:<id>[:<audio index>[:<subtitle index or -1>[:<media source id>]]]` (opens the item and
+/// plays it from its resume point; empty fields keep the defaults). Returns the route and, for `play`, the track choices.
 #[cfg(debug_assertions)]
 #[allow(clippy::type_complexity)]
-fn debug_start_route() -> Option<(Route, Option<(Option<i32>, Option<i32>)>)> {
+fn debug_start_route() -> Option<(Route, Option<(Option<i32>, Option<i32>, Option<String>)>)> {
     use jellyfin::models::CollectionType;
 
     let value = std::env::var("JELLY_GPUI_ROUTE").ok()?;
@@ -281,8 +281,10 @@ fn debug_start_route() -> Option<(Route, Option<(Option<i32>, Option<i32>)>)> {
         ("search", _) => Some((Route::Search, None)),
         ("settings", _) => Some((Route::Settings, None)),
         (kind @ ("item" | "play"), Some(id)) => {
-            let mut index = || parts.next().and_then(|p| p.parse().ok());
-            let tracks = (kind == "play").then(|| (index(), index()));
+            let rest: Vec<&str> = parts.collect();
+            let index = |i: usize| rest.get(i).and_then(|p| p.parse().ok());
+            let source = rest.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string());
+            let tracks = (kind == "play").then(|| (index(0), index(1), source));
             Some((
                 Route::Item {
                     id: id.into(),

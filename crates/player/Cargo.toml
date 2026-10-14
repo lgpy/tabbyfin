@@ -27,6 +27,8 @@ windows = { version = "0.62", features = [
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# ANGLE (libEGL.dll), loaded at runtime for the zero-copy video path.
+khronos-egl = { version = "6", features = ["dynamic"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # GPU video output (Vulkan external memory <-> OpenGL), also used by

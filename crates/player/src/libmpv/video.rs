@@ -1,7 +1,9 @@
 //! Video output. A render thread owns an mpv render context and publishes frames for the UI.
 //!
-//! - **GPU (Windows):** mpv renders through OpenGL into D3D11 textures shared with GPUI's
-//!   renderer (`wgl.rs`); the UI draws them as surfaces, with no CPU copy.
+//! - **GPU (Windows):** mpv renders through OpenGL ES on ANGLE (`angle.rs`, with zero-copy
+//!   hardware decoding) or desktop OpenGL (`wgl.rs`) into D3D11 textures shared with GPUI's
+//!   renderer; the UI draws them as surfaces, with no CPU copy.
+//! - **GPU (Linux):** mpv renders into exported Vulkan memory that GPUI imports (`egl.rs`).
 //! - **Software:** mpv renders into a CPU buffer that the UI uploads as an image. Used where the
 //!   GPU path isn't available.
 //!
@@ -194,13 +196,24 @@ fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Op
     // `JELLY_GPUI_VIDEO=software` forces the software path, e.g. to rule out GPU driver issues.
     #[cfg(any(windows, target_os = "linux"))]
     if std::env::var("JELLY_GPUI_VIDEO").as_deref() != Ok("software") {
+        // On Windows, ANGLE first: it also gives zero-copy hardware decoding. Then plain WGL.
         #[cfg(windows)]
-        let (gpu, kind) = (super::wgl::GpuRenderer::new(core, control), "OpenGL/D3D11 interop");
+        let gpu = super::angle::GpuRenderer::new(core, control)
+            .map(|gpu| (GpuRenderer::Angle(gpu), "ANGLE/D3D11"))
+            .or_else(|err| {
+                tracing::info!("ANGLE video output unavailable: {err}");
+                super::wgl::GpuRenderer::new(core, control).map(|gpu| (GpuRenderer::Wgl(gpu), "OpenGL/D3D11 interop"))
+            });
         #[cfg(target_os = "linux")]
-        let (gpu, kind) = (super::egl::GpuRenderer::new(core, control), "OpenGL/Vulkan interop");
+        let gpu = super::egl::GpuRenderer::new(core, control).map(|gpu| (gpu, "OpenGL/Vulkan interop"));
         match gpu {
-            Ok(mut gpu) => {
+            Ok((mut gpu, kind)) => {
                 tracing::info!("video output: GPU ({kind})");
+                // Decoded frames can stay on the GPU where mpv has an interop for this context
+                // (d3d11va with ANGLE, nvdec everywhere); otherwise mpv copies them back.
+                if let Err(err) = core.set_property("hwdec", "auto-safe") {
+                    tracing::warn!("{err}");
+                }
                 let _ = ready.send(Ok(()));
                 gpu.run(core, control, frames);
                 return;
@@ -216,6 +229,22 @@ fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Op
         }
         Err(err) => {
             let _ = ready.send(Err(err));
+        }
+    }
+}
+
+#[cfg(windows)]
+enum GpuRenderer {
+    Angle(super::angle::GpuRenderer),
+    Wgl(super::wgl::GpuRenderer),
+}
+
+#[cfg(windows)]
+impl GpuRenderer {
+    fn run(&mut self, core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>) {
+        match self {
+            GpuRenderer::Angle(gpu) => gpu.run(core, control, frames),
+            GpuRenderer::Wgl(gpu) => gpu.run(core, control, frames),
         }
     }
 }

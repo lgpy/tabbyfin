@@ -180,11 +180,18 @@ Video plays **inside the app** through libmpv. There's no separate mpv window an
   1. `http-header-fields` carries the `Authorization` header, so the stream URL contains no token.
   2. Then `force-media-title` and `start`, followed by `loadfile`.
   3. After `file-loaded`, `sub-add` for each external subtitle. These requests are authenticated by the same header.
-- **Observed properties:** `time-pos` (throttled to about once a second), `duration` and `pause`.
+- **Observed properties:** `time-pos` (throttled to about once a second), `duration`, `pause`, `volume` and `mute`.
+- **Hardware decoding:** `hwdec=auto-safe` on the GPU video paths, so frames stay on the GPU where mpv has an interop for the render context (`d3d11va` through ANGLE on Windows, `nvdec` anywhere), and `auto-copy-safe` on the software path. The log says which decoder each file got (`video decoding: …`).
+- **mpv's log** is forwarded to ours at `warn` level. `JELLY_GPUI_MPV_LOG=v` (or any mpv level) shows more.
 
 ### 5.2 Threading and reporting
 
-1. The session runs on tokio. It forwards `PlayerEvent`s to a `NowPlaying` GPUI entity, which the player page draws, and it receives `UiCommand`s from that page: pause, seek, tracks and stop.
+1. The session runs on tokio. It forwards `PlayerEvent`s to a `NowPlaying` GPUI entity, which the player page draws, and it receives `UiCommand`s from that page: pause, seek, volume, tracks and stop.
+   - After playback starts, it also looks up the item's versions and, for episodes, the next episode.
+   - **Switching version** starts a new session of the same item at the current position.
+   - **Next episode** (button, Shift+N, or automatically when an episode plays to the end) starts a session for the next episode from its resume point.
+   - Sessions are numbered, so when one replaces another, the old one's end doesn't close the new player.
+   - The volume carries over between sessions and is saved in the config.
 2. It reports to the server:
    - `/Sessions/Playing` on start.
    - `/Sessions/Playing/Progress` about every 10 s, plus immediately on pause, seek or track change.
@@ -196,7 +203,7 @@ Video plays **inside the app** through libmpv. There's no separate mpv window an
 | Platform | libmpv |
 |---|---|
 | Linux | The system's `libmpv2`. The `.deb` depends on it. |
-| Windows | `libmpv-2.dll` next to `jelly-gpui.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. |
+| Windows | `libmpv-2.dll` next to `jelly-gpui.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. The zip also carries ANGLE (`libEGL.dll`, `libGLESv2.dll`) and its MinGW runtime DLLs, MSYS2 builds pinned in `packaging/angle.lock` and fetched by `packaging/fetch-angle.sh`, for zero-copy video. |
 | macOS | Not bundled yet. The app looks in Homebrew's folders, so `brew install mpv` makes playback work. Bundling `libmpv.dylib` is still to do. The app is ad-hoc signed, not notarized. |
 
 `packaging/THIRD_PARTY.md` holds mpv's license (GPL-2.0-or-later) and source information, and ships in the packages.
@@ -231,6 +238,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
   - Show a placeholder from `ImageBlurHashes` while the real image loads.
 - **Keyboard:**
   - Define GPUI `actions!` with a keymap: arrow keys and Enter to navigate, Backspace or Esc to go back, `/` to search.
+  - In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N plays the next episode, F toggles fullscreen and Esc leaves fullscreen, then the player.
 - **Theme:**
   - GPUI Kit's theme system, defaulting to dark.
 
@@ -284,6 +292,8 @@ sudo apt install build-essential pkg-config libmpv2 \
 - `mingw-w64` adds the Windows test loop: `dev/win-run.sh` cross-builds, copies to `C:\Temp\jelly-dev` and runs on the Windows host.
   - It uses its own config folder (`JELLY_GPUI_CONFIG_DIR=C:\Temp\jelly-dev\config`), so your real sign-in isn't touched. Set it to an empty string to use the normal one.
   - `JELLY_GPUI_VIDEO=software` forces software video and `=gpu` forces the GPU path, even on software OpenGL, to compare the two. Both work on Linux too.
+  - The script also fetches ANGLE next to the exe. Delete `libEGL.dll` there to try the WGL path.
+  - `JELLY_GPUI_ROUTE=play:<id>:::<media source id>` plays a specific version, e.g. the 4K HEVC 10-bit one that `dev/make-media.sh` adds to Test Movie.
 - GPUI on WSL2 runs through WSLg (`WAYLAND_DISPLAY=wayland-0` is set). It needs a working Vulkan driver, such as mesa `dzn` or llvmpipe.
 - Run `vulkaninfo --summary` before debugging rendering problems.
 - If WSLg rendering is poor, use a native Windows build for daily UI work. GPUI supports Windows directly.
