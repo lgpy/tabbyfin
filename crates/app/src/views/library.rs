@@ -1,12 +1,15 @@
-//! A library (or folder) as a poster grid. Rows are virtualized and pages are fetched as they
-//! scroll into view.
+//! A library (or folder, or a person's items) as a poster grid, with sort and filter. Rows are
+//! virtualized and pages are fetched as they scroll into view.
 
 use std::collections::HashSet;
 use std::ops::Range;
 
-use gpui_kit::component::h_flex;
+use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::{ActiveTheme, IndexPath, Sizable, h_flex, v_flex};
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemSortBy};
+use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemSortBy};
 use jellyfin::{Client, ItemsQuery, SortOrder};
 
 use crate::browse::{Browse, Cursor, Position, Section, on_browse_actions};
@@ -15,61 +18,134 @@ use crate::components::{
     CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_message, centered_spinner, error_state, placeholder_card,
     poster_card,
 };
+use crate::config::{Config, LibraryView};
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
+use crate::tracks::{Choice, ChoiceSelect};
 
 const PAGE_SIZE: usize = 100;
 const GRID_PADDING: f32 = 24.;
 const ROW_H: f32 = POSTER_H + CARD_TEXT_H + CARD_GAP;
 
+/// What the grid lists.
+pub enum Source {
+    /// A library or folder. Movie and show libraries list their top-level items across all
+    /// folders; anything else is browsed folder by folder.
+    Folder {
+        id: String,
+        collection_type: Option<CollectionType>,
+    },
+    /// Movies and shows a person appears in.
+    Person { id: String },
+}
+
+/// Sort choices: config key, label, server sort, and whether it starts descending.
+const SORTS: [(&str, &str, ItemSortBy, bool); 6] = [
+    ("name", "Name", ItemSortBy::SortName, false),
+    ("added", "Date added", ItemSortBy::DateCreated, true),
+    ("released", "Release date", ItemSortBy::PremiereDate, true),
+    ("rating", "Rating", ItemSortBy::CommunityRating, true),
+    ("runtime", "Runtime", ItemSortBy::Runtime, false),
+    ("random", "Random", ItemSortBy::Random, false),
+];
+
+/// Filter choices: config key, label, server filter.
+const FILTERS: [(&str, &str, Option<ItemFilter>); 5] = [
+    ("all", "All", None),
+    ("unwatched", "Unwatched", Some(ItemFilter::IsUnplayed)),
+    ("watched", "Watched", Some(ItemFilter::IsPlayed)),
+    ("favorites", "Favorites", Some(ItemFilter::IsFavorite)),
+    ("in-progress", "In progress", Some(ItemFilter::IsResumable)),
+];
+
 pub struct LibraryPage {
     client: Client,
     nav: Navigator,
+    /// Key for the remembered sort and filter.
+    view_key: String,
+    view: LibraryView,
     base_query: ItemsQuery,
     /// `None` until the first page arrives.
     total: Option<usize>,
     items: Vec<Option<BaseItemDto>>,
     pages_requested: HashSet<usize>,
+    /// Bumped when the sort or filter changes, so pages fetched before are dropped.
+    generation: u64,
     error: Option<SharedString>,
     scroll: UniformListScrollHandle,
     cursor: Cursor,
     focus_handle: FocusHandle,
+    sort: ChoiceSelect,
+    filter: ChoiceSelect,
     _subscriptions: Vec<Subscription>,
 }
 
 impl LibraryPage {
-    pub fn new(
-        client: Client,
-        nav: Navigator,
-        parent_id: String,
-        collection_type: Option<CollectionType>,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        // Movie and show libraries list their top-level items across all folders; anything
-        // else is browsed folder by folder.
-        let (include_item_types, recursive) = match collection_type {
-            Some(CollectionType::Movies) => (vec![BaseItemKind::Movie], true),
-            Some(CollectionType::TvShows) => (vec![BaseItemKind::Series], true),
-            _ => (Vec::new(), false),
+    pub fn new(client: Client, nav: Navigator, source: Source, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let (view_key, base_query) = match source {
+            Source::Folder { id, collection_type } => {
+                let (include_item_types, recursive) = match collection_type {
+                    Some(CollectionType::Movies) => (vec![BaseItemKind::Movie], true),
+                    Some(CollectionType::TvShows) => (vec![BaseItemKind::Series], true),
+                    _ => (Vec::new(), false),
+                };
+                let query = ItemsQuery {
+                    parent_id: Some(id.clone()),
+                    include_item_types,
+                    recursive,
+                    ..Default::default()
+                };
+                (id, query)
+            }
+            Source::Person { id } => {
+                let query = ItemsQuery {
+                    person_ids: vec![id],
+                    include_item_types: vec![BaseItemKind::Movie, BaseItemKind::Series],
+                    recursive: true,
+                    ..Default::default()
+                };
+                ("person".to_owned(), query)
+            }
         };
         let base_query = ItemsQuery {
-            parent_id: Some(parent_id),
-            include_item_types,
-            recursive,
-            sort_by: vec![ItemSortBy::SortName],
-            sort_order: Some(SortOrder::Ascending),
             fields: vec![ItemField::PrimaryImageAspectRatio],
             limit: Some(PAGE_SIZE as u32),
-            ..Default::default()
+            ..base_query
         };
+        let view = Config::load()
+            .library_views
+            .get(&view_key)
+            .cloned()
+            .unwrap_or_else(|| LibraryView {
+                sort: SORTS[0].0.into(),
+                descending: SORTS[0].3,
+                filter: FILTERS[0].0.into(),
+            });
+        let select = |choices: Vec<(&str, &str)>, current: &str, window: &mut Window, cx: &mut Context<Self>| {
+            let selected = choices.iter().position(|(key, _)| *key == current).unwrap_or(0);
+            let choices: Vec<Choice> = choices
+                .iter()
+                .enumerate()
+                .map(|(i, (_, label))| Choice {
+                    label: (*label).into(),
+                    value: i as i32,
+                })
+                .collect();
+            cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
+        };
+        let sort = select(SORTS.iter().map(|s| (s.0, s.1)).collect(), &view.sort, window, cx);
+        let filter = select(FILTERS.iter().map(|f| (f.0, f.1)).collect(), &view.filter, window, cx);
         let mut this = Self {
             client,
             nav,
+            view_key,
+            view,
             base_query,
             total: None,
             items: Vec::new(),
             pages_requested: HashSet::new(),
+            generation: 0,
             error: None,
             scroll: UniformListScrollHandle::new(),
             cursor: Cursor::default(),
@@ -79,10 +155,70 @@ impl LibraryPage {
                 cx.subscribe(&Changes::global(cx), |this, _, _: &UserDataChanged, cx| {
                     this.refresh(cx)
                 }),
+                cx.subscribe(&sort, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
+                    if let SelectEvent::Confirm(Some(i)) = event
+                        && let Some(sort) = SORTS.get(*i as usize)
+                        && this.view.sort != sort.0
+                    {
+                        this.view.sort = sort.0.into();
+                        this.view.descending = sort.3;
+                        this.change_view(cx);
+                    }
+                }),
+                cx.subscribe(&filter, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
+                    if let SelectEvent::Confirm(Some(i)) = event
+                        && let Some(filter) = FILTERS.get(*i as usize)
+                        && this.view.filter != filter.0
+                    {
+                        this.view.filter = filter.0.into();
+                        this.change_view(cx);
+                    }
+                }),
             ],
+            sort,
+            filter,
         };
+        this.apply_view();
         this.request_page(0, cx);
         this
+    }
+
+    /// Puts the sort and filter into the query.
+    fn apply_view(&mut self) {
+        let sort = SORTS.iter().find(|s| s.0 == self.view.sort).unwrap_or(&SORTS[0]);
+        // Ties (same date, rating…) fall back to the name.
+        self.base_query.sort_by = vec![sort.2, ItemSortBy::SortName];
+        self.base_query.sort_order = Some(if self.view.descending {
+            SortOrder::Descending
+        } else {
+            SortOrder::Ascending
+        });
+        let filter = FILTERS.iter().find(|f| f.0 == self.view.filter).unwrap_or(&FILTERS[0]);
+        self.base_query.filters = filter.2.into_iter().collect();
+    }
+
+    /// The sort or filter changed: remember it and load the grid again from the top.
+    fn change_view(&mut self, cx: &mut Context<Self>) {
+        let mut config = Config::load();
+        config.library_views.insert(self.view_key.clone(), self.view.clone());
+        if let Err(err) = config.save() {
+            tracing::warn!("failed to save config: {err:#}");
+        }
+        self.apply_view();
+        self.generation += 1;
+        self.total = None;
+        self.items.clear();
+        self.pages_requested.clear();
+        self.error = None;
+        self.cursor = Cursor::default();
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.request_page(0, cx);
+        cx.notify();
+    }
+
+    fn toggle_order(&mut self, cx: &mut Context<Self>) {
+        self.view.descending = !self.view.descending;
+        self.change_view(cx);
     }
 
     /// Re-fetches the pages already loaded (e.g. for new watched badges), keeping the current
@@ -110,9 +246,13 @@ impl LibraryPage {
             start_index: Some((page * PAGE_SIZE) as u32),
             ..self.base_query.clone()
         };
+        let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let result = runtime::spawn(async move { client.items(&query).await }).await;
             this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
                 match result {
                     Ok(result) => {
                         let total = result.total_record_count as usize;
@@ -212,7 +352,51 @@ impl Focusable for LibraryPage {
 impl Render for LibraryPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = self.render_content(window, cx);
-        on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(content)
+        let random = self.view.sort == "random";
+        let toolbar = h_flex()
+            .flex_none()
+            .px(px(GRID_PADDING))
+            .pt_4()
+            .gap_2()
+            .text_sm()
+            .child(div().text_color(cx.theme().muted_foreground).child("Sort"))
+            .child(div().w(px(160.)).child(Select::new(&self.sort).small()))
+            .child(
+                Button::new("sort-order")
+                    .ghost()
+                    .small()
+                    .icon(if self.view.descending {
+                        Lucide::ArrowDownWideNarrow
+                    } else {
+                        Lucide::ArrowUpNarrowWide
+                    })
+                    .tooltip(if random {
+                        "Shuffle again"
+                    } else if self.view.descending {
+                        "Descending"
+                    } else {
+                        "Ascending"
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_order(cx))),
+            )
+            .child(div().w_4())
+            .child(div().text_color(cx.theme().muted_foreground).child("Show"))
+            .child(div().w(px(140.)).child(Select::new(&self.filter).small()))
+            .child(div().flex_1())
+            .children(
+                self.total
+                    .map(|total| div().text_color(cx.theme().muted_foreground).child(item_count(total))),
+            );
+        on_browse_actions(v_flex().size_full().track_focus(&self.focus_handle), cx)
+            .child(toolbar)
+            .child(div().flex_1().min_h_0().child(content))
+    }
+}
+
+fn item_count(total: usize) -> String {
+    match total {
+        1 => "1 item".into(),
+        n => format!("{n} items"),
     }
 }
 
@@ -227,7 +411,12 @@ impl LibraryPage {
             };
         };
         if total == 0 {
-            return centered_message("Nothing here yet.", cx).into_any_element();
+            let message = if self.view.filter == FILTERS[0].0 {
+                "Nothing here yet."
+            } else {
+                "Nothing matches this filter."
+            };
+            return centered_message(message, cx).into_any_element();
         }
 
         let columns = columns(window);
@@ -240,7 +429,7 @@ impl LibraryPage {
         )
         .track_scroll(&self.scroll)
         .size_full()
-        .pt(px(GRID_PADDING))
+        .pt_4()
         .into_any_element()
     }
 }

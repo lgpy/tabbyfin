@@ -21,7 +21,7 @@ use crate::session::Session;
 use crate::syncplay::{SyncPlay, SyncPlayEvent};
 use crate::views::home::HomePage;
 use crate::views::item::ItemPage;
-use crate::views::library::LibraryPage;
+use crate::views::library::{LibraryPage, Source};
 use crate::views::player::PlayerPage;
 use crate::views::search::SearchPage;
 use crate::views::settings::SettingsPage;
@@ -150,7 +150,8 @@ impl ShellView {
             } => Page {
                 title: name.into(),
                 view: {
-                    let page = cx.new(|cx| LibraryPage::new(client, nav, id, collection_type, cx));
+                    let source = Source::Folder { id, collection_type };
+                    let page = cx.new(|cx| LibraryPage::new(client, nav, source, window, cx));
                     focus = Some(focuser(&page));
                     page.into()
                 },
