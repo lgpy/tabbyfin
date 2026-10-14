@@ -156,7 +156,7 @@ impl AppView {
     }
 
     fn sign_out(&mut self, session: &Session, window: &mut Window, cx: &mut Context<Self>) {
-        crate::playback::PlaybackManager::global(cx).update(cx, |playback, _| playback.stop());
+        crate::playback::PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
         // Revoke the token server-side; nothing to do if that fails, we forget it either way.
         let client = session.client.clone();
         runtime::detach(async move {
@@ -172,7 +172,7 @@ impl AppView {
             return;
         }
         tracing::warn!("session expired");
-        crate::playback::PlaybackManager::global(cx).update(cx, |playback, _| playback.stop());
+        crate::playback::PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
         self.forget_session(Some(describe_error(&jellyfin::Error::Unauthorized)), window, cx);
     }
 

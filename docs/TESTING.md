@@ -64,6 +64,14 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ Behind a **reverse proxy with HTTPS** (`wss://`), e.g. nginx or Caddy, including a base path like `/jellyfin`.
 - ⬜ The app shows up in *Dashboard → Activity / Sessions* as a session that can play video.
 
+## 5b. Network drops (2.2.2)
+
+✅ In development: a server restart mid-play (ffmpeg reconnects, no interruption), and a 30 s outage with a tiny cache (EOF at 0:30, reconnect after 2 s, resumed at 0:30 to the end).
+
+- ⬜ **Wi-Fi off for 10 s and for a minute** on a laptop, with the normal cache: playback continues, or reconnects with the "Reconnecting…" notice.
+- ⬜ A **transcoded** stream (HLS) through an outage.
+- ⬜ Esc while "Reconnecting…" closes the player and doesn't start again.
+
 ## 6. SyncPlay (2.4.3–2.4.6)
 
 ✅ Against the scripted member (`cargo run -p jellyfin --example syncplay`): following the group (load, Ready, Unpause, Pause, Unpause, Seek, Stop) and leading it (Play on an item page, Space, →, Esc); the popover in and out of a group; drift correction catching up 0.8 s.

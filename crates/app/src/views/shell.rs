@@ -78,6 +78,9 @@ impl ShellView {
                 PlaybackEvent::Failed(message) => {
                     window.push_notification(Notification::error(message.clone()), cx);
                 }
+                PlaybackEvent::Notice(message) => {
+                    window.push_notification(Notification::info(message.clone()), cx);
+                }
             },
         );
         let _live = crate::live::connect(session.client.clone(), cx);
@@ -243,7 +246,7 @@ impl ShellView {
     fn back(&mut self, _: &Back, window: &mut Window, cx: &mut Context<Self>) {
         // Leaving the player stops playback; the page closes when the session ends.
         if self.stack.last().is_some_and(|page| page.is_player) {
-            PlaybackManager::global(cx).update(cx, |playback, _| playback.stop());
+            PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
             return;
         }
         if self.stack.len() > 1 {
