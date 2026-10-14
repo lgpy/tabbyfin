@@ -138,6 +138,12 @@ impl Client {
         })
     }
 
+    /// A playlist's entries, in playlist order.
+    pub async fn playlist_items(&self, playlist_id: &str, fields: &[ItemField]) -> Result<QueryResult<BaseItemDto>> {
+        self.get(&format!("/Playlists/{playlist_id}/Items"), &fields_query(fields))
+            .await
+    }
+
     /// Intro, outro and similar segments, from the server's segment provider plugins. Empty
     /// when none are installed.
     pub async fn media_segments(&self, item_id: &str) -> Result<Vec<MediaSegmentDto>> {

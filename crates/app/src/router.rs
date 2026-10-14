@@ -30,11 +30,7 @@ pub enum Route {
 impl Route {
     pub fn for_item(item: &BaseItemDto) -> Self {
         match item.kind {
-            BaseItemKind::CollectionFolder
-            | BaseItemKind::UserView
-            | BaseItemKind::Folder
-            | BaseItemKind::BoxSet
-            | BaseItemKind::Playlist => Route::Library {
+            BaseItemKind::CollectionFolder | BaseItemKind::UserView | BaseItemKind::Folder => Route::Library {
                 id: item.id.clone(),
                 name: item.name.clone(),
                 collection_type: item.collection_type,

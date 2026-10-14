@@ -7,8 +7,8 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme, IconName, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ItemField};
-use jellyfin::{Client, Ticks};
+use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ItemField, ItemSortBy};
+use jellyfin::{Client, ItemsQuery, Ticks};
 
 use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
@@ -230,6 +230,17 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
                 .await?
                 .items
         }
+        // A collection's movies (and shows) by release date.
+        BaseItemKind::BoxSet => {
+            let query = ItemsQuery {
+                parent_id: Some(item.id.clone()),
+                sort_by: vec![ItemSortBy::PremiereDate, ItemSortBy::SortName],
+                fields: vec![ItemField::PrimaryImageAspectRatio],
+                ..Default::default()
+            };
+            client.items(&query).await?.items
+        }
+        BaseItemKind::Playlist => client.playlist_items(&item.id, &[ItemField::Overview]).await?.items,
         _ => Vec::new(),
     };
     Ok(ItemData { item, children })
@@ -283,6 +294,8 @@ impl ItemPage {
                     .outline()
                     .icon(if played { IconName::CircleCheck } else { IconName::Check })
                     .label(if played { "Watched" } else { "Mark watched" }),
+                ItemAction::PlayAll => Button::new("play-all").primary().icon(IconName::Play).label("Play all"),
+                ItemAction::Shuffle => Button::new("shuffle").outline().icon(Lucide::Shuffle).label("Shuffle"),
                 ItemAction::ToggleFavorite => Button::new("toggle-favorite")
                     .outline()
                     .icon(if favorite { Lucide::HeartOff } else { Lucide::Heart })
@@ -314,6 +327,28 @@ impl ItemPage {
                 let Load::Loaded(data) = &self.data else { return };
                 let (id, played) = (data.item.id.clone(), is_played(&data.item));
                 self.set_played(id, !played, window, cx);
+            }
+            ItemAction::PlayAll | ItemAction::Shuffle => {
+                let Load::Loaded(data) = &self.data else { return };
+                let mut items: Vec<BaseItemDto> = data
+                    .children
+                    .iter()
+                    .filter(|child| {
+                        matches!(
+                            child.kind,
+                            BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video
+                        )
+                    })
+                    .cloned()
+                    .collect();
+                if matches!(action, ItemAction::Shuffle) {
+                    shuffle(&mut items);
+                }
+                if items.is_empty() {
+                    window.push_notification(Notification::info("Nothing here to play."), cx);
+                    return;
+                }
+                PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_all(items, cx));
             }
             ItemAction::ToggleFavorite => {
                 let Load::Loaded(data) = &self.data else { return };
@@ -477,8 +512,18 @@ impl ItemPage {
                     Some(episode),
                     cx,
                 );
-                let (_, subtitle) = card_text(episode);
-                let runtime = episode.run_time_ticks.map(runtime_text).unwrap_or_default();
+                // Episodes read "S1:E2 · Name"; movies in a playlist their name, and the year.
+                let (name, episode_line) = card_text(episode);
+                let is_episode = episode.kind == BaseItemKind::Episode;
+                let heading = if is_episode { episode_line } else { name };
+                let runtime = [
+                    episode.production_year.filter(|_| !is_episode).map(|y| y.to_string()),
+                    episode.run_time_ticks.map(runtime_text),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
                 let played = is_played(episode);
                 let episode_id = episode.id.clone();
                 let selected = self.cursor.is_selected(CHILDREN, i);
@@ -508,7 +553,7 @@ impl ItemPage {
                             .flex_1()
                             .min_w_0()
                             .gap_1()
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child(subtitle))
+                            .child(div().font_weight(FontWeight::SEMIBOLD).child(heading))
                             .child(div().text_sm().text_color(cx.theme().muted_foreground).child(runtime))
                             .when_some(episode.overview.clone(), |el, overview| {
                                 el.child(div().text_sm().line_clamp(3).child(overview))
@@ -534,12 +579,12 @@ impl ItemPage {
     /// The seasons grid or episode list, if the page has one.
     fn children_section(&self, data: &ItemData, window: &Window) -> Section {
         match data.item.kind {
-            BaseItemKind::Series => {
+            BaseItemKind::Series | BaseItemKind::BoxSet => {
                 let available = window.viewport_size().width - px(48.);
                 let columns = ((available + px(CARD_GAP)) / px(POSTER_W + CARD_GAP)).floor() as usize;
                 Section::grid(data.children.len(), columns)
             }
-            BaseItemKind::Season => Section::grid(data.children.len(), 1),
+            BaseItemKind::Season | BaseItemKind::Playlist => Section::grid(data.children.len(), 1),
             _ => Section::row(0),
         }
     }
@@ -598,6 +643,11 @@ impl ItemPage {
         let (title, rows) = match item.kind {
             _ if children.len == 0 => (None, Vec::new()),
             BaseItemKind::Series => (Some("Seasons"), self.season_rows(&data.children, children.columns, cx)),
+            BaseItemKind::BoxSet => (
+                Some("In this collection"),
+                self.season_rows(&data.children, children.columns, cx),
+            ),
+            BaseItemKind::Playlist => (Some("Playlist"), self.episode_rows(&data.children, cx)),
             _ => (Some("Episodes"), self.episode_rows(&data.children, cx)),
         };
 
@@ -630,6 +680,18 @@ impl ItemPage {
     }
 }
 
+/// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
+fn shuffle<T>(items: &mut [T]) {
+    let mut state = uuid::Uuid::new_v4().as_u128() as u64 | 1;
+    for i in (1..items.len()).rev() {
+        // xorshift64
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        items.swap(i, (state % (i as u64 + 1)) as usize);
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Mark {
     Played(bool),
@@ -643,6 +705,9 @@ enum ItemAction {
     Play,
     TogglePlayed,
     ToggleFavorite,
+    /// Collections and playlists: everything in order, or shuffled.
+    PlayAll,
+    Shuffle,
 }
 
 /// The buttons under an item's title, in order.
@@ -657,6 +722,9 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
         .map(|d| d.playback_position_ticks)
         .filter(|t| t.0 > 0);
     let mut actions = match (playable, resume_at) {
+        _ if matches!(item.kind, BaseItemKind::BoxSet | BaseItemKind::Playlist) => {
+            vec![ItemAction::PlayAll, ItemAction::Shuffle]
+        }
         (false, _) => Vec::new(),
         (true, Some(position)) => vec![ItemAction::Resume(position), ItemAction::PlayFromStart],
         (true, None) => vec![ItemAction::Play],

@@ -155,6 +155,14 @@ impl SyncPlay {
         self.call(cx, |client| async move { client.syncplay_leave().await });
     }
 
+    /// Plays `items` in order for the whole group.
+    pub fn start_items(&mut self, items: &[BaseItemDto], cx: &mut Context<Self>) {
+        let ids: Vec<String> = items.iter().map(|item| item.id.clone()).collect();
+        self.call(cx, move |client| async move {
+            client.syncplay_set_queue(&ids, 0, Ticks::default()).await
+        });
+    }
+
     /// Plays `item` for the whole group, with the next episode queued after it.
     pub fn start_queue(&mut self, item: &BaseItemDto, start: Ticks, cx: &mut Context<Self>) {
         let item = item.clone();

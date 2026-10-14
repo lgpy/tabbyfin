@@ -34,6 +34,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ A library with **real metadata** (TMDb): sorting by rating, release date and runtime gives sensible orders; cast **photos** show.
 - ⬜ A person page for someone in **many** movies and shows.
 - ⬜ Favoriting from another device shows up in the Home shelf (via the live connection).
+- ⬜ **Collections and playlists** from a real library (TMDb collections, a long playlist): *Play all* and *Shuffle* go through the whole list, the up-next card names the next entry, and playing something else ends the queue.
+- ⬜ *Play all* while in a SyncPlay group plays the list for the whole group.
 
 ## 3. Transcoding (2.2.1)
 

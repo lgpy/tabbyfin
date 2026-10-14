@@ -3,6 +3,7 @@
 //! One session at a time. Starting a new one stops the current one. The session itself runs on
 //! tokio and publishes a [`NowPlaying`] entity that the player page draws and controls.
 
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use gpui_kit::*;
@@ -291,6 +292,9 @@ pub struct PlaybackManager {
     active: bool,
     /// A reconnect waiting to start after a lost stream. Stopping cancels it.
     reconnect: Option<Task<()>>,
+    /// What plays after the current item ("Play all" on a playlist or collection). Takes the
+    /// place of the next episode for the up-next card and autoplay.
+    queue: VecDeque<BaseItemDto>,
     volume: f64,
     muted: bool,
 }
@@ -311,6 +315,7 @@ impl PlaybackManager {
             generation: 0,
             active: false,
             reconnect: None,
+            queue: VecDeque::new(),
             volume,
             muted: false,
         });
@@ -350,7 +355,31 @@ impl PlaybackManager {
         );
     }
 
+    /// Plays `items` in order: the first now, the rest as a queue.
+    pub fn play_all(&mut self, items: Vec<BaseItemDto>, cx: &mut Context<Self>) {
+        let mut items = VecDeque::from(items);
+        let Some(first) = items.pop_front() else { return };
+        if let Some(syncplay) = SyncPlay::try_global(cx).filter(|s| s.read(cx).group.is_some()) {
+            let mut all = vec![first];
+            all.extend(items);
+            syncplay.update(cx, |syncplay, cx| syncplay.start_items(&all, cx));
+            return;
+        }
+        self.queue = items;
+        self.play_now(&first, PlayOptions::default(), cx);
+    }
+
     pub fn play(&mut self, item: &BaseItemDto, options: PlayOptions, cx: &mut Context<Self>) {
+        // Playing the queue's next item moves the queue on; playing anything else drops it.
+        if self.queue.front().is_some_and(|next| next.id == item.id) {
+            self.queue.pop_front();
+        } else if options.group_item.is_none() {
+            self.queue.clear();
+        }
+        self.play_now(item, options, cx);
+    }
+
+    fn play_now(&mut self, item: &BaseItemDto, options: PlayOptions, cx: &mut Context<Self>) {
         // In a SyncPlay group, starting something means giving the group a new queue; the
         // server then has every member (this one included) load it.
         if options.group_item.is_none()
@@ -376,6 +405,7 @@ impl PlaybackManager {
         let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
         let group_item = options.group_item.clone();
         let retry_options = options.clone();
+        let queued = self.queue.front().cloned();
         let (updates_tx, mut updates) = mpsc::unbounded_channel();
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
 
@@ -419,7 +449,7 @@ impl PlaybackManager {
                             volume,
                             muted,
                             versions: Vec::new(),
-                            next: None,
+                            next: queued.clone(),
                             next_cancelled: false,
                             autoplay,
                             chapters: Vec::new(),
@@ -437,7 +467,9 @@ impl PlaybackManager {
                         if let Some(entity) = &now_playing {
                             entity.update(cx, |state, cx| {
                                 state.versions = details.versions;
-                                state.next = details.next;
+                                if queued.is_none() {
+                                    state.next = details.next;
+                                }
                                 state.chapters = details.chapters;
                                 state.segments = details.segments;
                                 cx.notify();
