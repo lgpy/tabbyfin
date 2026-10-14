@@ -168,6 +168,17 @@ impl ShellView {
                 focus: None,
                 is_player: false,
             },
+            Route::Person { id, name } => Page {
+                title: name.into(),
+                view: {
+                    let source = Source::Person { id };
+                    let page = cx.new(|cx| LibraryPage::new(client, nav, source, window, cx));
+                    focus = Some(focuser(&page));
+                    page.into()
+                },
+                focus: None,
+                is_player: false,
+            },
             Route::Search => Page {
                 title: "Search".into(),
                 view: {

@@ -18,6 +18,11 @@ pub enum Route {
         id: String,
         name: String,
     },
+    /// A person's movies and shows.
+    Person {
+        id: String,
+        name: String,
+    },
     Search,
     Settings,
 }

@@ -113,9 +113,9 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
 | 3.1 | **Keyboard navigation in grids and shelves** | P1 | M | ✅ Done: a shared cursor (`browse.rs`) on Home, libraries, search and item pages. Arrow keys move it, Tab jumps between sections and Enter opens. It's hidden until a key is pressed. Left: version and track pickers, the episode rows' watched toggle and Settings still need the mouse. |
-| 3.2 | **Sorting and filters in libraries** | P2 | M | Libraries are always sorted by name. Add sort (name, date added, release date, rating, runtime, random) and filters (played/unplayed, favorites, genre, year, resolution). Remember the choice per library. |
-| 3.3 | **Favorites** | P2 | S | `UserData.IsFavorite` is in the model but unused. Add a heart toggle on item pages (`POST/DELETE /UserFavoriteItems/{id}`) and a Favorites shelf or filter. |
-| 3.4 | **Cast and crew** | P2 | M | Item pages don't show people. Add a cast row (`People` field, person images) and person pages listing their items. |
+| 3.2 | **Sorting and filters in libraries** | P2 | M | ✅ Done: sort by name, date added, release date, rating, runtime or random (ascending/descending), show all, unwatched, watched, favorites or in progress; remembered per library. Not yet: genre, year and resolution filters. |
+| 3.3 | **Favorites** | P2 | S | ✅ Done: a Favorite button on item pages (also on the keyboard cursor), a Favorites shelf on Home, and a Favorites filter in libraries. |
+| 3.4 | **Cast and crew** | P2 | M | ✅ Done: a "Cast & crew" shelf on item pages (photo or initials, role or job) and person pages listing their movies and shows, with the library sort and filter. |
 | 3.5 | **Collections and playlists** | P2 | M | BoxSets and playlists route to the generic library grid. Give them their own pages (collection overview, playlist order, "play all"). |
 | 3.6 | **Image placeholders** | P2 | S | `ImageBlurHashes` is parsed but unused. Draw the blurhash while the real image loads (§6 of the plan). |
 | 3.7 | **Item page extras** | P3 | M | Trailers (local and `RemoteTrailers`), "More like this" (`/Items/{id}/Similar`), special features, studio and tags. |
