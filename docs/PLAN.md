@@ -201,6 +201,7 @@ Video plays **inside the app** through libmpv. There's no separate mpv window an
      - PgUp/PgDn seek to chapter starts from our own list, so PgDn in the last chapter does nothing (mpv's `add chapter 1` would end the file).
    - Sessions are numbered, so when one replaces another, the old one's end doesn't close the new player.
    - The volume carries over between sessions and is saved in the config.
+   - **Network drops:** mpv's HTTP input reconnects by itself (`stream-lavf-o=reconnect=1,…`), which covers a server restart. If the stream still fails, or mpv hits EOF more than 10 s before the duration, the session ends as *lost* and the manager starts it again from that position after 2, 5 and 10 s ("Reconnecting…"), keeping the player up. Esc during the wait cancels it. Errors in the last 10 s aren't retried.
    - **Transcoding:** the server transcodes only when it won't direct play: above the *Settings → Playback → Max streaming bitrate* (sent as `MaxStreamingBitrate`), or when the user's policy forbids it.
      - The session then plays the HLS `TranscodingUrl` and reports `PlayMethod: Transcode`, and the player shows a "Transcoding" label.
      - Subtitles the server delivers as files (`DeliveryMethod: External`, embedded text ones included) are added to mpv; image subtitles are burned in (`Encode`).

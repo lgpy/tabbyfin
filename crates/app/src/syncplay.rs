@@ -306,7 +306,7 @@ impl SyncPlay {
         self.drift_task = None;
         self.timeline = None;
         if self.loaded.take().is_some() && self.now_playing.take().is_some() {
-            PlaybackManager::global(cx).update(cx, |playback, _| playback.stop());
+            PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
         }
         if self.group.is_none() {
             self.clock_task = None;
@@ -379,7 +379,7 @@ impl SyncPlay {
             CommandKind::Stop => {
                 self.loaded = None;
                 self.scheduled = None;
-                PlaybackManager::global(cx).update(cx, |playback, _| playback.stop());
+                PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
             }
         }
     }

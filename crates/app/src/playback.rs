@@ -30,6 +30,8 @@ pub enum PlaybackEvent {
     /// The session ended, normally or not. Watched state and resume points may have changed.
     Ended,
     Failed(SharedString),
+    /// Something to tell the user that isn't an error, e.g. reconnecting.
+    Notice(SharedString),
 }
 
 /// What to play. Stream indexes are Jellyfin's `MediaStream.Index`; `None` leaves the choice
@@ -287,6 +289,8 @@ pub struct PlaybackManager {
     generation: u64,
     /// A session is running (from `play` until its end is handled).
     active: bool,
+    /// A reconnect waiting to start after a lost stream. Stopping cancels it.
+    reconnect: Option<Task<()>>,
     volume: f64,
     muted: bool,
 }
@@ -306,6 +310,7 @@ impl PlaybackManager {
             stop: None,
             generation: 0,
             active: false,
+            reconnect: None,
             volume,
             muted: false,
         });
@@ -320,9 +325,12 @@ impl PlaybackManager {
         self.active
     }
 
-    /// Stops the current session, if any.
-    pub fn stop(&mut self) {
+    /// Stops the current session, if any, or a pending reconnect (closing the player).
+    pub fn stop(&mut self, cx: &mut Context<Self>) {
         self.stop = None;
+        if self.reconnect.take().is_some() {
+            cx.emit(PlaybackEvent::Ended);
+        }
     }
 
     /// Plays an item from its resume point, with default tracks (e.g. the next episode).
@@ -352,6 +360,12 @@ impl PlaybackManager {
             syncplay.update(cx, |syncplay, cx| syncplay.start_queue(item, start, cx));
             return;
         }
+        self.start_session(item, options, 0, cx);
+    }
+
+    /// Starts a session; `attempt` counts reconnects after a lost stream.
+    fn start_session(&mut self, item: &BaseItemDto, options: PlayOptions, attempt: usize, cx: &mut Context<Self>) {
+        self.reconnect = None;
         // Dropping the previous sender stops that session; it still reports its final position.
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
@@ -361,6 +375,7 @@ impl PlaybackManager {
         let (volume, muted) = (self.volume, self.muted);
         let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
         let group_item = options.group_item.clone();
+        let retry_options = options.clone();
         let (updates_tx, mut updates) = mpsc::unbounded_channel();
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
 
@@ -475,6 +490,33 @@ impl PlaybackManager {
                         tracing::info!(next = %next.name, "playing the next episode");
                         this.play_from_resume(&next, cx);
                     }
+                    // Keep the player up and try again from where it stopped.
+                    Ok(Ended::Lost { position, message })
+                        if group_item.is_none() && attempt < RECONNECT_DELAYS.len() =>
+                    {
+                        let delay = RECONNECT_DELAYS[attempt];
+                        tracing::warn!(attempt, ?delay, "stream lost: {message}");
+                        cx.emit(PlaybackEvent::Notice(
+                            "Lost the connection to the server. Reconnecting…".into(),
+                        ));
+                        let options = PlayOptions {
+                            start: Some(position),
+                            ..retry_options
+                        };
+                        let item = item.clone();
+                        this.reconnect = Some(cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(delay).await;
+                            this.update(cx, |this, cx| this.start_session(&item, options, attempt + 1, cx))
+                                .ok();
+                        }));
+                    }
+                    Ok(Ended::Lost { message, .. }) => {
+                        tracing::warn!("stream lost for good: {message}");
+                        cx.emit(PlaybackEvent::Failed(
+                            "Lost the connection to the server. Try again when it's back.".into(),
+                        ));
+                        cx.emit(PlaybackEvent::Ended);
+                    }
                     Ok(_) => cx.emit(PlaybackEvent::Ended),
                     Err(message) => {
                         tracing::warn!("playback failed: {message}");
@@ -504,7 +546,18 @@ enum Ended {
     /// Played to the end.
     Finished,
     Stopped,
+    /// The stream failed (or ended early) after playback had started, at `position`: likely
+    /// the network, so worth retrying.
+    Lost {
+        position: Ticks,
+        message: String,
+    },
 }
+
+/// Waits before each reconnect attempt after a lost stream.
+const RECONNECT_DELAYS: [Duration; 3] = [Duration::from_secs(2), Duration::from_secs(5), Duration::from_secs(10)];
+/// An end of file this long before the duration is a dropped stream, not the end.
+const EARLY_END: Duration = Duration::from_secs(10);
 
 struct Channels {
     stop: oneshot::Receiver<()>,
@@ -824,6 +877,7 @@ async fn run_session(
     let mut stopping = false;
     let mut finished = false;
     let mut error = None;
+    let mut duration = None;
     let mut ticker = tokio::time::interval(PROGRESS_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -831,6 +885,7 @@ async fn run_session(
         tokio::select! {
             event = events.recv() => {
                 let Some(event) = event else { break };
+                tracing::trace!(?event, "player event");
                 let _ = channels.updates.send(SessionUpdate::Player(event.clone()));
                 match event {
                     PlayerEvent::FileLoaded => {
@@ -845,6 +900,7 @@ async fn run_session(
                         started = true;
                     }
                     PlayerEvent::Position(position) => report.position = Ticks::from(position),
+                    PlayerEvent::Duration(length) => duration = Some(length),
                     PlayerEvent::Paused(paused) => {
                         report.is_paused = paused;
                         if started {
@@ -891,8 +947,18 @@ async fn run_session(
         report_or_log(client.stop_transcoding(id).await, "transcode stop");
     }
     tracing::info!(item = %item.name, position = report.position.as_secs_f64(), "playback ended");
+    let ended_early = duration.is_some_and(|d| Duration::from(report.position) + EARLY_END < d);
     match error {
+        // A failure right at the end isn't worth replaying from there.
+        Some(message) if started && !stopping && ended_early => Ok(Ended::Lost {
+            position: report.position,
+            message,
+        }),
         Some(error) => Err(error),
+        None if finished && ended_early => Ok(Ended::Lost {
+            position: report.position,
+            message: "the stream ended early".into(),
+        }),
         None if finished => Ok(Ended::Finished),
         None => Ok(Ended::Stopped),
     }

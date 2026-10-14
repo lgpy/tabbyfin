@@ -54,8 +54,20 @@ impl EmbeddedPlayer {
             ("input-default-bindings", "no"),
             ("idle", "once"),
             ("keep-open", "no"),
+            // Ride out short network drops: ffmpeg reconnects and resumes the HTTP stream.
+            (
+                "stream-lavf-o",
+                "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5",
+            ),
         ] {
             set_option(name, value);
+        }
+        // Dev aid: `JELLY_GPUI_MPV_OPTIONS="demuxer-max-bytes=1MiB;cache=no"` sets extra options.
+        #[cfg(debug_assertions)]
+        for option in std::env::var("JELLY_GPUI_MPV_OPTIONS").unwrap_or_default().split(';') {
+            if let Some((name, value)) = option.split_once('=') {
+                set_option(name.trim(), value.trim());
+            }
         }
         // The software renderer reads frames back from the CPU.
         set_option("hwdec", "auto-copy-safe");
