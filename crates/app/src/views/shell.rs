@@ -61,6 +61,7 @@ impl ShellView {
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
         ImageCache::init(session.client.clone(), cx);
         PlaybackManager::init(session.client.clone(), cx);
+        crate::playback::report_unfinished(&session.client);
         SyncPlay::init(session.client.clone(), cx);
         let syncplay = SyncPlay::global(cx);
         let _syncplay = vec![

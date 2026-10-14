@@ -26,9 +26,21 @@ pub struct Config {
     /// Skip intros and recaps without asking. `None` means no.
     #[serde(default)]
     pub auto_skip_intro: Option<bool>,
+    /// The playback in progress, saved every few seconds. Still set on launch means the app
+    /// didn't exit cleanly (e.g. mpv or a driver crashed), so its stop gets reported then.
+    #[serde(default)]
+    pub unfinished_playback: Option<UnfinishedPlayback>,
     /// Sort and filter per library, by library id.
     #[serde(default)]
     pub library_views: BTreeMap<String, LibraryView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnfinishedPlayback {
+    pub item_id: String,
+    pub media_source_id: String,
+    pub play_session_id: Option<String>,
+    pub position_ticks: i64,
 }
 
 /// How a library grid is sorted and filtered. Keys are the library page's own names.
