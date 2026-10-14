@@ -166,6 +166,8 @@ impl LoginView {
                         this.error = Some(message.into());
                         // Waiting to restore a saved session: keep trying until the server is back.
                         if this.resume_saved_session {
+                            this.status =
+                                Some("You'll be signed back in automatically as soon as the server answers.".into());
                             this.retry = Some(cx.spawn_in(window, async move |this, cx| {
                                 cx.background_executor().timer(RECONNECT_INTERVAL).await;
                                 this.update_in(cx, |this, window, cx| this.connect(window, cx)).ok();
