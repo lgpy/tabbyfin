@@ -78,6 +78,7 @@ Plain `cargo run` works too, with the Rust version pinned in `mise.toml` (1.99).
 - [`docs/PLAN.md`](docs/PLAN.md): architecture, Jellyfin API notes, and the dev environment.
 - [`docs/in-app-video.md`](docs/in-app-video.md): how video gets from mpv into the window on each OS.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): missing features and open work.
+- [`docs/TESTING.md`](docs/TESTING.md): what still needs testing on real hardware, servers and with other people.
 - [`third_party/gpui/PATCHES.md`](third_party/gpui/PATCHES.md): our changes to GPUI.
 
 ## License
