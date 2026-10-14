@@ -27,3 +27,8 @@ windows = { version = "0.62", features = [
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# GPU interop probe (examples/vk_interop_probe.rs). Same versions wgpu uses.
+ash = { version = "0.38", features = ["loaded"] }
+khronos-egl = { version = "6", features = ["dynamic"] }

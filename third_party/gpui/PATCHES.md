@@ -8,6 +8,7 @@ crates.io versions with `[patch.crates-io]` in the workspace `Cargo.toml`.
 |---|---|---|
 | `gpui-pre` | 0.3.9 | `SurfaceSource::SharedTexture` / `Window::paint_shared_texture` on Windows |
 | `gpui-pre-windows` | 0.3.9 | DirectX renderer draws `PaintSurface`s from shared D3D11 textures |
+| `gpui-pre-wgpu` | 0.3.9 | wgpu (Vulkan) renderer draws `PaintSurface`s from imported external memory (Linux) |
 
 Trimmed from the crates.io copies: `gpui-pre/examples/` (only used by tests) and the
 `Cargo.lock` files.
