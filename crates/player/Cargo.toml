@@ -5,7 +5,13 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+# In-window video through libmpv's software renderer (PLAN §5.4 option C, experimental).
+# libmpv is loaded at runtime, so building doesn't need it installed.
+software-render = ["dep:libloading"]
+
 [dependencies]
+libloading = { version = "0.8", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

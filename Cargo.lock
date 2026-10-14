@@ -3372,11 +3372,13 @@ dependencies = [
  "directories",
  "gethostname",
  "gpui-kit",
+ "image",
  "jellyfin",
  "keyring",
  "player",
  "serde",
  "serde_json",
+ "smallvec",
  "tokio",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
@@ -4798,6 +4800,7 @@ name = "player"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libloading",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
