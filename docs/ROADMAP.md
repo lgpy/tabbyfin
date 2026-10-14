@@ -24,10 +24,9 @@ v1 scope is mostly done:
 - **CI:** builds packages for all four targets.
 
 The big gaps:
-- **Keyboard navigation** outside the player.
-- **Release hygiene:** a log file, a license, a signed macOS build.
+- **Release hygiene:** a signed macOS build.
 - **macOS playback quality.**
-- **Testing** on hardware and servers we haven't touched (NVIDIA, Intel, real Linux GPUs, Jellyfin 10.11).
+- **Testing** on hardware and servers we haven't touched (NVIDIA, Intel, real Linux GPUs, macOS), and the app UI on Jellyfin 10.11.
 
 ---
 
@@ -113,7 +112,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 3.1 | **Keyboard navigation in grids and shelves** | P1 | M | The plan promises keyboard-first navigation, but only the player, search (`/`) and Back have keys. Add focus rings, arrow-key movement in grids and shelves, Enter to open, and Tab between sections. This is the biggest v1 gap. |
+| 3.1 | **Keyboard navigation in grids and shelves** | P1 | M | ✅ Done: a shared cursor (`browse.rs`) on Home, libraries, search and item pages. Arrow keys move it, Tab jumps between sections and Enter opens. It's hidden until a key is pressed. Left: version and track pickers, the episode rows' watched toggle and Settings still need the mouse. |
 | 3.2 | **Sorting and filters in libraries** | P2 | M | Libraries are always sorted by name. Add sort (name, date added, release date, rating, runtime, random) and filters (played/unplayed, favorites, genre, year, resolution). Remember the choice per library. |
 | 3.3 | **Favorites** | P2 | S | `UserData.IsFavorite` is in the model but unused. Add a heart toggle on item pages (`POST/DELETE /UserFavoriteItems/{id}`) and a Favorites shelf or filter. |
 | 3.4 | **Cast and crew** | P2 | M | Item pages don't show people. Add a cast row (`People` field, person images) and person pages listing their items. |

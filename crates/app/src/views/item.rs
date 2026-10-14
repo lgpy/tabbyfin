@@ -9,10 +9,11 @@ use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField};
 use jellyfin::{Client, Ticks};
 
+use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
-    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, card_text, centered_spinner, episode_label, error_state, landscape_image,
-    poster_card, remote_image, runtime_text, timestamp,
+    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, centered_spinner, episode_label, error_state,
+    landscape_image, poster_card, remote_image, runtime_text, selection_ring, timestamp,
 };
 use crate::images::ImageCache;
 use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
@@ -47,6 +48,8 @@ pub struct ItemPage {
     data: Load<ItemData>,
     pickers: Option<Pickers>,
     scroll: ScrollHandle,
+    cursor: Cursor,
+    focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -64,6 +67,8 @@ impl ItemPage {
             data: Load::Loading,
             pickers: None,
             scroll: ScrollHandle::new(),
+            cursor: Cursor::default(),
+            focus_handle: cx.focus_handle(),
             _subscriptions,
         };
         this.reload(cx);
@@ -247,53 +252,48 @@ fn is_played(item: &BaseItemDto) -> bool {
 impl ItemPage {
     /// Play / Resume buttons and the watched toggle.
     fn render_actions(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
-        let playable = matches!(
-            item.kind,
-            BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video
-        );
-        let resume_at = item
-            .user_data
-            .as_ref()
-            .map(|d| d.playback_position_ticks)
-            .filter(|t| t.0 > 0);
         let played = is_played(item);
-        let item_id = item.id.clone();
-
-        h_flex()
-            .pt_2()
-            .gap_2()
-            .when(playable, |el| match resume_at {
-                Some(position) => el
-                    .child(
-                        Button::new("resume")
-                            .primary()
-                            .icon(IconName::Play)
-                            .label(format!("Resume from {}", timestamp(position.into())))
-                            .on_click(cx.listener(move |this, _, _, cx| this.play(Some(position), cx))),
-                    )
-                    .child(
-                        Button::new("play-start")
-                            .outline()
-                            .label("Play from beginning")
-                            .on_click(cx.listener(|this, _, _, cx| this.play(None, cx))),
-                    ),
-                None => el.child(
-                    Button::new("play")
-                        .primary()
-                        .icon(IconName::Play)
-                        .label("Play")
-                        .on_click(cx.listener(|this, _, _, cx| this.play(None, cx))),
-                ),
-            })
-            .child(
-                Button::new("toggle-played")
+        let buttons = item_actions(item).into_iter().enumerate().map(|(i, action)| {
+            let button = match action {
+                ItemAction::Resume(position) => Button::new("resume")
+                    .primary()
+                    .icon(IconName::Play)
+                    .label(format!("Resume from {}", timestamp(position.into()))),
+                ItemAction::PlayFromStart => Button::new("play-start").outline().label("Play from beginning"),
+                ItemAction::Play => Button::new("play").primary().icon(IconName::Play).label("Play"),
+                ItemAction::TogglePlayed => Button::new("toggle-played")
                     .outline()
                     .icon(if played { IconName::CircleCheck } else { IconName::Check })
-                    .label(if played { "Watched" } else { "Mark watched" })
-                    .on_click(
-                        cx.listener(move |this, _, window, cx| this.set_played(item_id.clone(), !played, window, cx)),
-                    ),
-            )
+                    .label(if played { "Watched" } else { "Mark watched" }),
+            };
+            let button = button.on_click(cx.listener(move |this, _, window, cx| this.run_action(action, window, cx)));
+            // Room around the button for the keyboard cursor's ring.
+            div()
+                .relative()
+                .p(px(ACTION_RING_GAP))
+                .rounded_lg()
+                .child(button)
+                .when(self.cursor.is_selected(ACTIONS, i), |el| {
+                    el.child(selection_ring(cx).rounded_lg())
+                })
+        });
+        h_flex()
+            .pt_2()
+            .ml(px(-ACTION_RING_GAP))
+            .gap(px(8. - ACTION_RING_GAP * 2.))
+            .children(buttons)
+    }
+
+    fn run_action(&mut self, action: ItemAction, window: &mut Window, cx: &mut Context<Self>) {
+        match action {
+            ItemAction::Resume(position) => self.play(Some(position), cx),
+            ItemAction::PlayFromStart | ItemAction::Play => self.play(None, cx),
+            ItemAction::TogglePlayed => {
+                let Load::Loaded(data) = &self.data else { return };
+                let (id, played) = (data.item.id.clone(), is_played(&data.item));
+                self.set_played(id, !played, window, cx);
+            }
+        }
     }
 
     fn render_header(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
@@ -403,31 +403,42 @@ impl ItemPage {
         )
     }
 
-    fn render_seasons(&self, seasons: &[BaseItemDto], cx: &mut Context<Self>) -> impl IntoElement {
-        let cards: Vec<AnyElement> = seasons
-            .iter()
+    /// Season cards in rows of `columns`.
+    fn season_rows(&self, seasons: &[BaseItemDto], columns: usize, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        seasons
+            .chunks(columns)
             .enumerate()
-            .map(|(i, season)| {
-                let nav = self.nav.clone();
-                let target = season.clone();
-                poster_card(
-                    ("season", i),
-                    season,
-                    move |_, window, cx| nav.open(&target, window, cx),
-                    cx,
-                )
-                .into_any_element()
+            .map(|(r, row)| {
+                let cards: Vec<AnyElement> = row
+                    .iter()
+                    .enumerate()
+                    .map(|(c, season)| {
+                        let i = r * columns + c;
+                        let nav = self.nav.clone();
+                        let target = season.clone();
+                        poster_card(
+                            ("season", i),
+                            season,
+                            self.cursor.is_selected(CHILDREN, i),
+                            move |_, window, cx| nav.open(&target, window, cx),
+                            cx,
+                        )
+                        .into_any_element()
+                    })
+                    .collect();
+                h_flex()
+                    .px_6()
+                    .pb(px(CARD_GAP))
+                    .gap(px(CARD_GAP))
+                    .items_start()
+                    .children(cards)
+                    .into_any_element()
             })
-            .collect();
-        v_flex()
-            .px_6()
-            .gap_3()
-            .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child("Seasons"))
-            .child(h_flex().flex_wrap().gap(px(CARD_GAP)).children(cards))
+            .collect()
     }
 
-    fn render_episodes(&self, episodes: &[BaseItemDto], cx: &mut Context<Self>) -> impl IntoElement {
-        let rows: Vec<AnyElement> = episodes
+    fn episode_rows(&self, episodes: &[BaseItemDto], cx: &mut Context<Self>) -> Vec<AnyElement> {
+        episodes
             .iter()
             .enumerate()
             .map(|(i, episode)| {
@@ -441,14 +452,17 @@ impl ItemPage {
                 let runtime = episode.run_time_ticks.map(runtime_text).unwrap_or_default();
                 let played = is_played(episode);
                 let episode_id = episode.id.clone();
-                h_flex()
+                let selected = self.cursor.is_selected(CHILDREN, i);
+                let row = h_flex()
                     .id(("episode", i))
+                    .relative()
                     .items_start()
                     .gap_4()
                     .p_2()
                     .rounded_md()
                     .cursor_pointer()
                     .hover(|style| style.bg(cx.theme().muted))
+                    .when(selected, |el| el.bg(cx.theme().muted))
                     .on_click(move |_, window, cx| nav.open(&target, window, cx))
                     .child(
                         div()
@@ -482,25 +496,31 @@ impl ItemPage {
                                 this.set_played(episode_id.clone(), !played, window, cx);
                             })),
                     )
-                    .into_any_element()
+                    .when(selected, |el| el.child(selection_ring(cx)));
+                div().px_4().pb_1().child(row).into_any_element()
             })
-            .collect();
-        v_flex()
-            .px_4()
-            .gap_1()
-            .child(
-                div()
-                    .px_2()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Episodes"),
-            )
-            .children(rows)
+            .collect()
     }
-}
 
-impl Render for ItemPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The seasons grid or episode list, if the page has one.
+    fn children_section(&self, data: &ItemData, window: &Window) -> Section {
+        match data.item.kind {
+            BaseItemKind::Series => {
+                let available = window.viewport_size().width - px(48.);
+                let columns = ((available + px(CARD_GAP)) / px(POSTER_W + CARD_GAP)).floor() as usize;
+                Section::grid(data.children.len(), columns)
+            }
+            BaseItemKind::Season => Section::grid(data.children.len(), 1),
+            _ => Section::row(0),
+        }
+    }
+
+    /// Scroll-container child index of the children's title.
+    fn children_title_index(&self) -> usize {
+        1 + usize::from(self.pickers.is_some())
+    }
+
+    fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.ensure_pickers(window, cx);
         let data = match &self.data {
             Load::Loading => return centered_spinner().into_any_element(),
@@ -514,25 +534,123 @@ impl Render for ItemPage {
             Load::Loaded(data) => data,
         };
         let item = &data.item;
+        let children = self.children_section(data, window);
+        let (title, rows) = match item.kind {
+            _ if children.len == 0 => (None, Vec::new()),
+            BaseItemKind::Series => (Some("Seasons"), self.season_rows(&data.children, children.columns, cx)),
+            _ => (Some("Episodes"), self.episode_rows(&data.children, cx)),
+        };
 
-        div()
+        // The header, pickers, title and rows are the scroll container's direct children,
+        // for `browse::reveal` (see `children_title_index`).
+        v_flex()
             .id("item")
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .child(
-                v_flex()
-                    .pb_8()
-                    .gap_6()
-                    .child(self.render_header(item, cx))
-                    .children(self.render_pickers(cx))
-                    .when(item.kind == BaseItemKind::Series && !data.children.is_empty(), |el| {
-                        el.child(self.render_seasons(&data.children, cx))
-                    })
-                    .when(item.kind == BaseItemKind::Season && !data.children.is_empty(), |el| {
-                        el.child(self.render_episodes(&data.children, cx))
-                    }),
-            )
+            .pb_8()
+            .child(self.render_header(item, cx))
+            .children(self.render_pickers(cx).map(|pickers| div().pt_6().child(pickers)))
+            .when_some(title, |el, title| {
+                el.child(
+                    div()
+                        .px_6()
+                        .pt_6()
+                        .pb_3()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(title),
+                )
+            })
+            .children(rows)
             .into_any_element()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ItemAction {
+    Resume(Ticks),
+    PlayFromStart,
+    Play,
+    TogglePlayed,
+}
+
+/// The buttons under an item's title, in order.
+fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
+    let playable = matches!(
+        item.kind,
+        BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video
+    );
+    let resume_at = item
+        .user_data
+        .as_ref()
+        .map(|d| d.playback_position_ticks)
+        .filter(|t| t.0 > 0);
+    let mut actions = match (playable, resume_at) {
+        (false, _) => Vec::new(),
+        (true, Some(position)) => vec![ItemAction::Resume(position), ItemAction::PlayFromStart],
+        (true, None) => vec![ItemAction::Play],
+    };
+    actions.push(ItemAction::TogglePlayed);
+    actions
+}
+
+/// Cursor sections: the action buttons, then the seasons or episodes.
+const ACTIONS: usize = 0;
+const CHILDREN: usize = 1;
+/// Padding around each action button, where the cursor's ring goes.
+const ACTION_RING_GAP: f32 = 3.;
+
+impl Browse for ItemPage {
+    fn cursor(&mut self) -> &mut Cursor {
+        &mut self.cursor
+    }
+
+    fn sections(&self, window: &Window, _cx: &App) -> Vec<Section> {
+        let Load::Loaded(data) = &self.data else {
+            return Vec::new();
+        };
+        vec![
+            Section::row(item_actions(&data.item).len()),
+            self.children_section(data, window),
+        ]
+    }
+
+    fn reveal(&mut self, position: Position, window: &mut Window, _cx: &mut Context<Self>) {
+        if position.section == ACTIONS {
+            self.scroll.set_offset(point(px(0.), px(0.)));
+            return;
+        }
+        let Load::Loaded(data) = &self.data else { return };
+        let title = self.children_title_index();
+        let row = position.index / self.children_section(data, window).columns;
+        if row == 0 {
+            browse::reveal(&self.scroll, title, px(0.));
+        }
+        browse::reveal(&self.scroll, title + 1 + row, px(CARD_GAP));
+    }
+
+    fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
+        let Load::Loaded(data) = &self.data else { return };
+        if position.section == ACTIONS {
+            if let Some(&action) = item_actions(&data.item).get(position.index) {
+                self.run_action(action, window, cx);
+            }
+        } else if let Some(child) = data.children.get(position.index) {
+            self.nav.open(child, window, cx);
+        }
+    }
+}
+
+impl Focusable for ItemPage {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for ItemPage {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = self.render_content(window, cx);
+        on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(content)
     }
 }

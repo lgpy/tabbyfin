@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app_view;
+mod browse;
 mod changes;
 mod components;
 mod config;
@@ -111,6 +112,7 @@ fn main() {
                 KeyBinding::new("f", ToggleFullscreen, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("escape", ExitPlayer, Some(player::KEY_CONTEXT)),
             ]);
+            cx.bind_keys(browse::key_bindings());
 
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1280.), px(800.)), cx)),

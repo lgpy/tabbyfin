@@ -2,7 +2,7 @@
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ImageType};
@@ -137,11 +137,23 @@ fn progress_bar(fraction: f32, cx: &App) -> impl IntoElement {
         .child(div().h_full().w(relative(fraction)).bg(cx.theme().primary))
 }
 
+/// The keyboard cursor's highlight, drawn over its parent's edge (inside, so scrolling
+/// containers don't clip it). The parent must be `relative` and rounded like this.
+pub fn selection_ring(cx: &App) -> Div {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded_md()
+        .border_3()
+        .border_color(cx.theme().foreground)
+}
+
 fn card(
     id: ElementId,
     item: &BaseItemDto,
     (width, height): (f32, f32),
     image: Option<ImageRequest>,
+    selected: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut App,
 ) -> Stateful<Div> {
@@ -167,7 +179,8 @@ fn card(
                 .hover(|style| style.opacity(0.8))
                 .child(image)
                 .when(played, |el| el.child(played_badge(cx)))
-                .when_some(progress, |el, fraction| el.child(progress_bar(fraction, cx))),
+                .when_some(progress, |el, fraction| el.child(progress_bar(fraction, cx)))
+                .when(selected, |el| el.child(selection_ring(cx))),
         )
         .child(div().text_sm().truncate().child(title))
         .child(
@@ -182,21 +195,31 @@ fn card(
 pub fn poster_card(
     id: impl Into<ElementId>,
     item: &BaseItemDto,
+    selected: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut App,
 ) -> Stateful<Div> {
     let image = item.primary_image().map(|r| r.fill_width((POSTER_W * 2.) as u32));
-    card(id.into(), item, (POSTER_W, POSTER_H), image, on_click, cx)
+    card(id.into(), item, (POSTER_W, POSTER_H), image, selected, on_click, cx)
 }
 
 pub fn landscape_card(
     id: impl Into<ElementId>,
     item: &BaseItemDto,
+    selected: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut App,
 ) -> Stateful<Div> {
     let image = landscape_image(item).map(|r| r.fill_width((LANDSCAPE_W * 2.) as u32));
-    card(id.into(), item, (LANDSCAPE_W, LANDSCAPE_H), image, on_click, cx)
+    card(
+        id.into(),
+        item,
+        (LANDSCAPE_W, LANDSCAPE_H),
+        image,
+        selected,
+        on_click,
+        cx,
+    )
 }
 
 /// Grey card used while a grid page is still loading.
@@ -209,11 +232,13 @@ pub fn placeholder_card(cx: &App) -> impl IntoElement {
         .child(div().h(px(CARD_TEXT_H - 4.)))
 }
 
-/// A titled, horizontally scrolling row of cards.
+/// A titled, horizontally scrolling row of cards. The cards are the direct children of
+/// `scroll`, so [`crate::browse::reveal`] can scroll to them.
 pub fn shelf(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
     cards: Vec<AnyElement>,
+    scroll: &ScrollHandle,
     cx: &App,
 ) -> impl IntoElement {
     v_flex()
@@ -229,8 +254,13 @@ pub fn shelf(
         .child(
             div()
                 .id(id)
+                .flex()
+                .px_6()
+                .pb_2()
+                .gap(px(CARD_GAP))
                 .overflow_x_scroll()
-                .child(h_flex().px_6().pb_2().gap(px(CARD_GAP)).children(cards)),
+                .track_scroll(scroll)
+                .children(cards),
         )
 }
 

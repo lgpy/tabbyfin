@@ -238,7 +238,13 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
   - Decode off the main thread and hand the result to GPUI.
   - Show a placeholder from `ImageBlurHashes` while the real image loads.
 - **Keyboard:**
-  - Define GPUI `actions!` with a keymap: arrow keys and Enter to navigate, Backspace or Esc to go back, `/` to search.
+  - Define GPUI `actions!` with a keymap: Backspace, Esc or Alt+← to go back, Ctrl+F (⌘F) to search.
+  - Browsing pages (`browse.rs`) share one keyboard cursor over sections of cards: Home shelves, the library grid, search result groups, and an item page's buttons followed by its seasons or episodes.
+    - The arrow keys move it, Tab and Shift+Tab jump between sections, and Enter opens the card or presses the button.
+    - It's hidden until a key is pressed and hides again on a click, so mouse users never see it.
+    - Each page keeps its cursor while it's on the stack, so Back returns to the same card.
+    - In search, Enter in the box moves to the first result, and Up from the top row returns to the box.
+    - Version and track pickers aren't on the cursor yet.
   - In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N plays the next episode, F toggles fullscreen and Esc leaves fullscreen, then the player.
 - **Theme:**
   - GPUI Kit's theme system, defaulting to dark.
@@ -295,6 +301,7 @@ sudo apt install build-essential pkg-config libmpv2 \
   - `JELLY_GPUI_VIDEO=software` forces software video and `=gpu` forces the GPU path, even on software OpenGL, to compare the two. Both work on Linux too.
   - The script also fetches ANGLE next to the exe. Delete `libEGL.dll` there to try the WGL path.
   - `JELLY_GPUI_ROUTE=play:<id>:::<media source id>` plays a specific version, e.g. the 4K HEVC 10-bit one that `dev/make-media.sh` adds to Test Movie.
+- `JELLY_GPUI_KEYS="down right enter wait escape"` (debug builds) presses keys inside the app 3 s after sign-in, 250 ms apart; `wait` pauses for a second. Together with a screenshot (`import -window <id>` under X11), it tests keyboard navigation without touching the desktop's real keyboard or mouse.
 - GPUI on WSL2 runs through WSLg (`WAYLAND_DISPLAY=wayland-0` is set). It needs a working Vulkan driver, such as mesa `dzn` or llvmpipe.
 - Run `vulkaninfo --summary` before debugging rendering problems.
 - If WSLg rendering is poor, use a native Windows build for daily UI work. GPUI supports Windows directly.
