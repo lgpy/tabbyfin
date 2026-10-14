@@ -4,6 +4,8 @@ description = "Desktop Jellyfin client built with GPUI"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 jellyfin.workspace = true
@@ -20,6 +22,7 @@ tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tracing-appender.workspace = true
 uuid.workspace = true
 # Video frames are handed to GPUI as RenderImages.
 image = { version = "0.25", default-features = false }
@@ -32,8 +35,9 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 
 
 [package.metadata.deb]
-maintainer = "jelly-gpui developers"
-copyright = "jelly-gpui developers"
+maintainer = "lgpy <lgpy17@gmail.com>"
+copyright = "2026, lgpy <lgpy17@gmail.com>"
+license-file = ["../../LICENSE", "0"]
 section = "video"
 # Playback uses the system libmpv. libmpv, Vulkan and Wayland are loaded at runtime, so
 # `$auto` can't see them.
