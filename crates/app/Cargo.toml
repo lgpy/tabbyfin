@@ -28,6 +28,8 @@ uuid.workspace = true
 # Video frames are handed to GPUI as RenderImages.
 image = { version = "0.25", default-features = false }
 smallvec = "1"
+# Placeholders for images still loading (`ImageBlurHashes`).
+blurhash = { version = "0.2", default-features = false }
 
 # Debug builds of gpui-kit's icons would otherwise be read from their build-time path, which
 # doesn't exist when a Windows build is cross-compiled from Linux (dev/win-run.sh).

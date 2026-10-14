@@ -3,6 +3,9 @@
 //! Views call [`ImageCache::get`] while rendering. A miss starts a background load (disk first,
 //! then network) and returns `None`. When the load finishes the cache notifies its observers,
 //! so views that render images observe the global cache entity.
+//!
+//! While an image loads, its blurhash (from the item's `ImageBlurHashes`) is drawn instead:
+//! a tiny blurred preview decoded in memory.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +21,12 @@ pub struct ImageCache {
     client: Client,
     dir: PathBuf,
     entries: HashMap<ImageRequest, Entry>,
+    /// Decoded blurhashes, by hash.
+    placeholders: HashMap<String, Option<Arc<RenderImage>>>,
 }
+
+/// Blurhash previews are decoded at this size and scaled up (they're blurry by design).
+const PLACEHOLDER_SIZE: u32 = 32;
 
 enum Entry {
     Loading,
@@ -37,6 +45,7 @@ impl ImageCache {
             client,
             dir: crate::config::cache_dir().join("images"),
             entries: HashMap::new(),
+            placeholders: HashMap::new(),
         });
         cx.set_global(GlobalImageCache(cache));
     }
@@ -48,6 +57,14 @@ impl ImageCache {
     /// Drops loaded images from memory. They reload from disk or the server when next shown.
     pub fn clear_memory(&mut self) {
         self.entries.retain(|_, entry| matches!(entry, Entry::Loading));
+    }
+
+    /// The blurred preview for a blurhash, or `None` if it doesn't decode.
+    pub fn placeholder(&mut self, hash: &str) -> Option<Arc<RenderImage>> {
+        self.placeholders
+            .entry(hash.to_owned())
+            .or_insert_with(|| decode_blurhash(hash))
+            .clone()
     }
 
     /// Returns the image if it's loaded, otherwise starts loading it and returns `None`.
@@ -81,6 +98,19 @@ impl ImageCache {
         .detach();
         None
     }
+}
+
+fn decode_blurhash(hash: &str) -> Option<Arc<RenderImage>> {
+    let size = PLACEHOLDER_SIZE;
+    let mut pixels = blurhash::decode(hash, size, size, 1.).ok()?;
+    // GPUI wants BGRA.
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+    }
+    let buffer = image::RgbaImage::from_raw(size, size, pixels)?;
+    Some(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
+        buffer
+    )])))
 }
 
 async fn load(client: &Client, req: &ImageRequest, path: &Path) -> anyhow::Result<Image> {

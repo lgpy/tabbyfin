@@ -25,11 +25,24 @@ pub enum Load<T> {
     Failed(SharedString),
 }
 
-/// An image filling its parent, or nothing while it loads (the parent's background shows).
-pub fn remote_image(req: Option<ImageRequest>, cx: &mut App) -> AnyElement {
-    let image = req.and_then(|req| ImageCache::global(cx).update(cx, |cache, cx| cache.get(&req, cx)));
-    match image {
-        Some(image) => img(image).size_full().object_fit(ObjectFit::Cover).into_any_element(),
+/// An image filling its parent. While it loads, its blurhash from `item` if there is one, or
+/// nothing (the parent's background shows).
+pub fn remote_image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, cx: &mut App) -> AnyElement {
+    let Some(req) = req else {
+        return div().size_full().into_any_element();
+    };
+    let cache = ImageCache::global(cx);
+    if let Some(image) = cache.update(cx, |cache, cx| cache.get(&req, cx)) {
+        return img(image).size_full().object_fit(ObjectFit::Cover).into_any_element();
+    }
+    let hash = item
+        .zip(req.tag.as_deref())
+        .and_then(|(item, tag)| item.blur_hash(req.image_type, tag));
+    match hash.and_then(|hash| cache.update(cx, |cache, _| cache.placeholder(hash))) {
+        Some(preview) => img(ImageSource::Render(preview))
+            .size_full()
+            .object_fit(ObjectFit::Cover)
+            .into_any_element(),
         None => div().size_full().into_any_element(),
     }
 }
@@ -160,7 +173,7 @@ fn card(
     let (title, subtitle) = card_text(item);
     let played = is_played(item);
     let progress = progress(item);
-    let image = remote_image(image, cx);
+    let image = remote_image(image, Some(item), cx);
     v_flex()
         .id(id)
         .w(px(width))
@@ -238,7 +251,7 @@ pub fn person_card(
         .clone()
         .map(|tag| ImageRequest::new(&person.id, ImageType::Primary, Some(tag)).fill_width((PERSON_W * 2.) as u32));
     let has_photo = photo.is_some();
-    let photo = remote_image(photo, cx);
+    let photo = remote_image(photo, None, cx);
     let initials: String = person
         .name
         .split_whitespace()

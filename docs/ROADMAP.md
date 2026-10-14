@@ -117,7 +117,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 | 3.3 | **Favorites** | P2 | S | ✅ Done: a Favorite button on item pages (also on the keyboard cursor), a Favorites shelf on Home, and a Favorites filter in libraries. |
 | 3.4 | **Cast and crew** | P2 | M | ✅ Done: a "Cast & crew" shelf on item pages (photo or initials, role or job) and person pages listing their movies and shows, with the library sort and filter. |
 | 3.5 | **Collections and playlists** | P2 | M | BoxSets and playlists route to the generic library grid. Give them their own pages (collection overview, playlist order, "play all"). |
-| 3.6 | **Image placeholders** | P2 | S | `ImageBlurHashes` is parsed but unused. Draw the blurhash while the real image loads (§6 of the plan). |
+| 3.6 | **Image placeholders** | P2 | S | ✅ Done: cards, posters, backdrops and episode stills show their blurhash (decoded at 32×32 and scaled up) while the image loads. |
 | 3.7 | **Item page extras** | P3 | M | Trailers (local and `RemoteTrailers`), "More like this" (`/Items/{id}/Similar`), special features, studio and tags. |
 | 3.8 | **Home customisation** | P3 | S | Respect the user's Home screen settings from the server (section order, hidden libraries), or offer our own toggles. |
 | 3.9 | **Alphabet jump in long libraries** | P3 | S | A side bar of letters using `NameStartsWith`. |
