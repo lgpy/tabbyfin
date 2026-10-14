@@ -134,6 +134,8 @@ We use the user-scoped routes without a userId, such as `/UserViews` and `/Items
 
 ### 4.3 Other 12.x behavior changes to handle
 
+- **Direct play needs subtitle profiles (12.2):** a `PlaybackInfo` device profile without `SubtitleProfiles` gets `SupportsDirectPlay: false` on every source in 12.2 (10.11 still allows direct play). The app's profile always lists them. Found while capturing test fixtures.
+
 Source: the 12.0 release notes, plus 12.1 and 12.2, which only contained bug fixes.
 
 | Change | What we do |

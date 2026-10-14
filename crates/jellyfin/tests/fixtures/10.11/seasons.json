@@ -1,0 +1,86 @@
+{
+  "Items": [
+    {
+      "BackdropImageTags": [],
+      "ChannelId": null,
+      "Id": "0173092548b085805d91ffea12e3fb36",
+      "ImageBlurHashes": {
+        "Backdrop": {
+          "3538c0d6618f448e5d102865fa315f1f": "W49[9W.4M{%vxt.O_IoeWBodoeoyM{ayxtofM|Rj?;odt7oyRkbE"
+        },
+        "Primary": {
+          "550c4135c334bca23b212c4956f1c5ba": "d75Rz:uefQueptkBfQkBfQfQfQfQptkBfQkBfQfQfQfQ",
+          "8ee4df0d456bc0fdfaba550196c332e0": "d303uThVfQhVg]f%fQf%fQfQfQfQg]f%fQf%fQfQfQfQ"
+        }
+      },
+      "ImageTags": {
+        "Primary": "550c4135c334bca23b212c4956f1c5ba"
+      },
+      "IndexNumber": 1,
+      "IsFolder": true,
+      "LocationType": "FileSystem",
+      "MediaType": "Unknown",
+      "Name": "Season 1",
+      "ParentBackdropImageTags": [
+        "3538c0d6618f448e5d102865fa315f1f"
+      ],
+      "ParentBackdropItemId": "129db440ee6554a42e5d8f1350516bab",
+      "SeriesId": "129db440ee6554a42e5d8f1350516bab",
+      "SeriesName": "Test Show",
+      "SeriesPrimaryImageTag": "8ee4df0d456bc0fdfaba550196c332e0",
+      "ServerId": "002fe86af53e4f8b9fdfa8b24682a1bf",
+      "Type": "Season",
+      "UserData": {
+        "IsFavorite": false,
+        "ItemId": "0173092548b085805d91ffea12e3fb36",
+        "Key": "129db440-ee65-54a4-2e5d-8f1350516bab001",
+        "PlayCount": 0,
+        "PlaybackPositionTicks": 0,
+        "Played": false,
+        "UnplayedItemCount": 3
+      }
+    },
+    {
+      "BackdropImageTags": [],
+      "ChannelId": null,
+      "Id": "4a64cab37fa47954742340981c2d7064",
+      "ImageBlurHashes": {
+        "Backdrop": {
+          "3538c0d6618f448e5d102865fa315f1f": "W49[9W.4M{%vxt.O_IoeWBodoeoyM{ayxtofM|Rj?;odt7oyRkbE"
+        },
+        "Primary": {
+          "8197143c455c4a7aef38d906dacee438": "d75Rz:uefQueptkBfQkBfQfQfQfQptkBfQkBfQfQfQfQ",
+          "8ee4df0d456bc0fdfaba550196c332e0": "d303uThVfQhVg]f%fQf%fQfQfQfQg]f%fQf%fQfQfQfQ"
+        }
+      },
+      "ImageTags": {
+        "Primary": "8197143c455c4a7aef38d906dacee438"
+      },
+      "IndexNumber": 2,
+      "IsFolder": true,
+      "LocationType": "FileSystem",
+      "MediaType": "Unknown",
+      "Name": "Season 2",
+      "ParentBackdropImageTags": [
+        "3538c0d6618f448e5d102865fa315f1f"
+      ],
+      "ParentBackdropItemId": "129db440ee6554a42e5d8f1350516bab",
+      "SeriesId": "129db440ee6554a42e5d8f1350516bab",
+      "SeriesName": "Test Show",
+      "SeriesPrimaryImageTag": "8ee4df0d456bc0fdfaba550196c332e0",
+      "ServerId": "002fe86af53e4f8b9fdfa8b24682a1bf",
+      "Type": "Season",
+      "UserData": {
+        "IsFavorite": false,
+        "ItemId": "4a64cab37fa47954742340981c2d7064",
+        "Key": "129db440-ee65-54a4-2e5d-8f1350516bab002",
+        "PlayCount": 0,
+        "PlaybackPositionTicks": 0,
+        "Played": false,
+        "UnplayedItemCount": 2
+      }
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 2
+}
