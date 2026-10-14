@@ -9,6 +9,7 @@ use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemSortBy};
 use jellyfin::{Client, ItemsQuery, SortOrder};
 
+use crate::browse::{Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
     CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_message, centered_spinner, error_state, placeholder_card,
@@ -32,6 +33,8 @@ pub struct LibraryPage {
     pages_requested: HashSet<usize>,
     error: Option<SharedString>,
     scroll: UniformListScrollHandle,
+    cursor: Cursor,
+    focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -69,6 +72,8 @@ impl LibraryPage {
             pages_requested: HashSet::new(),
             error: None,
             scroll: UniformListScrollHandle::new(),
+            cursor: Cursor::default(),
+            focus_handle: cx.focus_handle(),
             _subscriptions: vec![
                 cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
                 cx.subscribe(&Changes::global(cx), |this, _, _: &UserDataChanged, cx| {
@@ -150,6 +155,7 @@ impl LibraryPage {
                         poster_card(
                             ("item", index),
                             item,
+                            self.cursor.is_selected(0, index),
                             move |_, window, cx| nav.open(&target, window, cx),
                             cx,
                         )
@@ -170,8 +176,48 @@ impl LibraryPage {
     }
 }
 
+/// Cards per row at the window's current width.
+fn columns(window: &Window) -> usize {
+    let available = window.viewport_size().width - px(GRID_PADDING * 2.);
+    ((available + px(CARD_GAP)) / px(POSTER_W + CARD_GAP)).floor().max(1.) as usize
+}
+
+impl Browse for LibraryPage {
+    fn cursor(&mut self) -> &mut Cursor {
+        &mut self.cursor
+    }
+
+    fn sections(&self, window: &Window, _cx: &App) -> Vec<Section> {
+        vec![Section::grid(self.total.unwrap_or(0), columns(window))]
+    }
+
+    fn reveal(&mut self, position: Position, window: &mut Window, _cx: &mut Context<Self>) {
+        self.scroll
+            .scroll_to_item(position.index / columns(window), ScrollStrategy::Nearest);
+    }
+
+    fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(Some(item)) = self.items.get(position.index) {
+            self.nav.open(item, window, cx);
+        }
+    }
+}
+
+impl Focusable for LibraryPage {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
 impl Render for LibraryPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = self.render_content(window, cx);
+        on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(content)
+    }
+}
+
+impl LibraryPage {
+    fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(total) = self.total else {
             return match &self.error {
                 Some(error) => {
@@ -184,8 +230,7 @@ impl Render for LibraryPage {
             return centered_message("Nothing here yet.", cx).into_any_element();
         }
 
-        let available = window.viewport_size().width - px(GRID_PADDING * 2.);
-        let columns = ((available + px(CARD_GAP)) / px(POSTER_W + CARD_GAP)).floor().max(1.) as usize;
+        let columns = columns(window);
         let rows = total.div_ceil(columns);
 
         uniform_list(

@@ -5,8 +5,9 @@ use gpui_kit::*;
 use jellyfin::Client;
 use jellyfin::models::{BaseItemDto, CollectionType, ItemField};
 
+use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
-use crate::components::{Load, centered_message, centered_spinner, error_state, landscape_card, poster_card, shelf};
+use crate::components::{Load, centered_message, centered_spinner, error_state, landscape_card, poster_card};
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
@@ -27,6 +28,10 @@ pub struct HomePage {
     nav: Navigator,
     data: Load<HomeData>,
     scroll: ScrollHandle,
+    /// One per shelf, in display order.
+    shelf_scrolls: Vec<ScrollHandle>,
+    cursor: Cursor,
+    focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -42,6 +47,9 @@ impl HomePage {
             nav,
             data: Load::Loading,
             scroll: ScrollHandle::new(),
+            shelf_scrolls: Vec::new(),
+            cursor: Cursor::default(),
+            focus_handle: cx.focus_handle(),
             _subscriptions,
         };
         this.reload(cx);
@@ -92,28 +100,63 @@ async fn load(client: Client) -> jellyfin::Result<HomeData> {
     })
 }
 
+/// One row of cards on the page, in display order.
+struct Shelf<'a> {
+    id: ElementId,
+    title: SharedString,
+    items: &'a [BaseItemDto],
+    landscape: bool,
+}
+
+fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
+    let fixed = [
+        ("views", "My Media", &data.views),
+        ("resume", "Continue Watching", &data.resume),
+        ("next-up", "Next Up", &data.next_up),
+    ];
+    let fixed = fixed.into_iter().map(|(id, title, items)| Shelf {
+        id: id.into(),
+        title: title.into(),
+        items,
+        landscape: true,
+    });
+    let latest = data.latest.iter().enumerate().map(|(i, (view, items))| Shelf {
+        id: ("latest", i).into(),
+        title: format!("Latest {}", view.name).into(),
+        items,
+        landscape: false,
+    });
+    fixed.chain(latest).filter(|shelf| !shelf.items.is_empty()).collect()
+}
+
 impl HomePage {
-    fn cards(&self, prefix: &'static str, items: &[BaseItemDto], landscape: bool, cx: &mut App) -> Vec<AnyElement> {
-        items
+    fn cards(&self, section: usize, shelf: &Shelf, cx: &mut App) -> Vec<AnyElement> {
+        shelf
+            .items
             .iter()
             .enumerate()
             .map(|(i, item)| {
                 let nav = self.nav.clone();
                 let target = item.clone();
                 let on_click = move |_: &ClickEvent, window: &mut Window, cx: &mut App| nav.open(&target, window, cx);
-                let id = (SharedString::from(prefix), i);
-                if landscape {
-                    landscape_card(id, item, on_click, cx).into_any_element()
+                let selected = self.cursor.is_selected(section, i);
+                if shelf.landscape {
+                    landscape_card(i, item, selected, on_click, cx).into_any_element()
                 } else {
-                    poster_card(id, item, on_click, cx).into_any_element()
+                    poster_card(i, item, selected, on_click, cx).into_any_element()
                 }
             })
             .collect()
     }
-}
 
-impl Render for HomePage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let count = match &self.data {
+            Load::Loaded(data) => shelves(data).len(),
+            _ => 0,
+        };
+        if self.shelf_scrolls.len() < count {
+            self.shelf_scrolls.resize_with(count, ScrollHandle::new);
+        }
         let data = match &self.data {
             Load::Loading => return centered_spinner().into_any_element(),
             Load::Failed(message) => {
@@ -126,39 +169,72 @@ impl Render for HomePage {
             Load::Loaded(data) => data,
         };
 
-        let mut sections: Vec<AnyElement> = Vec::new();
-        if !data.views.is_empty() {
-            let cards = self.cards("view", &data.views, true, cx);
-            sections.push(shelf("views", "My Media", cards, cx).into_any_element());
-        }
-        if !data.resume.is_empty() {
-            let cards = self.cards("resume", &data.resume, true, cx);
-            sections.push(shelf("resume", "Continue Watching", cards, cx).into_any_element());
-        }
-        if !data.next_up.is_empty() {
-            let cards = self.cards("next-up", &data.next_up, true, cx);
-            sections.push(shelf("next-up", "Next Up", cards, cx).into_any_element());
-        }
-        for (i, (view, items)) in data.latest.iter().enumerate() {
-            let cards = self.cards("latest", items, false, cx);
-            sections.push(shelf(("latest", i), format!("Latest {}", view.name), cards, cx).into_any_element());
-        }
+        let sections: Vec<AnyElement> = shelves(data)
+            .iter()
+            .enumerate()
+            .map(|(s, shelf)| {
+                let cards = self.cards(s, shelf, cx);
+                crate::components::shelf(shelf.id.clone(), shelf.title.clone(), cards, &self.shelf_scrolls[s], cx)
+                    .into_any_element()
+            })
+            .collect();
         if sections.is_empty() {
             return centered_message("Your server has no libraries yet.", cx).into_any_element();
         }
 
-        div()
+        // The shelves are the scroll container's direct children, for `browse::reveal`.
+        v_flex()
             .id("home")
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .child(
-                v_flex()
-                    .py_6()
-                    .gap_8()
-                    .text_color(cx.theme().foreground)
-                    .children(sections),
-            )
+            .py_6()
+            .gap_8()
+            .text_color(cx.theme().foreground)
+            .children(sections)
             .into_any_element()
+    }
+}
+
+impl Browse for HomePage {
+    fn cursor(&mut self) -> &mut Cursor {
+        &mut self.cursor
+    }
+
+    fn sections(&self, _window: &Window, _cx: &App) -> Vec<Section> {
+        match &self.data {
+            Load::Loaded(data) => shelves(data).iter().map(|s| Section::row(s.items.len())).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn reveal(&mut self, position: Position, _window: &mut Window, _cx: &mut Context<Self>) {
+        browse::reveal(&self.scroll, position.section, px(24.));
+        if let Some(scroll) = self.shelf_scrolls.get(position.section) {
+            browse::reveal(scroll, position.index, px(24.));
+        }
+    }
+
+    fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
+        let Load::Loaded(data) = &self.data else { return };
+        if let Some(item) = shelves(data)
+            .get(position.section)
+            .and_then(|shelf| shelf.items.get(position.index))
+        {
+            self.nav.open(item, window, cx);
+        }
+    }
+}
+
+impl Focusable for HomePage {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for HomePage {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = self.render_content(cx);
+        on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(content)
     }
 }

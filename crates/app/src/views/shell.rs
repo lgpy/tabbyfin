@@ -3,6 +3,8 @@
 //! Pages stay alive while they're on the stack, so going back keeps their data and scroll
 //! position.
 
+use std::rc::Rc;
+
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme, Disableable, IconName, WindowExt, h_flex, v_flex};
@@ -33,6 +35,8 @@ pub enum ShellEvent {
 struct Page {
     title: SharedString,
     view: AnyView,
+    /// What takes keyboard focus when the page is on top; the shell itself if `None`.
+    focus: Option<Focuser>,
     /// The embedded player: full window, no top bar; leaving it stops playback.
     is_player: bool,
 }
@@ -100,19 +104,24 @@ impl ShellView {
             }
             this.push(route, window, cx);
         }
+        #[cfg(debug_assertions)]
+        replay_debug_keys(window, cx);
         this
     }
 
     pub fn push(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
-        // Keep keyboard shortcuts working after clicks moved focus elsewhere. Done before
-        // creating the page so pages can take focus themselves (e.g. the search box).
-        self.focus_handle.focus(window, cx);
         let nav = Navigator::new(cx.entity().downgrade());
         let client = self.session.client.clone();
+        let mut focus = None;
         let page = match route {
             Route::Home => Page {
                 title: "Home".into(),
-                view: cx.new(|cx| HomePage::new(client, nav, cx)).into(),
+                view: {
+                    let page = cx.new(|cx| HomePage::new(client, nav, cx));
+                    focus = Some(focuser(&page));
+                    page.into()
+                },
+                focus: None,
                 is_player: false,
             },
             Route::Library {
@@ -121,29 +130,53 @@ impl ShellView {
                 collection_type,
             } => Page {
                 title: name.into(),
-                view: cx
-                    .new(|cx| LibraryPage::new(client, nav, id, collection_type, cx))
-                    .into(),
+                view: {
+                    let page = cx.new(|cx| LibraryPage::new(client, nav, id, collection_type, cx));
+                    focus = Some(focuser(&page));
+                    page.into()
+                },
+                focus: None,
                 is_player: false,
             },
             Route::Item { id, name } => Page {
                 title: name.into(),
-                view: cx.new(|cx| ItemPage::new(client, nav, id, cx)).into(),
+                view: {
+                    let page = cx.new(|cx| ItemPage::new(client, nav, id, cx));
+                    focus = Some(focuser(&page));
+                    page.into()
+                },
+                focus: None,
                 is_player: false,
             },
             Route::Search => Page {
                 title: "Search".into(),
-                view: cx.new(|cx| SearchPage::new(client, nav, window, cx)).into(),
+                view: {
+                    let page = cx.new(|cx| SearchPage::new(client, nav, window, cx));
+                    focus = Some(focuser(&page));
+                    page.into()
+                },
+                focus: None,
                 is_player: false,
             },
             Route::Settings => Page {
                 title: "Settings".into(),
                 view: cx.new(|_| SettingsPage::new(self.session.clone())).into(),
+                focus: None,
                 is_player: false,
             },
         };
-        self.stack.push(page);
+        self.stack.push(Page { focus, ..page });
+        self.focus_top(window, cx);
         cx.notify();
+    }
+
+    /// Gives keyboard focus to the page on top, so its keys work after clicks moved focus
+    /// elsewhere.
+    fn focus_top(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.stack.last().and_then(|page| page.focus.clone()) {
+            Some(focus) => focus(cx).focus(window, cx),
+            None => self.focus_handle.focus(window, cx),
+        }
     }
 
     fn push_player(
@@ -159,6 +192,7 @@ impl ShellView {
         self.stack.push(Page {
             title,
             view,
+            focus: None,
             is_player: true,
         });
         cx.notify();
@@ -170,7 +204,7 @@ impl ShellView {
             if window.is_fullscreen() {
                 window.toggle_fullscreen();
             }
-            self.focus_handle.focus(window, cx);
+            self.focus_top(window, cx);
             cx.notify();
         }
     }
@@ -183,7 +217,7 @@ impl ShellView {
         }
         if self.stack.len() > 1 {
             self.stack.pop();
-            self.focus_handle.focus(window, cx);
+            self.focus_top(window, cx);
             cx.notify();
         }
     }
@@ -194,7 +228,7 @@ impl ShellView {
 
     fn home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.stack.truncate(1);
-        self.focus_handle.focus(window, cx);
+        self.focus_top(window, cx);
         cx.notify();
     }
 
@@ -271,6 +305,43 @@ impl Render for ShellView {
             .when(show_top_bar, |el| el.child(self.render_top_bar(cx)))
             .child(div().flex_1().min_h_0().children(page))
     }
+}
+
+/// Looks up a page's focus handle when it comes back on top (it can change, e.g. search).
+type Focuser = Rc<dyn Fn(&App) -> FocusHandle>;
+
+fn focuser<T: Focusable>(page: &Entity<T>) -> Focuser {
+    let page = page.clone();
+    Rc::new(move |cx| page.read(cx).focus_handle(cx))
+}
+
+/// Dev aid: `JELLY_GPUI_KEYS="down right enter wait escape"` presses keys after startup, for
+/// testing keyboard navigation without touching the desktop. `wait` pauses for a second.
+#[cfg(debug_assertions)]
+fn replay_debug_keys(window: &mut Window, cx: &mut Context<ShellView>) {
+    use std::time::Duration;
+
+    let Ok(keys) = std::env::var("JELLY_GPUI_KEYS") else {
+        return;
+    };
+    cx.spawn_in(window, async move |_, cx| {
+        cx.background_executor().timer(Duration::from_secs(3)).await;
+        for key in keys.split_whitespace() {
+            if key == "wait" {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                continue;
+            }
+            match Keystroke::parse(key) {
+                Ok(keystroke) => {
+                    tracing::info!("debug key: {key}");
+                    cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx)).ok();
+                }
+                Err(err) => tracing::warn!("bad debug key {key:?}: {err}"),
+            }
+            cx.background_executor().timer(Duration::from_millis(250)).await;
+        }
+    })
+    .detach();
 }
 
 /// Dev aid: open a page on top of Home at startup, for screenshots and quick iteration.
