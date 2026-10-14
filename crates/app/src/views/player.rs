@@ -16,6 +16,7 @@ use gpui_kit::*;
 use player::libmpv::Frame;
 
 use crate::components::timestamp;
+use crate::markers;
 use crate::playback::{NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
 
@@ -29,6 +30,9 @@ actions!(
         VolumeDown,
         ToggleMute,
         NextEpisode,
+        NextChapter,
+        PrevChapter,
+        Skip,
         ToggleFullscreen,
         ExitPlayer
     ]
@@ -38,6 +42,7 @@ pub const KEY_CONTEXT: &str = "Player";
 const SEEK_STEP: f64 = 10.;
 const VOLUME_STEP: f64 = 5.;
 const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
+const CHAPTER_MARK_H: f32 = 8.;
 
 /// The frame on screen.
 #[derive(Clone)]
@@ -281,6 +286,40 @@ impl PlayerPage {
         PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
     }
 
+    /// Enter: skip the intro (or recap, preview…), or play the next episode from the up-next
+    /// card.
+    fn skip(&mut self, _: &Skip, _: &mut Window, cx: &mut Context<Self>) {
+        let state = self.now_playing.read(cx);
+        if let Some(segment) = state.skippable() {
+            self.send(UiCommand::SeekTo(segment.end), cx);
+        } else if state.show_up_next() {
+            self.now_playing.update(cx, |state, cx| state.play_next(cx));
+        }
+    }
+
+    fn cancel_up_next(&mut self, cx: &mut Context<Self>) {
+        self.now_playing.update(cx, |state, cx| {
+            state.next_cancelled = true;
+            cx.notify();
+        });
+    }
+
+    fn next_chapter(&mut self, _: &NextChapter, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.now_playing.read(cx);
+        if let Some(start) = markers::next_chapter(&state.chapters, state.position) {
+            self.send(UiCommand::SeekTo(start), cx);
+        }
+        self.show_controls(window, cx);
+    }
+
+    fn prev_chapter(&mut self, _: &PrevChapter, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.now_playing.read(cx);
+        if let Some(start) = markers::prev_chapter(&state.chapters, state.position) {
+            self.send(UiCommand::SeekTo(start), cx);
+        }
+        self.show_controls(window, cx);
+    }
+
     fn next_episode(&mut self, _: &NextEpisode, _: &mut Window, cx: &mut Context<Self>) {
         let Some(next) = self.now_playing.read(cx).next.clone() else {
             return;
@@ -343,10 +382,13 @@ impl PlayerPage {
         window.toggle_fullscreen();
     }
 
-    /// Esc: leave fullscreen first, then stop playback (which closes the player).
+    /// Esc: leave fullscreen first, then dismiss the up-next card, then stop playback (which
+    /// closes the player).
     fn exit_player(&mut self, _: &ExitPlayer, window: &mut Window, cx: &mut Context<Self>) {
         if window.is_fullscreen() {
             window.toggle_fullscreen();
+        } else if self.now_playing.read(cx).show_up_next() {
+            self.cancel_up_next(cx);
         } else {
             self.send(UiCommand::Stop, cx);
         }
@@ -356,11 +398,24 @@ impl PlayerPage {
         let state = self.now_playing.read(cx);
         let paused = state.paused;
         let (muted, has_next) = (state.muted || state.volume == 0., state.next.is_some());
-        let time = format!(
+        let mut time = format!(
             "{} / {}",
             timestamp(state.position),
             state.duration.map(timestamp).unwrap_or_else(|| "--:--".into())
         );
+        if let Some(name) = markers::current_chapter(&state.chapters, state.position).and_then(|c| c.name.as_ref()) {
+            time = format!("{time} · {name}");
+        }
+        // Chapter starts as fractions of the seek bar.
+        let chapter_marks: Vec<f32> = match state.duration.filter(|d| !d.is_zero()) {
+            Some(duration) => state
+                .chapters
+                .iter()
+                .filter(|c| !c.start.is_zero() && c.start < duration)
+                .map(|c| c.start.as_secs_f32() / duration.as_secs_f32())
+                .collect(),
+            None => Vec::new(),
+        };
         let title = crate::components::card_text(&state.item);
         let title = if state.item.kind == jellyfin::models::BaseItemKind::Episode {
             format!("{} · {}", title.0, title.1)
@@ -418,7 +473,22 @@ impl PlayerPage {
                 linear_color_stop(black().opacity(0.8), 0.),
                 linear_color_stop(black().opacity(0.), 1.),
             ))
-            .children(self.seek.as_ref().map(|seek| Slider::new(seek).w_full()))
+            .children(self.seek.as_ref().map(|seek| {
+                div()
+                    .relative()
+                    .w_full()
+                    .child(Slider::new(seek).w_full())
+                    .children(chapter_marks.into_iter().map(|fraction| {
+                        div()
+                            .absolute()
+                            .top(relative(0.5))
+                            .mt(px(-CHAPTER_MARK_H / 2.))
+                            .left(relative(fraction))
+                            .w(px(2.))
+                            .h(px(CHAPTER_MARK_H))
+                            .bg(white().opacity(0.6))
+                    }))
+            }))
             .child(
                 h_flex()
                     .gap_2()
@@ -472,6 +542,75 @@ impl PlayerPage {
 
         div().absolute().inset_0().child(top).child(bottom)
     }
+
+    /// The skip button or the up-next card, bottom right. Shown with or without the controls
+    /// (above them when they're up).
+    fn render_prompt(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let state = self.now_playing.read(cx);
+        let prompt = if let Some(segment) = state.skippable() {
+            Button::new("skip-segment")
+                .large()
+                .icon(Lucide::SkipForward)
+                .label(segment.kind.skip_label())
+                .on_click(cx.listener(|this, _, window, cx| this.skip(&Skip, window, cx)))
+                .into_any_element()
+        } else if state.show_up_next() {
+            let next = state.next.as_ref()?;
+            let (series, episode) = crate::components::card_text(next);
+            let label = if next.kind == jellyfin::models::BaseItemKind::Episode {
+                episode
+            } else {
+                series
+            };
+            let remaining = state.duration.map(|d| d.saturating_sub(state.position));
+            v_flex()
+                .w(px(320.))
+                .p_3()
+                .gap_2()
+                .rounded_lg()
+                .bg(black().opacity(0.8))
+                .text_color(white())
+                .child(div().text_sm().text_color(white().opacity(0.7)).child("Up next"))
+                .child(div().truncate().child(label))
+                .when_some(remaining.filter(|_| state.autoplay), |el, remaining| {
+                    el.child(
+                        div()
+                            .text_sm()
+                            .text_color(white().opacity(0.7))
+                            .child(format!("Starts in {} s", remaining.as_secs())),
+                    )
+                })
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("play-next")
+                                .primary()
+                                .icon(Lucide::Play)
+                                .label("Play now")
+                                .on_click(cx.listener(|this, _, window, cx| this.skip(&Skip, window, cx))),
+                        )
+                        .child(
+                            Button::new("cancel-next")
+                                .ghost()
+                                .label("Cancel")
+                                .on_click(cx.listener(|this, _, _, cx| this.cancel_up_next(cx))),
+                        ),
+                )
+                .into_any_element()
+        } else {
+            return None;
+        };
+        let bottom = if self.controls_visible { 120. } else { 32. };
+        Some(
+            div()
+                .occlude()
+                .absolute()
+                .right(px(24.))
+                .bottom(px(bottom))
+                .child(prompt),
+        )
+    }
 }
 
 /// A fixed-width track or version picker for the control bar.
@@ -513,6 +652,9 @@ impl Render for PlayerPage {
             .on_action(cx.listener(Self::volume_down))
             .on_action(cx.listener(Self::toggle_mute))
             .on_action(cx.listener(Self::next_episode))
+            .on_action(cx.listener(Self::next_chapter))
+            .on_action(cx.listener(Self::prev_chapter))
+            .on_action(cx.listener(Self::skip))
             .on_action(cx.listener(Self::toggle_fullscreen))
             .on_action(cx.listener(Self::exit_player))
             .on_mouse_move(cx.listener(|this, _, window, cx| this.show_controls(window, cx)))
@@ -547,6 +689,7 @@ impl Render for PlayerPage {
                 )
             })
             .when(self.controls_visible, |el| el.child(self.render_controls(cx)))
+            .children(self.render_prompt(cx))
     }
 }
 

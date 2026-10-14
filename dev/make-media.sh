@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generates a small synthetic media library under dev/.data/media.
 # Covers: a movie with three versions (one 4K HEVC 10-bit, for hardware decoding), a series with two seasons, multiple audio
-# languages, embedded and external subtitles, and local artwork.
+# languages, embedded and external subtitles, chapters (Intro, Episode, Credits), and local artwork.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")" && pwd)/.data/media"
@@ -12,12 +12,33 @@ srt() {
   printf '1\n00:00:01,000 --> 00:00:05,000\n%s\n\n2\n00:00:10,000 --> 00:00:15,000\nTen seconds in.\n\n3\n00:00:30,000 --> 00:00:35,000\nHalfway there.\n' "$title"
 }
 
+# Chapters: Intro for the first 10 s, Credits for the last 15 s.
+chapters() {
+  local ms=$((dur * 1000))
+  printf ';FFMETADATA1\n'
+  printf '[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=10000\ntitle=Intro\n'
+  printf '[CHAPTER]\nTIMEBASE=1/1000\nSTART=10000\nEND=%d\ntitle=Episode\n' $((ms - 15000))
+  printf '[CHAPTER]\nTIMEBASE=1/1000\nSTART=%d\nEND=%d\ntitle=Credits\n' $((ms - 15000)) "$ms"
+}
+
+# add_chapters <file.mkv>: remuxes a file made before chapters were added.
+add_chapters() {
+  local file="$1" meta tmp
+  [[ -n "$(ffprobe -loglevel error -show_chapters -of csv "$file")" ]] && return
+  meta="$(mktemp)"
+  tmp="${file%.mkv}.tmp.mkv"
+  chapters > "$meta"
+  ffmpeg -loglevel error -y -i "$file" -i "$meta" -map 0 -map_chapters 1 -c copy "$tmp"
+  mv "$tmp" "$file"
+  rm -f "$meta"
+}
+
 # video <out.mkv> <title> <size> [hevc10]
 video() {
   local out="$1" title="$2" size="$3" sub
   local codec=(-c:v libx264 -preset ultrafast -crf 32 -pix_fmt yuv420p)
   [[ "${4:-}" == hevc10 ]] && codec=(-c:v libx265 -preset ultrafast -crf 32 -pix_fmt yuv420p10le -x265-params log-level=error)
-  [[ -f "$out" ]] && return
+  [[ -f "$out" ]] && { add_chapters "$out"; return; }
   mkdir -p "$(dirname "$out")"
   sub="$(mktemp --suffix=.srt)"
   srt "$title" > "$sub"
@@ -36,6 +57,7 @@ video() {
     -metadata:s:s:0 language=eng \
     "$out"
   rm -f "$sub"
+  add_chapters "$out"
 }
 
 # image <out.jpg> <label> <size> <color>

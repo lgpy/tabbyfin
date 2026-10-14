@@ -8,6 +8,7 @@ mod components;
 mod config;
 mod credentials;
 mod images;
+mod markers;
 mod playback;
 mod router;
 mod runtime;
@@ -22,8 +23,8 @@ use tracing_subscriber::EnvFilter;
 use crate::app_view::AppView;
 use crate::changes::Changes;
 use crate::views::player::{
-    self, ExitPlayer, NextEpisode, SeekBackward, SeekForward, ToggleFullscreen, ToggleMute, TogglePause, VolumeDown,
-    VolumeUp,
+    self, ExitPlayer, NextChapter, NextEpisode, PrevChapter, SeekBackward, SeekForward, Skip, ToggleFullscreen,
+    ToggleMute, TogglePause, VolumeDown, VolumeUp,
 };
 use crate::views::shell::{self, Back, OpenSearch};
 
@@ -109,6 +110,10 @@ fn main() {
                 KeyBinding::new("down", VolumeDown, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("m", ToggleMute, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("shift-n", NextEpisode, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("pagedown", NextChapter, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("pageup", PrevChapter, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("enter", Skip, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("s", Skip, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("f", ToggleFullscreen, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("escape", ExitPlayer, Some(player::KEY_CONTEXT)),
             ]);

@@ -115,6 +115,27 @@ pub struct BaseItemDto {
     /// More than one entry means multiple versions (movies, and episodes since 12.0).
     #[serde(default, deserialize_with = "nullable")]
     pub media_sources: Vec<MediaSourceInfo>,
+    /// Only present when requested with [`crate::models::ItemField::Chapters`].
+    #[serde(default, deserialize_with = "nullable")]
+    pub chapters: Vec<ChapterInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ChapterInfo {
+    #[serde(default, deserialize_with = "nullable")]
+    pub start_position_ticks: Ticks,
+    pub name: Option<String>,
+}
+
+/// A stretch of an item marked by a segment provider plugin (e.g. Intro Skipper).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct MediaSegmentDto {
+    #[serde(rename = "Type", default)]
+    pub kind: MediaSegmentType,
+    pub start_ticks: Ticks,
+    pub end_ticks: Ticks,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -286,6 +307,18 @@ wire_enum!(
         ParentId = "ParentId",
         ProviderIds = "ProviderIds",
         SortName = "SortName",
+        Chapters = "Chapters",
+    }
+);
+
+wire_enum!(
+    MediaSegmentType {
+        Unknown = "Unknown",
+        Commercial = "Commercial",
+        Preview = "Preview",
+        Recap = "Recap",
+        Outro = "Outro",
+        Intro = "Intro",
     }
 );
 

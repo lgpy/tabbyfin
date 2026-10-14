@@ -26,6 +26,7 @@ Login: `dev` / `dev`. Legacy authorization is disabled, which is the 12.x defaul
 Every video is 60 s long and has:
 - English and Japanese audio tracks.
 - An embedded English subtitle track.
+- Chapters: Intro (0–10 s), Episode, and Credits (the last 15 s), for skip intro and the up-next card. `make-media.sh` adds them to videos made before it did; rescan the library afterwards.
 
 Remote metadata and image fetchers are turned off, so the fake titles never match real TMDb or TVDb entries.
 

@@ -192,9 +192,14 @@ Video plays **inside the app** through libmpv. There's no separate mpv window an
    - After playback starts, it also looks up the item's versions and, for episodes, the next episode.
    - **Switching version** starts a new session of the same item at the current position.
    - **Next episode** (button, Shift+N, or automatically when an episode plays to the end) starts a session for the next episode from its resume point.
+   - **Chapters and segments** (`markers.rs`) are fetched with the details: chapters from the item (`Fields=Chapters`), segments from `GET /MediaSegments/{id}`.
+     - The server only returns segments from provider plugins (e.g. Intro Skipper) that are enabled for the library. Without any, segments are guessed from chapter names: Intro/Opening/OP, Recap/Previously, Preview/Next Episode, Credits/Ending/ED/Outro/End Credits.
+     - A "Skip intro" (recap, preview, ad) button shows during those segments.
+     - From the Outro segment, or 20 s before the end without one, an up-next card offers the next episode with *Play now* and *Cancel*. Cancel (or Esc) means the session ends at the end of the file instead of autoplaying. *Settings → Playback* turns autoplay off altogether.
+     - PgUp/PgDn seek to chapter starts from our own list, so PgDn in the last chapter does nothing (mpv's `add chapter 1` would end the file).
    - Sessions are numbered, so when one replaces another, the old one's end doesn't close the new player.
    - The volume carries over between sessions and is saved in the config.
-   - **Transcoding:** the server transcodes only when it won't direct play: above the *Max streaming bitrate* setting (sent as `MaxStreamingBitrate`), or when the user's policy forbids it.
+   - **Transcoding:** the server transcodes only when it won't direct play: above the *Settings → Playback → Max streaming bitrate* (sent as `MaxStreamingBitrate`), or when the user's policy forbids it.
      - The session then plays the HLS `TranscodingUrl` and reports `PlayMethod: Transcode`, and the player shows a "Transcoding" label.
      - Subtitles the server delivers as files (`DeliveryMethod: External`, embedded text ones included) are added to mpv; image subtitles are burned in (`Encode`).
      - A transcode carries only the chosen audio track, so changing audio, or changing to or from a burned-in subtitle, restarts the session at the current position. The server picks the default audio by the user's language preference and names it in the URL (`AudioStreamIndex`), which the picker follows.
@@ -250,7 +255,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
     - Each page keeps its cursor while it's on the stack, so Back returns to the same card.
     - In search, Enter in the box moves to the first result, and Up from the top row returns to the box.
     - Version and track pickers aren't on the cursor yet.
-  - In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N plays the next episode, F toggles fullscreen and Esc leaves fullscreen, then the player.
+  - In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N plays the next episode, PgUp/PgDn go to the previous/next chapter, Enter or S skips the intro (or plays the next episode from the up-next card), F toggles fullscreen, and Esc leaves fullscreen, then dismisses the up-next card, then leaves the player.
 - **Theme:**
   - GPUI Kit's theme system, defaulting to dark.
 

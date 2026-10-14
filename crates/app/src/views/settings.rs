@@ -1,8 +1,9 @@
-//! Settings: streaming, image cache, logs and account info.
+//! Settings: playback, image cache, logs and account info.
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::*;
 
@@ -18,14 +19,15 @@ pub struct SettingsPage {
     session: Session,
     scroll: ScrollHandle,
     bitrate: ChoiceSelect,
+    autoplay: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl SettingsPage {
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let current = Config::load()
-            .max_streaming_bitrate
-            .map_or(0, |bps| (bps / 1_000_000) as i32);
+        let config = Config::load();
+        let autoplay = config.autoplay_next_episode.unwrap_or(true);
+        let current = config.max_streaming_bitrate.map_or(0, |bps| (bps / 1_000_000) as i32);
         let choices: Vec<Choice> = BITRATES_MBPS
             .iter()
             .map(|&mbps| Choice {
@@ -51,8 +53,19 @@ impl SettingsPage {
             session,
             scroll: ScrollHandle::new(),
             bitrate,
+            autoplay,
             _subscriptions,
         }
+    }
+
+    fn set_autoplay(&mut self, autoplay: bool, cx: &mut Context<Self>) {
+        self.autoplay = autoplay;
+        let mut config = Config::load();
+        config.autoplay_next_episode = Some(autoplay);
+        if let Err(err) = config.save() {
+            tracing::warn!("failed to save config: {err:#}");
+        }
+        cx.notify();
     }
 
     fn clear_image_cache(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -119,7 +132,15 @@ impl Render for SettingsPage {
                     .gap_8()
                     .max_w(px(720.))
                     .child(
-                        section("Streaming", cx)
+                        section("Playback", cx)
+                            .child(
+                                Switch::new("autoplay")
+                                    .checked(self.autoplay)
+                                    .label("Play the next episode automatically")
+                                    .on_click(
+                                        cx.listener(|this, checked: &bool, _, cx| this.set_autoplay(*checked, cx)),
+                                    ),
+                            )
                             .child(
                                 h_flex()
                                     .gap_4()

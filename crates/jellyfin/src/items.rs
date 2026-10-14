@@ -1,5 +1,7 @@
 use crate::client::Query;
-use crate::models::{BaseItemDto, BaseItemKind, ItemField, ItemFilter, ItemSortBy, QueryResult, wire_list};
+use crate::models::{
+    BaseItemDto, BaseItemKind, ItemField, ItemFilter, ItemSortBy, MediaSegmentDto, QueryResult, wire_list,
+};
 use crate::{Client, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +133,14 @@ impl Client {
             // The start item itself is missing (e.g. removed): don't guess.
             _ => None,
         })
+    }
+
+    /// Intro, outro and similar segments, from the server's segment provider plugins. Empty
+    /// when none are installed.
+    pub async fn media_segments(&self, item_id: &str) -> Result<Vec<MediaSegmentDto>> {
+        let segments: QueryResult<MediaSegmentDto> =
+            self.get(&format!("/MediaSegments/{item_id}"), &Query::new()).await?;
+        Ok(segments.items)
     }
 
     /// Marks an item (or every episode of a series/season) as watched.
