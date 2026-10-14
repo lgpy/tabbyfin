@@ -326,10 +326,11 @@ impl ItemPage {
     fn render_header(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
         let backdrop = item.backdrop_image().map(|r| r.fill_width(1280));
         let has_backdrop = backdrop.is_some();
-        let backdrop = remote_image(backdrop, cx);
+        let backdrop = remote_image(backdrop, Some(item), cx);
         let poster = remote_image(
             item.primary_image()
                 .map(|r| r.fill_width((DETAIL_POSTER_W * 2.) as u32)),
+            Some(item),
             cx,
         );
         let title = match item.kind {
@@ -473,6 +474,7 @@ impl ItemPage {
                 let target = episode.clone();
                 let image = remote_image(
                     landscape_image(episode).map(|r| r.fill_width((LANDSCAPE_W * 2.) as u32)),
+                    Some(episode),
                     cx,
                 );
                 let (_, subtitle) = card_text(episode);
