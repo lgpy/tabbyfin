@@ -135,7 +135,7 @@ impl ShellView {
             Route::Settings => Page {
                 title: "Settings".into(),
                 view: cx
-                    .new(|cx| SettingsPage::new(self.session.clone(), window, cx))
+                    .new(|_| SettingsPage::new(self.session.clone()))
                     .into(),
                 is_player: false,
             },

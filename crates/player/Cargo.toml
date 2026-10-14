@@ -1,23 +1,14 @@
 [package]
 name = "player"
-description = "mpv control over JSON IPC (no UI dependencies)"
+description = "mpv playback embedded through libmpv (no UI dependencies)"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
-[features]
-# mpv embedded in the app (video inside our window). libmpv is loaded at runtime, so building
-# doesn't need it installed. See docs/in-app-video.md.
-libmpv = ["dep:libloading"]
-
 [dependencies]
-libloading = { version = "0.8", optional = true }
-serde.workspace = true
+# libmpv is loaded at runtime, so building doesn't need it installed.
+libloading = "0.8"
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["io-util", "net", "process", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true
-
-[dev-dependencies]
-anyhow.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

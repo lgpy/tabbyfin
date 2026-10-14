@@ -32,10 +32,7 @@ platform interop
 GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI controls overlay
 ```
 
-**Fallbacks**, chosen automatically and logged:
-1. GPU sharing.
-2. Software render: the spike, `player::software`.
-3. A separate mpv window over IPC, today's behaviour, used when libmpv can't be loaded.
+**Fallback:** GPU sharing where it works, otherwise software rendering. The choice is automatic and logged. There's no separate mpv window anymore; it was removed on 2026-10-14. Without libmpv, playback shows an install hint.
 
 **GPUI fork:**
 - The crates we change (`gpui-pre`, `gpui-pre-windows`, later `gpui-pre-wgpu`) are vendored under `third_party/gpui/` and applied with `[patch.crates-io]`.
@@ -44,7 +41,7 @@ GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI contr
 ## Phases
 
 1. ✅ **libmpv backend and in-app player view, on the software path.** Done on 2026-10-14. Verified on Linux (WSL) and on Windows (RX 6600) with `dev/win-run.sh`. The Windows zip now bundles `libmpv-2.dll`, and the `.deb` depends on `libmpv2`.
-   - `player::libmpv` (core and event loop) produces the same `PlayerEvent`s as the IPC backend, so progress reporting is reused.
+   - `player::libmpv` (core and event loop) produces `PlayerEvent`s that the session turns into progress reports.
    - A full-window player page: seek bar, play/pause, ±10 s, audio and subtitle tracks, fullscreen, keyboard shortcuts. Not done yet: volume control, version switching during playback, a "next episode" action.
    - Rendering uses the software path at first, so in-app playback works on every OS straight away.
 2. **Windows GPU sharing.**
@@ -56,7 +53,7 @@ GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI contr
    - Windows: `libmpv-2.dll`.
    - macOS: `libmpv.dylib`.
    - Linux: a `.deb` dependency on `libmpv2`.
-   - Then remove the bundled `mpv.exe` and `mpv.app` once the IPC fallback is no longer the default.
+   - Done for Windows and Linux. macOS uses Homebrew's libmpv for now.
 5. **macOS GPU sharing** (IOSurface), when a Mac is available for testing.
 
 ## Test loop for Windows

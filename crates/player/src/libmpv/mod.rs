@@ -1,8 +1,8 @@
 //! mpv embedded in the app through libmpv, with video drawn inside our window.
 //! See `docs/in-app-video.md`.
 //!
-//! libmpv is loaded with `dlopen` at runtime, so builds don't need it and the app falls back to
-//! a separate mpv window where it's missing.
+//! libmpv is loaded with `dlopen` at runtime, so builds don't need it; without it the app shows
+//! an error when playback starts.
 
 mod embedded;
 mod video;
@@ -11,7 +11,7 @@ use std::ffi::{CStr, CString, c_char, c_double, c_int, c_void};
 
 use libloading::Library;
 
-pub use embedded::{EmbeddedOptions, EmbeddedPlayer};
+pub use embedded::EmbeddedPlayer;
 pub use video::{VideoFrame, VideoOutput};
 
 use crate::Error;
@@ -81,13 +81,23 @@ const LIBRARY_NAMES: &[&str] = if cfg!(windows) {
     &["libmpv.so.2", "libmpv.so.1", "libmpv.so"]
 };
 
+/// Extra folders to search on macOS: Homebrew (`brew install mpv`) on Apple silicon and Intel,
+/// which aren't on the default library path.
+const EXTRA_DIRS: &[&str] = if cfg!(target_os = "macos") { &["/opt/homebrew/lib", "/usr/local/lib"] } else { &[] };
+
 impl Api {
     pub fn load() -> Result<Self, Error> {
         let mut last_error = String::new();
         for name in LIBRARY_NAMES {
-            // Next to the executable first (bundled), then the system search path.
+            // Next to the executable first (bundled), then the system search path, then the
+            // extra folders.
             let bundled = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join(name)));
-            for candidate in bundled.iter().map(|p| p.as_os_str().to_owned()).chain([(*name).into()]) {
+            let candidates = bundled
+                .iter()
+                .map(|p| p.as_os_str().to_owned())
+                .chain([(*name).into()])
+                .chain(EXTRA_DIRS.iter().map(|dir| std::path::Path::new(dir).join(name).into_os_string()));
+            for candidate in candidates {
                 // SAFETY: loading libmpv runs no unexpected initialization code.
                 match unsafe { Library::new(&candidate) } {
                     Ok(lib) => return Self::from_library(lib),

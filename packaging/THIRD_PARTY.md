@@ -1,12 +1,12 @@
 # Third-party software
 
-The Windows and macOS packages of jelly-gpui include **mpv**. On Windows that's libmpv
-(`libmpv-2.dll`, from https://github.com/shinchiro/mpv-winbuild-cmake, version in
-`packaging/mpv.lock`), which plays video inside the app, plus the `mpv` program used as a
-fallback in its own window. macOS currently bundles the `mpv` program only.
+jelly-gpui plays video with **libmpv**, the library form of mpv, running inside the app.
 
-- mpv, version pinned in `packaging/mpv.lock`, from https://github.com/mpv-player/mpv/releases
-- License: GPL-2.0-or-later (these builds), see https://github.com/mpv-player/mpv/blob/master/Copyright
-- Source code: https://github.com/mpv-player/mpv (the tag matching the bundled version)
+- **Windows:** the package includes `libmpv-2.dll`, a build from
+  https://github.com/shinchiro/mpv-winbuild-cmake. The version is pinned in `packaging/mpv.lock`.
+- **Linux:** uses the system libmpv (`libmpv2`).
+- **macOS:** uses Homebrew's libmpv (`brew install mpv`) for now.
 
-Linux packages use the mpv installed on the system and don't include it.
+**License:** GPL-2.0-or-later for these builds, see https://github.com/mpv-player/mpv/blob/master/Copyright.
+
+**Source code:** https://github.com/mpv-player/mpv. The shinchiro build records the exact mpv commit in its file name.

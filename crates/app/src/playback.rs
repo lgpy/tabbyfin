@@ -1,29 +1,26 @@
 //! Playback sessions: negotiate with the server, run mpv, and report progress back.
 //!
 //! One session at a time. Starting a new one stops the current one. The session itself runs on
-//! tokio. With embedded mpv (the default) it publishes a [`NowPlaying`] entity that the player
-//! page draws and controls; with the external mpv window the UI only hears when it ends.
+//! tokio and publishes a [`NowPlaying`] entity that the player page draws and controls.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, MediaSourceInfo, MediaStream, MediaStreamType};
 use jellyfin::{Client, PlaybackInfoRequest, PlaybackReport, Ticks};
-use player::libmpv::{EmbeddedOptions, VideoOutput};
-use player::{EndReason, LoadRequest, Player, PlayerEvent, SpawnOptions};
+use player::libmpv::VideoOutput;
+use player::{EndReason, LoadRequest, Player, PlayerEvent};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::changes::Changes;
-use crate::config::{Config, PlayerSettings};
 use crate::runtime;
 use crate::session::describe_error;
 
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 
 pub enum PlaybackEvent {
-    /// Embedded playback started; show the player.
+    /// Playback started; show the player.
     Started(Entity<NowPlaying>),
     /// The session ended, normally or not. Watched state and resume points may have changed.
     Ended,
@@ -139,13 +136,12 @@ impl PlaybackManager {
         let session = {
             let (client, item) = (self.client.clone(), item.clone());
             runtime::spawn(async move {
-                let settings = Config::load().player;
                 let channels = Channels {
                     stop: stop_rx,
                     updates: updates_tx,
                     commands: commands_rx,
                 };
-                run_session(client, item, options, settings, channels).await
+                run_session(client, item, options, channels).await
             })
         };
 
@@ -254,31 +250,21 @@ fn subtitle_index(choice: SubtitleChoice) -> Option<i32> {
     }
 }
 
-async fn start_player(settings: &PlayerSettings) -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, Option<VideoOutput>), String> {
-    if !settings.external_window {
-        let options = EmbeddedOptions {
-            use_mpv_config: settings.use_mpv_config,
-        };
-        match Player::spawn_embedded(options).await {
-            Ok((player, events, video)) => return Ok((player, events, Some(video))),
-            Err(player::Error::LibmpvUnavailable(reason)) => {
-                tracing::warn!("libmpv unavailable, using a separate mpv window: {reason}");
-            }
-            Err(err) => return Err(format!("Couldn't start the player: {err}")),
+async fn start_player() -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, VideoOutput), String> {
+    Player::spawn().await.map_err(|err| match err {
+        player::Error::LibmpvUnavailable(reason) => {
+            tracing::warn!("libmpv unavailable: {reason}");
+            let hint = if cfg!(target_os = "macos") {
+                "Install mpv with Homebrew (brew install mpv)."
+            } else if cfg!(windows) {
+                "libmpv-2.dll is missing next to jelly-gpui.exe; reinstall the app."
+            } else {
+                "Install libmpv (the libmpv2 package on Debian and Ubuntu)."
+            };
+            format!("Video playback needs libmpv, which wasn't found. {hint}")
         }
-    }
-    let options = SpawnOptions {
-        mpv_path: settings.mpv_path.clone().map(PathBuf::from),
-        extra_args: if settings.use_mpv_config { Vec::new() } else { vec!["--no-config".into()] },
-    };
-    let (player, events) = Player::spawn_external(options).await.map_err(|err| match err {
-        player::Error::NotFound(path) => format!(
-            "mpv wasn't found ({}). Install mpv, or set its location in Settings.",
-            path.display()
-        ),
-        err => format!("Couldn't start mpv: {err}"),
-    })?;
-    Ok((player, events, None))
+        err => format!("Couldn't start the player: {err}"),
+    })
 }
 
 /// Runs one playback from negotiation to the final stop report. Returns a user-facing error.
@@ -286,7 +272,6 @@ async fn run_session(
     client: Client,
     item: BaseItemDto,
     options: PlayOptions,
-    settings: PlayerSettings,
     mut channels: Channels,
 ) -> Result<(), String> {
     let info = client
@@ -310,7 +295,7 @@ async fn run_session(
     }
     .ok_or("The server returned no playable media.")?;
 
-    let (player, mut events, video) = start_player(&settings).await?;
+    let (player, mut events, video) = start_player().await?;
 
     // Track choices are options, so they're set before loading the file.
     if let Some(aid) = options
@@ -349,14 +334,12 @@ async fn run_session(
         .await
         .map_err(|err| format!("mpv couldn't open the stream: {err}"))?;
 
-    if let Some(video) = video {
-        let _ = channels.updates.send(SessionUpdate::Started {
-            source: Box::new(source.clone()),
-            video,
-            audio: options.audio_stream_index.or(source.default_audio_stream_index),
-            subtitle: options.subtitle,
-        });
-    }
+    let _ = channels.updates.send(SessionUpdate::Started {
+        source: Box::new(source.clone()),
+        video,
+        audio: options.audio_stream_index.or(source.default_audio_stream_index),
+        subtitle: options.subtitle,
+    });
 
     let external_subtitles: Vec<_> = source.media_streams.iter().filter(|s| s.is_external).cloned().collect();
     let mut report = PlaybackReport {
