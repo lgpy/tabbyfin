@@ -212,7 +212,7 @@ After connecting over IPC, the app sends this sequence. Every option is set as a
 | C. Software render API | libmpv `mpv_render_context` with the `sw` backend, copying frames into a GPUI image | Easiest way to get video in the window, with GPUI drawing the overlay. CPU-heavy, so likely capped around 1080p. |
 | D. GL render plus texture sharing | Share mpv's FBO with GPUI's renderer through dmabuf, IOSurface, or DXGI | The best result. Each platform needs changes to GPUI's renderer. This is a long-term project. |
 
-We plan a time-boxed spike on C after v1. The `player` crate gets a `libmpv` backend next to the `ipc` backend, behind the same trait.
+We ran a time-boxed spike on C after v1; results are in `docs/spike-inline-video.md`. C works at full frame rate up to 1080p. We'll measure on real GPU hardware before shipping it as an opt-in mode, and option D remains the long-term path for 4K and HDR.
 
 ### 5.5 Shipping mpv
 
@@ -305,6 +305,8 @@ Lookup order: path set in settings, then bundled, then `PATH`. If none is found,
 ---
 
 ## 8. Dev environment
+
+**Tools and tasks:** `mise install` installs the pinned Rust toolchain (with clippy and rustfmt) and `cargo-deb`. `mise tasks` lists the shortcuts: `run`, `ci`, `smoke`, `dev:setup`, `package`, and so on. System libraries still come from the OS:
 
 **Ubuntu / WSL2 (current machine):**
 ```sh

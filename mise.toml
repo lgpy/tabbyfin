@@ -1,0 +1,93 @@
+# Dev environment and tasks. `mise install` sets up the tools; `mise tasks` lists the tasks.
+# System packages (GPU, windowing, mpv) still come from the OS; see docs/PLAN.md §8.
+
+[tools]
+rust = { version = "1.99.0", components = "clippy,rustfmt" }
+# Builds the Linux .deb (packaging/package.sh).
+"cargo:cargo-deb" = "3.8.0"
+# GitHub CLI, for the ci:* tasks.
+gh = "2.102.0"
+
+[env]
+RUST_LOG = "info"
+
+# App
+
+[tasks.run]
+description = "Run the app (debug build)"
+run = "cargo run -p jelly-gpui"
+
+[tasks.build]
+description = "Build the workspace"
+run = "cargo build --workspace"
+
+[tasks.check]
+description = "Lint like CI: clippy with warnings as errors"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Run all tests"
+run = "cargo test --workspace"
+
+[tasks.ci]
+description = "What CI runs on every push"
+depends = ["check", "test"]
+
+[tasks.smoke]
+description = "Exercise the Jellyfin API client against the dev server"
+run = "cargo run -p jellyfin --example smoke"
+
+# Dev server (dev/README.md)
+
+[tasks."dev:media"]
+description = "Generate the synthetic test library (needs ffmpeg)"
+run = "dev/make-media.sh"
+
+[tasks."dev:up"]
+description = "Start the Jellyfin dev server on http://localhost:8096"
+depends = ["dev:media"]
+run = "docker compose -f dev/compose.yaml up -d"
+
+[tasks."dev:setup"]
+description = "Start the dev server, run the startup wizard and scan libraries (idempotent)"
+depends = ["dev:up"]
+run = "python3 -I dev/setup-server.py"
+
+[tasks."dev:down"]
+description = "Stop the dev server"
+run = "docker compose -f dev/compose.yaml down"
+
+[tasks."dev:reset"]
+description = "Delete the dev server's config and cache (keeps the media), then set it up again"
+run = [
+  "docker compose -f dev/compose.yaml down",
+  "rm -rf dev/.data/config dev/.data/cache",
+  "mkdir -p dev/.data/config dev/.data/cache",
+  "mise run dev:setup",
+]
+
+# Packaging (packaging/package.sh)
+
+[tasks.package]
+description = "Release build and package for a target (default: this Linux machine)"
+usage = 'arg "[target]" default="x86_64-unknown-linux-gnu"'
+run = [
+  "cargo build --release --locked -p jelly-gpui --target {{arg(name='target')}}",
+  "packaging/package.sh {{arg(name='target')}} dist",
+]
+
+# CI (GitHub Actions)
+
+[tasks."ci:build"]
+description = "Build packages for every OS on GitHub Actions and download them into dist/"
+run = "packaging/ci-build.sh"
+
+[tasks."ci:status"]
+description = "Show recent CI runs"
+run = "gh run list --workflow ci.yml --limit 10"
+
+# Spike
+
+[tasks.spike]
+description = "In-window video spike (needs libmpv): mise run spike -- <url> [header] [WxH]"
+run = "cargo run --release -p jelly-gpui --example inline_video --"
