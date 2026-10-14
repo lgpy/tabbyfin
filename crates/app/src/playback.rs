@@ -19,6 +19,7 @@ use crate::config::Config;
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::session::describe_error;
+use crate::syncplay::{GroupRequest, SyncPlay};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 const DEFAULT_VOLUME: f64 = 100.;
@@ -39,6 +40,10 @@ pub struct PlayOptions {
     pub media_source_id: Option<String>,
     pub audio_stream_index: Option<i32>,
     pub subtitle: SubtitleChoice,
+    /// Load paused (SyncPlay starts playback with a scheduled command).
+    pub start_paused: bool,
+    /// The SyncPlay queue entry this plays, when the group controls playback.
+    pub group_item: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -53,6 +58,7 @@ pub enum SubtitleChoice {
 #[derive(Debug, Clone)]
 pub enum UiCommand {
     TogglePause,
+    SetPause(bool),
     SeekBy(f64),
     SeekTo(Duration),
     /// Percent, 0 to 100.
@@ -133,12 +139,41 @@ pub struct NowPlaying {
     /// Intro, credits and similar, once known.
     pub segments: Vec<Segment>,
     pub stream: StreamInfo,
+    /// The SyncPlay queue entry, while a group controls playback.
+    pub group_item: Option<String>,
+    /// Counts [`PlayerEvent::Restarted`]: playback resumed after loading or seeking.
+    pub restarts: u64,
     commands: mpsc::UnboundedSender<UiCommand>,
 }
 
 impl NowPlaying {
     pub fn send(&self, command: UiCommand) {
         let _ = self.commands.send(command);
+    }
+
+    /// A control from the player UI. In a SyncPlay group, pause, seek and stop are requests
+    /// to the group, which then commands every member.
+    pub fn control(&self, command: UiCommand, cx: &mut App) {
+        if self.group_item.is_some()
+            && let Some(syncplay) = SyncPlay::try_global(cx)
+        {
+            let request = match command {
+                UiCommand::TogglePause => Some(GroupRequest::SetPause(!self.paused)),
+                UiCommand::SetPause(paused) => Some(GroupRequest::SetPause(paused)),
+                UiCommand::SeekBy(seconds) => {
+                    let target = (self.position.as_secs_f64() + seconds).max(0.);
+                    Some(GroupRequest::Seek(Duration::from_secs_f64(target)))
+                }
+                UiCommand::SeekTo(position) => Some(GroupRequest::Seek(position)),
+                UiCommand::Stop => Some(GroupRequest::Stop),
+                _ => None,
+            };
+            if let Some(request) = request {
+                syncplay.update(cx, |syncplay, cx| syncplay.request(request, cx));
+                return;
+            }
+        }
+        self.send(command);
     }
 
     /// The segment the skip button would skip, if one is playing.
@@ -216,6 +251,8 @@ impl NowPlaying {
             media_source_id: Some(self.source.id.clone()),
             audio_stream_index: self.audio,
             subtitle: self.subtitle,
+            group_item: self.group_item.clone(),
+            ..Default::default()
         };
         let item = self.item.clone();
         PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
@@ -229,6 +266,7 @@ impl NowPlaying {
             PlayerEvent::Paused(paused) => self.paused = *paused,
             PlayerEvent::Volume(volume) => self.volume = *volume,
             PlayerEvent::Muted(muted) => self.muted = *muted,
+            PlayerEvent::Restarted => self.restarts += 1,
             _ => {}
         }
     }
@@ -298,6 +336,15 @@ impl PlaybackManager {
     }
 
     pub fn play(&mut self, item: &BaseItemDto, options: PlayOptions, cx: &mut Context<Self>) {
+        // In a SyncPlay group, starting something means giving the group a new queue; the
+        // server then has every member (this one included) load it.
+        if options.group_item.is_none()
+            && let Some(syncplay) = SyncPlay::try_global(cx).filter(|s| s.read(cx).group.is_some())
+        {
+            let start = options.start.unwrap_or_default();
+            syncplay.update(cx, |syncplay, cx| syncplay.start_queue(item, start, cx));
+            return;
+        }
         // Dropping the previous sender stops that session; it still reports its final position.
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
@@ -306,6 +353,7 @@ impl PlaybackManager {
         let generation = self.generation;
         let (volume, muted) = (self.volume, self.muted);
         let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
+        let group_item = options.group_item.clone();
         let (updates_tx, mut updates) = mpsc::unbounded_channel();
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
 
@@ -354,6 +402,8 @@ impl PlaybackManager {
                             chapters: Vec::new(),
                             segments: Vec::new(),
                             stream,
+                            group_item: group_item.clone(),
+                            restarts: 0,
                             commands,
                         });
                         this.update(cx, |_, cx| cx.emit(PlaybackEvent::Started(entity.clone())))
@@ -405,6 +455,14 @@ impl PlaybackManager {
                 }
                 this.active = false;
                 match result {
+                    // In a group, every member reports the end and the server moves the
+                    // queue on (once); the next item then comes as a queue update.
+                    Ok(Ended::Finished) if let Some(group_item) = &group_item => {
+                        if let Some(syncplay) = SyncPlay::try_global(cx) {
+                            syncplay.update(cx, |syncplay, cx| syncplay.item_ended(group_item, cx));
+                        }
+                        cx.emit(PlaybackEvent::Ended);
+                    }
                     Ok(Ended::Finished) if let Some(next) = next => {
                         tracing::info!(next = %next.name, "playing the next episode");
                         this.play_from_resume(&next, cx);
@@ -699,6 +757,12 @@ async fn run_session(
         },
     };
 
+    if options.start_paused {
+        player
+            .set_property("pause", true)
+            .await
+            .map_err(|err| err.to_string())?;
+    }
     player
         .set_property("volume", volume)
         .await
@@ -786,6 +850,7 @@ async fn run_session(
                 }
             }
             Some(command) = channels.commands.recv() => {
+                tracing::debug!(?command, "player command");
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
@@ -829,6 +894,7 @@ async fn apply_command(
 ) -> player::Result<()> {
     match command {
         UiCommand::TogglePause => player.command(json!(["cycle", "pause"])).await,
+        UiCommand::SetPause(paused) => player.set_property("pause", paused).await,
         UiCommand::SeekBy(seconds) => player.command(json!(["seek", seconds, "relative"])).await,
         UiCommand::SeekTo(position) => {
             player

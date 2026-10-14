@@ -14,6 +14,7 @@ mod playback;
 mod router;
 mod runtime;
 mod session;
+mod syncplay;
 mod tracks;
 mod views;
 

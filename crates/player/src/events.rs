@@ -16,6 +16,8 @@ pub enum PlayerEvent {
     Volume(f64),
     Muted(bool),
     Seeked,
+    /// Playback (re)started after loading or a seek: frames are ready at the new position.
+    Restarted,
     EndFile(EndReason),
     /// mpv exited or closed the connection. Always the last event.
     Exited,
@@ -45,7 +47,11 @@ impl EventTranslator {
             "seek" | "playback-restart" => {
                 // Let the next position through immediately.
                 self.last_position = None;
-                (event["event"] == "seek").then_some(PlayerEvent::Seeked)
+                Some(if event["event"] == "seek" {
+                    PlayerEvent::Seeked
+                } else {
+                    PlayerEvent::Restarted
+                })
             }
             "end-file" => {
                 let reason = match event.get("reason").and_then(Value::as_str) {
@@ -104,6 +110,10 @@ mod tests {
             Some(PlayerEvent::Position(Duration::from_secs_f64(1.2)))
         );
         assert_eq!(t.translate(&json!({"event": "seek"})), Some(PlayerEvent::Seeked));
+        assert_eq!(
+            t.translate(&json!({"event": "playback-restart"})),
+            Some(PlayerEvent::Restarted)
+        );
         assert_eq!(
             t.translate(&pos(1.3)),
             Some(PlayerEvent::Position(Duration::from_secs_f64(1.3)))

@@ -193,8 +193,9 @@ impl PlayerPage {
         this
     }
 
-    fn send(&self, command: UiCommand, cx: &App) {
-        self.now_playing.read(cx).send(command);
+    /// A control: acts on the player, or asks the SyncPlay group while one is in charge.
+    fn send(&self, command: UiCommand, cx: &mut App) {
+        self.now_playing.update(cx, |state, cx| state.control(command, cx));
     }
 
     /// Creates the seek bar once the duration is known, then follows playback unless the user
@@ -445,18 +446,8 @@ impl PlayerPage {
                     .on_click(cx.listener(|this, _, window, cx| this.exit_player(&ExitPlayer, window, cx))),
             )
             .child(div().flex_1().text_lg().text_color(white()).truncate().child(title))
-            .when(state.is_transcoding(), |el| {
-                el.child(
-                    div()
-                        .flex_none()
-                        .px_2()
-                        .rounded_md()
-                        .bg(black().opacity(0.5))
-                        .text_sm()
-                        .text_color(white().opacity(0.8))
-                        .child("Transcoding"),
-                )
-            });
+            .when(state.group_item.is_some(), |el| el.child(badge("SyncPlay")))
+            .when(state.is_transcoding(), |el| el.child(badge("Transcoding")));
 
         let bottom = v_flex()
             .occlude()
@@ -611,6 +602,18 @@ impl PlayerPage {
                 .child(prompt),
         )
     }
+}
+
+/// A small label in the player's top bar.
+fn badge(text: &'static str) -> impl IntoElement {
+    div()
+        .flex_none()
+        .px_2()
+        .rounded_md()
+        .bg(black().opacity(0.5))
+        .text_sm()
+        .text_color(white().opacity(0.8))
+        .child(text)
 }
 
 /// A fixed-width track or version picker for the control bar.

@@ -5,16 +5,20 @@
 
 use std::rc::Rc;
 
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, WindowExt, h_flex, v_flex};
+use gpui_kit::component::popover::Popover;
+use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use jellyfin::GroupState;
 
 use crate::images::ImageCache;
 use crate::playback::{PlaybackEvent, PlaybackManager};
 use crate::router::{Navigator, Route};
 use crate::session::Session;
+use crate::syncplay::{SyncPlay, SyncPlayEvent};
 use crate::views::home::HomePage;
 use crate::views::item::ItemPage;
 use crate::views::library::LibraryPage;
@@ -46,6 +50,7 @@ pub struct ShellView {
     stack: Vec<Page>,
     focus_handle: FocusHandle,
     _playback: Subscription,
+    _syncplay: Vec<Subscription>,
     /// The session websocket; dropped (disconnecting) with the shell on sign-out.
     _live: Task<()>,
 }
@@ -56,6 +61,14 @@ impl ShellView {
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
         ImageCache::init(session.client.clone(), cx);
         PlaybackManager::init(session.client.clone(), cx);
+        SyncPlay::init(session.client.clone(), cx);
+        let syncplay = SyncPlay::global(cx);
+        let _syncplay = vec![
+            cx.observe(&syncplay, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&syncplay, window, |_, _, event, window, cx| match event {
+                SyncPlayEvent::Notice(text) => window.push_notification(Notification::info(text.clone()), cx),
+            }),
+        ];
         let _playback = cx.subscribe_in(
             &PlaybackManager::global(cx),
             window,
@@ -73,6 +86,7 @@ impl ShellView {
             stack: Vec::new(),
             focus_handle: cx.focus_handle(),
             _playback,
+            _syncplay,
             _live,
         };
         this.push(Route::Home, window, cx);
@@ -98,6 +112,7 @@ impl ShellView {
                                     None => crate::playback::SubtitleChoice::Auto,
                                 },
                                 media_source_id: autoplay_tracks.2,
+                                ..Default::default()
                             };
                             PlaybackManager::global(cx).update(cx, |p, cx| p.play(&item, options, cx));
                         }),
@@ -267,6 +282,7 @@ impl ShellView {
                     .tooltip("Search")
                     .on_click(cx.listener(|this, _, window, cx| this.open_search(&OpenSearch, window, cx))),
             )
+            .child(self.render_syncplay(cx))
             .child(
                 Button::new("settings")
                     .ghost()
@@ -287,6 +303,117 @@ impl ShellView {
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(ShellEvent::SignOut))),
             )
     }
+}
+
+impl ShellView {
+    /// The SyncPlay button and its popover: join or create a group, or see and leave it.
+    fn render_syncplay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let syncplay = SyncPlay::global(cx);
+        let in_group = syncplay.read(cx).group.is_some();
+        let new_name = format!("{}'s group", self.session.user.name);
+        Popover::new("syncplay")
+            .anchor(Anchor::TopRight)
+            .on_open_change({
+                let syncplay = syncplay.clone();
+                move |open, _, cx| {
+                    if *open {
+                        syncplay.update(cx, |syncplay, cx| syncplay.refresh_groups(cx));
+                    }
+                }
+            })
+            .trigger(
+                Button::new("syncplay-button")
+                    .ghost()
+                    .icon(Lucide::Users)
+                    .when(in_group, |b| b.primary())
+                    .tooltip("Watch together (SyncPlay)"),
+            )
+            .content(move |_, _, cx| syncplay_panel(&syncplay, &new_name, cx))
+    }
+}
+
+fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, cx: &mut App) -> AnyElement {
+    let state = syncplay.read(cx);
+    let muted = cx.theme().muted_foreground;
+    let body = match &state.group {
+        Some(group) => {
+            let status = match group.state {
+                GroupState::Idle => "Nothing playing",
+                GroupState::Waiting => "Waiting for everyone",
+                GroupState::Paused => "Paused",
+                GroupState::Playing => "Playing",
+            };
+            v_flex()
+                .gap_2()
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(group.group_name.clone()))
+                .child(div().text_sm().text_color(muted).child(status))
+                .child(
+                    div()
+                        .text_sm()
+                        .child(format!("Watching: {}", group.participants.join(", "))),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child("Anything you play now plays for everyone in the group."),
+                )
+                .child(Button::new("syncplay-leave").outline().label("Leave group").on_click({
+                    let syncplay = syncplay.clone();
+                    move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.leave(cx))
+                }))
+                .into_any_element()
+        }
+        None => {
+            let groups = state.groups.iter().map(|group| {
+                let id = group.group_id.clone();
+                h_flex()
+                    .gap_2()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().truncate().child(group.group_name.clone()))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .truncate()
+                                    .child(group.participants.join(", ")),
+                            ),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("join-{id}")))
+                            .small()
+                            .label("Join")
+                            .on_click({
+                                let syncplay = syncplay.clone();
+                                move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.join(id.clone(), cx))
+                            }),
+                    )
+            });
+            let new_name = new_name.to_owned();
+            v_flex()
+                .gap_2()
+                .child(div().font_weight(FontWeight::SEMIBOLD).child("Watch together"))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child("Play in sync with others on this server."),
+                )
+                .when(state.groups.is_empty(), |el| {
+                    el.child(div().text_sm().text_color(muted).child("No groups yet."))
+                })
+                .children(groups)
+                .child(Button::new("syncplay-new").primary().label("New group").on_click({
+                    let syncplay = syncplay.clone();
+                    move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.create(new_name.clone(), cx))
+                }))
+                .into_any_element()
+        }
+    };
+    div().w(px(300.)).child(body).into_any_element()
 }
 
 impl Focusable for ShellView {

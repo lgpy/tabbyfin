@@ -13,6 +13,7 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 
 use crate::client::Query;
+use crate::syncplay::{Command, GroupUpdate};
 use crate::{Client, Error, Result};
 
 /// The server asks for keep-alives at this interval unless it says otherwise.
@@ -31,10 +32,10 @@ pub enum SocketEvent {
 pub enum ServerMessage {
     /// Watched state, resume points or favorites changed, e.g. on another device.
     UserDataChanged { item_ids: Vec<String> },
-    /// SyncPlay group state (joined, left, members, queue…). Typed with SyncPlay itself.
-    SyncPlayGroupUpdate(serde_json::Value),
+    /// SyncPlay group changes: joined, left, members, state, queue.
+    SyncPlayGroupUpdate(GroupUpdate),
     /// A scheduled SyncPlay playback command.
-    SyncPlayCommand(serde_json::Value),
+    SyncPlayCommand(Command),
     Other {
         message_type: String,
         data: serde_json::Value,
@@ -77,8 +78,15 @@ impl ServerMessage {
                     Err(err) => return Some(Err(err)),
                 }
             }
-            "SyncPlayGroupUpdate" => ServerMessage::SyncPlayGroupUpdate(raw.data),
-            "SyncPlayCommand" => ServerMessage::SyncPlayCommand(raw.data),
+            "SyncPlayGroupUpdate" => match GroupUpdate::parse(raw.data) {
+                Ok(Some(update)) => ServerMessage::SyncPlayGroupUpdate(update),
+                Ok(None) => return None,
+                Err(err) => return Some(Err(err)),
+            },
+            "SyncPlayCommand" => match Command::parse(raw.data) {
+                Ok(command) => ServerMessage::SyncPlayCommand(command),
+                Err(err) => return Some(Err(err)),
+            },
             _ => ServerMessage::Other {
                 message_type: raw.message_type,
                 data: raw.data,
@@ -220,7 +228,9 @@ mod tests {
         }
         assert!(ServerMessage::parse(r#"{"MessageType":"ForceKeepAlive","Data":60}"#).is_none());
         assert!(matches!(
-            ServerMessage::parse(r#"{"MessageType":"SyncPlayCommand","Data":{"Command":"Unpause"}}"#),
+            ServerMessage::parse(
+                r#"{"MessageType":"SyncPlayCommand","Data":{"Command":"Unpause","When":"2026-10-14T19:00:00Z"}}"#
+            ),
             Some(Ok(ServerMessage::SyncPlayCommand(_)))
         ));
         assert!(matches!(

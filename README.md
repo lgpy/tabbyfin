@@ -20,7 +20,8 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
   - Audio, subtitle and version pickers, including external subtitles from Jellyfin.
   - Volume, chapters (marked on the seek bar), next episode, and an up-next card that plays the next episode at the end (or not: it's a setting).
   - Skip intro, recap and similar, from the server's media segments (with a segment plugin such as Intro Skipper) or from chapter names like "Intro", "Opening" or "OP".
-  - Resume points and watched state stay in sync with the server.
+  - Resume points and watched state stay in sync with the server, including changes made on other devices.
+- **Watch together** with Jellyfin's SyncPlay: create or join a group from the top bar, and play, pause and seek in sync with the other members.
 - **Isolation:** your own mpv configuration, scripts and key bindings are never loaded, so they can't change how the embedded player looks.
 
 **Keys:** in the browsing pages, the arrow keys move a highlight over the cards, Tab and Shift+Tab jump between rows, and Enter opens. Esc or Backspace goes back, and Ctrl+F (⌘F on macOS) searches. In search, Enter in the box jumps to the results.
