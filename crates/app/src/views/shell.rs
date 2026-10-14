@@ -15,13 +15,17 @@ use crate::session::Session;
 use crate::views::home::HomePage;
 use crate::views::item::ItemPage;
 use crate::views::library::LibraryPage;
+use crate::views::search::SearchPage;
+use crate::views::settings::SettingsPage;
 
-actions!(jelly, [Back]);
+actions!(jelly, [Back, OpenSearch]);
 
 pub const KEY_CONTEXT: &str = "Shell";
 
 pub enum ShellEvent {
     SignOut,
+    /// The server rejected the session token.
+    SessionExpired,
 }
 
 struct Page {
@@ -45,31 +49,37 @@ impl ShellView {
         let _playback_errors = cx.subscribe_in(
             &PlaybackManager::global(cx),
             window,
-            |_, _, event, window, cx| {
-                if let PlaybackEvent::Failed(message) = event {
-                    window.push_notification(Notification::error(message.clone()), cx);
-                }
+            |_, _, PlaybackEvent::Failed(message), window, cx| {
+                window.push_notification(Notification::error(message.clone()), cx);
             },
         );
-        let focus_handle = cx.focus_handle();
-        focus_handle.focus(window, cx);
         let mut this = Self {
             session,
             stack: Vec::new(),
-            focus_handle,
+            focus_handle: cx.focus_handle(),
             _playback_errors,
         };
         this.push(Route::Home, window, cx);
         #[cfg(debug_assertions)]
         if let Some((route, autoplay)) = debug_start_route() {
-            if let (true, Route::Item { id, .. }) = (autoplay, &route) {
+            if let (Some(autoplay_tracks), Route::Item { id, .. }) = (autoplay, &route) {
                 let (client, id) = (this.session.client.clone(), id.clone());
                 cx.spawn(async move |_, cx| {
                     let item = crate::runtime::spawn(async move { client.item(&id, &[]).await }).await;
                     match item {
                         Ok(item) => cx.update(|cx| {
                             let start = item.user_data.as_ref().map(|d| d.playback_position_ticks).filter(|t| t.0 > 0);
-                            PlaybackManager::global(cx).update(cx, |p, cx| p.play(&item, start, cx));
+                            let options = crate::playback::PlayOptions {
+                                start,
+                                audio_stream_index: autoplay_tracks.0,
+                                subtitle: match autoplay_tracks.1 {
+                                    Some(-1) => crate::playback::SubtitleChoice::Off,
+                                    Some(index) => crate::playback::SubtitleChoice::Stream(index),
+                                    None => crate::playback::SubtitleChoice::Auto,
+                                },
+                                ..Default::default()
+                            };
+                            PlaybackManager::global(cx).update(cx, |p, cx| p.play(&item, options, cx));
                         }),
                         Err(err) => tracing::error!("autoplay failed: {err}"),
                     }
@@ -82,6 +92,9 @@ impl ShellView {
     }
 
     pub fn push(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
+        // Keep keyboard shortcuts working after clicks moved focus elsewhere. Done before
+        // creating the page so pages can take focus themselves (e.g. the search box).
+        self.focus_handle.focus(window, cx);
         let nav = Navigator::new(cx.entity().downgrade());
         let client = self.session.client.clone();
         let page = match route {
@@ -103,22 +116,36 @@ impl ShellView {
                 title: name.into(),
                 view: cx.new(|cx| ItemPage::new(client, nav, id, cx)).into(),
             },
+            Route::Search => Page {
+                title: "Search".into(),
+                view: cx.new(|cx| SearchPage::new(client, nav, window, cx)).into(),
+            },
+            Route::Settings => Page {
+                title: "Settings".into(),
+                view: cx
+                    .new(|cx| SettingsPage::new(self.session.clone(), window, cx))
+                    .into(),
+            },
         };
         self.stack.push(page);
-        // Keep keyboard shortcuts working after clicks moved focus elsewhere.
-        self.focus_handle.focus(window, cx);
         cx.notify();
     }
 
-    fn back(&mut self, _: &Back, _window: &mut Window, cx: &mut Context<Self>) {
+    fn back(&mut self, _: &Back, window: &mut Window, cx: &mut Context<Self>) {
         if self.stack.len() > 1 {
             self.stack.pop();
+            self.focus_handle.focus(window, cx);
             cx.notify();
         }
     }
 
-    fn home(&mut self, cx: &mut Context<Self>) {
+    fn open_search(&mut self, _: &OpenSearch, window: &mut Window, cx: &mut Context<Self>) {
+        self.push(Route::Search, window, cx);
+    }
+
+    fn home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.stack.truncate(1);
+        self.focus_handle.focus(window, cx);
         cx.notify();
     }
 
@@ -143,14 +170,22 @@ impl ShellView {
                 Button::new("home")
                     .ghost()
                     .label("Home")
-                    .on_click(cx.listener(|this, _, _, cx| this.home(cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.home(window, cx))),
+            )
+            .child(div().flex_1().truncate().font_weight(FontWeight::SEMIBOLD).child(title))
+            .child(
+                Button::new("search")
+                    .ghost()
+                    .icon(IconName::Search)
+                    .tooltip("Search")
+                    .on_click(cx.listener(|this, _, window, cx| this.open_search(&OpenSearch, window, cx))),
             )
             .child(
-                div()
-                    .flex_1()
-                    .truncate()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(title),
+                Button::new("settings")
+                    .ghost()
+                    .icon(IconName::Settings)
+                    .tooltip("Settings")
+                    .on_click(cx.listener(|this, _, window, cx| this.push(Route::Settings, window, cx))),
             )
             .child(
                 div()
@@ -181,6 +216,7 @@ impl Render for ShellView {
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::back))
+            .on_action(cx.listener(Self::open_search))
             .bg(cx.theme().background)
             .child(self.render_top_bar(cx))
             .child(div().flex_1().min_h_0().children(page))
@@ -188,23 +224,31 @@ impl Render for ShellView {
 }
 
 /// Dev aid: open a page on top of Home at startup, for screenshots and quick iteration.
-/// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, or `play:<id>` (opens the item
-/// and plays it from its resume point). Returns the route and whether to autoplay.
+/// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, `search`, `settings`, or
+/// `play:<id>[:<audio index>[:<subtitle index or -1>]]` (opens the item and plays it from its
+/// resume point). Returns the route and, for `play`, the track choices.
 #[cfg(debug_assertions)]
-fn debug_start_route() -> Option<(Route, bool)> {
+#[allow(clippy::type_complexity)]
+fn debug_start_route() -> Option<(Route, Option<(Option<i32>, Option<i32>)>)> {
     use jellyfin::models::CollectionType;
 
     let value = std::env::var("JELLY_GPUI_ROUTE").ok()?;
     let mut parts = value.split(':');
-    match (parts.next()?, parts.next()?) {
-        (kind @ ("item" | "play"), id) => Some((
-            Route::Item {
-                id: id.into(),
-                name: "Item".into(),
-            },
-            kind == "play",
-        )),
-        ("library", id) => Some((
+    match (parts.next()?, parts.next()) {
+        ("search", _) => Some((Route::Search, None)),
+        ("settings", _) => Some((Route::Settings, None)),
+        (kind @ ("item" | "play"), Some(id)) => {
+            let mut index = || parts.next().and_then(|p| p.parse().ok());
+            let tracks = (kind == "play").then(|| (index(), index()));
+            Some((
+                Route::Item {
+                    id: id.into(),
+                    name: "Item".into(),
+                },
+                tracks,
+            ))
+        }
+        ("library", Some(id)) => Some((
             Route::Library {
                 id: id.into(),
                 name: "Library".into(),
@@ -214,7 +258,7 @@ fn debug_start_route() -> Option<(Route, bool)> {
                     _ => None,
                 },
             },
-            false,
+            None,
         )),
         _ => None,
     }

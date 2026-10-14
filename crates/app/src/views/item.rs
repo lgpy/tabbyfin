@@ -1,25 +1,30 @@
 //! Detail page for a movie, series, season or episode.
 
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, IconName, h_flex, v_flex};
+use gpui_kit::component::notification::Notification;
+use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::{ActiveTheme, IconName, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType};
 use jellyfin::{Client, Ticks};
-use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, MediaStreamType};
 
+use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
-    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, card_text, centered_message, centered_spinner,
-    episode_label, landscape_image, poster_card, remote_image, runtime_text,
+    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, card_text, centered_spinner, episode_label, error_state,
+    landscape_image, poster_card, remote_image, runtime_text,
 };
 use crate::images::ImageCache;
-use crate::playback::{PlaybackEvent, PlaybackManager};
+use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
 use crate::router::Navigator;
 use crate::runtime;
-use crate::session::describe_error;
 
 const BACKDROP_H: f32 = 340.;
 const DETAIL_POSTER_W: f32 = 200.;
 const DETAIL_POSTER_H: f32 = 300.;
+const PICKER_W: f32 = 260.;
+/// Subtitle picker value for "Off".
+const SUBTITLES_OFF: i32 = -1;
 
 struct ItemData {
     item: BaseItemDto,
@@ -27,11 +32,43 @@ struct ItemData {
     children: Vec<BaseItemDto>,
 }
 
+/// One entry in a version or track picker.
+#[derive(Clone)]
+struct Choice {
+    label: SharedString,
+    /// Media source position for versions; Jellyfin stream index for tracks.
+    value: i32,
+}
+
+impl SelectItem for Choice {
+    type Value = i32;
+
+    fn title(&self) -> SharedString {
+        self.label.clone()
+    }
+
+    fn value(&self) -> &i32 {
+        &self.value
+    }
+}
+
+type ChoiceSelect = Entity<SelectState<Vec<Choice>>>;
+
+/// Version and track choices for a playable item. Defaults come from the server, which
+/// applies the user's language preferences.
+struct Pickers {
+    version: Option<ChoiceSelect>,
+    audio: Option<ChoiceSelect>,
+    subtitle: Option<ChoiceSelect>,
+    _version_changed: Option<Subscription>,
+}
+
 pub struct ItemPage {
     client: Client,
     nav: Navigator,
     item_id: String,
     data: Load<ItemData>,
+    pickers: Option<Pickers>,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -40,18 +77,15 @@ impl ItemPage {
     pub fn new(client: Client, nav: Navigator, item_id: String, cx: &mut Context<Self>) -> Self {
         let _subscriptions = vec![
             cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
-            // Resume point and watched state change after playback.
-            cx.subscribe(&PlaybackManager::global(cx), |this, _, event, cx| {
-                if let PlaybackEvent::Stopped = event {
-                    this.reload(cx);
-                }
-            }),
+            // Resume point and watched state change after playback or marking items watched.
+            cx.subscribe(&Changes::global(cx), |this, _, _: &UserDataChanged, cx| this.reload(cx)),
         ];
         let mut this = Self {
             client,
             nav,
             item_id,
             data: Load::Loading,
+            pickers: None,
             scroll: ScrollHandle::new(),
             _subscriptions,
         };
@@ -67,7 +101,7 @@ impl ItemPage {
             this.update(cx, |this, cx| {
                 this.data = match result {
                     Ok(data) => Load::Loaded(data),
-                    Err(err) => Load::Failed(describe_error(&err).into()),
+                    Err(err) => Load::Failed(this.nav.handle_error(&err, cx)),
                 };
                 cx.notify();
             })
@@ -75,6 +109,144 @@ impl ItemPage {
         })
         .detach();
     }
+
+    fn play(&mut self, start: Option<Ticks>, cx: &mut Context<Self>) {
+        let Load::Loaded(data) = &self.data else { return };
+        let mut options = PlayOptions {
+            start,
+            ..Default::default()
+        };
+        if let Some(pickers) = &self.pickers {
+            let selected = |select: &Option<ChoiceSelect>| {
+                select.as_ref().and_then(|s| s.read(cx).selected_value().copied())
+            };
+            options.media_source_id = selected(&pickers.version)
+                .and_then(|i| data.item.media_sources.get(i as usize))
+                .map(|source| source.id.clone());
+            options.audio_stream_index = selected(&pickers.audio);
+            options.subtitle = match selected(&pickers.subtitle) {
+                Some(SUBTITLES_OFF) => SubtitleChoice::Off,
+                Some(index) => SubtitleChoice::Stream(index),
+                None => SubtitleChoice::Auto,
+            };
+        }
+        let item = data.item.clone();
+        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
+    }
+
+    fn set_played(&mut self, item_id: String, played: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = runtime::spawn(async move {
+                if played {
+                    client.mark_played(&item_id).await
+                } else {
+                    client.mark_unplayed(&item_id).await
+                }
+            })
+            .await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(()) => Changes::notify_user_data(cx),
+                Err(err) => {
+                    let message = this.nav.handle_error(&err, cx);
+                    window.push_notification(Notification::error(message), cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn ensure_pickers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pickers.is_some() {
+            return;
+        }
+        let Load::Loaded(data) = &self.data else { return };
+        if data.item.media_sources.is_empty() {
+            return;
+        }
+        let sources = data.item.media_sources.clone();
+        let version = (sources.len() > 1).then(|| {
+            let choices = sources
+                .iter()
+                .enumerate()
+                .map(|(i, s)| Choice {
+                    label: s.name.clone().unwrap_or_else(|| format!("Version {}", i + 1)).into(),
+                    value: i as i32,
+                })
+                .collect();
+            cx.new(|cx| SelectState::new(choices, Some(IndexPath::default()), window, cx))
+        });
+        let _version_changed = version.as_ref().map(|select| {
+            cx.subscribe_in(select, window, move |this, _, event: &SelectEvent<Vec<Choice>>, window, cx| {
+                let SelectEvent::Confirm(Some(index)) = event else { return };
+                if let Some(source) = sources.get(*index as usize) {
+                    let (audio, subtitle) = track_pickers(source, window, cx);
+                    if let Some(pickers) = &mut this.pickers {
+                        pickers.audio = audio;
+                        pickers.subtitle = subtitle;
+                    }
+                    cx.notify();
+                }
+            })
+        });
+        let (audio, subtitle) = track_pickers(&data.item.media_sources[0], window, cx);
+        self.pickers = Some(Pickers {
+            version,
+            audio,
+            subtitle,
+            _version_changed,
+        });
+    }
+}
+
+fn track_pickers<V: 'static>(
+    source: &MediaSourceInfo,
+    window: &mut Window,
+    cx: &mut Context<V>,
+) -> (Option<ChoiceSelect>, Option<ChoiceSelect>) {
+    let streams = |kind| -> Vec<&MediaStream> { source.media_streams.iter().filter(|s| s.kind == kind).collect() };
+    let label = |s: &MediaStream| -> SharedString {
+        s.display_title
+            .clone()
+            .or_else(|| s.language.clone())
+            .unwrap_or_else(|| format!("Track {}", s.index))
+            .into()
+    };
+
+    let audio_streams = streams(MediaStreamType::Audio);
+    let audio = (!audio_streams.is_empty()).then(|| {
+        let selected = audio_streams
+            .iter()
+            .position(|s| Some(s.index) == source.default_audio_stream_index)
+            .unwrap_or(0);
+        let choices = audio_streams
+            .iter()
+            .map(|s| Choice {
+                label: label(s),
+                value: s.index,
+            })
+            .collect();
+        cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
+    });
+
+    let subtitle_streams = streams(MediaStreamType::Subtitle);
+    let subtitle = (!subtitle_streams.is_empty()).then(|| {
+        let mut choices = vec![Choice {
+            label: "Off".into(),
+            value: SUBTITLES_OFF,
+        }];
+        choices.extend(subtitle_streams.iter().map(|s| Choice {
+            label: label(s),
+            value: s.index,
+        }));
+        let selected = choices
+            .iter()
+            .position(|c| Some(c.value) == source.default_subtitle_stream_index)
+            .unwrap_or(0);
+        cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
+    });
+    (audio, subtitle)
 }
 
 async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
@@ -119,30 +291,6 @@ fn meta_line(item: &BaseItemDto) -> String {
     parts.join(" · ")
 }
 
-/// Play, or Resume plus Play from beginning when there's a saved position.
-fn play_buttons(item: &BaseItemDto) -> impl IntoElement {
-    let resume_at = item
-        .user_data
-        .as_ref()
-        .map(|d| d.playback_position_ticks)
-        .filter(|t| t.0 > 0);
-    let play = |id: &'static str, label: String, start: Option<Ticks>, item: &BaseItemDto| {
-        let item = item.clone();
-        Button::new(id).icon(IconName::Play).label(label).on_click(move |_, _, cx| {
-            PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, start, cx));
-        })
-    };
-    h_flex()
-        .pt_2()
-        .gap_2()
-        .map(|el| match resume_at {
-            Some(position) => el
-                .child(play("resume", format!("Resume from {}", timestamp(position)), Some(position), item).primary())
-                .child(play("play-start", "Play from beginning".into(), None, item).outline()),
-            None => el.child(play("play", "Play".into(), None, item).primary()),
-        })
-}
-
 /// `1:02:03`, `4:05`.
 fn timestamp(ticks: Ticks) -> String {
     let secs = ticks.as_secs_f64() as u64;
@@ -150,24 +298,59 @@ fn timestamp(ticks: Ticks) -> String {
     if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
 }
 
-/// `English, Japanese` style summary of a stream kind in the first media source.
-fn stream_summary(item: &BaseItemDto, kind: MediaStreamType) -> Option<String> {
-    let source = item.media_sources.first()?;
-    let names: Vec<String> = source
-        .media_streams
-        .iter()
-        .filter(|s| s.kind == kind)
-        .map(|s| {
-            s.display_title
-                .clone()
-                .or_else(|| s.language.clone())
-                .unwrap_or_else(|| "Unknown".into())
-        })
-        .collect();
-    (!names.is_empty()).then(|| names.join(", "))
+fn is_played(item: &BaseItemDto) -> bool {
+    item.user_data.as_ref().is_some_and(|d| d.played)
 }
 
 impl ItemPage {
+    /// Play / Resume buttons and the watched toggle.
+    fn render_actions(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
+        let playable = matches!(item.kind, BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video);
+        let resume_at = item
+            .user_data
+            .as_ref()
+            .map(|d| d.playback_position_ticks)
+            .filter(|t| t.0 > 0);
+        let played = is_played(item);
+        let item_id = item.id.clone();
+
+        h_flex()
+            .pt_2()
+            .gap_2()
+            .when(playable, |el| match resume_at {
+                Some(position) => el
+                    .child(
+                        Button::new("resume")
+                            .primary()
+                            .icon(IconName::Play)
+                            .label(format!("Resume from {}", timestamp(position)))
+                            .on_click(cx.listener(move |this, _, _, cx| this.play(Some(position), cx))),
+                    )
+                    .child(
+                        Button::new("play-start")
+                            .outline()
+                            .label("Play from beginning")
+                            .on_click(cx.listener(|this, _, _, cx| this.play(None, cx))),
+                    ),
+                None => el.child(
+                    Button::new("play")
+                        .primary()
+                        .icon(IconName::Play)
+                        .label("Play")
+                        .on_click(cx.listener(|this, _, _, cx| this.play(None, cx))),
+                ),
+            })
+            .child(
+                Button::new("toggle-played")
+                    .outline()
+                    .icon(if played { IconName::CircleCheck } else { IconName::Check })
+                    .label(if played { "Watched" } else { "Mark watched" })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.set_played(item_id.clone(), !played, window, cx)
+                    })),
+            )
+    }
+
     fn render_header(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
         let backdrop = item.backdrop_image().map(|r| r.fill_width(1280));
         let has_backdrop = backdrop.is_some();
@@ -177,11 +360,8 @@ impl ItemPage {
                 .map(|r| r.fill_width((DETAIL_POSTER_W * 2.) as u32)),
             cx,
         );
-        let playable = matches!(item.kind, BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video);
         let title = match item.kind {
-            BaseItemKind::Episode | BaseItemKind::Season => {
-                item.series_name.clone().unwrap_or_default()
-            }
+            BaseItemKind::Episode | BaseItemKind::Season => item.series_name.clone().unwrap_or_default(),
             _ => String::new(),
         };
 
@@ -197,7 +377,7 @@ impl ItemPage {
             .when(!item.genres.is_empty(), |el| {
                 el.child(div().text_sm().text_color(cx.theme().muted_foreground).child(item.genres.join(", ")))
             })
-            .when(playable, |el| el.child(play_buttons(item)))
+            .child(self.render_actions(item, cx))
             .when_some(item.overview.clone(), |el, overview| {
                 el.child(div().pt_2().max_w(px(820.)).child(overview))
             });
@@ -215,16 +395,11 @@ impl ItemPage {
                         .h(px(BACKDROP_H))
                         .overflow_hidden()
                         .child(backdrop)
-                        .child(
-                            div()
-                                .absolute()
-                                .inset_0()
-                                .bg(linear_gradient(
-                                    180.,
-                                    linear_color_stop(cx.theme().background.opacity(0.3), 0.),
-                                    linear_color_stop(cx.theme().background, 1.),
-                                )),
-                        ),
+                        .child(div().absolute().inset_0().bg(linear_gradient(
+                            180.,
+                            linear_color_stop(cx.theme().background.opacity(0.3), 0.),
+                            linear_color_stop(cx.theme().background, 1.),
+                        ))),
                 )
             })
             .child(
@@ -248,33 +423,22 @@ impl ItemPage {
             )
     }
 
-    fn render_versions(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        if item.media_sources.is_empty() {
-            return None;
-        }
-        let versions: Vec<String> = item
-            .media_sources
-            .iter()
-            .map(|s| s.name.clone().unwrap_or_else(|| "Default".into()))
-            .collect();
-        let row = |label: &'static str, value: String| {
+    fn render_pickers(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let pickers = self.pickers.as_ref()?;
+        let row = |label: &'static str, select: &ChoiceSelect| {
             h_flex()
                 .gap_4()
                 .child(div().w(px(90.)).flex_none().text_color(cx.theme().muted_foreground).child(label))
-                .child(div().flex_1().child(value))
+                .child(Select::new(select).w(px(PICKER_W)).menu_width(px(PICKER_W * 1.5)))
         };
         Some(
             v_flex()
                 .px_6()
-                .gap_1()
+                .gap_2()
                 .text_sm()
-                .when(versions.len() > 1, |el| el.child(row("Versions", versions.join(", "))))
-                .when_some(stream_summary(item, MediaStreamType::Audio), |el, audio| {
-                    el.child(row("Audio", audio))
-                })
-                .when_some(stream_summary(item, MediaStreamType::Subtitle), |el, subs| {
-                    el.child(row("Subtitles", subs))
-                }),
+                .when_some(pickers.version.as_ref(), |el, s| el.child(row("Version", s)))
+                .when_some(pickers.audio.as_ref(), |el, s| el.child(row("Audio", s)))
+                .when_some(pickers.subtitle.as_ref(), |el, s| el.child(row("Subtitles", s))),
         )
     }
 
@@ -309,7 +473,8 @@ impl ItemPage {
                 );
                 let (_, subtitle) = card_text(episode);
                 let runtime = episode.run_time_ticks.map(runtime_text).unwrap_or_default();
-                let played = episode.user_data.as_ref().is_some_and(|d| d.played);
+                let played = is_played(episode);
+                let episode_id = episode.id.clone();
                 h_flex()
                     .id(("episode", i))
                     .items_start()
@@ -335,15 +500,21 @@ impl ItemPage {
                             .min_w_0()
                             .gap_1()
                             .child(div().font_weight(FontWeight::SEMIBOLD).child(subtitle))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(if played { format!("{runtime} · Watched") } else { runtime }),
-                            )
+                            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(runtime))
                             .when_some(episode.overview.clone(), |el, overview| {
                                 el.child(div().text_sm().line_clamp(3).child(overview))
                             }),
+                    )
+                    .child(
+                        Button::new(("toggle-played", i))
+                            .ghost()
+                            .icon(if played { IconName::CircleCheck } else { IconName::Check })
+                            .tooltip(if played { "Mark unwatched" } else { "Mark watched" })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                // Don't open the episode underneath.
+                                cx.stop_propagation();
+                                this.set_played(episode_id.clone(), !played, window, cx);
+                            })),
                     )
                     .into_any_element()
             })
@@ -357,10 +528,17 @@ impl ItemPage {
 }
 
 impl Render for ItemPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ensure_pickers(window, cx);
         let data = match &self.data {
             Load::Loading => return centered_spinner().into_any_element(),
-            Load::Failed(message) => return centered_message(message.clone(), cx).into_any_element(),
+            Load::Failed(message) => {
+                let retry = cx.listener(|this, _, _, cx| {
+                    this.data = Load::Loading;
+                    this.reload(cx);
+                });
+                return error_state(message.clone(), retry, cx).into_any_element();
+            }
             Load::Loaded(data) => data,
         };
         let item = &data.item;
@@ -375,7 +553,7 @@ impl Render for ItemPage {
                     .pb_8()
                     .gap_6()
                     .child(self.render_header(item, cx))
-                    .children(self.render_versions(item, cx))
+                    .children(self.render_pickers(cx))
                     .when(item.kind == BaseItemKind::Series && !data.children.is_empty(), |el| {
                         el.child(self.render_seasons(&data.children, cx))
                     })

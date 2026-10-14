@@ -164,6 +164,17 @@ async fn main() -> anyhow::Result<()> {
     let resume_at = movie.user_data.as_ref().map(|d| d.playback_position_ticks).unwrap_or_default();
     ok(format!("{} detail loaded, resume position {:.1}s", movie.name, resume_at.as_secs_f64()));
 
+    // Watched state round trip (restores the original state).
+    let was_played = movie.user_data.as_ref().is_some_and(|d| d.played);
+    client.mark_played(&movie.id).await?;
+    ensure!(is_played(&client, &movie.id).await?, "mark_played didn't stick");
+    client.mark_unplayed(&movie.id).await?;
+    ensure!(!is_played(&client, &movie.id).await?, "mark_unplayed didn't stick");
+    if was_played {
+        client.mark_played(&movie.id).await?;
+    }
+    ok(format!("{} marked watched and unwatched", movie.name));
+
     // Images.
     let req = movie.primary_image().context("movie has no primary image")?.fill_width(300);
     let bytes = client.image(&req).await?;
@@ -205,6 +216,11 @@ async fn first_of(client: &Client, kind: BaseItemKind) -> anyhow::Result<jellyfi
         .into_iter()
         .next()
         .with_context(|| format!("no {kind:?} on the server"))
+}
+
+async fn is_played(client: &Client, id: &str) -> anyhow::Result<bool> {
+    let item = client.item(id, &[]).await?;
+    Ok(item.user_data.is_some_and(|d| d.played))
 }
 
 fn env(key: &str, default: &str) -> String {

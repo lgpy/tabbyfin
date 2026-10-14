@@ -13,6 +13,26 @@ pub struct Config {
     pub device_id: String,
     /// The server and user of the last successful sign-in.
     pub server: Option<SavedServer>,
+    #[serde(default)]
+    pub player: PlayerSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlayerSettings {
+    /// mpv executable. `None` finds it automatically (bundled copy, then `PATH`).
+    pub mpv_path: Option<String>,
+    /// Load the user's own `mpv.conf` and scripts. Off passes `--no-config`.
+    pub use_mpv_config: bool,
+}
+
+impl Default for PlayerSettings {
+    fn default() -> Self {
+        Self {
+            mpv_path: None,
+            use_mpv_config: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

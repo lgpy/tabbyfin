@@ -18,7 +18,8 @@ enum Screen {
 }
 
 pub struct AppView {
-    config: Config,
+    device_id: String,
+    saved: Option<SavedServer>,
     screen: Screen,
     _screen_subscription: Option<Subscription>,
 }
@@ -26,14 +27,14 @@ pub struct AppView {
 impl AppView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let config = Config::load();
-        let saved = config.server.clone();
         let mut this = Self {
-            config,
+            device_id: config.device_id,
+            saved: config.server.clone(),
             screen: Screen::Restoring,
             _screen_subscription: None,
         };
-        match saved {
-            Some(saved) => this.restore(saved, window, cx),
+        match config.server {
+            Some(saved) => this.restore(saved, true, window, cx),
             None => this.show_login(None, window, cx),
         }
         this
@@ -41,8 +42,12 @@ impl AppView {
 
     /// Signs back in with the stored token. Falls back to the sign-in screen, pre-filled with
     /// the saved server and username, if the token is missing, revoked or the server is down.
-    fn restore(&mut self, saved: SavedServer, window: &mut Window, cx: &mut Context<Self>) {
-        let device_id = self.config.device_id.clone();
+    /// With `allow_reconnect`, an unreachable server leaves the token in place and the sign-in
+    /// screen tries the saved session again once the server answers.
+    fn restore(&mut self, saved: SavedServer, allow_reconnect: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.screen = Screen::Restoring;
+        cx.notify();
+        let device_id = self.device_id.clone();
         cx.spawn_in(window, async move |this, cx| {
             let account = saved.credential_account();
             let token = cx
@@ -82,10 +87,12 @@ impl AppView {
                             .spawn(async move { credentials::delete(&account) })
                             .detach();
                     }
+                    let unreachable = matches!(err, Some(jellyfin::Error::Http(_) | jellyfin::Error::ServerStarting));
                     let prefill = Prefill {
                         url: saved.url.clone(),
                         username: saved.username.clone(),
                         error: err.map(|e| describe_error(&e)),
+                        resume_saved_session: allow_reconnect && unreachable,
                     };
                     this.show_login(Some(prefill), window, cx);
                 }
@@ -96,10 +103,15 @@ impl AppView {
     }
 
     fn show_login(&mut self, prefill: Option<Prefill>, window: &mut Window, cx: &mut Context<Self>) {
-        let device_id = self.config.device_id.clone();
+        let device_id = self.device_id.clone();
         let login = cx.new(|cx| LoginView::new(device_id, prefill, window, cx));
         self._screen_subscription = Some(cx.subscribe_in(&login, window, |this, _, ev, window, cx| match ev {
-            LoginEvent::LoggedIn(session) => this.on_logged_in(session.clone(), window, cx),
+            LoginEvent::LoggedIn(session) => this.on_logged_in((**session).clone(), window, cx),
+            LoginEvent::ServerReachable => {
+                if let Some(saved) = this.saved.clone() {
+                    this.restore(saved, false, window, cx);
+                }
+            }
         }));
         self.screen = Screen::Login(login);
         cx.notify();
@@ -109,6 +121,7 @@ impl AppView {
         let home = cx.new(|cx| ShellView::new(session.clone(), window, cx));
         self._screen_subscription = Some(cx.subscribe_in(&home, window, move |this, _, ev, window, cx| match ev {
             ShellEvent::SignOut => this.sign_out(&session, window, cx),
+            ShellEvent::SessionExpired => this.session_expired(window, cx),
         }));
         self.screen = Screen::Home(home);
         cx.notify();
@@ -132,10 +145,13 @@ impl AppView {
                 })
                 .detach();
         }
-        self.config.server = Some(saved);
-        if let Err(err) = self.config.save() {
+        // Re-read the file so settings changed elsewhere aren't overwritten.
+        let mut config = Config::load();
+        config.server = Some(saved.clone());
+        if let Err(err) = config.save() {
             tracing::error!("failed to save config: {err:#}");
         }
+        self.saved = Some(saved);
         self.show_home(session, window, cx);
     }
 
@@ -148,7 +164,21 @@ impl AppView {
                 tracing::warn!("logout request failed: {err}");
             }
         });
-        let prefill = self.config.server.as_ref().map(|saved| {
+        self.forget_session(None, window, cx);
+    }
+
+    fn session_expired(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login(_)) {
+            return;
+        }
+        tracing::warn!("session expired");
+        crate::playback::PlaybackManager::global(cx).update(cx, |playback, _| playback.stop());
+        self.forget_session(Some(describe_error(&jellyfin::Error::Unauthorized)), window, cx);
+    }
+
+    /// Deletes the stored token and shows sign-in for the same server and user.
+    fn forget_session(&mut self, error: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let prefill = self.saved.as_ref().map(|saved| {
             let account = saved.credential_account();
             cx.background_executor()
                 .spawn(async move { credentials::delete(&account) })
@@ -156,7 +186,8 @@ impl AppView {
             Prefill {
                 url: saved.url.clone(),
                 username: saved.username.clone(),
-                error: None,
+                error,
+                resume_saved_session: false,
             }
         });
         self.show_login(prefill, window, cx);

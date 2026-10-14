@@ -113,4 +113,14 @@ impl Client {
         q.opt("seasonId", season_id);
         self.get(&format!("/Shows/{series_id}/Episodes"), &q).await
     }
+
+    /// Marks an item (or every episode of a series/season) as watched.
+    pub async fn mark_played(&self, item_id: &str) -> Result<()> {
+        self.post_no_content::<()>(&format!("/UserPlayedItems/{item_id}"), &Query::new(), None)
+            .await
+    }
+
+    pub async fn mark_unplayed(&self, item_id: &str) -> Result<()> {
+        self.delete(&format!("/UserPlayedItems/{item_id}")).await
+    }
 }

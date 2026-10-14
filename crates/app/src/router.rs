@@ -1,7 +1,8 @@
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType};
 
-use crate::views::shell::ShellView;
+use crate::session::describe_error;
+use crate::views::shell::{ShellEvent, ShellView};
 
 #[derive(Debug, Clone)]
 pub enum Route {
@@ -14,6 +15,8 @@ pub enum Route {
     },
     /// A detail page: movie, series, season or episode.
     Item { id: String, name: String },
+    Search,
+    Settings,
 }
 
 impl Route {
@@ -51,5 +54,14 @@ impl Navigator {
 
     pub fn open(&self, item: &BaseItemDto, window: &mut Window, cx: &mut App) {
         self.push(Route::for_item(item), window, cx);
+    }
+
+    /// User-facing message for a failed request. A rejected token also signs the user out,
+    /// back to the sign-in screen.
+    pub fn handle_error(&self, err: &jellyfin::Error, cx: &mut App) -> SharedString {
+        if matches!(err, jellyfin::Error::Unauthorized) {
+            self.0.update(cx, |_, cx| cx.emit(ShellEvent::SessionExpired)).ok();
+        }
+        describe_error(err).into()
     }
 }

@@ -99,10 +99,11 @@ impl Player {
         self.command(json!(["loadfile", req.url, "replace"])).await.map(drop)
     }
 
-    /// Adds an external subtitle track without selecting it. Call after
+    /// Adds an external subtitle track, selecting it if `select`. Call after
     /// [`PlayerEvent::FileLoaded`].
-    pub async fn add_subtitle(&self, url: &str, title: &str, language: Option<&str>) -> Result<()> {
-        self.command(json!(["sub-add", url, "auto", title, language.unwrap_or("")]))
+    pub async fn add_subtitle(&self, url: &str, title: &str, language: Option<&str>, select: bool) -> Result<()> {
+        let flag = if select { "select" } else { "auto" };
+        self.command(json!(["sub-add", url, flag, title, language.unwrap_or("")]))
             .await
             .map(drop)
     }

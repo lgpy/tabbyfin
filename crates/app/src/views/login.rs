@@ -18,9 +18,12 @@ use crate::session::{self, Session, describe_error};
 /// How long to keep retrying while the server reports that it is starting up.
 const STARTUP_WAIT: Duration = Duration::from_secs(120);
 const QUICK_CONNECT_POLL: Duration = Duration::from_secs(3);
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 
 pub enum LoginEvent {
-    LoggedIn(Session),
+    LoggedIn(Box<Session>),
+    /// The server answered, and the form was opened with `resume_saved_session`.
+    ServerReachable,
 }
 
 /// Values to start the form with, e.g. after sign-out or an expired session.
@@ -28,10 +31,14 @@ pub struct Prefill {
     pub url: String,
     pub username: String,
     pub error: Option<String>,
+    /// A saved session couldn't be restored because the server was unreachable. Once the
+    /// server answers, emit [`LoginEvent::ServerReachable`] instead of asking for credentials.
+    pub resume_saved_session: bool,
 }
 
 pub struct LoginView {
     device_id: String,
+    resume_saved_session: bool,
     server_input: Entity<InputState>,
     username_input: Entity<InputState>,
     password_input: Entity<InputState>,
@@ -43,6 +50,8 @@ pub struct LoginView {
     error: Option<SharedString>,
     /// The in-flight operation. Replacing or clearing it cancels the previous one.
     task: Option<Task<()>>,
+    /// Reconnect attempt while waiting for an unreachable server (`resume_saved_session`).
+    retry: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -50,9 +59,9 @@ impl EventEmitter<LoginEvent> for LoginView {}
 
 impl LoginView {
     pub fn new(device_id: String, prefill: Option<Prefill>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (url, username, error) = match prefill {
-            Some(p) => (p.url, p.username, p.error),
-            None => (String::new(), String::new(), None),
+        let (url, username, error, resume_saved_session) = match prefill {
+            Some(p) => (p.url, p.username, p.error, p.resume_saved_session),
+            None => (String::new(), String::new(), None, false),
         };
         let has_url = !url.is_empty();
 
@@ -84,6 +93,7 @@ impl LoginView {
 
         let mut this = Self {
             device_id,
+            resume_saved_session,
             server_input,
             username_input,
             password_input,
@@ -93,6 +103,7 @@ impl LoginView {
             status: None,
             error: error.map(Into::into),
             task: None,
+            retry: None,
             _subscriptions,
         };
         if has_url {
@@ -132,6 +143,10 @@ impl LoginView {
                 this.busy = false;
                 this.status = None;
                 match result {
+                    Ok(_) if this.resume_saved_session => {
+                        this.resume_saved_session = false;
+                        cx.emit(LoginEvent::ServerReachable);
+                    }
                     Ok(server) => {
                         // Keep any error passed in via `Prefill` (e.g. "session expired");
                         // user-triggered connects clear it in `on_connect`.
@@ -143,7 +158,16 @@ impl LoginView {
                         };
                         focus.update(cx, |input, cx| input.focus(window, cx));
                     }
-                    Err(message) => this.error = Some(message.into()),
+                    Err(message) => {
+                        this.error = Some(message.into());
+                        // Waiting to restore a saved session: keep trying until the server is back.
+                        if this.resume_saved_session {
+                            this.retry = Some(cx.spawn_in(window, async move |this, cx| {
+                                cx.background_executor().timer(RECONNECT_INTERVAL).await;
+                                this.update_in(cx, |this, window, cx| this.connect(window, cx)).ok();
+                            }));
+                        }
+                    }
                 }
                 cx.notify();
             })
@@ -175,11 +199,11 @@ impl LoginView {
             this.update(cx, |this, cx| {
                 this.busy = false;
                 match result {
-                    Ok(auth) => cx.emit(LoginEvent::LoggedIn(Session {
+                    Ok(auth) => cx.emit(LoginEvent::LoggedIn(Box::new(Session {
                         client: client.with_token(auth.access_token.as_str()),
                         user: auth.user,
                         server: info,
-                    })),
+                    }))),
                     Err(Error::Unauthorized) => this.error = Some("Wrong username or password.".into()),
                     Err(err) => this.error = Some(describe_error(&err).into()),
                 }
@@ -245,11 +269,11 @@ impl LoginView {
                 Ok(auth) => {
                     this.update(cx, |this, cx| {
                         this.quick_connect_code = None;
-                        cx.emit(LoginEvent::LoggedIn(Session {
+                        cx.emit(LoginEvent::LoggedIn(Box::new(Session {
                             client: client.with_token(auth.access_token.as_str()),
                             user: auth.user,
                             server: info,
-                        }));
+                        })));
                         cx.notify();
                     })
                     .ok();
@@ -269,6 +293,8 @@ impl LoginView {
 
     fn change_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel(cx);
+        self.retry = None;
+        self.resume_saved_session = false;
         self.server = None;
         self.error = None;
         self.server_input.update(cx, |input, cx| input.focus(window, cx));

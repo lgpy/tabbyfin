@@ -1,5 +1,6 @@
 //! Shared building blocks for browsing pages.
 
+use gpui_kit::component::button::Button;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -217,4 +218,19 @@ pub fn centered_message(message: impl Into<SharedString>, cx: &App) -> impl Into
         .justify_center()
         .text_color(cx.theme().muted_foreground)
         .child(message.into())
+}
+
+/// A failed load with a Retry button.
+pub fn error_state(
+    message: impl Into<SharedString>,
+    on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap_3()
+        .child(div().text_color(cx.theme().muted_foreground).child(message.into()))
+        .child(Button::new("retry").outline().label("Retry").on_click(on_retry))
 }

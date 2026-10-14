@@ -116,6 +116,11 @@ impl Client {
         Ok(())
     }
 
+    pub(crate) async fn delete(&self, path: &str) -> Result<()> {
+        self.send(self.http.delete(self.url(path))).await?;
+        Ok(())
+    }
+
     pub(crate) async fn get_bytes(&self, url: Url) -> Result<Vec<u8>> {
         let resp = self.send(self.http.get(url)).await?;
         Ok(resp.bytes().await?.to_vec())
