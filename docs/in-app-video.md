@@ -64,7 +64,15 @@ GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI contr
      - Decoding still copies frames back to the CPU (`hwdec=auto-copy-safe`). Zero-copy hardware decoding (dxva2 through the same interop) would remove that too.
      - Pacing between the 3 textures relies on `glFinish` plus the ring, with no keyed mutex.
      - Test on NVIDIA and Intel.
-3. **Linux GPU sharing.** Vulkan external memory, plus the `gpui-pre-wgpu` patch. When wgpu runs on its GL backend, fall back to software.
+3. ✅ **Linux GPU sharing.** Done on 2026-10-14. Verified on Mesa llvmpipe/lavapipe, i.e. without a real GPU.
+   - **Probe:** `examples/vk_interop_probe.rs` checks that a Vulkan device can export linear RGBA8 image memory as an opaque fd, OpenGL can import and render into it (`GL_EXT_memory_object_fd`), and a second Vulkan device can import and read it back.
+   - **Player** (`player::libmpv::egl`):
+     - Windowless EGL/OpenGL, plus a small exporter Vulkan device matched to OpenGL by device UUID.
+     - A ring of 3 images, each exported twice: one fd stays open for GPUI, the other is imported into GL.
+     - mpv renders with `FLIP_Y=0`, then `glFinish` runs.
+   - **GPUI patch:** `gpui-pre-wgpu` imports the fd (see `third_party/gpui/PATCHES.md`).
+   - **Software OpenGL:** the GPU path is skipped on CPU-emulated OpenGL (llvmpipe, softpipe, SwiftShader, Windows' "GDI Generic"). There it costs far more than the software renderer: about 11 cores against 2.8 on this WSL box for 1080p. `JELLY_GPUI_VIDEO=gpu` forces it anyway; `=software` forces software.
+   - **Not tested yet:** real Mesa GPUs (AMD/Intel) and NVIDIA's proprietary driver. The extensions are standard there, but driver quirks with linear tiling are possible.
 4. **Packaging libmpv.**
    - Windows: `libmpv-2.dll`.
    - macOS: `libmpv.dylib`.

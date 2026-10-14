@@ -241,6 +241,15 @@ mod probe {
         glFinish: unsafe extern "C" fn(),
     }
 
+    /// A GL function pointer from EGL as its declared type.
+    ///
+    /// # Safety
+    /// `T` must be the function's actual signature.
+    unsafe fn cast<T: Copy>(f: extern "system" fn()) -> T {
+        // SAFETY: function pointers have the same size; the caller guarantees the signature.
+        unsafe { std::mem::transmute_copy(&f) }
+    }
+
     pub fn run() -> Result<(), Error> {
         let exporter = Vk::new()?;
         let reader = Vk::new()?;
@@ -261,7 +270,7 @@ mod probe {
             ($($name:ident),*) => {
                 Gl { $($name: {
                     let f = egl.get_proc_address(stringify!($name)).ok_or(concat!(stringify!($name), " missing"))?;
-                    unsafe { std::mem::transmute::<extern "system" fn(), _>(f) }
+                    unsafe { cast(f) }
                 },)* }
             };
         }

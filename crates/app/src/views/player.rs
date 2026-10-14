@@ -28,8 +28,8 @@ const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 enum Shown {
     /// Software-rendered pixels uploaded as an image.
     Image(Arc<RenderImage>),
-    /// A GPU texture shared by the player (Windows), drawn as a surface.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// A GPU texture shared by the player (Windows, Linux), drawn as a surface.
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     Shared(player::libmpv::SharedFrame),
 }
 
@@ -341,16 +341,12 @@ impl Render for PlayerPage {
                         Shown::Image(image) => {
                             img(ImageSource::Render(image)).size_full().object_fit(ObjectFit::Contain).into_any_element()
                         }
-                        #[cfg(windows)]
-                        Shown::Shared(texture) => surface(SharedTexture {
-                            handle: texture.handle,
-                            width: texture.width,
-                            height: texture.height,
-                        })
-                        .size_full()
-                        .object_fit(ObjectFit::Contain)
-                        .into_any_element(),
-                        #[cfg(not(windows))]
+                        #[cfg(any(windows, target_os = "linux"))]
+                        Shown::Shared(texture) => surface(shared_texture(texture))
+                            .size_full()
+                            .object_fit(ObjectFit::Contain)
+                            .into_any_element(),
+                        #[cfg(not(any(windows, target_os = "linux")))]
                         Shown::Shared(_) => div().into_any_element(),
                     })
             }))
@@ -365,5 +361,25 @@ impl Render for PlayerPage {
                 )
             })
             .when(self.controls_visible, |el| el.child(self.render_controls(cx)))
+    }
+}
+
+#[cfg(windows)]
+fn shared_texture(frame: player::libmpv::SharedFrame) -> SharedTexture {
+    SharedTexture {
+        handle: frame.handle,
+        width: frame.width,
+        height: frame.height,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn shared_texture(frame: player::libmpv::SharedFrame) -> SharedTexture {
+    SharedTexture {
+        id: frame.id,
+        fd: frame.fd,
+        allocation_size: frame.allocation_size,
+        width: frame.width,
+        height: frame.height,
     }
 }

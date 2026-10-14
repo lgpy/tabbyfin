@@ -14,12 +14,13 @@ pub enum SurfaceSource {
     /// A CoreVideo image buffer
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     Surface(CFRetained<CVPixelBuffer>),
-    /// A D3D11 texture shared by another device (e.g. a video player).
-    #[cfg(target_os = "windows")]
+    /// A texture shared by another device (e.g. a video player): a D3D11 texture on
+    /// Windows, exported Vulkan memory on Linux.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     SharedTexture(crate::SharedTexture),
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 impl From<crate::SharedTexture> for SurfaceSource {
     fn from(value: crate::SharedTexture) -> Self {
         SurfaceSource::SharedTexture(value)
@@ -41,7 +42,13 @@ pub struct Surface {
 }
 
 /// Create a new surface element.
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd"
+))]
 pub fn surface(source: impl Into<SurfaceSource>) -> Surface {
     Surface {
         source: source.into(),
@@ -99,14 +106,26 @@ impl Element for Surface {
         _global_id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         #[cfg_attr(
-            not(any(target_os = "macos", target_os = "ios", target_os = "windows")),
+            not(any(
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "freebsd"
+            )),
             allow(unused_variables)
         )]
         bounds: Bounds<Pixels>,
         _: &mut Self::RequestLayoutState,
         _: &mut Self::PrepaintState,
         #[cfg_attr(
-            not(any(target_os = "macos", target_os = "ios", target_os = "windows")),
+            not(any(
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "freebsd"
+            )),
             allow(unused_variables)
         )]
         window: &mut Window,
@@ -123,7 +142,7 @@ impl Element for Surface {
                 // TODO: Add support for corner_radii
                 window.paint_surface(new_bounds, surface.clone());
             }
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             SurfaceSource::SharedTexture(texture) => {
                 let size = crate::size(
                     crate::DevicePixels(texture.width as i32),

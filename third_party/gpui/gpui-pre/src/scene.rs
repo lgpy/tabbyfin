@@ -777,6 +777,24 @@ pub struct SharedTexture {
     pub height: u32,
 }
 
+/// An RGBA8, linearly tiled image whose memory another Vulkan device exported as an opaque fd
+/// (`VK_KHR_external_memory_fd`), drawn as a surface; used for embedded video. The renderer
+/// imports it once per `id`, duplicating `fd`.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SharedTexture {
+    /// Identifies the image; a new image (e.g. after a resize) gets a new id.
+    pub id: u64,
+    /// The exported memory. The producer keeps it open while the image may be drawn.
+    pub fd: i32,
+    /// Size of the memory allocation in bytes.
+    pub allocation_size: u64,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub struct PaintSurface {
@@ -785,7 +803,7 @@ pub struct PaintSurface {
     pub content_mask: ContentMask<ScaledPixels>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub image_buffer: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>,
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     pub shared_texture: SharedTexture,
 }
 

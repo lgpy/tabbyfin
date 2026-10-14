@@ -6,6 +6,8 @@
 
 mod embedded;
 mod video;
+#[cfg(target_os = "linux")]
+mod egl;
 #[cfg(windows)]
 mod wgl;
 
