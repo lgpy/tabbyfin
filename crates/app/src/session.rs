@@ -10,12 +10,6 @@ pub struct Session {
     pub server: PublicSystemInfo,
 }
 
-impl Session {
-    pub fn server_name(&self) -> &str {
-        self.server.server_name.as_deref().unwrap_or("Jellyfin")
-    }
-}
-
 pub fn client_info(device_id: &str) -> ClientInfo {
     let device = gethostname::gethostname().to_string_lossy().into_owned();
     ClientInfo {
