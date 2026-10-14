@@ -3,6 +3,14 @@
 A local Jellyfin 12.2 with a small synthetic library, for developing against.
 
 ```sh
+mise run dev:setup     # generate media, start the server, run the startup wizard, scan
+mise run dev:down      # stop it
+mise run dev:reset     # wipe the server state (keeps the media) and set it up again
+```
+
+Without mise, the same steps by hand:
+
+```sh
 ./dev/make-media.sh                          # generate test media into dev/.data/media (needs ffmpeg)
 docker compose -f dev/compose.yaml up -d     # start the server on http://localhost:8096
 ./dev/setup-server.py                        # run the startup wizard, create libraries, scan
