@@ -7,7 +7,7 @@ publish.workspace = true
 
 [dependencies]
 jellyfin.workspace = true
-player.workspace = true
+player = { workspace = true, features = ["libmpv"] }
 gpui-kit.workspace = true
 
 anyhow.workspace = true
@@ -21,21 +21,23 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
-
-[dev-dependencies]
-# For the in-window video spike (examples/inline_video.rs).
+# Video frames are handed to GPUI as RenderImages.
 image = { version = "0.25", default-features = false }
-player = { workspace = true, features = ["software-render"] }
 smallvec = "1"
+
+# Debug builds of gpui-kit's icons would otherwise be read from their build-time path, which
+# doesn't exist when a Windows build is cross-compiled from Linux (dev/win-run.sh).
+[target.'cfg(windows)'.dependencies]
+rust-embed = { version = "8", features = ["debug-embed"] }
 
 
 [package.metadata.deb]
 maintainer = "jelly-gpui developers"
 copyright = "jelly-gpui developers"
 section = "video"
-# Playback uses the system mpv. Vulkan and Wayland are loaded at runtime, so `$auto` can't
-# see them.
-depends = "$auto, mpv, libvulkan1, libwayland-client0"
+# Playback uses the system libmpv (in-app) and mpv (separate-window fallback). libmpv, Vulkan
+# and Wayland are loaded at runtime, so `$auto` can't see them.
+depends = "$auto, libmpv2, mpv, libvulkan1, libwayland-client0"
 extended-description = "Desktop client for Jellyfin built with GPUI, playing media in mpv."
 assets = [
     ["target/release/jelly-gpui", "usr/bin/", "755"],

@@ -165,6 +165,8 @@ Source: the 12.0 release notes, plus 12.1 and 12.2, which only contained bug fix
 
 ## 5. Playback architecture
 
+> **Update (2026-10-14):** playback now happens **inside the app** through libmpv (`player::libmpv`). The separate-window IPC backend described here is the fallback, used when libmpv can't be loaded or when "Play in a separate mpv window" is on in Settings. The plan for moving to GPU texture sharing is in `docs/in-app-video.md`.
+
 ### 5.1 Why we use the `mpv` binary over IPC instead of libmpv
 
 We agreed to start with **option A**: mpv opens its own window. Doing that by spawning the `mpv` binary and controlling it through `--input-ipc-server` (JSON IPC) is the most portable approach:

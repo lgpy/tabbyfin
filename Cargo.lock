@@ -3376,6 +3376,7 @@ dependencies = [
  "jellyfin",
  "keyring",
  "player",
+ "rust-embed",
  "serde",
  "serde_json",
  "smallvec",

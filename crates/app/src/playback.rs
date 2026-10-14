@@ -1,7 +1,8 @@
 //! Playback sessions: negotiate with the server, run mpv, and report progress back.
 //!
 //! One session at a time. Starting a new one stops the current one. The session itself runs on
-//! tokio; the GPUI side only hears when it ends, so pages can refresh watched state.
+//! tokio. With embedded mpv (the default) it publishes a [`NowPlaying`] entity that the player
+//! page draws and controls; with the external mpv window the UI only hears when it ends.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -9,8 +10,10 @@ use std::time::Duration;
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, MediaSourceInfo, MediaStream, MediaStreamType};
 use jellyfin::{Client, PlaybackInfoRequest, PlaybackReport, Ticks};
+use player::libmpv::{EmbeddedOptions, VideoOutput};
 use player::{EndReason, LoadRequest, Player, PlayerEvent, SpawnOptions};
-use tokio::sync::oneshot;
+use serde_json::json;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::changes::Changes;
 use crate::config::{Config, PlayerSettings};
@@ -20,6 +23,10 @@ use crate::session::describe_error;
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 
 pub enum PlaybackEvent {
+    /// Embedded playback started; show the player.
+    Started(Entity<NowPlaying>),
+    /// The session ended, normally or not. Watched state and resume points may have changed.
+    Ended,
     Failed(SharedString),
 }
 
@@ -39,6 +46,59 @@ pub enum SubtitleChoice {
     Auto,
     Off,
     Stream(i32),
+}
+
+/// Requests from the player UI to the running session.
+#[derive(Debug, Clone)]
+pub enum UiCommand {
+    TogglePause,
+    SeekBy(f64),
+    SeekTo(Duration),
+    Audio(i32),
+    Subtitle(SubtitleChoice),
+    Stop,
+}
+
+/// Session to UI messages.
+enum SessionUpdate {
+    Started {
+        source: Box<MediaSourceInfo>,
+        video: VideoOutput,
+        audio: Option<i32>,
+        subtitle: SubtitleChoice,
+    },
+    Player(PlayerEvent),
+}
+
+/// State of the embedded player, for the player page.
+pub struct NowPlaying {
+    pub item: BaseItemDto,
+    pub source: MediaSourceInfo,
+    pub video: VideoOutput,
+    pub position: Duration,
+    pub duration: Option<Duration>,
+    pub paused: bool,
+    /// Until the file has loaded.
+    pub loading: bool,
+    pub audio: Option<i32>,
+    pub subtitle: SubtitleChoice,
+    commands: mpsc::UnboundedSender<UiCommand>,
+}
+
+impl NowPlaying {
+    pub fn send(&self, command: UiCommand) {
+        let _ = self.commands.send(command);
+    }
+
+    fn apply(&mut self, event: &PlayerEvent) {
+        match event {
+            PlayerEvent::FileLoaded => self.loading = false,
+            PlayerEvent::Position(position) => self.position = *position,
+            PlayerEvent::Duration(duration) => self.duration = Some(*duration),
+            PlayerEvent::Paused(paused) => self.paused = *paused,
+            _ => {}
+        }
+    }
 }
 
 pub struct PlaybackManager {
@@ -73,26 +133,79 @@ impl PlaybackManager {
         // Dropping the previous sender stops that session; it still reports its final position.
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
+        let (updates_tx, mut updates) = mpsc::unbounded_channel();
+        let (commands_tx, commands_rx) = mpsc::unbounded_channel();
 
-        let client = self.client.clone();
+        let session = {
+            let (client, item) = (self.client.clone(), item.clone());
+            runtime::spawn(async move {
+                let settings = Config::load().player;
+                let channels = Channels {
+                    stop: stop_rx,
+                    updates: updates_tx,
+                    commands: commands_rx,
+                };
+                run_session(client, item, options, settings, channels).await
+            })
+        };
+
         let item = item.clone();
         cx.spawn(async move |this, cx| {
-            let result = runtime::spawn(async move {
-                let settings = Config::load().player;
-                run_session(client, item, options, settings, stop_rx).await
-            })
-            .await;
+            let mut now_playing: Option<Entity<NowPlaying>> = None;
+            while let Some(update) = updates.recv().await {
+                match update {
+                    SessionUpdate::Started {
+                        source,
+                        video,
+                        audio,
+                        subtitle,
+                    } => {
+                        let commands = commands_tx.clone();
+                        let item = item.clone();
+                        let entity = cx.new(|_| NowPlaying {
+                            item,
+                            source: *source,
+                            video,
+                            position: Duration::ZERO,
+                            duration: None,
+                            paused: false,
+                            loading: true,
+                            audio,
+                            subtitle,
+                            commands,
+                        });
+                        this.update(cx, |_, cx| cx.emit(PlaybackEvent::Started(entity.clone()))).ok();
+                        now_playing = Some(entity);
+                    }
+                    SessionUpdate::Player(event) => {
+                        if let Some(entity) = &now_playing {
+                            entity.update(cx, |state, cx| {
+                                state.apply(&event);
+                                cx.notify();
+                            });
+                        }
+                    }
+                }
+            }
+            let result = session.await;
             this.update(cx, |_, cx| {
                 if let Err(message) = result {
                     tracing::warn!("playback failed: {message}");
                     cx.emit(PlaybackEvent::Failed(message.into()));
                 }
+                cx.emit(PlaybackEvent::Ended);
                 Changes::notify_user_data(cx);
             })
             .ok();
         })
         .detach();
     }
+}
+
+struct Channels {
+    stop: oneshot::Receiver<()>,
+    updates: mpsc::UnboundedSender<SessionUpdate>,
+    commands: mpsc::UnboundedReceiver<UiCommand>,
 }
 
 fn title(item: &BaseItemDto) -> String {
@@ -117,19 +230,65 @@ fn mpv_track_id(source: &MediaSourceInfo, kind: MediaStreamType, index: i32) -> 
     embedded.iter().position(|s| s.index == index).map(|i| i + 1)
 }
 
+/// mpv's id for a subtitle once the file is loaded and the external ones were added (after
+/// the embedded tracks, in `media_streams` order).
+fn mpv_subtitle_id(source: &MediaSourceInfo, index: i32) -> Option<usize> {
+    if let Some(id) = mpv_track_id(source, MediaStreamType::Subtitle, index) {
+        return Some(id);
+    }
+    let subtitles = |external| {
+        source
+            .media_streams
+            .iter()
+            .filter(move |s| s.kind == MediaStreamType::Subtitle && s.is_external == external)
+    };
+    let position = subtitles(true).position(|s| s.index == index)?;
+    Some(subtitles(false).count() + position + 1)
+}
+
+fn subtitle_index(choice: SubtitleChoice) -> Option<i32> {
+    match choice {
+        SubtitleChoice::Stream(index) => Some(index),
+        SubtitleChoice::Off => Some(-1),
+        SubtitleChoice::Auto => None,
+    }
+}
+
+async fn start_player(settings: &PlayerSettings) -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, Option<VideoOutput>), String> {
+    if !settings.external_window {
+        let options = EmbeddedOptions {
+            use_mpv_config: settings.use_mpv_config,
+        };
+        match Player::spawn_embedded(options).await {
+            Ok((player, events, video)) => return Ok((player, events, Some(video))),
+            Err(player::Error::LibmpvUnavailable(reason)) => {
+                tracing::warn!("libmpv unavailable, using a separate mpv window: {reason}");
+            }
+            Err(err) => return Err(format!("Couldn't start the player: {err}")),
+        }
+    }
+    let options = SpawnOptions {
+        mpv_path: settings.mpv_path.clone().map(PathBuf::from),
+        extra_args: if settings.use_mpv_config { Vec::new() } else { vec!["--no-config".into()] },
+    };
+    let (player, events) = Player::spawn_external(options).await.map_err(|err| match err {
+        player::Error::NotFound(path) => format!(
+            "mpv wasn't found ({}). Install mpv, or set its location in Settings.",
+            path.display()
+        ),
+        err => format!("Couldn't start mpv: {err}"),
+    })?;
+    Ok((player, events, None))
+}
+
 /// Runs one playback from negotiation to the final stop report. Returns a user-facing error.
 async fn run_session(
     client: Client,
     item: BaseItemDto,
     options: PlayOptions,
     settings: PlayerSettings,
-    mut stop: oneshot::Receiver<()>,
+    mut channels: Channels,
 ) -> Result<(), String> {
-    let subtitle_index = match options.subtitle {
-        SubtitleChoice::Stream(index) => Some(index),
-        SubtitleChoice::Off => Some(-1),
-        SubtitleChoice::Auto => None,
-    };
     let info = client
         .playback_info(
             &item.id,
@@ -137,7 +296,7 @@ async fn run_session(
                 media_source_id: options.media_source_id.clone(),
                 start_position: options.start,
                 audio_stream_index: options.audio_stream_index,
-                subtitle_stream_index: subtitle_index,
+                subtitle_stream_index: subtitle_index(options.subtitle),
             },
         )
         .await
@@ -151,17 +310,7 @@ async fn run_session(
     }
     .ok_or("The server returned no playable media.")?;
 
-    let spawn_options = SpawnOptions {
-        mpv_path: settings.mpv_path.map(PathBuf::from),
-        extra_args: if settings.use_mpv_config { Vec::new() } else { vec!["--no-config".into()] },
-    };
-    let (player, mut events) = Player::spawn(spawn_options).await.map_err(|err| match err {
-        player::Error::NotFound(path) => format!(
-            "mpv wasn't found ({}). Install mpv, or set its location in Settings.",
-            path.display()
-        ),
-        err => format!("Couldn't start mpv: {err}"),
-    })?;
+    let (player, mut events, video) = start_player(&settings).await?;
 
     // Track choices are options, so they're set before loading the file.
     if let Some(aid) = options
@@ -200,6 +349,15 @@ async fn run_session(
         .await
         .map_err(|err| format!("mpv couldn't open the stream: {err}"))?;
 
+    if let Some(video) = video {
+        let _ = channels.updates.send(SessionUpdate::Started {
+            source: Box::new(source.clone()),
+            video,
+            audio: options.audio_stream_index.or(source.default_audio_stream_index),
+            subtitle: options.subtitle,
+        });
+    }
+
     let external_subtitles: Vec<_> = source.media_streams.iter().filter(|s| s.is_external).cloned().collect();
     let mut report = PlaybackReport {
         item_id: item.id.clone(),
@@ -207,7 +365,7 @@ async fn run_session(
         play_session_id: info.play_session_id.clone(),
         position: options.start.unwrap_or_default(),
         audio_stream_index: options.audio_stream_index,
-        subtitle_stream_index: subtitle_index,
+        subtitle_stream_index: subtitle_index(options.subtitle),
         ..Default::default()
     };
     let mut started = false;
@@ -220,6 +378,7 @@ async fn run_session(
         tokio::select! {
             event = events.recv() => {
                 let Some(event) = event else { break };
+                let _ = channels.updates.send(SessionUpdate::Player(event.clone()));
                 match event {
                     PlayerEvent::FileLoaded => {
                         for stream in &external_subtitles {
@@ -232,11 +391,6 @@ async fn run_session(
                         }
                         report_or_log(client.report_playback_start(&report).await, "start");
                         started = true;
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            let aid = player.command(serde_json::json!(["get_property", "aid"])).await;
-                            let sid = player.command(serde_json::json!(["get_property", "sid"])).await;
-                            tracing::debug!(?aid, ?sid, "mpv tracks after load");
-                        }
                     }
                     PlayerEvent::Position(position) => report.position = Ticks::from(position),
                     PlayerEvent::Paused(paused) => {
@@ -255,10 +409,18 @@ async fn run_session(
                     _ => {}
                 }
             }
+            Some(command) = channels.commands.recv() => {
+                if let Err(err) = apply_command(&player, &source, &mut report, command).await {
+                    tracing::warn!("player command failed: {err}");
+                }
+                if started {
+                    report_or_log(client.report_playback_progress(&report).await, "progress");
+                }
+            }
             _ = ticker.tick(), if started => {
                 report_or_log(client.report_playback_progress(&report).await, "progress");
             }
-            _ = &mut stop, if !stopping => {
+            _ = &mut channels.stop, if !stopping => {
                 // Replaced by a new session or signed out: ask mpv to quit and keep going until
                 // it exits, so the final position gets reported.
                 stopping = true;
@@ -274,6 +436,43 @@ async fn run_session(
     error.map_or(Ok(()), Err)
 }
 
+async fn apply_command(
+    player: &Player,
+    source: &MediaSourceInfo,
+    report: &mut PlaybackReport,
+    command: UiCommand,
+) -> player::Result<()> {
+    match command {
+        UiCommand::TogglePause => player.command(json!(["cycle", "pause"])).await,
+        UiCommand::SeekBy(seconds) => player.command(json!(["seek", seconds, "relative"])).await,
+        UiCommand::SeekTo(position) => {
+            player
+                .command(json!(["seek", position.as_secs_f64(), "absolute"]))
+                .await
+        }
+        UiCommand::Audio(index) => {
+            if let Some(aid) = mpv_track_id(source, MediaStreamType::Audio, index) {
+                player.set_property("aid", aid).await?;
+                report.audio_stream_index = Some(index);
+            }
+            Ok(())
+        }
+        UiCommand::Subtitle(choice) => {
+            let sid = match choice {
+                SubtitleChoice::Stream(index) => mpv_subtitle_id(source, index).map(|id| json!(id)),
+                SubtitleChoice::Off => Some(json!("no")),
+                SubtitleChoice::Auto => Some(json!("auto")),
+            };
+            if let Some(sid) = sid {
+                player.set_property("sid", sid).await?;
+                report.subtitle_stream_index = subtitle_index(choice);
+            }
+            Ok(())
+        }
+        UiCommand::Stop => player.quit().await,
+    }
+}
+
 fn report_or_log(result: jellyfin::Result<()>, what: &str) {
     if let Err(err) = result {
         tracing::warn!("playback {what} report failed: {err}");
@@ -285,7 +484,7 @@ mod tests {
     // Not `super::*`: that glob brings in GPUI's `test` attribute, which shadows the std one.
     use jellyfin::models::{MediaSourceInfo, MediaStream, MediaStreamType};
 
-    use super::mpv_track_id;
+    use super::{mpv_subtitle_id, mpv_track_id};
 
     fn stream(index: i32, kind: MediaStreamType, is_external: bool) -> MediaStream {
         serde_json::from_value(serde_json::json!({
@@ -296,23 +495,37 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn maps_jellyfin_indexes_to_mpv_track_ids() {
+    fn source() -> MediaSourceInfo {
         let source: MediaSourceInfo = serde_json::from_value(serde_json::json!({ "Id": "s" })).unwrap();
-        let source = MediaSourceInfo {
+        MediaSourceInfo {
             media_streams: vec![
                 stream(0, MediaStreamType::Subtitle, true),
                 stream(1, MediaStreamType::Video, false),
                 stream(2, MediaStreamType::Audio, false),
                 stream(3, MediaStreamType::Audio, false),
                 stream(4, MediaStreamType::Subtitle, false),
+                stream(5, MediaStreamType::Subtitle, true),
             ],
             ..source
-        };
+        }
+    }
+
+    #[test]
+    fn maps_jellyfin_indexes_to_mpv_track_ids() {
+        let source = source();
         assert_eq!(mpv_track_id(&source, MediaStreamType::Audio, 2), Some(1));
         assert_eq!(mpv_track_id(&source, MediaStreamType::Audio, 3), Some(2));
         assert_eq!(mpv_track_id(&source, MediaStreamType::Subtitle, 4), Some(1));
         // External streams aren't in the file.
         assert_eq!(mpv_track_id(&source, MediaStreamType::Subtitle, 0), None);
+    }
+
+    #[test]
+    fn external_subtitles_follow_embedded_ones() {
+        let source = source();
+        assert_eq!(mpv_subtitle_id(&source, 4), Some(1));
+        assert_eq!(mpv_subtitle_id(&source, 0), Some(2));
+        assert_eq!(mpv_subtitle_id(&source, 5), Some(3));
+        assert_eq!(mpv_subtitle_id(&source, 9), None);
     }
 }

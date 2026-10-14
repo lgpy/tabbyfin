@@ -6,6 +6,8 @@
 
 ## What was built
 
+(The spike code was later folded into `player::libmpv`, the in-app player; see `docs/in-app-video.md`. The original example is in commit `ef28e48`.)
+
 - **`player::software`** (`crates/player/src/software.rs`), behind the `software-render` feature:
   - Loads libmpv at runtime with `dlopen`. Builds don't need libmpv, and the app keeps working without it.
   - Sets up the software render context.

@@ -15,6 +15,7 @@ pub struct SettingsPage {
     session: Session,
     mpv_path: Entity<InputState>,
     use_mpv_config: bool,
+    external_window: bool,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -38,6 +39,7 @@ impl SettingsPage {
             session,
             mpv_path,
             use_mpv_config: settings.use_mpv_config,
+            external_window: settings.external_window,
             scroll: ScrollHandle::new(),
             _subscriptions,
         }
@@ -47,12 +49,14 @@ impl SettingsPage {
         let mut config = Config::load();
         let path = self.mpv_path.read(cx).value().trim().to_string();
         let changed = config.player.mpv_path.as_deref().unwrap_or("") != path
-            || config.player.use_mpv_config != self.use_mpv_config;
+            || config.player.use_mpv_config != self.use_mpv_config
+            || config.player.external_window != self.external_window;
         if !changed {
             return;
         }
         config.player.mpv_path = (!path.is_empty()).then_some(path);
         config.player.use_mpv_config = self.use_mpv_config;
+        config.player.external_window = self.external_window;
         match config.save() {
             Ok(()) => window.push_notification(Notification::success("Settings saved. They apply to the next playback."), cx),
             Err(err) => window.push_notification(Notification::error(format!("Couldn't save settings: {err:#}")), cx),
@@ -115,7 +119,20 @@ impl Render for SettingsPage {
                     .max_w(px(720.))
                     .child(
                         section("Playback", cx)
-                            .child(hint("mpv executable. Leave empty to find it automatically.", cx))
+                            .child(
+                                Switch::new("external-window")
+                                    .checked(self.external_window)
+                                    .label("Play in a separate mpv window instead of inside the app")
+                                    .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                                        this.external_window = *checked;
+                                        this.save(window, cx);
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(hint(
+                                "mpv executable for the separate window (also used when libmpv isn't available). Leave empty to find it automatically.",
+                                cx,
+                            ))
                             .child(Input::new(&self.mpv_path))
                             .child(
                                 Switch::new("use-mpv-config")

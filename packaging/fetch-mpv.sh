@@ -3,6 +3,7 @@
 # package needs into <dest>.
 #
 #   packaging/fetch-mpv.sh windows-x86_64 <dest>   -> <dest>/mpv.exe, <dest>/vulkan-1.dll
+#   packaging/fetch-mpv.sh windows-libmpv <dest>   -> <dest>/libmpv-2.dll (in-app player)
 #   packaging/fetch-mpv.sh macos-aarch64 <dest>    -> <dest>/mpv.app
 #   packaging/fetch-mpv.sh macos-x86_64 <dest>     -> <dest>/mpv.app
 set -euo pipefail
@@ -13,7 +14,9 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=mpv.lock
 source "$here/mpv.lock"
 
+url_base="https://github.com/mpv-player/mpv/releases/download/$MPV_VERSION"
 case "$platform" in
+  windows-libmpv) url="$LIBMPV_WINDOWS_X86_64_URL"; asset="${url##*/}"; sha="$LIBMPV_WINDOWS_X86_64_SHA256" ;;
   windows-x86_64) asset="mpv-$MPV_VERSION-x86_64-pc-windows-msvc.zip"; sha="$MPV_WINDOWS_X86_64_SHA256" ;;
   macos-aarch64)  asset="mpv-$MPV_VERSION-macos-15-arm.zip";          sha="$MPV_MACOS_AARCH64_SHA256" ;;
   macos-x86_64)   asset="mpv-$MPV_VERSION-macos-15-intel.zip";        sha="$MPV_MACOS_X86_64_SHA256" ;;
@@ -22,7 +25,7 @@ esac
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-curl -fsSL -o "$work/$asset" "https://github.com/mpv-player/mpv/releases/download/$MPV_VERSION/$asset"
+curl -fsSL -o "$work/$asset" "${url:-$url_base/$asset}"
 
 if command -v sha256sum >/dev/null; then
   actual="$(sha256sum "$work/$asset" | cut -d' ' -f1)"
@@ -36,6 +39,17 @@ fi
 
 mkdir -p "$dest"
 case "$platform" in
+  windows-libmpv)
+    # A .7z: needs 7-Zip (on Windows CI runners) or a libarchive tar (bsdtar, Windows' tar.exe).
+    if command -v 7z >/dev/null; then
+      7z e -y -o"$dest" "$work/$asset" libmpv-2.dll >/dev/null
+    elif command -v bsdtar >/dev/null; then
+      bsdtar -xf "$work/$asset" -C "$dest" libmpv-2.dll
+    else
+      echo "extracting $asset needs 7z or bsdtar" >&2
+      exit 1
+    fi
+    ;;
   windows-x86_64)
     # Only the player and its Vulkan loader; skip the debug symbols and shell scripts.
     if command -v unzip >/dev/null; then

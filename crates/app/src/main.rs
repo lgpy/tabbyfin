@@ -11,6 +11,7 @@ mod playback;
 mod router;
 mod runtime;
 mod session;
+mod tracks;
 mod views;
 
 use gpui_kit::component::{Theme, ThemeMode};
@@ -19,6 +20,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::app_view::AppView;
 use crate::changes::Changes;
+use crate::views::player::{self, ExitPlayer, SeekBackward, SeekForward, ToggleFullscreen, TogglePause};
 use crate::views::shell::{self, Back, OpenSearch};
 
 fn main() {
@@ -40,6 +42,11 @@ fn main() {
                 KeyBinding::new("escape", Back, Some(shell::KEY_CONTEXT)),
                 KeyBinding::new("backspace", Back, Some(shell::KEY_CONTEXT)),
                 KeyBinding::new("alt-left", Back, Some(shell::KEY_CONTEXT)),
+                KeyBinding::new("space", TogglePause, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("right", SeekForward, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("left", SeekBackward, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("f", ToggleFullscreen, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("escape", ExitPlayer, Some(player::KEY_CONTEXT)),
             ]);
 
             let options = WindowOptions {

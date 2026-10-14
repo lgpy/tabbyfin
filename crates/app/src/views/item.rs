@@ -2,57 +2,34 @@
 
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme, IconName, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType};
+use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField};
 use jellyfin::{Client, Ticks};
 
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, card_text, centered_spinner, episode_label, error_state,
-    landscape_image, poster_card, remote_image, runtime_text,
+    landscape_image, poster_card, remote_image, runtime_text, timestamp,
 };
 use crate::images::ImageCache;
 use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
 use crate::router::Navigator;
 use crate::runtime;
+use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
 
 const BACKDROP_H: f32 = 340.;
 const DETAIL_POSTER_W: f32 = 200.;
 const DETAIL_POSTER_H: f32 = 300.;
 const PICKER_W: f32 = 260.;
-/// Subtitle picker value for "Off".
-const SUBTITLES_OFF: i32 = -1;
 
 struct ItemData {
     item: BaseItemDto,
     /// Seasons of a series, or episodes of a season.
     children: Vec<BaseItemDto>,
 }
-
-/// One entry in a version or track picker.
-#[derive(Clone)]
-struct Choice {
-    label: SharedString,
-    /// Media source position for versions; Jellyfin stream index for tracks.
-    value: i32,
-}
-
-impl SelectItem for Choice {
-    type Value = i32;
-
-    fn title(&self) -> SharedString {
-        self.label.clone()
-    }
-
-    fn value(&self) -> &i32 {
-        &self.value
-    }
-}
-
-type ChoiceSelect = Entity<SelectState<Vec<Choice>>>;
 
 /// Version and track choices for a playable item. Defaults come from the server, which
 /// applies the user's language preferences.
@@ -181,7 +158,8 @@ impl ItemPage {
             cx.subscribe_in(select, window, move |this, _, event: &SelectEvent<Vec<Choice>>, window, cx| {
                 let SelectEvent::Confirm(Some(index)) = event else { return };
                 if let Some(source) = sources.get(*index as usize) {
-                    let (audio, subtitle) = track_pickers(source, window, cx);
+                    let (audio, subtitle) =
+                        track_pickers(source, source.default_audio_stream_index, source.default_subtitle_stream_index, window, cx);
                     if let Some(pickers) = &mut this.pickers {
                         pickers.audio = audio;
                         pickers.subtitle = subtitle;
@@ -190,7 +168,9 @@ impl ItemPage {
                 }
             })
         });
-        let (audio, subtitle) = track_pickers(&data.item.media_sources[0], window, cx);
+        let first = &data.item.media_sources[0];
+        let (audio, subtitle) =
+            track_pickers(first, first.default_audio_stream_index, first.default_subtitle_stream_index, window, cx);
         self.pickers = Some(Pickers {
             version,
             audio,
@@ -198,55 +178,6 @@ impl ItemPage {
             _version_changed,
         });
     }
-}
-
-fn track_pickers<V: 'static>(
-    source: &MediaSourceInfo,
-    window: &mut Window,
-    cx: &mut Context<V>,
-) -> (Option<ChoiceSelect>, Option<ChoiceSelect>) {
-    let streams = |kind| -> Vec<&MediaStream> { source.media_streams.iter().filter(|s| s.kind == kind).collect() };
-    let label = |s: &MediaStream| -> SharedString {
-        s.display_title
-            .clone()
-            .or_else(|| s.language.clone())
-            .unwrap_or_else(|| format!("Track {}", s.index))
-            .into()
-    };
-
-    let audio_streams = streams(MediaStreamType::Audio);
-    let audio = (!audio_streams.is_empty()).then(|| {
-        let selected = audio_streams
-            .iter()
-            .position(|s| Some(s.index) == source.default_audio_stream_index)
-            .unwrap_or(0);
-        let choices = audio_streams
-            .iter()
-            .map(|s| Choice {
-                label: label(s),
-                value: s.index,
-            })
-            .collect();
-        cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
-    });
-
-    let subtitle_streams = streams(MediaStreamType::Subtitle);
-    let subtitle = (!subtitle_streams.is_empty()).then(|| {
-        let mut choices = vec![Choice {
-            label: "Off".into(),
-            value: SUBTITLES_OFF,
-        }];
-        choices.extend(subtitle_streams.iter().map(|s| Choice {
-            label: label(s),
-            value: s.index,
-        }));
-        let selected = choices
-            .iter()
-            .position(|c| Some(c.value) == source.default_subtitle_stream_index)
-            .unwrap_or(0);
-        cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
-    });
-    (audio, subtitle)
 }
 
 async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
@@ -291,13 +222,6 @@ fn meta_line(item: &BaseItemDto) -> String {
     parts.join(" · ")
 }
 
-/// `1:02:03`, `4:05`.
-fn timestamp(ticks: Ticks) -> String {
-    let secs = ticks.as_secs_f64() as u64;
-    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
-    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
-}
-
 fn is_played(item: &BaseItemDto) -> bool {
     item.user_data.as_ref().is_some_and(|d| d.played)
 }
@@ -323,7 +247,7 @@ impl ItemPage {
                         Button::new("resume")
                             .primary()
                             .icon(IconName::Play)
-                            .label(format!("Resume from {}", timestamp(position)))
+                            .label(format!("Resume from {}", timestamp(position.into())))
                             .on_click(cx.listener(move |this, _, _, cx| this.play(Some(position), cx))),
                     )
                     .child(
