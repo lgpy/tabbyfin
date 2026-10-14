@@ -4,6 +4,8 @@ description = "mpv playback embedded through libmpv (no UI dependencies)"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 # libmpv is loaded at runtime, so building doesn't need it installed.

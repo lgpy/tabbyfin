@@ -24,7 +24,8 @@ case "$target" in
   x86_64-unknown-linux-gnu)
     name="jelly-gpui-$version-linux-x86_64"
     mkdir -p "$stage/$name"
-    cp "$bin_dir/jelly-gpui" "$packaging/jelly-gpui.desktop" "$packaging/jelly-gpui.svg" "$stage/$name/"
+    cp "$bin_dir/jelly-gpui" "$packaging/jelly-gpui.desktop" "$packaging/jelly-gpui.svg" "$root/LICENSE" \
+      "$stage/$name/"
     tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
     (cd "$root" && cargo deb -p jelly-gpui --target "$target" --no-build --output "$out/")
     ;;
@@ -32,7 +33,7 @@ case "$target" in
   x86_64-pc-windows-msvc)
     name="jelly-gpui-$version-windows-x86_64"
     mkdir -p "$stage/$name"
-    cp "$bin_dir/jelly-gpui.exe" "$packaging/THIRD_PARTY.md" "$stage/$name/"
+    cp "$bin_dir/jelly-gpui.exe" "$packaging/THIRD_PARTY.md" "$root/LICENSE" "$stage/$name/"
     "$packaging/fetch-libmpv.sh" windows-x86_64 "$stage/$name"
     "$packaging/fetch-angle.sh" "$stage/$name"
     if command -v 7z >/dev/null; then
@@ -48,7 +49,7 @@ case "$target" in
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     cp "$bin_dir/jelly-gpui" "$app/Contents/MacOS/"
     sed "s/@VERSION@/$version/g" "$packaging/Info.plist" > "$app/Contents/Info.plist"
-    cp "$packaging/THIRD_PARTY.md" "$app/Contents/Resources/"
+    cp "$packaging/THIRD_PARTY.md" "$root/LICENSE" "$app/Contents/Resources/"
     # Ad-hoc signature only: not notarized, so Gatekeeper asks before the first launch.
     codesign --force --deep --sign - "$app"
     ditto -c -k --keepParent "$app" "$out/jelly-gpui-$version-macos-$arch.zip"

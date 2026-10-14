@@ -26,10 +26,68 @@ use crate::views::player::{
 };
 use crate::views::shell::{self, Back, OpenSearch};
 
-fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+/// Daily log files kept in [`config::log_dir`].
+const LOG_FILES_KEPT: usize = 7;
+
+/// Logs to stderr and to a daily file (release builds on Windows have no console, so the file
+/// is what bug reports can attach). `RUST_LOG` sets the filter; the default is `info`. Keep the
+/// returned guard alive: dropping it flushes and stops the file writer.
+fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    use tracing_subscriber::prelude::*;
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // The appender prunes old files on start and complains if the folder doesn't exist yet.
+    let _ = std::fs::create_dir_all(config::log_dir());
+    let file = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("jelly-gpui")
+        .filename_suffix("log")
+        .max_log_files(LOG_FILES_KEPT)
+        .build(config::log_dir());
+    let (file_layer, guard, file_error) = match file {
+        Ok(appender) => {
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            (
+                Some(
+                    tracing_subscriber::fmt::layer()
+                        .with_ansi(false)
+                        .fmt_fields(PlainFields)
+                        .with_writer(writer),
+                ),
+                Some(guard),
+                None,
+            )
+        }
+        Err(err) => (None, None, Some(err)),
+    };
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(file_layer)
         .init();
+    if let Some(err) = file_error {
+        tracing::warn!("not logging to a file in {}: {err}", config::log_dir().display());
+    }
+    guard
+}
+
+/// The default field format, as a type of its own. Layers cache formatted span fields by
+/// formatter type, so with a shared type the file would get the terminal layer's colour codes.
+struct PlainFields;
+
+impl<'writer> tracing_subscriber::fmt::FormatFields<'writer> for PlainFields {
+    fn format_fields<R: tracing_subscriber::field::RecordFields>(
+        &self,
+        writer: tracing_subscriber::fmt::format::Writer<'writer>,
+        fields: R,
+    ) -> std::fmt::Result {
+        tracing_subscriber::fmt::format::DefaultFields::new().format_fields(writer, fields)
+    }
+}
+
+fn main() {
+    let _log_guard = init_logging();
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting jelly-gpui");
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)

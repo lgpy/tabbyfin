@@ -48,6 +48,17 @@ pub fn dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".jelly-gpui"))
 }
 
+/// Log files. Under the config folder when `JELLY_GPUI_CONFIG_DIR` is set, so test runs keep
+/// their logs to themselves; otherwise the platform's local data dir.
+pub fn log_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("JELLY_GPUI_CONFIG_DIR") {
+        return PathBuf::from(dir).join("logs");
+    }
+    project_dirs()
+        .map(|d| d.data_local_dir().join("logs"))
+        .unwrap_or_else(|| PathBuf::from(".jelly-gpui/logs"))
+}
+
 /// Platform cache dir, for data that can be deleted at any time (e.g. images).
 pub fn cache_dir() -> PathBuf {
     project_dirs()
