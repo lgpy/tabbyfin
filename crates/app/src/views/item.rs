@@ -1,10 +1,10 @@
 //! Detail page for a movie, series, season or episode.
 
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jellyfin::Client;
+use jellyfin::{Client, Ticks};
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, MediaStreamType};
 
 use crate::components::{
@@ -12,6 +12,7 @@ use crate::components::{
     episode_label, landscape_image, poster_card, remote_image, runtime_text,
 };
 use crate::images::ImageCache;
+use crate::playback::{PlaybackEvent, PlaybackManager};
 use crate::router::Navigator;
 use crate::runtime;
 use crate::session::describe_error;
@@ -27,14 +28,40 @@ struct ItemData {
 }
 
 pub struct ItemPage {
+    client: Client,
     nav: Navigator,
+    item_id: String,
     data: Load<ItemData>,
     scroll: ScrollHandle,
-    _observe_images: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl ItemPage {
     pub fn new(client: Client, nav: Navigator, item_id: String, cx: &mut Context<Self>) -> Self {
+        let _subscriptions = vec![
+            cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
+            // Resume point and watched state change after playback.
+            cx.subscribe(&PlaybackManager::global(cx), |this, _, event, cx| {
+                if let PlaybackEvent::Stopped = event {
+                    this.reload(cx);
+                }
+            }),
+        ];
+        let mut this = Self {
+            client,
+            nav,
+            item_id,
+            data: Load::Loading,
+            scroll: ScrollHandle::new(),
+            _subscriptions,
+        };
+        this.reload(cx);
+        this
+    }
+
+    /// Fetches the item again. The current content stays up until the new data arrives.
+    fn reload(&mut self, cx: &mut Context<Self>) {
+        let (client, item_id) = (self.client.clone(), self.item_id.clone());
         cx.spawn(async move |this, cx| {
             let result = runtime::spawn(load(client, item_id)).await;
             this.update(cx, |this, cx| {
@@ -47,13 +74,6 @@ impl ItemPage {
             .ok();
         })
         .detach();
-
-        Self {
-            nav,
-            data: Load::Loading,
-            scroll: ScrollHandle::new(),
-            _observe_images: cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
-        }
     }
 }
 
@@ -97,6 +117,37 @@ fn meta_line(item: &BaseItemDto) -> String {
         parts.push(format!("★ {score:.1}"));
     }
     parts.join(" · ")
+}
+
+/// Play, or Resume plus Play from beginning when there's a saved position.
+fn play_buttons(item: &BaseItemDto) -> impl IntoElement {
+    let resume_at = item
+        .user_data
+        .as_ref()
+        .map(|d| d.playback_position_ticks)
+        .filter(|t| t.0 > 0);
+    let play = |id: &'static str, label: String, start: Option<Ticks>, item: &BaseItemDto| {
+        let item = item.clone();
+        Button::new(id).icon(IconName::Play).label(label).on_click(move |_, _, cx| {
+            PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, start, cx));
+        })
+    };
+    h_flex()
+        .pt_2()
+        .gap_2()
+        .map(|el| match resume_at {
+            Some(position) => el
+                .child(play("resume", format!("Resume from {}", timestamp(position)), Some(position), item).primary())
+                .child(play("play-start", "Play from beginning".into(), None, item).outline()),
+            None => el.child(play("play", "Play".into(), None, item).primary()),
+        })
+}
+
+/// `1:02:03`, `4:05`.
+fn timestamp(ticks: Ticks) -> String {
+    let secs = ticks.as_secs_f64() as u64;
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
 }
 
 /// `English, Japanese` style summary of a stream kind in the first media source.
@@ -146,14 +197,7 @@ impl ItemPage {
             .when(!item.genres.is_empty(), |el| {
                 el.child(div().text_sm().text_color(cx.theme().muted_foreground).child(item.genres.join(", ")))
             })
-            .when(playable, |el| {
-                el.child(
-                    h_flex().pt_2().child(
-                        // Playback lands in milestone 5.
-                        Button::new("play").primary().icon(IconName::Play).label("Play").disabled(true),
-                    ),
-                )
-            })
+            .when(playable, |el| el.child(play_buttons(item)))
             .when_some(item.overview.clone(), |el, overview| {
                 el.child(div().pt_2().max_w(px(820.)).child(overview))
             });

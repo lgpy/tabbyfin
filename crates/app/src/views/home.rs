@@ -9,6 +9,7 @@ use crate::components::{
     Load, centered_message, centered_spinner, landscape_card, poster_card, shelf,
 };
 use crate::images::ImageCache;
+use crate::playback::{PlaybackEvent, PlaybackManager};
 use crate::router::Navigator;
 use crate::runtime;
 use crate::session::describe_error;
@@ -25,14 +26,38 @@ struct HomeData {
 }
 
 pub struct HomePage {
+    client: Client,
     nav: Navigator,
     data: Load<HomeData>,
     scroll: ScrollHandle,
-    _observe_images: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl HomePage {
     pub fn new(client: Client, nav: Navigator, cx: &mut Context<Self>) -> Self {
+        let _subscriptions = vec![
+            cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
+            // Resume points and Next Up change after playback.
+            cx.subscribe(&PlaybackManager::global(cx), |this, _, event, cx| {
+                if let PlaybackEvent::Stopped = event {
+                    this.reload(cx);
+                }
+            }),
+        ];
+        let mut this = Self {
+            client,
+            nav,
+            data: Load::Loading,
+            scroll: ScrollHandle::new(),
+            _subscriptions,
+        };
+        this.reload(cx);
+        this
+    }
+
+    /// Fetches everything again. The current content stays up until the new data arrives.
+    fn reload(&mut self, cx: &mut Context<Self>) {
+        let client = self.client.clone();
         cx.spawn(async move |this, cx| {
             let result = runtime::spawn(load(client)).await;
             this.update(cx, |this, cx| {
@@ -45,13 +70,6 @@ impl HomePage {
             .ok();
         })
         .detach();
-
-        Self {
-            nav,
-            data: Load::Loading,
-            scroll: ScrollHandle::new(),
-            _observe_images: cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
-        }
     }
 }
 

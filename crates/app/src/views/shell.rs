@@ -4,10 +4,12 @@
 //! position.
 
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, h_flex, v_flex};
+use gpui_kit::component::notification::Notification;
+use gpui_kit::component::{ActiveTheme, Disableable, IconName, WindowExt, h_flex, v_flex};
 use gpui_kit::*;
 
 use crate::images::ImageCache;
+use crate::playback::{PlaybackEvent, PlaybackManager};
 use crate::router::{Navigator, Route};
 use crate::session::Session;
 use crate::views::home::HomePage;
@@ -31,6 +33,7 @@ pub struct ShellView {
     session: Session,
     stack: Vec<Page>,
     focus_handle: FocusHandle,
+    _playback_errors: Subscription,
 }
 
 impl EventEmitter<ShellEvent> for ShellView {}
@@ -38,16 +41,41 @@ impl EventEmitter<ShellEvent> for ShellView {}
 impl ShellView {
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
         ImageCache::init(session.client.clone(), cx);
+        PlaybackManager::init(session.client.clone(), cx);
+        let _playback_errors = cx.subscribe_in(
+            &PlaybackManager::global(cx),
+            window,
+            |_, _, event, window, cx| {
+                if let PlaybackEvent::Failed(message) = event {
+                    window.push_notification(Notification::error(message.clone()), cx);
+                }
+            },
+        );
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
         let mut this = Self {
             session,
             stack: Vec::new(),
             focus_handle,
+            _playback_errors,
         };
         this.push(Route::Home, window, cx);
         #[cfg(debug_assertions)]
-        if let Some(route) = debug_start_route() {
+        if let Some((route, autoplay)) = debug_start_route() {
+            if let (true, Route::Item { id, .. }) = (autoplay, &route) {
+                let (client, id) = (this.session.client.clone(), id.clone());
+                cx.spawn(async move |_, cx| {
+                    let item = crate::runtime::spawn(async move { client.item(&id, &[]).await }).await;
+                    match item {
+                        Ok(item) => cx.update(|cx| {
+                            let start = item.user_data.as_ref().map(|d| d.playback_position_ticks).filter(|t| t.0 > 0);
+                            PlaybackManager::global(cx).update(cx, |p, cx| p.play(&item, start, cx));
+                        }),
+                        Err(err) => tracing::error!("autoplay failed: {err}"),
+                    }
+                })
+                .detach();
+            }
             this.push(route, window, cx);
         }
         this
@@ -160,27 +188,34 @@ impl Render for ShellView {
 }
 
 /// Dev aid: open a page on top of Home at startup, for screenshots and quick iteration.
-/// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>` or `item:<id>`.
+/// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, or `play:<id>` (opens the item
+/// and plays it from its resume point). Returns the route and whether to autoplay.
 #[cfg(debug_assertions)]
-fn debug_start_route() -> Option<Route> {
+fn debug_start_route() -> Option<(Route, bool)> {
     use jellyfin::models::CollectionType;
 
     let value = std::env::var("JELLY_GPUI_ROUTE").ok()?;
     let mut parts = value.split(':');
     match (parts.next()?, parts.next()?) {
-        ("item", id) => Some(Route::Item {
-            id: id.into(),
-            name: "Item".into(),
-        }),
-        ("library", id) => Some(Route::Library {
-            id: id.into(),
-            name: "Library".into(),
-            collection_type: match parts.next() {
-                Some("movies") => Some(CollectionType::Movies),
-                Some("tvshows") => Some(CollectionType::TvShows),
-                _ => None,
+        (kind @ ("item" | "play"), id) => Some((
+            Route::Item {
+                id: id.into(),
+                name: "Item".into(),
             },
-        }),
+            kind == "play",
+        )),
+        ("library", id) => Some((
+            Route::Library {
+                id: id.into(),
+                name: "Library".into(),
+                collection_type: match parts.next() {
+                    Some("movies") => Some(CollectionType::Movies),
+                    Some("tvshows") => Some(CollectionType::TvShows),
+                    _ => None,
+                },
+            },
+            false,
+        )),
         _ => None,
     }
 }

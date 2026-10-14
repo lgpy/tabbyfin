@@ -110,8 +110,10 @@ def main():
         last = count
 
     config = request("/System/Configuration", token=token)
-    if config.get("ServerName") != SERVER_NAME:
-        config["ServerName"] = SERVER_NAME
+    # The test videos are 60 s long; by default only videos over 5 minutes get resume points.
+    wanted = {"ServerName": SERVER_NAME, "MinResumeDurationSeconds": 0}
+    if any(config.get(k) != v for k, v in wanted.items()):
+        config.update(wanted)
         request("/System/Configuration", "POST", config, token)
     legacy = config["EnableLegacyAuthorization"]
     print(f"server ready: {BASE}  user={USER} pass={PASS}  items={last}  EnableLegacyAuthorization={legacy}")

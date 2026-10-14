@@ -182,18 +182,17 @@ libmpv returns later for in-window video (§5.4). The `Player` trait keeps that 
 ### 5.2 Launching mpv
 
 ```
-mpv --idle=once --force-window=immediate --input-ipc-server=<path>
-    --hwdec=auto-safe --vo=gpu-next --keep-open=no
-    --title="<item name> — jelly-gpui"
+mpv --input-ipc-server=<path> --idle=once --force-window=immediate --keep-open=no --terminal=no
 ```
 
-After connecting over IPC, the app sends this sequence:
-1. `set_property http-header-fields ["Authorization: MediaBrowser ... Token=..."]`. **The token goes over IPC, not on the command line**, because other local users can read process arguments with `ps`.
-2. `loadfile <stream url> replace` with `start=<resume seconds>`.
-3. `sub-add <subtitle url>` for each external subtitle. These requests are authenticated by the same header fields.
-4. `observe_property` on `time-pos`, `pause`, `duration`, `track-list`, `eof-reached`, and `idle-active`.
+We pass no `--vo` or `--hwdec`. Options on the command line override `mpv.conf`, and the user's own mpv config should decide those. mpv's defaults apply if the user hasn't set anything.
 
-**User config:** we load the user's normal `mpv.conf` by default. A setting can switch to `--no-config` or a config dir that belongs to the app.
+After connecting over IPC, the app sends this sequence. Every option is set as a property, because the argument list of `loadfile` changed in mpv 0.38.
+1. `set_property http-header-fields ["Authorization: MediaBrowser ... Token=..."]`. **The token goes over IPC, not on the command line**, because other local users can read process arguments with `ps`. The stream URL doesn't contain the token either.
+2. `set_property force-media-title`, then `set_property start <resume seconds>`.
+3. `loadfile <stream url> replace`.
+4. After `file-loaded`, `sub-add <subtitle url> auto` for each external subtitle. These requests are authenticated by the same header fields.
+5. `observe_property` on `time-pos` (throttled to about once a second), `duration`, and `pause`.
 
 ### 5.3 Threading and reporting
 
