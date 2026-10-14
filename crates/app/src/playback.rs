@@ -168,8 +168,19 @@ impl PlaybackManager {
 
     /// Plays an item from its resume point, with default tracks (e.g. the next episode).
     pub fn play_from_resume(&mut self, item: &BaseItemDto, cx: &mut Context<Self>) {
-        let start = item.user_data.as_ref().map(|d| d.playback_position_ticks).filter(|t| t.0 > 0);
-        self.play(item, PlayOptions { start, ..Default::default() }, cx);
+        let start = item
+            .user_data
+            .as_ref()
+            .map(|d| d.playback_position_ticks)
+            .filter(|t| t.0 > 0);
+        self.play(
+            item,
+            PlayOptions {
+                start,
+                ..Default::default()
+            },
+            cx,
+        );
     }
 
     pub fn play(&mut self, item: &BaseItemDto, options: PlayOptions, cx: &mut Context<Self>) {
@@ -223,7 +234,8 @@ impl PlaybackManager {
                             next: None,
                             commands,
                         });
-                        this.update(cx, |_, cx| cx.emit(PlaybackEvent::Started(entity.clone()))).ok();
+                        this.update(cx, |_, cx| cx.emit(PlaybackEvent::Started(entity.clone())))
+                            .ok();
                         now_playing = Some(entity);
                     }
                     SessionUpdate::Details(details) => {
@@ -394,10 +406,12 @@ async fn details(client: &Client, item: &BaseItemDto) -> Details {
         })
         .collect();
     let next = match (item.kind, &item.series_id) {
-        (BaseItemKind::Episode, Some(series_id)) => client.next_episode(series_id, &item.id).await.unwrap_or_else(|err| {
-            tracing::warn!("couldn't find the next episode: {err}");
-            None
-        }),
+        (BaseItemKind::Episode, Some(series_id)) => {
+            client.next_episode(series_id, &item.id).await.unwrap_or_else(|err| {
+                tracing::warn!("couldn't find the next episode: {err}");
+                None
+            })
+        }
         _ => None,
     };
     Details { versions, next }
@@ -460,8 +474,14 @@ async fn run_session(
         },
     };
 
-    player.set_property("volume", volume).await.map_err(|err| err.to_string())?;
-    player.set_property("mute", muted).await.map_err(|err| err.to_string())?;
+    player
+        .set_property("volume", volume)
+        .await
+        .map_err(|err| err.to_string())?;
+    player
+        .set_property("mute", muted)
+        .await
+        .map_err(|err| err.to_string())?;
 
     let url = client.stream_url(&item.id, &source.id, info.play_session_id.as_deref());
     player

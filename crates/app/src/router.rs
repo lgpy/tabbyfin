@@ -14,7 +14,10 @@ pub enum Route {
         collection_type: Option<CollectionType>,
     },
     /// A detail page: movie, series, season or episode.
-    Item { id: String, name: String },
+    Item {
+        id: String,
+        name: String,
+    },
     Search,
     Settings,
 }

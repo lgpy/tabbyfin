@@ -61,7 +61,8 @@ impl EmbeddedPlayer {
         set_option("hwdec", "auto-copy-safe");
         set_option("vo", "libmpv");
         // SAFETY: valid handle, options set.
-        core.api.check("mpv_initialize", unsafe { (core.api.initialize)(core.mpv) })?;
+        core.api
+            .check("mpv_initialize", unsafe { (core.api.initialize)(core.mpv) })?;
         // mpv's own log, forwarded to ours. `JELLY_GPUI_MPV_LOG` picks the level (e.g. `v`).
         let level = cstring(&std::env::var("JELLY_GPUI_MPV_LOG").unwrap_or_else(|_| "warn".into()));
         // SAFETY: valid handle and C string.
@@ -119,7 +120,8 @@ impl EmbeddedPlayer {
             Value::Array(items) => {
                 self.core.command(&["change-list", name, "clr", ""])?;
                 for item in items {
-                    self.core.command(&["change-list", name, "append", &value_string(item)])?;
+                    self.core
+                        .command(&["change-list", name, "append", &value_string(item)])?;
                 }
                 Ok(())
             }
@@ -166,7 +168,11 @@ fn event_loop(core: &Core, stop: &AtomicBool, events: &mpsc::UnboundedSender<Pla
                 // SAFETY: LOG_MESSAGE events carry an mpv_event_log_message with C strings.
                 let (prefix, text, level) = unsafe {
                     let message = &*(event.data as *const RawLogMessage);
-                    (CStr::from_ptr(message.prefix), CStr::from_ptr(message.text), message.log_level)
+                    (
+                        CStr::from_ptr(message.prefix),
+                        CStr::from_ptr(message.text),
+                        message.log_level,
+                    )
                 };
                 let (prefix, text) = (prefix.to_string_lossy(), text.to_string_lossy());
                 let text = text.trim_end();

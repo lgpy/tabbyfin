@@ -76,7 +76,11 @@ impl ShellView {
                     let item = crate::runtime::spawn(async move { client.item(&id, &[]).await }).await;
                     match item {
                         Ok(item) => cx.update(|cx| {
-                            let start = item.user_data.as_ref().map(|d| d.playback_position_ticks).filter(|t| t.0 > 0);
+                            let start = item
+                                .user_data
+                                .as_ref()
+                                .map(|d| d.playback_position_ticks)
+                                .filter(|t| t.0 > 0);
                             let options = crate::playback::PlayOptions {
                                 start,
                                 audio_stream_index: autoplay_tracks.0,
@@ -134,9 +138,7 @@ impl ShellView {
             },
             Route::Settings => Page {
                 title: "Settings".into(),
-                view: cx
-                    .new(|_| SettingsPage::new(self.session.clone()))
-                    .into(),
+                view: cx.new(|_| SettingsPage::new(self.session.clone())).into(),
                 is_player: false,
             },
         };
@@ -144,7 +146,12 @@ impl ShellView {
         cx.notify();
     }
 
-    fn push_player(&mut self, now_playing: Entity<crate::playback::NowPlaying>, window: &mut Window, cx: &mut Context<Self>) {
+    fn push_player(
+        &mut self,
+        now_playing: Entity<crate::playback::NowPlaying>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // A new session replaces any player already open.
         self.stack.retain(|page| !page.is_player);
         let title = now_playing.read(cx).item.name.clone().into();

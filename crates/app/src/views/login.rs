@@ -70,7 +70,11 @@ impl LoginView {
                 .placeholder("jellyfin.example.com or 192.168.1.10:8096")
                 .default_value(url)
         });
-        let username_input = cx.new(|cx| InputState::new(window, cx).placeholder("Username").default_value(username));
+        let username_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Username")
+                .default_value(username)
+        });
         let password_input = cx.new(|cx| InputState::new(window, cx).placeholder("Password").masked(true));
 
         let _subscriptions = vec![
@@ -416,7 +420,9 @@ impl Render for LoginView {
                                     .child("Sign in to your Jellyfin server"),
                             ),
                     )
-                    .when_some(self.error.clone(), |el, error| el.child(Alert::error("login-error", error)))
+                    .when_some(self.error.clone(), |el, error| {
+                        el.child(Alert::error("login-error", error))
+                    })
                     .when_some(self.status.clone(), |el, status| {
                         el.child(
                             h_flex()

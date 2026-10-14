@@ -99,11 +99,20 @@ mod tests {
         let pos = |s: f64| json!({"event": "property-change", "id": 0, "name": "time-pos", "data": s});
         assert_eq!(t.translate(&pos(0.0)), Some(PlayerEvent::Position(Duration::ZERO)));
         assert_eq!(t.translate(&pos(0.5)), None);
-        assert_eq!(t.translate(&pos(1.2)), Some(PlayerEvent::Position(Duration::from_secs_f64(1.2))));
+        assert_eq!(
+            t.translate(&pos(1.2)),
+            Some(PlayerEvent::Position(Duration::from_secs_f64(1.2)))
+        );
         assert_eq!(t.translate(&json!({"event": "seek"})), Some(PlayerEvent::Seeked));
-        assert_eq!(t.translate(&pos(1.3)), Some(PlayerEvent::Position(Duration::from_secs_f64(1.3))));
+        assert_eq!(
+            t.translate(&pos(1.3)),
+            Some(PlayerEvent::Position(Duration::from_secs_f64(1.3)))
+        );
         // Unset properties arrive without data.
-        assert_eq!(t.translate(&json!({"event": "property-change", "name": "time-pos"})), None);
+        assert_eq!(
+            t.translate(&json!({"event": "property-change", "name": "time-pos"})),
+            None
+        );
         assert_eq!(
             t.translate(&json!({"event": "property-change", "name": "pause", "data": true})),
             Some(PlayerEvent::Paused(true))

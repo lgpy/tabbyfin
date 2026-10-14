@@ -7,8 +7,8 @@ use jellyfin::Client;
 
 use crate::config::{Config, SavedServer};
 use crate::session::{Session, client_info, describe_error};
-use crate::views::shell::{ShellEvent, ShellView};
 use crate::views::login::{LoginEvent, LoginView, Prefill};
+use crate::views::shell::{ShellEvent, ShellView};
 use crate::{credentials, runtime};
 
 enum Screen {

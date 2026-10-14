@@ -235,9 +235,18 @@ impl GpuRenderer {
                 get_proc_address_ctx: ptr::null_mut(),
             };
             let mut params = [
-                RenderParam { kind: PARAM_API_TYPE, data: api_type.as_ptr() as *mut c_void },
-                RenderParam { kind: PARAM_OPENGL_INIT_PARAMS, data: &mut init as *mut _ as *mut c_void },
-                RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+                RenderParam {
+                    kind: PARAM_API_TYPE,
+                    data: api_type.as_ptr() as *mut c_void,
+                },
+                RenderParam {
+                    kind: PARAM_OPENGL_INIT_PARAMS,
+                    data: &mut init as *mut _ as *mut c_void,
+                },
+                RenderParam {
+                    kind: PARAM_INVALID,
+                    data: ptr::null_mut(),
+                },
             ];
             let mut mpv_context = ptr::null_mut();
             let code = (core.api.render_create)(&mut mpv_context, core.mpv, params.as_mut_ptr());
@@ -319,9 +328,18 @@ impl GpuRenderer {
             // The interop texture already has D3D's row order (verified on AMD), so no flip.
             let mut flip: c_int = 0;
             let mut params = [
-                RenderParam { kind: PARAM_OPENGL_FBO, data: &mut fbo as *mut _ as *mut c_void },
-                RenderParam { kind: PARAM_FLIP_Y, data: &mut flip as *mut _ as *mut c_void },
-                RenderParam { kind: PARAM_INVALID, data: ptr::null_mut() },
+                RenderParam {
+                    kind: PARAM_OPENGL_FBO,
+                    data: &mut fbo as *mut _ as *mut c_void,
+                },
+                RenderParam {
+                    kind: PARAM_FLIP_Y,
+                    data: &mut flip as *mut _ as *mut c_void,
+                },
+                RenderParam {
+                    kind: PARAM_INVALID,
+                    data: ptr::null_mut(),
+                },
             ];
             let code = (core.api.render_render)(self.mpv_context, params.as_mut_ptr());
             // Make sure the frame is complete before another device reads it.
@@ -353,9 +371,15 @@ impl GpuRenderer {
                 ..Default::default()
             };
             let mut texture = None;
-            self.device.CreateTexture2D(&desc, None, Some(&mut texture)).map_err(failed)?;
+            self.device
+                .CreateTexture2D(&desc, None, Some(&mut texture))
+                .map_err(failed)?;
             let texture: ID3D11Texture2D = texture.ok_or_else(|| failed("no texture"))?;
-            let share = texture.cast::<IDXGIResource>().map_err(failed)?.GetSharedHandle().map_err(failed)?;
+            let share = texture
+                .cast::<IDXGIResource>()
+                .map_err(failed)?
+                .GetSharedHandle()
+                .map_err(failed)?;
 
             let mut gl_texture = 0;
             glGenTextures(1, &mut gl_texture);
@@ -381,7 +405,13 @@ impl GpuRenderer {
             let status = (self.fns.glCheckFramebufferStatus)(GL_FRAMEBUFFER);
             (self.fns.glBindFramebuffer)(GL_FRAMEBUFFER, 0);
             let _ = (self.fns.wglDXUnlockObjectsNV)(self.interop_device, 1, objects.as_mut_ptr());
-            let slot = Slot { texture, share, gl_texture, fbo, interop };
+            let slot = Slot {
+                texture,
+                share,
+                gl_texture,
+                fbo,
+                interop,
+            };
             if status != GL_FRAMEBUFFER_COMPLETE {
                 self.release_slot(&slot);
                 return Err(failed(format!("framebuffer incomplete: {status:#x}")));

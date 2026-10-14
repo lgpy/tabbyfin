@@ -6,10 +6,10 @@
 
 #[cfg(windows)]
 mod angle;
-mod embedded;
-mod video;
 #[cfg(target_os = "linux")]
 mod egl;
+mod embedded;
+mod video;
 #[cfg(windows)]
 mod wgl;
 
@@ -101,7 +101,11 @@ const LIBRARY_NAMES: &[&str] = if cfg!(windows) {
 
 /// Extra folders to search on macOS: Homebrew (`brew install mpv`) on Apple silicon and Intel,
 /// which aren't on the default library path.
-const EXTRA_DIRS: &[&str] = if cfg!(target_os = "macos") { &["/opt/homebrew/lib", "/usr/local/lib"] } else { &[] };
+const EXTRA_DIRS: &[&str] = if cfg!(target_os = "macos") {
+    &["/opt/homebrew/lib", "/usr/local/lib"]
+} else {
+    &[]
+};
 
 impl Api {
     pub fn load() -> Result<Self, Error> {
@@ -109,12 +113,18 @@ impl Api {
         for name in LIBRARY_NAMES {
             // Next to the executable first (bundled), then the system search path, then the
             // extra folders.
-            let bundled = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join(name)));
+            let bundled = std::env::current_exe()
+                .ok()
+                .and_then(|exe| Some(exe.parent()?.join(name)));
             let candidates = bundled
                 .iter()
                 .map(|p| p.as_os_str().to_owned())
                 .chain([(*name).into()])
-                .chain(EXTRA_DIRS.iter().map(|dir| std::path::Path::new(dir).join(name).into_os_string()));
+                .chain(
+                    EXTRA_DIRS
+                        .iter()
+                        .map(|dir| std::path::Path::new(dir).join(name).into_os_string()),
+                );
             for candidate in candidates {
                 // SAFETY: loading libmpv runs no unexpected initialization code.
                 match unsafe { Library::new(&candidate) } {
@@ -211,7 +221,12 @@ impl Core {
         let mut value: i64 = 0;
         // SAFETY: MPV_FORMAT_INT64 writes an i64 into `value`.
         let code = unsafe {
-            (self.api.get_property)(self.mpv, name.as_ptr(), FORMAT_INT64, &mut value as *mut i64 as *mut c_void)
+            (self.api.get_property)(
+                self.mpv,
+                name.as_ptr(),
+                FORMAT_INT64,
+                &mut value as *mut i64 as *mut c_void,
+            )
         };
         (code >= 0).then_some(value)
     }

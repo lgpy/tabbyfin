@@ -13,10 +13,7 @@ impl Client {
             username: &'a str,
             pw: &'a str,
         }
-        let body = Body {
-            username,
-            pw: password,
-        };
+        let body = Body { username, pw: password };
         self.post("/Users/AuthenticateByName", &Query::new(), Some(&body)).await
     }
 
@@ -33,7 +30,8 @@ impl Client {
     }
 
     pub async fn quick_connect_state(&self, secret: &str) -> Result<QuickConnectResult> {
-        self.get("/QuickConnect/Connect", Query::new().push("secret", secret)).await
+        self.get("/QuickConnect/Connect", Query::new().push("secret", secret))
+            .await
     }
 
     /// Exchanges an approved Quick Connect secret for a session.
@@ -43,8 +41,12 @@ impl Client {
         struct Body<'a> {
             secret: &'a str,
         }
-        self.post("/Users/AuthenticateWithQuickConnect", &Query::new(), Some(&Body { secret }))
-            .await
+        self.post(
+            "/Users/AuthenticateWithQuickConnect",
+            &Query::new(),
+            Some(&Body { secret }),
+        )
+        .await
     }
 
     pub async fn current_user(&self) -> Result<UserDto> {
@@ -53,6 +55,7 @@ impl Client {
 
     /// Ends the session and revokes this client's token.
     pub async fn logout(&self) -> Result<()> {
-        self.post_no_content::<()>("/Sessions/Logout", &Query::new(), None).await
+        self.post_no_content::<()>("/Sessions/Logout", &Query::new(), None)
+            .await
     }
 }

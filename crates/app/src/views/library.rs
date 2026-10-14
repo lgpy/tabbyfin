@@ -9,11 +9,11 @@ use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemSortBy};
 use jellyfin::{Client, ItemsQuery, SortOrder};
 
-use crate::components::{
-    CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_message, centered_spinner, error_state,
-    placeholder_card, poster_card,
-};
 use crate::changes::{Changes, UserDataChanged};
+use crate::components::{
+    CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_message, centered_spinner, error_state, placeholder_card,
+    poster_card,
+};
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
@@ -71,7 +71,9 @@ impl LibraryPage {
             scroll: UniformListScrollHandle::new(),
             _subscriptions: vec![
                 cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
-                cx.subscribe(&Changes::global(cx), |this, _, _: &UserDataChanged, cx| this.refresh(cx)),
+                cx.subscribe(&Changes::global(cx), |this, _, _: &UserDataChanged, cx| {
+                    this.refresh(cx)
+                }),
             ],
         };
         this.request_page(0, cx);
@@ -145,8 +147,13 @@ impl LibraryPage {
                     Some(item) => {
                         let nav = self.nav.clone();
                         let target = item.clone();
-                        poster_card(("item", index), item, move |_, window, cx| nav.open(&target, window, cx), cx)
-                            .into_any_element()
+                        poster_card(
+                            ("item", index),
+                            item,
+                            move |_, window, cx| nav.open(&target, window, cx),
+                            cx,
+                        )
+                        .into_any_element()
                     }
                     None => placeholder_card(cx).into_any_element(),
                 })

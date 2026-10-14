@@ -76,7 +76,10 @@ impl Player {
         if let Some(title) = req.title {
             self.set_property("force-media-title", title).await?;
         }
-        let start = req.start.map(|d| format!("{:.3}", d.as_secs_f64())).unwrap_or_else(|| "none".into());
+        let start = req
+            .start
+            .map(|d| format!("{:.3}", d.as_secs_f64()))
+            .unwrap_or_else(|| "none".into());
         self.set_property("start", start).await?;
         self.command(json!(["loadfile", req.url, "replace"])).await
     }
@@ -85,7 +88,8 @@ impl Player {
     /// [`PlayerEvent::FileLoaded`].
     pub async fn add_subtitle(&self, url: &str, title: &str, language: Option<&str>, select: bool) -> Result<()> {
         let flag = if select { "select" } else { "auto" };
-        self.command(json!(["sub-add", url, flag, title, language.unwrap_or("")])).await
+        self.command(json!(["sub-add", url, flag, title, language.unwrap_or("")]))
+            .await
     }
 
     /// Asks mpv to stop. [`PlayerEvent::Exited`] follows.
