@@ -1288,6 +1288,15 @@ impl App {
         self.platform.is_cursor_visible()
     }
 
+    /// Hides the mouse cursor until the user moves the mouse over one of this
+    /// application's windows.
+    ///
+    /// See [`App::set_cursor_hide_mode`] for hiding the cursor automatically on
+    /// keyboard input instead.
+    pub fn hide_cursor_until_mouse_moves(&self) {
+        self.platform.hide_cursor_until_mouse_moves();
+    }
+
     /// Returns whether non-essential animations (e.g. loading spinners) should
     /// be rendered in a static state instead of animating.
     pub fn reduce_motion(&self) -> bool {

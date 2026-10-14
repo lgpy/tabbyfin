@@ -54,7 +54,7 @@ The big gaps:
 | 2.1.5 | **Playback speed** | P3 | S | mpv `speed`. A small menu (0.5×–2×) plus `[` and `]`. |
 | 2.1.6 | **Subtitle and audio delay, subtitle size** | P3 | S | mpv `sub-delay`, `audio-delay`, `sub-scale`. Useful for badly timed external subtitles. |
 | 2.1.7 | **Show the current time on hover and the remaining time** | P3 | S | The seek bar shows no time where the mouse is. Option to show "-12:34" remaining. |
-| 2.1.8 | **Mouse niceties** | P3 | S | Double-click toggles fullscreen, the scroll wheel changes volume, and the cursor hides along with the controls. |
+| 2.1.8 | **Mouse niceties** | P3 | S | ✅ Done: double-click toggles fullscreen (the pause from its first click is toggled back), one wheel notch is 5% volume with trackpad deltas adding up, and the cursor hides together with the controls through `App::hide_cursor_until_mouse_moves`, a small gpui-pre patch (`PATCHES.md`). Real mouse and trackpad checks in `TESTING.md` §10. |
 | 2.1.9 | **Previous episode, and next for movies in a collection** | P3 | S | Mirror of 2.1.2. |
 | 2.1.10 | **Resume prompt** | P3 | S | The item page has Resume / Play from start buttons, but autoplayed episodes always resume. Consider "Resume from 12:34?" when starting from a list. |
 

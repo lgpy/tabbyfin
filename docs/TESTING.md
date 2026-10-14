@@ -130,3 +130,13 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Fullscreen playback**, then quit: the next launch opens windowed at the last normal bounds.
 - ⬜ A move or resize followed by a **quit within half a second**: the previous bounds are kept (the save waits for the change to settle).
 
+## 10. Player mouse niceties (2.1.8)
+
+Code-level and startup checks only so far: the development harness cannot send mouse input. The cursor hiding uses `App::hide_cursor_until_mouse_moves` (the gpui-pre patch), which the platforms restore on the next mouse move.
+
+- ⬜ **Single click** on the video pauses; a **double click** toggles fullscreen and leaves the video playing (the first click's pause is undone).
+- ⬜ **Wheel over the video**: one notch is 5% volume, scrolling down takes it away, and a fast spin follows the wheel rather than the event count.
+- ⬜ **Trackpad** (macOS, or a Windows precision touchpad): small deltas add up instead of being ignored, and one flick does not slam the volume to 0 or 100.
+- ⬜ **Cursor and controls**: after 3 s without movement both disappear while playing; any movement brings both back; neither happens while paused.
+- ⬜ The wheel over the control bars does not change the volume.
+
