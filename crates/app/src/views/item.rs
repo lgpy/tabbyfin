@@ -1,5 +1,6 @@
 //! Detail page for a movie, series, season or episode.
 
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -116,13 +117,19 @@ impl ItemPage {
     }
 
     fn set_played(&mut self, item_id: String, played: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.mark(item_id, Mark::Played(played), window, cx);
+    }
+
+    /// Sets watched or favorite state on the server, then refreshes the pages showing it.
+    fn mark(&mut self, item_id: String, mark: Mark, window: &mut Window, cx: &mut Context<Self>) {
         let client = self.client.clone();
         cx.spawn_in(window, async move |this, cx| {
             let result = runtime::spawn(async move {
-                if played {
-                    client.mark_played(&item_id).await
-                } else {
-                    client.mark_unplayed(&item_id).await
+                match mark {
+                    Mark::Played(true) => client.mark_played(&item_id).await,
+                    Mark::Played(false) => client.mark_unplayed(&item_id).await,
+                    Mark::Favorite(true) => client.mark_favorite(&item_id).await,
+                    Mark::Favorite(false) => client.unmark_favorite(&item_id).await,
                 }
             })
             .await;
@@ -249,10 +256,14 @@ fn is_played(item: &BaseItemDto) -> bool {
     item.user_data.as_ref().is_some_and(|d| d.played)
 }
 
+fn is_favorite(item: &BaseItemDto) -> bool {
+    item.user_data.as_ref().is_some_and(|d| d.is_favorite)
+}
+
 impl ItemPage {
     /// Play / Resume buttons and the watched toggle.
     fn render_actions(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
-        let played = is_played(item);
+        let (played, favorite) = (is_played(item), is_favorite(item));
         let buttons = item_actions(item).into_iter().enumerate().map(|(i, action)| {
             let button = match action {
                 ItemAction::Resume(position) => Button::new("resume")
@@ -265,6 +276,10 @@ impl ItemPage {
                     .outline()
                     .icon(if played { IconName::CircleCheck } else { IconName::Check })
                     .label(if played { "Watched" } else { "Mark watched" }),
+                ItemAction::ToggleFavorite => Button::new("toggle-favorite")
+                    .outline()
+                    .icon(if favorite { Lucide::HeartOff } else { Lucide::Heart })
+                    .label(if favorite { "Remove favorite" } else { "Favorite" }),
             };
             let button = button.on_click(cx.listener(move |this, _, window, cx| this.run_action(action, window, cx)));
             // Room around the button for the keyboard cursor's ring.
@@ -292,6 +307,11 @@ impl ItemPage {
                 let Load::Loaded(data) = &self.data else { return };
                 let (id, played) = (data.item.id.clone(), is_played(&data.item));
                 self.set_played(id, !played, window, cx);
+            }
+            ItemAction::ToggleFavorite => {
+                let Load::Loaded(data) = &self.data else { return };
+                let (id, favorite) = (data.item.id.clone(), is_favorite(&data.item));
+                self.mark(id, Mark::Favorite(!favorite), window, cx);
             }
         }
     }
@@ -568,11 +588,18 @@ impl ItemPage {
 }
 
 #[derive(Clone, Copy)]
+enum Mark {
+    Played(bool),
+    Favorite(bool),
+}
+
+#[derive(Clone, Copy)]
 enum ItemAction {
     Resume(Ticks),
     PlayFromStart,
     Play,
     TogglePlayed,
+    ToggleFavorite,
 }
 
 /// The buttons under an item's title, in order.
@@ -592,6 +619,7 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
         (true, None) => vec![ItemAction::Play],
     };
     actions.push(ItemAction::TogglePlayed);
+    actions.push(ItemAction::ToggleFavorite);
     actions
 }
 
