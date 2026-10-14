@@ -109,6 +109,38 @@ pub fn parse_utc(text: &str) -> Option<SystemTime> {
     Some(shift(UNIX_EPOCH, seconds * 1_000_000 + fraction_us))
 }
 
+/// Formats a time the way the server expects, e.g. `2026-10-14T19:00:00.123456Z`.
+pub fn format_utc(time: SystemTime) -> String {
+    let us = micros(time);
+    let (seconds, fraction) = (us.div_euclid(1_000_000), us.rem_euclid(1_000_000));
+    let (days, of_day) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{fraction:06}Z",
+        of_day / 3600,
+        of_day / 60 % 60,
+        of_day % 60
+    )
+}
+
+/// The inverse of [`days_from_civil`].
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    (year, month, day)
+}
+
 /// Days since 1970-01-01 (Howard Hinnant's algorithm).
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
@@ -151,7 +183,7 @@ impl Client {
 mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
-    use super::{ClockSample, ServerClock, micros, parse_utc};
+    use super::{ClockSample, ServerClock, format_utc, micros, parse_utc};
 
     #[test]
     fn parses_server_times() {
@@ -164,6 +196,17 @@ mod tests {
         assert_eq!(at("2026-10-14T19:00:00"), Some(1_792_004_400_000_000));
         assert_eq!(at("2026-13-14T19:00:00Z"), None);
         assert_eq!(at("yesterday"), None);
+    }
+
+    #[test]
+    fn formats_and_parses_back() {
+        for text in [
+            "1970-01-01T00:00:00.000000Z",
+            "2000-02-29T23:59:59.999999Z",
+            "2026-10-14T19:00:00.123456Z",
+        ] {
+            assert_eq!(format_utc(parse_utc(text).unwrap()), text);
+        }
     }
 
     #[test]

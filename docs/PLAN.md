@@ -230,6 +230,23 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 
 ---
 
+### 5.4 SyncPlay
+
+`syncplay.rs` holds the group this session is in. The protocol is in `docs/ROADMAP.md` §2.4; the flow here:
+
+1. **Joining:** the top-bar popover lists groups (`/SyncPlay/List`), creates one or joins one. The server confirms with a `GroupJoined` update on the websocket. While in a group, the server clock is sampled (4 samples, then one a minute) and the ping is reported.
+2. **Starting something** while in a group (Play on an item page, next episode…) doesn't play locally: `PlaybackManager::play` hands it to SyncPlay, which sends `SetNewQueue` (the item, plus the next episode for episodes).
+3. **Queue updates:** when the queue's current entry changes, every member (this one too) loads it paused at the group's position (`PlayOptions::start_paused`, `group_item`), reports `Buffering`, then `Ready` after mpv's first `playback-restart`.
+4. **Commands** arrive with a `When` in server time:
+   - `Unpause`: seek to the group's position if more than 0.4 s off, wait until `When`, then unpause. If it arrived late, seek ahead by the lateness and unpause now.
+   - `Pause`: at `When`, pause and seek to the group's position.
+   - `Seek`: pause, seek, report `Buffering`, and `Ready` after the restart; the server then unpauses everyone.
+   - `Stop`: stop playback.
+5. **Local controls** in a group session (`NowPlaying::control`): pause, seek and stop become `/SyncPlay/Pause`, `Unpause`, `Seek` and `Stop` requests, so they apply to everyone. Esc stops playback for the group, as in the web client. Volume and tracks stay local.
+6. **End of an item:** each member sends `NextItem`; the server advances the queue once, and the next item arrives as a queue update. Local autoplay is off in a group.
+
+Not yet: drift correction during playback (2.4.5), and track changes that need a new transcode, or version switches, don't stay in sync.
+
 ## 6. App architecture (GPUI side)
 
 - **`AppState` (Entity):**
