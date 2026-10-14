@@ -47,9 +47,9 @@ The big gaps:
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 2.1.1 | **Skip intro / outro** | P2 | M | Jellyfin 10.10+ has media segments (`GET /MediaSegments/{itemId}`). Show a "Skip intro" button during Intro segments, and offer the next episode early at an Outro. |
-| 2.1.2 | **"Up next" countdown** | P2 | S | Autoplay currently starts the next episode right away at EOF. Show a card in the last ~20 s (or at the Outro segment) with "Play now" and "Cancel". Make autoplay a setting. |
-| 2.1.3 | **Chapters** | P2 | S | mpv already reads chapters from the file. Add chapter marks on the seek bar and previous/next chapter keys (PgUp/PgDn). The `Chapters` model field exists; Jellyfin chapter images could serve as thumbnails. |
+| 2.1.1 | **Skip intro / outro** | P2 | M | ✅ Done: a skip button during Intro, Recap, Preview and Commercial segments, from `/MediaSegments` or, without a segment plugin, from chapter names. The up-next card starts at the Outro. Untested against a real segment plugin (the dev servers have none); the chapter fallback is tested. |
+| 2.1.2 | **"Up next" countdown** | P2 | S | ✅ Done: a card from the Outro (or 20 s before the end) with the next episode, "Starts in N s", *Play now* and *Cancel*; Esc also cancels. Autoplay is a setting. |
+| 2.1.3 | **Chapters** | P2 | S | ✅ Done: marks on the seek bar, the chapter name next to the time, PgUp/PgDn. Not yet: chapter image thumbnails. |
 | 2.1.4 | **Seek-bar preview thumbnails (trickplay)** | P3 | M | Jellyfin 10.9+ serves trickplay tile sheets (`/Videos/{id}/Trickplay/{width}/{index}.jpg`). Show a hover preview on the seek bar. |
 | 2.1.5 | **Playback speed** | P3 | S | mpv `speed`. A small menu (0.5×–2×) plus `[` and `]`. |
 | 2.1.6 | **Subtitle and audio delay, subtitle size** | P3 | S | mpv `sub-delay`, `audio-delay`, `sub-scale`. Useful for badly timed external subtitles. |
@@ -62,7 +62,7 @@ The big gaps:
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 2.2.1 | **Server transcoding fallback** | P1 | M | ✅ Done: an HLS H.264/AAC transcoding profile, the `TranscodingUrl` when the server won't direct play, and *Settings → Streaming → Max streaming bitrate*. Tested on 12.2 (playback, seeking, subtitles, audio choice, stop cleanup) and the HLS requests on 10.11. Not yet: HEVC or AV1 transcodes (cheaper bandwidth, but costly for servers), and automatic bitrate from a speed test. |
+| 2.2.1 | **Server transcoding fallback** | P1 | M | ✅ Done: an HLS H.264/AAC transcoding profile, the `TranscodingUrl` when the server won't direct play, and *Settings → Playback → Max streaming bitrate*. Tested on 12.2 (playback, seeking, subtitles, audio choice, stop cleanup) and the HLS requests on 10.11. Not yet: HEVC or AV1 transcodes (cheaper bandwidth, but costly for servers), and automatic bitrate from a speed test. |
 | 2.2.2 | **Recover from network drops** | P2 | M | If the stream stalls or the server goes away mid-play, mpv eventually ends with an error. Detect `end-file` errors after start, retry from the last position a couple of times, then show a clear message. Progress reports also need to survive a temporary 401/5xx. |
 | 2.2.3 | **Recover from an mpv crash** | P2 | M | libmpv now runs in our process, so a crash in mpv or a driver takes the whole app down. Options: run libmpv in a child process (big change), or at least report the stop on next launch from the last saved position. The old IPC design had this; the embedded one doesn't. |
 | 2.2.4 | **Report volume and mute** | P3 | S | `PlaybackProgressInfo` has `VolumeLevel` and `IsMuted`; other Jellyfin clients' remote-control UIs show them. |
@@ -127,7 +127,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 4.1 | **Player preferences** | P2 | S | Settings has Streaming, Storage, Logs, Account and About. Add: preferred audio and subtitle languages (or follow the user's server-side preferences: `AudioLanguagePreference`, `SubtitleMode`), autoplay next episode and skip-intro behaviour. (Max streaming bitrate is done, with 2.2.1.) |
+| 4.1 | **Player preferences** | P2 | S | Settings has Playback (bitrate, autoplay), Storage, Logs, Account and About. Add: preferred audio and subtitle languages (or follow the user's server-side preferences: `AudioLanguagePreference`, `SubtitleMode`), and skip-intro behaviour (e.g. skip automatically). Max streaming bitrate and autoplay are done. |
 | 4.2 | **Subtitle appearance** | P3 | S | Font size, colour, background (mpv `sub-*` options) for text subtitles. |
 | 4.3 | **Theme** | P3 | S | Dark only. Add light and follow-system, from GPUI Kit's theme system. |
 | 4.4 | **Remember window size and position** | P3 | S | The window always opens centred at 1280×800. |

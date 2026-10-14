@@ -18,7 +18,8 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
   - Direct play of nearly anything mpv can decode. Above a bitrate you set, or when your server requires it, the server transcodes instead.
   - Hardware decoding. On Windows, frames go from the decoder to the screen without a copy.
   - Audio, subtitle and version pickers, including external subtitles from Jellyfin.
-  - Volume, next episode, and automatic advance at the end of an episode.
+  - Volume, chapters (marked on the seek bar), next episode, and an up-next card that plays the next episode at the end (or not: it's a setting).
+  - Skip intro, recap and similar, from the server's media segments (with a segment plugin such as Intro Skipper) or from chapter names like "Intro", "Opening" or "OP".
   - Resume points and watched state stay in sync with the server.
 - **Isolation:** your own mpv configuration, scripts and key bindings are never loaded, so they can't change how the embedded player looks.
 
@@ -33,8 +34,10 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
 | ↑ / ↓ | Volume |
 | M | Mute |
 | Shift+N | Next episode |
+| PgUp / PgDn | Previous / next chapter |
+| Enter or S | Skip the intro, or play the next episode from the up-next card |
 | F | Fullscreen |
-| Esc | Leave fullscreen, then the player |
+| Esc | Leave fullscreen, then dismiss the up-next card, then leave the player |
 
 ## Install
 

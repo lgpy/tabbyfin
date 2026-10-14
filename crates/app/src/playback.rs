@@ -16,6 +16,7 @@ use url::Url;
 
 use crate::changes::Changes;
 use crate::config::Config;
+use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::session::describe_error;
 
@@ -98,7 +99,12 @@ pub struct Version {
 struct Details {
     versions: Vec<Version>,
     next: Option<BaseItemDto>,
+    chapters: Vec<Chapter>,
+    segments: Vec<Segment>,
 }
+
+/// When the up-next card shows without an Outro segment: this long before the end.
+const UP_NEXT_BEFORE_END: Duration = Duration::from_secs(20);
 
 /// State of the embedded player, for the player page.
 pub struct NowPlaying {
@@ -119,6 +125,13 @@ pub struct NowPlaying {
     pub versions: Vec<Version>,
     /// The following episode, for episodes.
     pub next: Option<BaseItemDto>,
+    /// The user dismissed the up-next card: don't play the next episode at the end.
+    pub next_cancelled: bool,
+    /// Play the next episode at the end (the setting, at session start).
+    pub autoplay: bool,
+    pub chapters: Vec<Chapter>,
+    /// Intro, credits and similar, once known.
+    pub segments: Vec<Segment>,
     pub stream: StreamInfo,
     commands: mpsc::UnboundedSender<UiCommand>,
 }
@@ -126,6 +139,38 @@ pub struct NowPlaying {
 impl NowPlaying {
     pub fn send(&self, command: UiCommand) {
         let _ = self.commands.send(command);
+    }
+
+    /// The segment the skip button would skip, if one is playing.
+    pub fn skippable(&self) -> Option<Segment> {
+        markers::skippable(&self.segments, self.position)
+    }
+
+    /// Whether to show the up-next card: from the credits (or near the end) of an episode
+    /// with a next one, unless dismissed.
+    pub fn show_up_next(&self) -> bool {
+        if self.next.is_none() || self.next_cancelled || self.loading {
+            return false;
+        }
+        let credits = self
+            .segments
+            .iter()
+            .find(|s| s.kind == SegmentKind::Outro)
+            .map(|s| s.start);
+        let near_end = self.duration.map(|d| d.saturating_sub(UP_NEXT_BEFORE_END));
+        credits.or(near_end).is_some_and(|from| self.position >= from)
+    }
+
+    /// Plays the next episode now.
+    pub fn play_next(&self, cx: &mut App) {
+        if let Some(next) = self.next.clone() {
+            PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_from_resume(&next, cx));
+        }
+    }
+
+    /// What plays after this item ends by itself.
+    fn autoplay_next(&self) -> Option<BaseItemDto> {
+        self.next.clone().filter(|_| self.autoplay && !self.next_cancelled)
     }
 
     pub fn is_transcoding(&self) -> bool {
@@ -252,6 +297,7 @@ impl PlaybackManager {
         self.generation += 1;
         let generation = self.generation;
         let (volume, muted) = (self.volume, self.muted);
+        let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
         let (updates_tx, mut updates) = mpsc::unbounded_channel();
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
 
@@ -295,6 +341,10 @@ impl PlaybackManager {
                             muted,
                             versions: Vec::new(),
                             next: None,
+                            next_cancelled: false,
+                            autoplay,
+                            chapters: Vec::new(),
+                            segments: Vec::new(),
                             stream,
                             commands,
                         });
@@ -307,6 +357,8 @@ impl PlaybackManager {
                             entity.update(cx, |state, cx| {
                                 state.versions = details.versions;
                                 state.next = details.next;
+                                state.chapters = details.chapters;
+                                state.segments = details.segments;
                                 cx.notify();
                             });
                         }
@@ -334,7 +386,7 @@ impl PlaybackManager {
                 }
             }
             let result = session.await;
-            let next = now_playing.and_then(|entity| entity.read_with(cx, |state, _| state.next.clone()));
+            let next = now_playing.and_then(|entity| entity.read_with(cx, |state, _| state.autoplay_next()));
             this.update(cx, |this, cx| {
                 this.save_volume();
                 Changes::notify_user_data(cx);
@@ -502,18 +554,39 @@ async fn start_player() -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>,
     })
 }
 
-/// Versions and the next episode, for the player's controls. Failures only lose those controls.
+/// Versions, chapters, segments and the next episode, for the player's controls. Failures
+/// only lose those controls.
 async fn details(client: &Client, item: &BaseItemDto) -> Details {
-    let sources = if item.media_sources.is_empty() {
-        match client.item(&item.id, &[ItemField::MediaSources]).await {
-            Ok(full) => full.media_sources,
-            Err(err) => {
-                tracing::warn!("couldn't load versions: {err}");
-                Vec::new()
-            }
+    let next = async {
+        match (item.kind, &item.series_id) {
+            (BaseItemKind::Episode, Some(series_id)) => client.next_episode(series_id, &item.id).await,
+            _ => Ok(None),
         }
-    } else {
-        item.media_sources.clone()
+    };
+    let (full, segments, next) = tokio::join!(
+        client.item(&item.id, &[ItemField::MediaSources, ItemField::Chapters]),
+        client.media_segments(&item.id),
+        next,
+    );
+    let full = full
+        .inspect_err(|err| tracing::warn!("couldn't load versions and chapters: {err}"))
+        .ok();
+    let next = next
+        .inspect_err(|err| tracing::warn!("couldn't find the next episode: {err}"))
+        .ok()
+        .flatten();
+    let sources = full.as_ref().map(|f| f.media_sources.clone()).unwrap_or_default();
+    let chapters = full
+        .as_ref()
+        .map(|f| markers::chapters(&f.chapters))
+        .unwrap_or_default();
+    let segments = match segments {
+        Ok(segments) if !segments.is_empty() => markers::from_server(&segments),
+        Ok(_) => markers::from_chapters(&chapters, item.run_time_ticks.map(Duration::from)),
+        Err(err) => {
+            tracing::warn!("couldn't load media segments: {err}");
+            markers::from_chapters(&chapters, item.run_time_ticks.map(Duration::from))
+        }
     };
     let versions = sources
         .iter()
@@ -523,16 +596,12 @@ async fn details(client: &Client, item: &BaseItemDto) -> Details {
             name: source.name.clone().unwrap_or_else(|| format!("Version {}", i + 1)),
         })
         .collect();
-    let next = match (item.kind, &item.series_id) {
-        (BaseItemKind::Episode, Some(series_id)) => {
-            client.next_episode(series_id, &item.id).await.unwrap_or_else(|err| {
-                tracing::warn!("couldn't find the next episode: {err}");
-                None
-            })
-        }
-        _ => None,
-    };
-    Details { versions, next }
+    Details {
+        versions,
+        next,
+        chapters,
+        segments,
+    }
 }
 
 /// Runs one playback from negotiation to the final stop report. Returns a user-facing error.

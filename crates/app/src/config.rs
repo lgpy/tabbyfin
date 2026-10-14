@@ -19,6 +19,9 @@ pub struct Config {
     /// Bits per second; the server transcodes anything above it. `None` means no limit.
     #[serde(default)]
     pub max_streaming_bitrate: Option<u64>,
+    /// Play the next episode when one ends. `None` means yes.
+    #[serde(default)]
+    pub autoplay_next_episode: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
