@@ -13,3 +13,17 @@ services:
       - ./.data/cache:/cache
       - ./.data/media:/media:ro
     restart: unless-stopped
+
+  # The minimum supported server version (docs/PLAN.md §4.4), on port 8097. Only started with
+  # `--profile min` (`mise run dev:min`). Shares the media, not the server state.
+  jellyfin-min:
+    image: jellyfin/jellyfin:10.11.11
+    profiles: [min]
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "8097:8096"
+    volumes:
+      - ./.data/min/config:/config
+      - ./.data/min/cache:/cache
+      - ./.data/media:/media:ro
+    restart: unless-stopped

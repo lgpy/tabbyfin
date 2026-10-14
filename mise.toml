@@ -61,9 +61,20 @@ description = "Start the dev server, run the startup wizard and scan libraries (
 depends = ["dev:up"]
 run = "python3 -I dev/setup-server.py"
 
+[tasks."dev:min"]
+description = "Start and set up the minimum-version (10.11) server on http://localhost:8097, then run the smoke test against it"
+depends = ["dev:media"]
+run = [
+  # Created as the user first; Docker would create missing bind mounts as root.
+  "mkdir -p dev/.data/min/config dev/.data/min/cache",
+  "docker compose -f dev/compose.yaml --profile min up -d jellyfin-min",
+  "JELLYFIN_URL=http://localhost:8097 python3 -I dev/setup-server.py",
+  "JELLYFIN_URL=localhost:8097 cargo run -q -p jellyfin --example smoke",
+]
+
 [tasks."dev:down"]
-description = "Stop the dev server"
-run = "docker compose -f dev/compose.yaml down"
+description = "Stop the dev servers"
+run = "docker compose -f dev/compose.yaml --profile min down"
 
 [tasks."dev:reset"]
 description = "Delete the dev server's config and cache (keeps the media), then set it up again"

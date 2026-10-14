@@ -112,10 +112,14 @@ def main():
     config = request("/System/Configuration", token=token)
     # The test videos are 60 s long; by default only videos over 5 minutes get resume points.
     wanted = {"ServerName": SERVER_NAME, "MinResumeDurationSeconds": 0}
+    # 12.x disables legacy auth by default; 10.11 has the switch but leaves it on. Turn it off
+    # there too, so the minimum-version server proves we don't rely on it.
+    if "EnableLegacyAuthorization" in config:
+        wanted["EnableLegacyAuthorization"] = False
     if any(config.get(k) != v for k, v in wanted.items()):
         config.update(wanted)
         request("/System/Configuration", "POST", config, token)
-    legacy = config["EnableLegacyAuthorization"]
+    legacy = config.get("EnableLegacyAuthorization")
     print(f"server ready: {BASE}  user={USER} pass={PASS}  items={last}  EnableLegacyAuthorization={legacy}")
 
 
