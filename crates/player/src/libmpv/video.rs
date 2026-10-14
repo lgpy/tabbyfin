@@ -36,14 +36,37 @@ pub struct VideoFrame {
     pub pixels: Vec<u8>,
 }
 
-/// A D3D11 texture holding a finished frame, shared through a legacy share handle. The render
-/// thread keeps it alive and doesn't write to it again for the next two frames.
+/// A GPU texture holding a finished frame. The render thread keeps it alive and doesn't write
+/// to it again for the next two frames.
+///
+/// Windows: a D3D11 texture shared through a legacy share handle.
+#[cfg(windows)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SharedFrame {
     pub handle: usize,
     pub width: u32,
     pub height: u32,
 }
+
+/// A GPU texture holding a finished frame. The render thread keeps it alive and doesn't write
+/// to it again for the next two frames.
+///
+/// Linux: an RGBA8, linearly tiled Vulkan image whose memory is exported as an opaque fd. A new
+/// image gets a new `id`.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SharedFrame {
+    pub id: u64,
+    pub fd: i32,
+    pub allocation_size: u64,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Placeholder so `Frame` has the same shape everywhere; never constructed here.
+#[cfg(not(any(windows, target_os = "linux")))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SharedFrame {}
 
 #[derive(Clone)]
 pub enum Frame {
@@ -169,11 +192,15 @@ type Ready = std::sync::mpsc::Sender<Result<()>>;
 
 fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>, ready: Ready) {
     // `JELLY_GPUI_VIDEO=software` forces the software path, e.g. to rule out GPU driver issues.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     if std::env::var("JELLY_GPUI_VIDEO").as_deref() != Ok("software") {
-        match super::wgl::GpuRenderer::new(core, control) {
+        #[cfg(windows)]
+        let (gpu, kind) = (super::wgl::GpuRenderer::new(core, control), "OpenGL/D3D11 interop");
+        #[cfg(target_os = "linux")]
+        let (gpu, kind) = (super::egl::GpuRenderer::new(core, control), "OpenGL/Vulkan interop");
+        match gpu {
             Ok(mut gpu) => {
-                tracing::info!("video output: GPU (OpenGL/D3D11 interop)");
+                tracing::info!("video output: GPU ({kind})");
                 let _ = ready.send(Ok(()));
                 gpu.run(core, control, frames);
                 return;
@@ -191,6 +218,21 @@ fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Op
             let _ = ready.send(Err(err));
         }
     }
+}
+
+/// Whether to use the GPU path with this OpenGL renderer. CPU-emulated OpenGL (Mesa's
+/// llvmpipe/softpipe, SwiftShader, Windows' "GDI Generic") makes mpv's GPU shaders far more
+/// expensive than its software renderer, so those use the software path unless
+/// `JELLY_GPUI_VIDEO=gpu` forces the GPU path.
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn hardware_renderer(renderer: &str) -> bool {
+    if std::env::var("JELLY_GPUI_VIDEO").as_deref() == Ok("gpu") {
+        return true;
+    }
+    let renderer = renderer.to_ascii_lowercase();
+    !["llvmpipe", "softpipe", "swiftshader", "gdi generic", "software rasterizer"]
+        .iter()
+        .any(|name| renderer.contains(name))
 }
 
 /// The video's display size scaled down to fit the target, or `None` without video.

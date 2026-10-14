@@ -141,6 +141,10 @@ default-features = false
 [dependencies.unicode-segmentation]
 version = "1.10"
 
+# Patched: importing shared textures (src/shared_texture.rs); same version wgpu-hal uses.
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.ash]
+version = "0.38"
+
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wgpu]
 version = "29.0"
 features = [

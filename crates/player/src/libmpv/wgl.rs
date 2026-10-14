@@ -96,10 +96,7 @@ fn gl_proc<T: Copy>(name: &str) -> Result<T> {
 }
 
 fn failed(what: impl std::fmt::Display) -> Error {
-    Error::Command {
-        command: "gpu video output".into(),
-        message: what.to_string(),
-    }
+    Error::GpuUnavailable(what.to_string())
 }
 
 /// One shared texture, registered with GL and attached to its own framebuffer.
@@ -184,6 +181,9 @@ impl GpuRenderer {
             };
             let renderer = CStr::from_ptr(glGetString(GL_RENDERER) as *const c_char).to_string_lossy();
             tracing::info!(%renderer, "OpenGL context for mpv");
+            if !super::video::hardware_renderer(&renderer) {
+                return Err(fail(failed(format!("{renderer} is a software OpenGL renderer"))));
+            }
 
             let extensions: unsafe extern "system" fn(HDC) -> *const c_char =
                 gl_proc("wglGetExtensionsStringARB").map_err(fail)?;

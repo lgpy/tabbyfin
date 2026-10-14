@@ -283,7 +283,7 @@ sudo apt install build-essential pkg-config libmpv2 \
 - `libmpv2` is the runtime library the player loads. No `-dev` package is needed, because libmpv is loaded at runtime.
 - `mingw-w64` adds the Windows test loop: `dev/win-run.sh` cross-builds, copies to `C:\Temp\jelly-dev` and runs on the Windows host.
   - It uses its own config folder (`JELLY_GPUI_CONFIG_DIR=C:\Temp\jelly-dev\config`), so your real sign-in isn't touched. Set it to an empty string to use the normal one.
-  - `JELLY_GPUI_VIDEO=software` forces software video, to compare with the GPU path.
+  - `JELLY_GPUI_VIDEO=software` forces software video and `=gpu` forces the GPU path, even on software OpenGL, to compare the two. Both work on Linux too.
 - GPUI on WSL2 runs through WSLg (`WAYLAND_DISPLAY=wayland-0` is set). It needs a working Vulkan driver, such as mesa `dzn` or llvmpipe.
 - Run `vulkaninfo --summary` before debugging rendering problems.
 - If WSLg rendering is poor, use a native Windows build for daily UI work. GPUI supports Windows directly.

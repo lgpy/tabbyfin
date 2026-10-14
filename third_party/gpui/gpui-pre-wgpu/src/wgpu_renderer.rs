@@ -154,6 +154,8 @@ struct InstanceBindings {
     monochrome_sprites: InstanceBinding,
     subpixel_sprites: InstanceBinding,
     polychrome_sprites: InstanceBinding,
+    /// `PaintSurface`s, drawn as polychrome sprites over their shared texture.
+    surfaces: InstanceBinding,
 }
 
 struct WgpuBindGroupLayouts {
@@ -186,6 +188,9 @@ struct WgpuResources {
     bind_group_layouts: WgpuBindGroupLayouts,
     atlas_sampler: wgpu::Sampler,
     atlas_texture_bind_groups: FxHashMap<AtlasTextureId, CachedTextureBindGroup>,
+    /// Imported shared textures (`gpui::SharedTexture`) and their bind groups, by id. Pruned to
+    /// the surfaces in each frame; recreated with the resources on device loss.
+    shared_textures: FxHashMap<u64, (wgpu::Texture, wgpu::BindGroup)>,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     path_globals_bind_group: wgpu::BindGroup,
@@ -1345,6 +1350,7 @@ impl WgpuRendererCore {
                 bind_group_layouts,
                 atlas_sampler,
                 atlas_texture_bind_groups: FxHashMap::default(),
+                shared_textures: FxHashMap::default(),
                 globals_buffer,
                 globals_bind_group,
                 path_globals_bind_group,
@@ -1497,6 +1503,7 @@ impl WgpuRendererCore {
                 )
             })?;
         self.prepare_texture_bind_groups(scene);
+        self.prepare_shared_textures(scene);
 
         let mut encoder =
             self.resources()
@@ -1609,9 +1616,9 @@ impl WgpuRendererCore {
                             &mut pass,
                         )?;
                     }
-                    // Surfaces are macOS-only for video playback and are not
-                    // implemented by the WGPU renderer.
-                    PrimitiveBatch::Surfaces(_surfaces) => {}
+                    PrimitiveBatch::Surfaces(range) => {
+                        self.draw_surfaces(scene, &instance_bindings.surfaces, range, &mut pass);
+                    }
                 }
             }
         }
@@ -1658,6 +1665,11 @@ impl WgpuRendererCore {
                 "polychrome_sprites_bind_group",
                 instance_offset,
                 &scene.polychrome_sprites,
+            )?,
+            surfaces: self.write_instance_binding(
+                "surfaces_bind_group",
+                instance_offset,
+                &surface_sprites(scene),
             )?,
         })
     }
@@ -1730,6 +1742,59 @@ impl WgpuRendererCore {
                 },
             );
         }
+    }
+
+    /// Imports newly seen shared textures and forgets ones no longer drawn.
+    fn prepare_shared_textures(&mut self, scene: &Scene) {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        {
+            let live: SmallVec<[u64; 4]> = scene.surfaces.iter().map(|s| s.shared_texture.id).collect();
+            self.resources_mut().shared_textures.retain(|id, _| live.contains(id));
+            for surface in &scene.surfaces {
+                let texture = surface.shared_texture;
+                if self.resources().shared_textures.contains_key(&texture.id) {
+                    continue;
+                }
+                match crate::shared_texture::import(&self.resources().device, &texture) {
+                    Ok(imported) => {
+                        let view = imported.create_view(&wgpu::TextureViewDescriptor::default());
+                        let bind_group = self.create_texture_bind_group("shared_texture_bind_group", &view);
+                        self.resources_mut().shared_textures.insert(texture.id, (imported, bind_group));
+                    }
+                    // Not fatal: the surface just isn't drawn (the producer can fall back).
+                    Err(err) => warn!("couldn't import shared texture: {err:#}"),
+                }
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        let _ = scene;
+    }
+
+    fn draw_surfaces(
+        &self,
+        scene: &Scene,
+        instances: &InstanceBinding,
+        range: Range<usize>,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        {
+            let resources = self.resources();
+            for index in range {
+                let id = scene.surfaces[index].shared_texture.id;
+                let Some((_, bind_group)) = resources.shared_textures.get(&id) else {
+                    continue;
+                };
+                pass.set_pipeline(&resources.pipelines.poly_sprites);
+                pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+                pass.set_bind_group(1, &instances.bind_group, &[]);
+                pass.set_bind_group(2, bind_group, &[]);
+                let instance = instances.first_instance + index as u32;
+                pass.draw(0..4, instance..instance + 1);
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        let _ = (scene, instances, range, pass);
     }
 
     fn draw_instances(
@@ -2542,6 +2607,47 @@ impl gpui::PlatformHeadlessRenderer for WgpuHeadlessRenderer {
 
     fn sprite_atlas(&self) -> Arc<dyn gpui::PlatformAtlas> {
         self.core.atlas.clone()
+    }
+}
+
+/// Each surface as a polychrome sprite whose tile is its whole shared texture. The sprite shader
+/// derives texture coordinates from the bound texture's size, so no new shader is needed.
+fn surface_sprites(scene: &Scene) -> Vec<gpui::PolychromeSprite> {
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    {
+        scene
+            .surfaces
+            .iter()
+            .map(|surface| {
+                let texture = surface.shared_texture;
+                gpui::PolychromeSprite {
+                    order: surface.order,
+                    pad: 0,
+                    grayscale: false.into(),
+                    opacity: 1.0,
+                    bounds: surface.bounds,
+                    content_mask: surface.content_mask.clone(),
+                    corner_radii: Default::default(),
+                    tile: gpui::AtlasTile {
+                        texture_id: AtlasTextureId {
+                            index: 0,
+                            kind: gpui::AtlasTextureKind::Polychrome,
+                        },
+                        tile_id: gpui::TileId(0),
+                        padding: 0,
+                        bounds: Bounds {
+                            origin: Point::new(DevicePixels(0), DevicePixels(0)),
+                            size: Size::new(DevicePixels(texture.width as i32), DevicePixels(texture.height as i32)),
+                        },
+                    },
+                }
+            })
+            .collect()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    {
+        let _ = scene;
+        Vec::new()
     }
 }
 

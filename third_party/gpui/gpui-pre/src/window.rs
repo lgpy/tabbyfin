@@ -5171,9 +5171,9 @@ impl Window {
         });
     }
 
-    /// Paints a D3D11 texture shared by another device into the current window. Used for
-    /// embedded video.
-    #[cfg(target_os = "windows")]
+    /// Paints a texture shared by another device into the current window. Used for embedded
+    /// video.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     pub fn paint_shared_texture(&mut self, bounds: Bounds<Pixels>, texture: crate::SharedTexture) {
         use crate::PaintSurface;
 

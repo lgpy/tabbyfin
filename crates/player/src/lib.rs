@@ -23,6 +23,9 @@ pub enum Error {
     LibmpvUnavailable(String),
     #[error("mpv rejected `{command}`: {message}")]
     Command { command: String, message: String },
+    /// GPU video output couldn't be set up; playback uses software rendering instead.
+    #[error("{0}")]
+    GpuUnavailable(String),
     #[error("mpv has exited")]
     Closed,
 }

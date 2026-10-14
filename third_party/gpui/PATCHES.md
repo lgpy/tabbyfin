@@ -20,11 +20,15 @@ Trimmed from the crates.io copies: `gpui-pre/examples/` (only used by tests) and
 
 ## Patches
 
-1. **`gpui-pre`: Windows shared-texture surfaces.**
-   - Adds `SharedTexture` (share handle and size) and a `PaintSurface.shared_texture` field on Windows.
-   - Adds `SurfaceSource::SharedTexture`, with `surface()` enabled on Windows.
+1. **`gpui-pre`: shared-texture surfaces (Windows, Linux).**
+   - Adds `SharedTexture` and a `PaintSurface.shared_texture` field. On Windows it's a D3D11 share handle plus size; on Linux, an id, an exported-memory fd, the allocation size, and the frame size.
+   - Adds `SurfaceSource::SharedTexture`, with `surface()` enabled on Windows and Linux.
    - Adds `Window::paint_shared_texture`.
 2. **`gpui-pre-windows`: drawing shared-texture surfaces.**
    - Adds a `surfaces` pipeline that reuses the polychrome sprite shaders. Each `PaintSurface` becomes a sprite whose tile covers the whole texture; UVs come from `GetDimensions`, so no HLSL changed.
    - Opens shared textures with `OpenSharedResource` and caches one view per share handle. The cache is pruned to each frame's surfaces and cleared on device loss.
    - Replaces the empty `draw_surfaces` stub with drawing each surface.
+3. **`gpui-pre-wgpu`: drawing shared-texture surfaces (Linux, Vulkan backend).**
+   - `src/shared_texture.rs` imports the producer's fd (duplicated) into a linear RGBA8 `VkImage` and wraps it with `texture_from_raw` and `create_texture_from_hal`. A drop callback frees the image and its memory.
+   - The renderer caches one texture and bind group per id, pruned each frame. It writes a `surfaces` instance binding (sprites over the whole texture) and draws the `Surfaces` batch with the polychrome pipeline.
+   - Adds an `ash` 0.38 dependency, the version wgpu-hal uses.
