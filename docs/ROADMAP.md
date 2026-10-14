@@ -1,6 +1,6 @@
 # jelly-gpui: Roadmap
 
-What's missing and what still needs work, as of 2026-10-14 (commit `23b7c57`).
+What's missing and what still needs work, as of 2026-10-14. Done items are marked ✅ and kept for context.
 
 - `docs/PLAN.md` describes the architecture, and `docs/in-app-video.md` the video pipeline. This document only lists gaps.
 - **Priority:**
@@ -35,12 +35,12 @@ The big gaps:
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| 1.1 | **Choose a project license** | P1 | S | Nothing declared yet. It has to be compatible with shipping GPL-2.0+ libmpv (Windows zip) and GCC runtime DLLs (runtime exception, fine). GPL-3.0 or MPL-2.0 would both work; MIT/Apache work for our code but the Windows bundle as a whole is GPL-governed. Add `LICENSE`, `license =` in `Cargo.toml`, and a line in `THIRD_PARTY.md`. |
-| 1.2 | **Package metadata** | P1 | S | The `.deb` maintainer is a placeholder (`crates/app/Cargo.toml`). The macOS `CFBundleIdentifier` needs a real reverse-DNS id (`packaging/Info.plist`). |
-| 1.3 | **Log to a file in release builds** | P1 | S | Release Windows builds have no console (`windows_subsystem = "windows"`), so logs go nowhere and bug reports have nothing to attach. Write a rolling log to the cache/data dir (e.g. `tracing-appender`), and add an "Open log folder" button to Settings. |
-| 1.4 | **One-time `cargo fmt`, then a CI check** | P1 | S | The code hasn't been formatted yet, so CI can't check formatting. Do one formatting commit, then add `cargo fmt --check` to the `check` job. |
-| 1.5 | **Smoke-test the CI artifacts** | P1 | S | So far only the Windows zip has been launched. Install the `.deb` on a clean Ubuntu, and open the macOS zip on a Mac (someone else's). |
-| 1.6 | **Release notes / README** | P1 | S | There's no README with install steps, system requirements (Vulkan on Linux, `brew install mpv` on macOS) or screenshots. |
+| 1.1 | **Choose a project license** | P1 | S | ✅ Done: GPL-3.0-or-later (`LICENSE`, `license` in every crate, shipped in every package). |
+| 1.2 | **Package metadata** | P1 | S | ✅ Done: maintainer `lgpy <lgpy17@gmail.com>`, bundle id `io.github.lgpy.jelly-gpui`. |
+| 1.3 | **Log to a file in release builds** | P1 | S | ✅ Done: daily log files, 7 kept, in the local data dir (`<config dir>/logs` with `JELLY_GPUI_CONFIG_DIR`), plus *Settings → Logs → Open log folder*. |
+| 1.4 | **One-time `cargo fmt`, then a CI check** | P1 | S | ✅ Done: formatted at 120 columns (`rustfmt.toml`); CI and `mise run ci` run `cargo fmt --check`. |
+| 1.5 | **Smoke-test the CI artifacts** | P1 | S | Partly done: the Windows zip runs on the dev machine, and the `.deb` installs on a clean Ubuntu 24.04 container (dependencies resolve, the app starts and logs). Still to do: a real Linux desktop with a GPU, and the macOS zip on a Mac (someone else's). |
+| 1.6 | **Release notes / README** | P1 | S | ✅ Done: `README.md`. Screenshots are still to add. |
 
 ## 2. Playback
 
@@ -133,7 +133,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 | 4.3 | **Theme** | P3 | S | Dark only. Add light and follow-system, from GPUI Kit's theme system. |
 | 4.4 | **Remember window size and position** | P3 | S | The window always opens centred at 1280×800. |
 | 4.5 | **Multiple servers or users** | P3 | M | One saved server at a time. A server/user switcher is out of v1 scope but often requested. |
-| 4.6 | **Minimum-version gate on real 10.11** | P1 | S | The version gate exists, but nothing has run against 10.11 yet (plan §4.4 and open question 1: does `POST /QuickConnect/Initiate` exist on 10.11?). Add a 10.11 container to `dev/compose.yaml` and run the smoke example against it. |
+| 4.6 | **Minimum-version gate on real 10.11** | P1 | S | ✅ Done: `mise run dev:min` (Jellyfin 10.11.11, legacy auth off): the smoke test passes, Quick Connect included. The app UI itself hasn't been clicked through on 10.11 yet. |
 
 ## 5. Platform and packaging
 
