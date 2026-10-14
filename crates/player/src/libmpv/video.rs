@@ -32,6 +32,7 @@ pub(crate) const UPDATE_FRAME: u64 = 1;
 const DEFAULT_TARGET: (u32, u32) = (1920, 1080);
 
 /// A frame in BGRA order with opaque alpha, tightly packed (`width * 4` bytes per row).
+#[derive(Debug)]
 pub struct VideoFrame {
     pub width: u32,
     pub height: u32,
@@ -70,18 +71,26 @@ pub struct SharedFrame {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SharedFrame {}
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Frame {
     Pixels(Arc<VideoFrame>),
     Shared(SharedFrame),
 }
 
-/// Handle to the video of an [`super::EmbeddedPlayer`]. Cheap to clone; rendering stops when
-/// the player is dropped.
+/// Handle to a player's video. Cheap to clone; rendering stops when the player is dropped.
 #[derive(Clone)]
 pub struct VideoOutput {
-    control: Arc<RenderControl>,
+    target: Target,
     frames: watch::Receiver<Option<Frame>>,
+}
+
+/// Where the requested output size goes.
+#[derive(Clone)]
+enum Target {
+    /// The render thread in this process.
+    Local(Arc<RenderControl>),
+    /// A player host process (see `crate::remote`).
+    Remote(Arc<dyn Fn(u32, u32) + Send + Sync>),
 }
 
 /// State shared between the render thread, the player and the UI.
@@ -168,7 +177,25 @@ impl VideoOutput {
         *control.thread.lock().unwrap() = Some(thread);
         let render_thread = RenderThread(control.clone());
         ready_rx.recv().map_err(|_| Error::Closed)??;
-        Ok((Self { control, frames }, render_thread))
+        Ok((
+            Self {
+                target: Target::Local(control),
+                frames,
+            },
+            render_thread,
+        ))
+    }
+
+    /// Video rendered by a player host process: frames arrive on `frames`, and size requests
+    /// go to `set_target`.
+    pub(crate) fn remote(
+        frames: watch::Receiver<Option<Frame>>,
+        set_target: Arc<dyn Fn(u32, u32) + Send + Sync>,
+    ) -> Self {
+        Self {
+            target: Target::Remote(set_target),
+            frames,
+        }
     }
 
     /// Latest frame, updated as mpv renders.
@@ -179,9 +206,15 @@ impl VideoOutput {
     /// Size of the area the video is shown in, in device pixels. Frames are rendered to fit
     /// it (never larger than the video), and the current frame is redrawn on change.
     pub fn set_target_size(&self, width: u32, height: u32) {
-        let packed = pack((width.max(2), height.max(2)));
-        if self.control.target.swap(packed, Ordering::Relaxed) != packed {
-            self.control.wakeup.notify();
+        let (width, height) = (width.max(2), height.max(2));
+        match &self.target {
+            Target::Local(control) => {
+                let packed = pack((width, height));
+                if control.target.swap(packed, Ordering::Relaxed) != packed {
+                    control.wakeup.notify();
+                }
+            }
+            Target::Remote(set_target) => set_target(width, height),
         }
     }
 }

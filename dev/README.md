@@ -38,6 +38,8 @@ Remote metadata and image fetchers are turned off, so the fake titles never matc
 
 **Test fixtures:** `dev/capture-fixtures.py http://localhost:8096 12.2` and `dev/capture-fixtures.py http://localhost:8097 10.11` save real responses (items, playback info, segments…) to `crates/jellyfin/tests/fixtures/<version>/`, with tokens and API keys zeroed. `cargo test -p jellyfin` parses them all into the client's models. Recapture after changing the dev media or adding a model.
 
+**Player process:** playback runs in `jelly-gpui --player-host` (see `docs/PLAN.md` §5.1b). `JELLY_GPUI_PLAYER=embedded` runs libmpv in the app instead, to compare. To test crash recovery, kill the host process during playback; on Linux, match it by process name (`pgrep -x jelly-gpui`, then check `/proc/<pid>/cmdline` for `--player-host`), since `pkill -f -- --player-host` also matches the shell running it.
+
 **SyncPlay:** `cargo run -p jellyfin --example syncplay` is a scripted group member. It joins (or creates) `SYNCPLAY_GROUP` (default `dev group`), plays along with `Buffering`/`Ready`, prints every update and command, and runs `SYNCPLAY_SCRIPT`, e.g. `"wait:12 queue:<item id> wait:6 pause wait:3 unpause wait:5 seek:30 wait:5 stop leave"`. Debug builds of the app join a group at startup with `JELLY_GPUI_SYNCPLAY=<group name>`, so the app and the example can be run together. `JELLY_GPUI_SYNCPLAY_SKEW_MS=800` makes the app start playback that late, to watch drift correction catch up (`RUST_LOG=jelly_gpui::syncplay=debug` logs the drift every second).
 
 **Reset everything:** `docker compose -f dev/compose.yaml down && rm -rf dev/.data/config dev/.data/cache`, then run the start and setup steps again. The container runs as your user, so no `sudo` is needed.

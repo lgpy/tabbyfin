@@ -190,6 +190,24 @@ Video plays **inside the app** through libmpv. There's no separate mpv window an
 - **Hardware decoding:** `hwdec=auto-safe` on the GPU video paths, so frames stay on the GPU where mpv has an interop for the render context (`d3d11va` through ANGLE on Windows, `nvdec` anywhere), and `auto-copy-safe` on the software path. The log says which decoder each file got (`video decoding: …`).
 - **mpv's log** is forwarded to ours at `warn` level. `JELLY_GPUI_MPV_LOG=v` (or any mpv level) shows more.
 
+### 5.1b The player host process
+
+libmpv doesn't run inside the app. `Player::spawn` starts this same executable again as `jelly-gpui --player-host` (`crates/player/src/host.rs`). That process runs libmpv and the video output described above, and the app talks to it over its stdin and stdout (`remote.rs`, `wire.rs`). An mpv or GPU driver crash then only kills the player process.
+
+- **Messages:** length-prefixed JSON headers with an optional binary payload.
+  - App to host: mpv commands, properties (each answered with a reply) and the on-screen size.
+  - Host to app: player events, replies and frames.
+- **Frames:**
+  - **Software:** the BGRA pixels go as the payload. Only the newest frame is sent, so a slow app skips frames instead of queueing them.
+  - **Windows:** only the D3D11 texture's legacy share handle is sent; any process can open it.
+  - **Linux:** the Vulkan memory fd of each image is passed once over a socket pair (`SCM_RIGHTS`; the host inherits its end as `JELLY_GPUI_PLAYER_FD`). The app keeps the newest 8 open, since GPUI duplicates an fd when it first draws it.
+- **Logging:** the host logs plain lines to stderr. The app forwards them into its own log under the `player` target.
+- **Crashes:** when the host dies without having finished, the app gets `EndFile(Error(HOST_CRASHED))` and `Exited`. The session ends as *lost*, the manager starts a new session (and host) at the same position, and the user sees "The player stopped unexpectedly. Restarting it…". After three tries the error says the player keeps crashing.
+- **Lifetime:** the host exits when its stdin closes, which happens when the app drops the player or exits. It's also killed when the app drops it.
+- **`JELLY_GPUI_PLAYER=embedded`** runs libmpv inside the app as before, for debugging.
+
+Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) through the host. Killing the host mid-play on both resumes playback in a new one. Linux GPU frames through the host aren't visually confirmed: the forced GPU path draws black on WSL's llvmpipe even in-process, where it used to work.
+
 ### 5.2 Threading and reporting
 
 1. The session runs on tokio. It forwards `PlayerEvent`s to a `NowPlaying` GPUI entity, which the player page draws, and it receives `UiCommand`s from that page: pause, seek, volume, tracks and stop.

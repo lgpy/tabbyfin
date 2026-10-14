@@ -1,11 +1,12 @@
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Properties observed on startup. The index is the observe id.
 pub(crate) const OBSERVED_PROPERTIES: &[&str] = &["time-pos", "duration", "pause", "volume", "mute"];
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PlayerEvent {
     FileLoaded,
     /// Current position, sent at most about once a second, plus right after seeks.
@@ -23,7 +24,7 @@ pub enum PlayerEvent {
     Exited,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EndReason {
     /// Played to the end.
     Eof,

@@ -1,11 +1,17 @@
-//! mpv playback, embedded in the app.
+//! mpv playback for the app.
 //!
-//! libmpv runs inside this process and renders into a [`libmpv::VideoOutput`] the UI draws;
-//! see `docs/in-app-video.md`. Commands are async; player state arrives as [`PlayerEvent`]s on
-//! a channel. Dropping the [`Player`] stops playback. Must be used from within a tokio runtime.
+//! libmpv renders into a [`libmpv::VideoOutput`] the UI draws; see `docs/in-app-video.md`. By
+//! default it runs in a separate player host process (this executable with `--player-host`,
+//! see [`host`] and [`remote`]), so an mpv or GPU driver crash doesn't take the app down;
+//! `JELLY_GPUI_PLAYER=embedded` runs it inside the app instead. Commands are async; player
+//! state arrives as [`PlayerEvent`]s on a channel. Dropping the [`Player`] stops playback. Must
+//! be used from within a tokio runtime.
 
 mod events;
+pub mod host;
 pub mod libmpv;
+mod remote;
+mod wire;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,6 +34,9 @@ pub enum Error {
     GpuUnavailable(String),
     #[error("mpv has exited")]
     Closed,
+    /// The player host process failed (see [`remote`]).
+    #[error("player process: {0}")]
+    Host(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -41,32 +50,62 @@ pub struct LoadRequest {
     pub http_headers: Vec<String>,
 }
 
-/// An mpv instance. libmpv calls block, so they run on tokio's blocking pool.
-pub struct Player(Arc<libmpv::EmbeddedPlayer>);
+/// An mpv instance.
+pub struct Player(Backend);
+
+enum Backend {
+    /// libmpv in this process. Its calls block, so they run on tokio's blocking pool.
+    Embedded(Arc<libmpv::EmbeddedPlayer>),
+    /// libmpv in a player host process.
+    Remote(remote::RemotePlayer),
+}
+
+type Started = (Player, mpsc::UnboundedReceiver<PlayerEvent>, libmpv::VideoOutput);
 
 impl Player {
-    /// Starts mpv. Fails with [`Error::LibmpvUnavailable`] where libmpv can't be loaded.
-    pub async fn spawn() -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, libmpv::VideoOutput)> {
+    /// Starts mpv, in a player host process unless `JELLY_GPUI_PLAYER=embedded`. Fails with
+    /// [`Error::LibmpvUnavailable`] where libmpv can't be loaded.
+    pub async fn spawn() -> Result<Started> {
+        if std::env::var("JELLY_GPUI_PLAYER").as_deref() == Ok("embedded") {
+            return Self::spawn_embedded().await;
+        }
+        let (player, events, video) = remote::RemotePlayer::spawn().await?;
+        Ok((Player(Backend::Remote(player)), events, video))
+    }
+
+    /// Starts mpv in this process.
+    pub(crate) async fn spawn_embedded() -> Result<Started> {
         let (player, events) = tokio::task::spawn_blocking(libmpv::EmbeddedPlayer::spawn)
             .await
             .map_err(|_| Error::Closed)??;
         let video = player.video();
-        Ok((Player(Arc::new(player)), events, video))
+        Ok((Player(Backend::Embedded(Arc::new(player))), events, video))
     }
 
     /// Runs a raw mpv command, e.g. `json!(["seek", 10, "relative"])`.
     pub async fn command(&self, command: Value) -> Result<()> {
-        let player = self.0.clone();
         let args = match command {
             Value::Array(args) => args,
             other => vec![other],
         };
-        blocking(move || player.command(&args)).await
+        match &self.0 {
+            Backend::Embedded(player) => {
+                let player = player.clone();
+                blocking(move || player.command(&args)).await
+            }
+            Backend::Remote(player) => player.command(args).await,
+        }
     }
 
     pub async fn set_property(&self, name: &str, value: impl Into<Value>) -> Result<()> {
-        let (player, name, value) = (self.0.clone(), name.to_owned(), value.into());
-        blocking(move || player.set_property(&name, &value)).await
+        let value = value.into();
+        match &self.0 {
+            Backend::Embedded(player) => {
+                let (player, name) = (player.clone(), name.to_owned());
+                blocking(move || player.set_property(&name, &value)).await
+            }
+            Backend::Remote(player) => player.set_property(name, value).await,
+        }
     }
 
     /// Loads a file. Options are set as properties first so this works with every mpv
@@ -103,4 +142,14 @@ impl Player {
 
 async fn blocking(f: impl FnOnce() -> Result<()> + Send + 'static) -> Result<()> {
     tokio::task::spawn_blocking(f).await.map_err(|_| Error::Closed)?
+}
+
+/// The [`EndReason::Error`] message when the player host process died (an mpv or GPU driver
+/// crash), as opposed to a stream or file error.
+pub const HOST_CRASHED: &str = "the player process stopped unexpectedly";
+
+/// Whether this process was started as the player host (`--player-host`). The app checks this
+/// first thing in `main` and then calls [`host::run`] instead of starting its UI.
+pub fn is_host_process() -> bool {
+    std::env::args().nth(1).as_deref() == Some(host::HOST_ARG)
 }
