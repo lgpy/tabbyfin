@@ -7,7 +7,7 @@
 //! local time. Local pause, seek and stop become requests ([`GroupRequest`]) instead of acting
 //! directly. See `docs/ROADMAP.md` §2.4.
 
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind};
@@ -53,11 +53,24 @@ pub struct SyncPlay {
     clock_task: Option<Task<()>>,
     /// Observes the group session's player.
     player_watch: Option<Subscription>,
+    /// The group's timeline while playing: the position it's at, at a local instant.
+    timeline: Option<(Instant, Duration)>,
+    /// The playback speed set for drift correction.
+    speed: f64,
+    drift_task: Option<Task<()>>,
     _playback: Subscription,
 }
 
 /// Off by more than this, a member seeks to the group's position before unpausing.
 const SEEK_THRESHOLD: Duration = Duration::from_millis(400);
+/// Drift correction: how often it checks, when it starts adjusting the speed, when it seeks
+/// instead, the largest speed change, and how fast drift is corrected (speed change per
+/// second of drift).
+const DRIFT_INTERVAL: Duration = Duration::from_secs(1);
+const DRIFT_TOLERANCE: f64 = 0.08;
+const DRIFT_SEEK: f64 = 1.5;
+const MAX_SPEED_CHANGE: f64 = 0.05;
+const SPEED_PER_DRIFT: f64 = 0.25;
 
 struct GlobalSyncPlay(Entity<SyncPlay>);
 
@@ -80,6 +93,9 @@ impl SyncPlay {
             scheduled: None,
             clock_task: None,
             player_watch: None,
+            timeline: None,
+            speed: 1.,
+            drift_task: None,
             _playback: cx.subscribe(&PlaybackManager::global(cx), Self::on_playback),
         });
         #[cfg(debug_assertions)]
@@ -287,6 +303,8 @@ impl SyncPlay {
         self.queue = None;
         self.ready_due = false;
         self.player_watch = None;
+        self.drift_task = None;
+        self.timeline = None;
         if self.loaded.take().is_some() && self.now_playing.take().is_some() {
             PlaybackManager::global(cx).update(cx, |playback, _| playback.stop());
         }
@@ -318,6 +336,10 @@ impl SyncPlay {
         let send = move |command: UiCommand, cx: &mut App| now_playing.read(cx).send(command);
         let position: Duration = command.position.into();
         let off = |target: Duration| local_position.abs_diff(target) > SEEK_THRESHOLD;
+        if command.kind != CommandKind::Unpause {
+            self.timeline = None;
+            self.set_speed(1., cx);
+        }
         match command.kind {
             CommandKind::Unpause => match delay {
                 // Wait at the group's position, then start exactly at `when`.
@@ -325,6 +347,8 @@ impl SyncPlay {
                     if off(position) {
                         send(UiCommand::SeekTo(position), cx);
                     }
+                    self.timeline = Some((Instant::now() + ahead, position));
+                    let ahead = ahead + debug_skew();
                     self.schedule(ahead, cx, move |cx| send(UiCommand::SetPause(false), cx));
                 }
                 // Late: catch up by however late this is.
@@ -334,6 +358,7 @@ impl SyncPlay {
                         send(UiCommand::SeekTo(target), cx);
                     }
                     send(UiCommand::SetPause(false), cx);
+                    self.timeline = Some((Instant::now(), target));
                 }
             },
             CommandKind::Pause => {
@@ -377,7 +402,53 @@ impl SyncPlay {
         self.player_watch = Some(cx.observe(now_playing, |this, now_playing, cx| {
             this.on_player_change(now_playing, cx)
         }));
+        self.speed = 1.;
+        self.drift_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(DRIFT_INTERVAL).await;
+                if this.update(cx, |this, cx| this.correct_drift(cx)).is_err() {
+                    return;
+                }
+            }
+        }));
         self.now_playing = Some((now_playing.clone(), 0));
+    }
+
+    /// Keeps the local player on the group's timeline while playing: small drift is evened
+    /// out by playing slightly faster or slower (mpv keeps the pitch), large drift by seeking.
+    fn correct_drift(&mut self, cx: &mut Context<Self>) {
+        let (Some((anchor_at, anchor)), Some((now_playing, _))) = (self.timeline, &self.now_playing) else {
+            return;
+        };
+        let now = Instant::now();
+        let state = now_playing.read(cx);
+        // Wait for a position reported since playback started.
+        if now < anchor_at || state.position_at <= anchor_at || state.paused || state.loading {
+            return;
+        }
+        let expected = anchor + (now - anchor_at);
+        let local = state.position + (now - state.position_at).mul_f64(self.speed);
+        let drift = local.as_secs_f64() - expected.as_secs_f64();
+        tracing::debug!(drift_ms = (drift * 1000.) as i64, speed = self.speed, "SyncPlay drift");
+        let speed = if drift.abs() > DRIFT_SEEK {
+            now_playing.read(cx).send(UiCommand::SeekTo(expected));
+            1.
+        } else if drift.abs() > DRIFT_TOLERANCE {
+            1. - (drift * SPEED_PER_DRIFT).clamp(-MAX_SPEED_CHANGE, MAX_SPEED_CHANGE)
+        } else {
+            1.
+        };
+        self.set_speed(speed, cx);
+    }
+
+    fn set_speed(&mut self, speed: f64, cx: &App) {
+        if (speed - self.speed).abs() < 0.001 {
+            return;
+        }
+        self.speed = speed;
+        if let Some((now_playing, _)) = &self.now_playing {
+            now_playing.read(cx).send(UiCommand::SetSpeed(speed));
+        }
     }
 
     fn mark_restart_seen(&mut self, cx: &App) {
@@ -459,4 +530,17 @@ impl SyncPlay {
             }
         }));
     }
+}
+
+/// Dev aid: `JELLY_GPUI_SYNCPLAY_SKEW_MS=800` starts playback that much after the group, to
+/// watch drift correction catch up.
+fn debug_skew() -> Duration {
+    if !cfg!(debug_assertions) {
+        return Duration::ZERO;
+    }
+    std::env::var("JELLY_GPUI_SYNCPLAY_SKEW_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or_default()
 }
