@@ -96,6 +96,10 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ Against the scripted member (`cargo run -p jellyfin --example syncplay`): following the group (load, Ready, Unpause, Pause, Unpause, Seek, Stop) and leading it (Play on an item page, Space, →, Esc); the popover in and out of a group; drift correction catching up 0.8 s.
 
+✅ Also against it: an audio change during a transcode (remote command) reported `Buffering`, the member paused, and both resumed at 18.6 s after the reload; shuffle, repeat and moving an entry from the SyncPlay menu by keyboard reached it as queue updates.
+
+- ⬜ A **version switch** in a group, from the player's version menu (the same reload path as the audio change, not clicked yet), and removing a queue entry.
+
 - ⬜ **With the Jellyfin web client** as the other member, in a browser against the same server:
   - ⬜ Create the group in jelly-gpui, join from the web, and the other way round.
   - ⬜ Start an item from each side; both load and start together.

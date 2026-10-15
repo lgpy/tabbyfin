@@ -353,12 +353,10 @@ impl PlayerPage {
             return;
         };
         let options = PlayOptions {
-            start: Some(jellyfin::Ticks::from(state.position)),
             media_source_id: Some(version.id.clone()),
             ..Default::default()
         };
-        let item = state.item.clone();
-        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
+        self.now_playing.update(cx, |state, cx| state.reload(options, cx));
     }
 
     /// Enter: skip the intro (or recap, preview…), or play the next episode from the up-next

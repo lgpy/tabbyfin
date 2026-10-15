@@ -408,11 +408,23 @@ impl NowPlaying {
             media_source_id: Some(self.source.id.clone()),
             audio_stream_index: self.audio,
             subtitle: self.subtitle,
-            group_item: self.group_item.clone(),
             ..Default::default()
         };
+        self.reload(options, cx);
+    }
+
+    /// Loads this item again here only, e.g. in another version: at the current position, or
+    /// `options.start`. In a SyncPlay group the others wait meanwhile (`SyncPlay::reload`),
+    /// rather than the group getting a new queue as when something new is played.
+    pub fn reload(&self, mut options: PlayOptions, cx: &mut App) {
+        options.start = options.start.or(Some(Ticks::from(self.position)));
         let item = self.item.clone();
-        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
+        match (&self.group_item, SyncPlay::try_global(cx)) {
+            (Some(_), Some(syncplay)) => {
+                syncplay.update(cx, |syncplay, cx| syncplay.reload(&item, options, cx));
+            }
+            _ => PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx)),
+        }
     }
 
     fn apply(&mut self, event: &PlayerEvent) {
