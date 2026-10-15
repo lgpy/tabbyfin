@@ -155,3 +155,13 @@ Code-level and startup checks only so far: the development harness cannot send m
 - ⬜ **Fullscreen** from the dashboard toggles the window (the harness can't check fullscreen).
 - ⬜ In a **SyncPlay group**: remote pause and seek act on the whole group, and play next/last add to the group's queue.
 - ⬜ Changing the **audio track** remotely during a transcode restarts the stream at the same position.
+
+## 13. Speed, delays, subtitle size and the clock (2.1.5–2.1.7)
+
+✅ With `JELLY_GPUI_KEYS`: `]` twice set 1.5× (the test pattern's timecode advanced about 1.5 s per second, and the badge showed "1.5×"), and `x` three times set the subtitle delay to +0.3 s, as the menu showed (opened by default for that screenshot only).
+
+- ⬜ **Clicking** through the menu: each speed, the delay and size buttons, Reset; the controls stay up while it's open.
+- ⬜ **Subtitle delay** and **size** on a real subtitle track (the dev media's text subtitles), and **audio delay** with sound.
+- ⬜ **Hovering the seek bar** shows the time under the mouse, close to where a click would seek.
+- ⬜ **Clicking the clock** switches to the time left, and the choice survives a restart.
+- ⬜ The next episode keeps the speed and size and drops the delays; a **SyncPlay** group shows "Normal in SyncPlay" and stays at 1×.

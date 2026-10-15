@@ -6,10 +6,11 @@ use std::time::Duration;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -17,7 +18,7 @@ use player::libmpv::Frame;
 
 use crate::components::timestamp;
 use crate::markers::{self, SegmentKind};
-use crate::playback::{NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
+use crate::playback::{Adjustments, NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
 
 actions!(
@@ -34,7 +35,11 @@ actions!(
         PrevChapter,
         Skip,
         ToggleFullscreen,
-        ExitPlayer
+        ExitPlayer,
+        SpeedUp,
+        SpeedDown,
+        SubtitleDelayUp,
+        SubtitleDelayDown
     ]
 );
 
@@ -91,6 +96,14 @@ pub struct PlayerPage {
     subtitle: Option<ChoiceSelect>,
     controls_visible: bool,
     hide_controls: Option<Task<()>>,
+    /// The settings menu is open, which keeps the controls up.
+    menu_open: bool,
+    /// The seek bar's bounds from the last paint, to turn the mouse position into a time.
+    seek_bounds: Bounds<Pixels>,
+    /// The mouse's x over the seek bar, in window coordinates.
+    seek_hover: Option<Pixels>,
+    /// Show the time left instead of the time played (a setting, toggled by clicking it).
+    show_remaining: bool,
     _subscriptions: Vec<Subscription>,
     _frames: Task<()>,
 }
@@ -211,6 +224,10 @@ impl PlayerPage {
             subtitle,
             controls_visible: true,
             hide_controls: None,
+            menu_open: false,
+            seek_bounds: Bounds::default(),
+            seek_hover: None,
+            show_remaining: crate::config::Config::load().show_remaining_time.unwrap_or(false),
             _subscriptions: subscriptions,
             _frames,
         };
@@ -396,7 +413,7 @@ impl PlayerPage {
         self.hide_controls = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(HIDE_CONTROLS_AFTER).await;
             this.update(cx, |this, cx| {
-                if !this.now_playing.read(cx).paused {
+                if !this.now_playing.read(cx).paused && !this.menu_open {
                     this.controls_visible = false;
                     cx.hide_cursor_until_mouse_moves();
                     cx.notify();
@@ -454,6 +471,40 @@ impl PlayerPage {
         self.show_controls(window, cx);
     }
 
+    fn adjust(&mut self, change: impl FnOnce(&mut Adjustments), window: &mut Window, cx: &mut Context<Self>) {
+        let mut adjustments = self.now_playing.read(cx).adjustments;
+        change(&mut adjustments);
+        self.now_playing.update(cx, |state, cx| state.adjust(adjustments, cx));
+        self.show_controls(window, cx);
+    }
+
+    fn speed_up(&mut self, _: &SpeedUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.adjust(|a| a.speed = a.step_speed(true), window, cx);
+    }
+
+    fn speed_down(&mut self, _: &SpeedDown, window: &mut Window, cx: &mut Context<Self>) {
+        self.adjust(|a| a.speed = a.step_speed(false), window, cx);
+    }
+
+    fn subtitle_delay_up(&mut self, _: &SubtitleDelayUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.adjust(|a| a.subtitle_delay += Adjustments::DELAY_STEP, window, cx);
+    }
+
+    fn subtitle_delay_down(&mut self, _: &SubtitleDelayDown, window: &mut Window, cx: &mut Context<Self>) {
+        self.adjust(|a| a.subtitle_delay -= Adjustments::DELAY_STEP, window, cx);
+    }
+
+    /// Switches the clock between the time played and the time left, and remembers the choice.
+    fn toggle_remaining(&mut self, cx: &mut Context<Self>) {
+        self.show_remaining = !self.show_remaining;
+        let mut config = crate::config::Config::load();
+        config.show_remaining_time = Some(self.show_remaining);
+        if let Err(err) = config.save() {
+            tracing::warn!("failed to save config: {err:#}");
+        }
+        cx.notify();
+    }
+
     fn toggle_fullscreen(&mut self, _: &ToggleFullscreen, window: &mut Window, _: &mut Context<Self>) {
         window.toggle_fullscreen();
     }
@@ -474,11 +525,18 @@ impl PlayerPage {
         let state = self.now_playing.read(cx);
         let paused = state.paused;
         let (muted, has_next) = (state.muted || state.volume == 0., state.next.is_some());
-        let mut time = format!(
-            "{} / {}",
-            timestamp(state.position),
-            state.duration.map(timestamp).unwrap_or_else(|| "--:--".into())
-        );
+        let mut time = match state.duration {
+            Some(duration) if self.show_remaining => format!(
+                "-{} / {}",
+                timestamp(duration.saturating_sub(state.position)),
+                timestamp(duration)
+            ),
+            duration => format!(
+                "{} / {}",
+                timestamp(state.position),
+                duration.map(timestamp).unwrap_or_else(|| "--:--".into())
+            ),
+        };
         if let Some(name) = markers::current_chapter(&state.chapters, state.position).and_then(|c| c.name.as_ref()) {
             time = format!("{time} · {name}");
         }
@@ -492,6 +550,16 @@ impl PlayerPage {
                 .collect(),
             None => Vec::new(),
         };
+        // The time under the mouse on the seek bar.
+        let hover = match (self.seek_hover, state.duration) {
+            (Some(x), Some(duration)) if self.seek_bounds.size.width > px(0.) => {
+                let offset = (x - self.seek_bounds.left()).clamp(px(0.), self.seek_bounds.size.width);
+                let fraction = offset / self.seek_bounds.size.width;
+                Some((offset, duration.mul_f32(fraction)))
+            }
+            _ => None,
+        };
+        let speed = state.adjustments.speed;
         let title = crate::components::card_text(&state.item);
         let title = if state.item.kind == jellyfin::models::BaseItemKind::Episode {
             format!("{} · {}", title.0, title.1)
@@ -540,9 +608,29 @@ impl PlayerPage {
                 linear_color_stop(black().opacity(0.), 1.),
             ))
             .children(self.seek.as_ref().map(|seek| {
+                let page = cx.entity();
                 div()
+                    .id("seek-bar")
                     .relative()
                     .w_full()
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                        this.seek_hover = Some(event.position.x);
+                        cx.notify();
+                    }))
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        if !hovered {
+                            this.seek_hover = None;
+                            cx.notify();
+                        }
+                    }))
+                    .child(
+                        canvas(
+                            move |bounds, _, cx| page.update(cx, |this, _| this.seek_bounds = bounds),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
                     .child(Slider::new(seek).w_full())
                     .children(chapter_marks.into_iter().map(|fraction| {
                         div()
@@ -554,6 +642,27 @@ impl PlayerPage {
                             .h(px(CHAPTER_MARK_H))
                             .bg(white().opacity(0.6))
                     }))
+                    .when_some(hover, |el, (offset, time)| {
+                        el.child(
+                            div()
+                                .absolute()
+                                .bottom(px(18.))
+                                .left(offset)
+                                .ml(px(-24.))
+                                .w(px(48.))
+                                .flex()
+                                .justify_center()
+                                .child(
+                                    div()
+                                        .px_1()
+                                        .rounded_sm()
+                                        .bg(black().opacity(0.8))
+                                        .text_xs()
+                                        .text_color(white())
+                                        .child(timestamp(time)),
+                                ),
+                        )
+                    })
             }))
             .child(
                 h_flex()
@@ -578,7 +687,15 @@ impl PlayerPage {
                             .label("+10s")
                             .on_click(cx.listener(|this, _, window, cx| this.seek_forward(&SeekForward, window, cx))),
                     )
-                    .child(div().text_sm().child(time))
+                    .child(
+                        div()
+                            .id("time")
+                            .text_sm()
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_remaining(cx)))
+                            .child(time),
+                    )
+                    .when(speed != 1., |el| el.child(badge(format!("{speed}×"))))
                     .child(
                         Button::new("mute")
                             .ghost()
@@ -601,12 +718,37 @@ impl PlayerPage {
                     .children(self.version.as_ref().map(|s| picker(s, 140., 240.)))
                     .children(self.audio.as_ref().map(|s| picker(s, 200., 320.)))
                     .children(self.subtitle.as_ref().map(|s| picker(s, 200., 320.)))
+                    .child(self.render_settings(cx))
                     .child(Button::new("fullscreen").ghost().label("Fullscreen").on_click(
                         cx.listener(|this, _, window, cx| this.toggle_fullscreen(&ToggleFullscreen, window, cx)),
                     )),
             );
 
         div().absolute().inset_0().child(top).child(bottom)
+    }
+
+    /// The settings menu: speed, subtitle and audio delay, subtitle size.
+    fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let page = cx.entity();
+        Popover::new("player-settings")
+            .anchor(Anchor::BottomRight)
+            .on_open_change({
+                let page = page.clone();
+                move |open, window, cx| {
+                    let open = *open;
+                    page.update(cx, |this, cx| {
+                        this.menu_open = open;
+                        this.show_controls(window, cx);
+                    });
+                }
+            })
+            .trigger(
+                Button::new("settings")
+                    .ghost()
+                    .icon(Lucide::Settings2)
+                    .tooltip("Playback settings"),
+            )
+            .content(move |_, _, cx| settings_panel(&page, cx))
     }
 
     /// The skip button or the up-next card, bottom right. Shown with or without the controls
@@ -679,8 +821,127 @@ impl PlayerPage {
     }
 }
 
-/// A small label in the player's top bar.
-fn badge(text: &'static str) -> impl IntoElement {
+/// The settings menu's rows. Each button changes one adjustment through the page.
+fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
+    let state = page.read(cx).now_playing.read(cx);
+    let adjustments = state.adjustments;
+    let in_group = state.group_item.is_some();
+    let button = |id: &'static str, label: String, change: Box<dyn Fn(&mut Adjustments)>| {
+        let page = page.clone();
+        Button::new(id)
+            .small()
+            .ghost()
+            .label(label)
+            .on_click(move |_, window, cx| {
+                page.update(cx, |this, cx| this.adjust(|a| change(a), window, cx));
+            })
+    };
+    let stepper = |name: &'static str, value: String, down: Button, up: Button, reset: Button| {
+        h_flex()
+            .gap_1()
+            .child(div().w(px(110.)).text_sm().child(name))
+            .child(down)
+            .child(div().w(px(56.)).text_sm().text_center().child(value))
+            .child(up)
+            .child(reset)
+    };
+    let delay = |seconds: f64| {
+        if seconds.abs() < 0.05 {
+            "0.0 s".to_string()
+        } else {
+            format!("{seconds:+.1} s")
+        }
+    };
+
+    let speed_row = h_flex()
+        .gap_1()
+        .child(div().w(px(110.)).text_sm().child("Speed"))
+        .children(if in_group {
+            vec![
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Normal in SyncPlay")
+                    .into_any_element(),
+            ]
+        } else {
+            Adjustments::SPEEDS
+                .into_iter()
+                .enumerate()
+                .map(|(i, speed)| {
+                    let page = page.clone();
+                    Button::new(("speed", i))
+                        .small()
+                        .label(format!("{speed}×"))
+                        .when(speed == adjustments.speed, |b| b.primary())
+                        .when(speed != adjustments.speed, |b| b.ghost())
+                        .on_click(move |_, window, cx| {
+                            page.update(cx, |this, cx| this.adjust(|a| a.speed = speed, window, cx));
+                        })
+                        .into_any_element()
+                })
+                .collect()
+        });
+    v_flex()
+        .p_1()
+        .gap_2()
+        .child(speed_row)
+        .child(stepper(
+            "Subtitle delay",
+            delay(adjustments.subtitle_delay),
+            button(
+                "sub-delay-down",
+                "−0.1".into(),
+                Box::new(|a| a.subtitle_delay -= Adjustments::DELAY_STEP),
+            ),
+            button(
+                "sub-delay-up",
+                "+0.1".into(),
+                Box::new(|a| a.subtitle_delay += Adjustments::DELAY_STEP),
+            ),
+            button("sub-delay-reset", "Reset".into(), Box::new(|a| a.subtitle_delay = 0.)),
+        ))
+        .child(stepper(
+            "Audio delay",
+            delay(adjustments.audio_delay),
+            button(
+                "audio-delay-down",
+                "−0.1".into(),
+                Box::new(|a| a.audio_delay -= Adjustments::DELAY_STEP),
+            ),
+            button(
+                "audio-delay-up",
+                "+0.1".into(),
+                Box::new(|a| a.audio_delay += Adjustments::DELAY_STEP),
+            ),
+            button("audio-delay-reset", "Reset".into(), Box::new(|a| a.audio_delay = 0.)),
+        ))
+        .child(stepper(
+            "Subtitle size",
+            format!("{:.0}%", adjustments.subtitle_scale * 100.),
+            button(
+                "sub-size-down",
+                "−".into(),
+                Box::new(|a| a.subtitle_scale -= Adjustments::SCALE_STEP),
+            ),
+            button(
+                "sub-size-up",
+                "+".into(),
+                Box::new(|a| a.subtitle_scale += Adjustments::SCALE_STEP),
+            ),
+            button("sub-size-reset", "Reset".into(), Box::new(|a| a.subtitle_scale = 1.)),
+        ))
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("Keys: [ and ] change the speed, z and x the subtitle delay."),
+        )
+        .into_any_element()
+}
+
+/// A small label in the player's bars.
+fn badge(text: impl Into<SharedString>) -> impl IntoElement {
     div()
         .flex_none()
         .px_2()
@@ -688,7 +949,7 @@ fn badge(text: &'static str) -> impl IntoElement {
         .bg(black().opacity(0.5))
         .text_sm()
         .text_color(white().opacity(0.8))
-        .child(text)
+        .child(text.into())
 }
 
 /// A fixed-width track or version picker for the control bar.
@@ -735,6 +996,10 @@ impl Render for PlayerPage {
             .on_action(cx.listener(Self::skip))
             .on_action(cx.listener(Self::toggle_fullscreen))
             .on_action(cx.listener(Self::exit_player))
+            .on_action(cx.listener(Self::speed_up))
+            .on_action(cx.listener(Self::speed_down))
+            .on_action(cx.listener(Self::subtitle_delay_up))
+            .on_action(cx.listener(Self::subtitle_delay_down))
             .on_mouse_move(cx.listener(|this, _, window, cx| this.show_controls(window, cx)))
             .children(self.frame.clone().map(|frame| {
                 div()
