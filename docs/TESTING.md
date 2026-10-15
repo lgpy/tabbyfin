@@ -140,7 +140,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ A **hybrid laptop** (Intel + NVIDIA): video shows (ANGLE and GPUI must end up on the same GPU).
 - ⬜ **Linux, AMD or Intel** (Mesa) and **Linux, NVIDIA** (proprietary driver), on **X11 and Wayland**: GPU video output, not "using software rendering".
 - ⬜ The `.deb` on a **real Ubuntu desktop** (only tested in a container).
-- ⬜ **macOS** on Apple silicon and Intel: the app starts, signs in, and plays with `brew install mpv` (software video).
+- ⬜ **macOS** on Apple silicon and Intel: the app starts, signs in, and plays with `brew install mpv` (software video), and the Dock and Finder show the app icon.
 - ⬜ High refresh-rate displays (120/144 Hz): no judder at 24 fps (2.3.7).
 
 ## 7b. Player host process (2.2.3)

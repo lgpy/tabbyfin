@@ -78,7 +78,7 @@ modules:
       # The desktop file and icon go by the app id in a Flatpak.
       - install -Dm644 packaging/jelly-gpui.desktop /app/share/applications/io.github.lgpy.jelly-gpui.desktop
       - desktop-file-edit --set-icon=io.github.lgpy.jelly-gpui /app/share/applications/io.github.lgpy.jelly-gpui.desktop
-      - install -Dm644 packaging/jelly-gpui.svg /app/share/icons/hicolor/scalable/apps/io.github.lgpy.jelly-gpui.svg
+      - install -Dm644 packaging/jelly-gpui.png /app/share/icons/hicolor/512x512/apps/io.github.lgpy.jelly-gpui.png
       - install -Dm644 packaging/flatpak/io.github.lgpy.jelly-gpui.metainfo.xml /app/share/metainfo/io.github.lgpy.jelly-gpui.metainfo.xml
       - install -Dm644 LICENSE /app/share/licenses/io.github.lgpy.jelly-gpui/LICENSE
     sources:

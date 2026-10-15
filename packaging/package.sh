@@ -27,7 +27,7 @@ case "$target" in
   x86_64-unknown-linux-gnu)
     name="jelly-gpui-$version-linux-x86_64"
     mkdir -p "$stage/$name"
-    cp "$bin_dir/jelly-gpui" "$packaging/jelly-gpui.desktop" "$packaging/jelly-gpui.svg" "$root/LICENSE" \
+    cp "$bin_dir/jelly-gpui" "$packaging/jelly-gpui.desktop" "$packaging/jelly-gpui.png" "$root/LICENSE" \
       "$stage/$name/"
     tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
     (cd "$root" && cargo deb -p jelly-gpui --target "$target" --no-build --output "$out/")
@@ -54,6 +54,17 @@ case "$target" in
     cp "$bin_dir/jelly-gpui" "$app/Contents/MacOS/"
     sed "s/@VERSION@/$version/g" "$packaging/Info.plist" > "$app/Contents/Info.plist"
     cp "$packaging/THIRD_PARTY.md" "$root/LICENSE" "$app/Contents/Resources/"
+    # The icon, from the 512 px PNG (so no 512@2x).
+    iconset="$stage/jelly-gpui.iconset"
+    mkdir -p "$iconset"
+    for size in 16 32 128 256 512; do
+      sips -z "$size" "$size" "$packaging/jelly-gpui.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+      if [ "$size" -lt 512 ]; then
+        sips -z $((size * 2)) $((size * 2)) "$packaging/jelly-gpui.png" \
+          --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+      fi
+    done
+    iconutil -c icns "$iconset" -o "$app/Contents/Resources/jelly-gpui.icns"
     # Ad-hoc signature only: not notarized, so Gatekeeper asks before the first launch.
     codesign --force --deep --sign - "$app"
     ditto -c -k --keepParent "$app" "$out/jelly-gpui-$version-macos-$arch.zip"
