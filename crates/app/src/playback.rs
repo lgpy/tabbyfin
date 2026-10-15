@@ -3,11 +3,13 @@
 //! One session at a time. Starting a new one stops the current one. The session itself runs on
 //! tokio and publishes a [`NowPlaying`] entity that the player page draws and controls.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType};
+use jellyfin::models::{
+    BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType, TrickplayInfo,
+};
 use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
 use player::libmpv::VideoOutput;
 use player::{EndReason, LoadRequest, Player, PlayerEvent};
@@ -188,6 +190,7 @@ pub struct Version {
 #[derive(Default)]
 struct Details {
     versions: Vec<Version>,
+    trickplay: TrickplayTiles,
     previous: Option<BaseItemDto>,
     next: Option<BaseItemDto>,
     /// `next` is the following movie of a collection, which is offered but not autoplayed.
@@ -195,6 +198,9 @@ struct Details {
     chapters: Vec<Chapter>,
     segments: Vec<Segment>,
 }
+
+/// Trickplay tile sets by media source id, then thumbnail width (see [`crate::trickplay`]).
+pub type TrickplayTiles = HashMap<String, HashMap<String, TrickplayInfo>>;
 
 /// When the up-next card shows without an Outro segment: this long before the end.
 const UP_NEXT_BEFORE_END: Duration = Duration::from_secs(20);
@@ -219,6 +225,8 @@ pub struct NowPlaying {
     /// All versions of the item, once known; empty or one entry means there's nothing to
     /// switch to.
     pub versions: Vec<Version>,
+    /// Seek-bar preview tiles, once known; empty if the server has none.
+    pub trickplay: TrickplayTiles,
     /// The item before this one: the previous episode, or the previous movie of its
     /// collection.
     pub previous: Option<BaseItemDto>,
@@ -463,6 +471,11 @@ impl PlaybackManager {
         self.active
     }
 
+    /// The signed-in session's client.
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// The running session's state; `None` while loading, between sessions or reconnecting.
     pub fn now_playing(&self) -> Option<Entity<NowPlaying>> {
         self.now_playing.clone()
@@ -630,6 +643,7 @@ impl PlaybackManager {
                             muted,
                             adjustments,
                             versions: Vec::new(),
+                            trickplay: TrickplayTiles::new(),
                             previous: None,
                             next: queued.clone(),
                             next_cancelled: false,
@@ -656,6 +670,7 @@ impl PlaybackManager {
                         if let Some(entity) = &now_playing {
                             entity.update(cx, |state, cx| {
                                 state.versions = details.versions;
+                                state.trickplay = details.trickplay;
                                 state.previous = details.previous;
                                 if !queued {
                                     state.next = details.next;
@@ -924,7 +939,10 @@ async fn start_player() -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>,
 /// only lose those controls.
 async fn details(client: &Client, item: &BaseItemDto) -> Details {
     let (full, segments, neighbours) = tokio::join!(
-        client.item(&item.id, &[ItemField::MediaSources, ItemField::Chapters]),
+        client.item(
+            &item.id,
+            &[ItemField::MediaSources, ItemField::Chapters, ItemField::Trickplay]
+        ),
         client.media_segments(&item.id),
         neighbours(client, item),
     );
@@ -957,6 +975,7 @@ async fn details(client: &Client, item: &BaseItemDto) -> Details {
         .collect();
     Details {
         versions,
+        trickplay: full.map(|full| full.trickplay).unwrap_or_default(),
         previous: neighbours.previous,
         next: neighbours.next,
         next_in_collection: neighbours.in_collection,

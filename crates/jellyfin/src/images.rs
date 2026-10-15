@@ -101,4 +101,17 @@ impl Client {
     pub async fn image(&self, req: &ImageRequest) -> Result<Vec<u8>> {
         self.get_bytes(self.image_url(req)).await
     }
+
+    /// Downloads trickplay sheet `index` (a JPEG) of a media source's tiles `width` wide.
+    pub async fn trickplay_sheet(
+        &self,
+        item_id: &str,
+        media_source_id: &str,
+        width: u32,
+        index: u32,
+    ) -> Result<Vec<u8>> {
+        let mut url = self.url(&format!("/Videos/{item_id}/Trickplay/{width}/{index}.jpg"));
+        url.query_pairs_mut().append_pair("mediaSourceId", media_source_id);
+        self.get_bytes(url).await
+    }
 }

@@ -21,6 +21,7 @@ use crate::components::timestamp;
 use crate::markers::{self, SegmentKind};
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
+use crate::trickplay::Trickplay;
 
 actions!(
     player,
@@ -60,6 +61,8 @@ const PIXELS_PER_LINE: f32 = 30.;
 const MAX_STEPS_PER_SCROLL: f32 = 4.;
 const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 const CHAPTER_MARK_H: f32 = 8.;
+/// Width of the seek-bar preview thumbnail.
+const PREVIEW_W: f32 = 192.;
 
 /// The frame on screen.
 #[derive(Clone)]
@@ -94,6 +97,8 @@ pub struct PlayerPage {
     auto_skipped: Option<Duration>,
     /// Created once the item's versions are known, if there's more than one.
     version: Option<ChoiceSelect>,
+    /// Seek-bar previews, once the session knows the server has tiles for this version.
+    trickplay: Option<Entity<Trickplay>>,
     audio: Option<ChoiceSelect>,
     subtitle: Option<ChoiceSelect>,
     controls_visible: bool,
@@ -137,6 +142,7 @@ impl PlayerPage {
                 this.sync_seek_bar(window, cx);
                 this.sync_volume(window, cx);
                 this.ensure_version_picker(window, cx);
+                this.ensure_trickplay(cx);
                 this.auto_skip(cx);
                 cx.notify();
             }),
@@ -222,6 +228,7 @@ impl PlayerPage {
             auto_skip: crate::config::Config::load().auto_skip_intro.unwrap_or(false),
             auto_skipped: None,
             version: None,
+            trickplay: None,
             audio,
             subtitle,
             controls_visible: true,
@@ -314,6 +321,28 @@ impl PlayerPage {
                 }
             }));
         self.version = Some(select);
+    }
+
+    /// The preview thumbnails, once the session knows the playing version's tiles. The
+    /// narrowest set is used: they're shown small.
+    fn ensure_trickplay(&mut self, cx: &mut Context<Self>) {
+        let state = self.now_playing.read(cx);
+        if self.trickplay.is_some() {
+            return;
+        }
+        let Some(info) = state
+            .trickplay
+            .get(&state.source.id)
+            .and_then(|sets| sets.values().min_by_key(|info| info.width))
+            .copied()
+        else {
+            return;
+        };
+        let client = PlaybackManager::global(cx).read(cx).client().clone();
+        let (item_id, source_id) = (state.item.id.clone(), state.source.id.clone());
+        let trickplay = cx.new(|cx| Trickplay::new(client, item_id, source_id, info, cx));
+        self._subscriptions.push(cx.observe(&trickplay, |_, _, cx| cx.notify()));
+        self.trickplay = Some(trickplay);
     }
 
     /// Restarts playback of the same item with another version, at the current position.
@@ -526,7 +555,25 @@ impl PlayerPage {
         }
     }
 
+    /// Where the mouse is over the seek bar (from its left edge) and the time there.
+    fn seek_hover(&self, cx: &App) -> Option<(Pixels, Duration)> {
+        let (x, duration) = (self.seek_hover?, self.now_playing.read(cx).duration?);
+        let width = self.seek_bounds.size.width;
+        if width <= px(0.) {
+            return None;
+        }
+        let offset = (x - self.seek_bounds.left()).clamp(px(0.), width);
+        Some((offset, duration.mul_f32(offset / width)))
+    }
+
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let hover = self.seek_hover(cx);
+        let preview = match (hover, &self.trickplay) {
+            (Some((_, time)), Some(trickplay)) => trickplay
+                .update(cx, |trickplay, cx| trickplay.thumbnail(time, cx))
+                .map(|image| (image, trickplay.read(cx).aspect_ratio())),
+            _ => None,
+        };
         let state = self.now_playing.read(cx);
         let paused = state.paused;
         let muted = state.muted || state.volume == 0.;
@@ -562,15 +609,6 @@ impl PlayerPage {
                 .map(|c| c.start.as_secs_f32() / duration.as_secs_f32())
                 .collect(),
             None => Vec::new(),
-        };
-        // The time under the mouse on the seek bar.
-        let hover = match (self.seek_hover, state.duration) {
-            (Some(x), Some(duration)) if self.seek_bounds.size.width > px(0.) => {
-                let offset = (x - self.seek_bounds.left()).clamp(px(0.), self.seek_bounds.size.width);
-                let fraction = offset / self.seek_bounds.size.width;
-                Some((offset, duration.mul_f32(fraction)))
-            }
-            _ => None,
         };
         let speed = state.adjustments.speed;
         let title = crate::components::card_text(&state.item);
@@ -656,15 +694,29 @@ impl PlayerPage {
                             .bg(white().opacity(0.6))
                     }))
                     .when_some(hover, |el, (offset, time)| {
+                        // Centred on the mouse, but kept over the bar.
+                        let half = if preview.is_some() { PREVIEW_W / 2. } else { 24. };
+                        let max = (self.seek_bounds.size.width - px(half)).max(px(half));
+                        let left = offset.clamp(px(half), max);
                         el.child(
-                            div()
+                            v_flex()
                                 .absolute()
                                 .bottom(px(18.))
-                                .left(offset)
-                                .ml(px(-24.))
-                                .w(px(48.))
-                                .flex()
-                                .justify_center()
+                                .left(left)
+                                .ml(px(-half))
+                                .w(px(half * 2.))
+                                .items_center()
+                                .gap_1()
+                                .when_some(preview.clone(), |el, (image, aspect_ratio)| {
+                                    el.child(
+                                        img(ImageSource::Render(image))
+                                            .w(px(PREVIEW_W))
+                                            .h(px(PREVIEW_W / aspect_ratio))
+                                            .rounded_sm()
+                                            .border_1()
+                                            .border_color(white().opacity(0.6)),
+                                    )
+                                })
                                 .child(
                                     div()
                                         .px_1()

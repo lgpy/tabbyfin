@@ -121,6 +121,25 @@ pub struct BaseItemDto {
     /// Only present when requested with [`crate::models::ItemField::Chapters`].
     #[serde(default, deserialize_with = "nullable")]
     pub chapters: Vec<ChapterInfo>,
+    /// Seek-bar preview tiles, by media source id and then thumbnail width. Only present when
+    /// requested with [`crate::models::ItemField::Trickplay`], and generated.
+    #[serde(default, deserialize_with = "nullable")]
+    pub trickplay: HashMap<String, HashMap<String, TrickplayInfo>>,
+}
+
+/// One set of trickplay tiles: JPEG sheets of `tile_width` × `tile_height` thumbnails, each
+/// `width` × `height`, one every `interval` ms. Sheet `n` holds thumbnails from
+/// `n × tile_width × tile_height`, row by row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TrickplayInfo {
+    pub width: u32,
+    pub height: u32,
+    pub tile_width: u32,
+    pub tile_height: u32,
+    pub thumbnail_count: u32,
+    /// Milliseconds between thumbnails.
+    pub interval: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -324,6 +343,7 @@ wire_enum!(
         ProviderIds = "ProviderIds",
         SortName = "SortName",
         Chapters = "Chapters",
+        Trickplay = "Trickplay",
     }
 );
 
