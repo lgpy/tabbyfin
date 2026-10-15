@@ -11,6 +11,14 @@ const DEFAULT_WIDTH: f32 = 1280.0;
 const DEFAULT_HEIGHT: f32 = 800.0;
 /// A saved side shorter than this is treated as a corrupt config, not a window.
 const MIN_SIDE: f32 = 100.0;
+/// The smallest window the layout works in: below it the player's control bar no longer fits.
+/// Restored bounds are grown to it too, since the platform only applies it to resizing.
+pub const MIN_WIDTH: f32 = 900.0;
+pub const MIN_HEIGHT: f32 = 500.0;
+
+pub fn min_size() -> Size<Pixels> {
+    size(px(MIN_WIDTH), px(MIN_HEIGHT))
+}
 
 /// Where to open the main window.
 pub struct Launch {
@@ -126,7 +134,10 @@ fn placed_bounds(saved: WindowGeometry, displays: &[Bounds<Pixels>]) -> Option<(
     if !usable(&saved) {
         return None;
     }
-    let bounds = Bounds::new(point(px(saved.x), px(saved.y)), size(px(saved.width), px(saved.height)));
+    let bounds = Bounds::new(
+        point(px(saved.x), px(saved.y)),
+        size(px(saved.width.max(MIN_WIDTH)), px(saved.height.max(MIN_HEIGHT))),
+    );
     let center = bounds.center();
     let display = displays.iter().position(|display| display.contains(&center))?;
     Some((bounds, display))
@@ -253,6 +264,15 @@ mod tests {
         assert!(placed_bounds(saved(1500., 900., 1280., 800.), &displays).is_none());
         let (_, display) = placed_bounds(saved(1600., 100., 1280., 800.), &displays).expect("kept");
         assert_eq!(display, 1);
+    }
+
+    #[test]
+    fn a_window_smaller_than_the_minimum_grows_to_it() {
+        let displays = [rect(0., 0., 1920., 1080.)];
+        let (bounds, _) = placed_bounds(saved(100., 100., 700., 400.), &displays).expect("kept");
+        assert_eq!(bounds.size.width.as_f32(), 900.);
+        assert_eq!(bounds.size.height.as_f32(), 500.);
+        assert_eq!(bounds.origin.x.as_f32(), 100.);
     }
 
     #[test]

@@ -160,6 +160,7 @@ fn main() {
             let launch = window::launch_placement(&config, cx);
             let options = WindowOptions {
                 window_bounds: Some(launch.window_bounds()),
+                window_min_size: Some(window::min_size()),
                 display_id: launch.display_id,
                 titlebar: Some(TitlebarOptions {
                     title: Some("jelly-gpui".into()),
