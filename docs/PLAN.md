@@ -241,15 +241,15 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
 
 | Platform | libmpv |
 |---|---|
-| Linux | The system's `libmpv2`. The `.deb` depends on it. |
+| Linux | The system's `libmpv2` for the `.deb` (which depends on it) and the tarball. The AppImage bundles it with the libraries it needs (`packaging/appimage.sh`, with linuxdeploy pinned in `packaging/linuxdeploy.lock`), leaving out what has to match the system (glibc, GL, X11/Wayland, the Vulkan loader) and forcing in `libjack` and `libusb`, which linuxdeploy's exclude list skips but plenty of desktops lack. The app looks for libmpv in `../lib` next to its executable, which is the AppImage's `usr/lib`. Built on Ubuntu 24.04, it needs glibc 2.39. |
 | Windows | `libmpv-2.dll` next to `jelly-gpui.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. The zip also carries ANGLE (`libEGL.dll`, `libGLESv2.dll`) and its MinGW runtime DLLs, MSYS2 builds pinned in `packaging/angle.lock` and fetched by `packaging/fetch-angle.sh`, for zero-copy video. |
 | macOS | Not bundled yet. The app looks in Homebrew's folders, so `brew install mpv` makes playback work. Bundling `libmpv.dylib` is still to do. The app is ad-hoc signed, not notarized. |
 
 `packaging/THIRD_PARTY.md` holds mpv's license (GPL-2.0-or-later) and source information, and ships in the packages.
 
 **Builds:** `.github/workflows/ci.yml` runs clippy and the tests on all three OSes. On a `v*` tag, or when started by hand, it also packages all four targets:
-- Linux `.tar.gz` and `.deb`
-- Windows `.zip`
+- Linux `.tar.gz`, `.deb` and AppImage
+- Windows `.zip`, and an installer from the same files (`packaging/jelly-gpui.iss`, Inno Setup 6, built by `packaging/installer.sh`): per-user install without admin rights, Start-menu and optional desktop shortcuts, an uninstaller, upgrades in place
 - macOS arm64 and x86_64 `.zip`
 
 A tag also creates a draft GitHub release with these files. Locally, `mise run package` packages Linux, and `mise run ci:build` builds every OS on CI.
