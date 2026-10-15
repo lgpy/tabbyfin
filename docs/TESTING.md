@@ -163,7 +163,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ In WSLg's X11 (no window manager): a resize and a move are saved to the config half a second later, and a restart reopens at the saved size. The position itself is approximated by the compositor there, so it says little about real desktops.
 
-✅ Minimum size 900×500: a config saved at 700×400 reopens at 900×500. At that size the player's bar keeps every control on screen with three pickers (version, audio, subtitles) and Next: the pickers, the volume slider and the time (its chapter name first) narrow instead.
+✅ Minimum size 800×500: a config saved at 600×400 reopens at 800×500. At that size the player's bar has every control on screen, and an item page's title keeps its line with the actions wrapped under it (they sit beside it when there's room; at 640 px wide the title squeezed to a letter a line).
 - ⬜ On a real X11 desktop, whether the window drifts down on each launch: in WSLg the saved `y` grows by the title bar's height (27 px) every run, since the window is placed by its frame but saved by its client area.
 
 ✅ On Windows, two 1920×1080 monitors at 100%: a window moved to the second monitor is saved there and reopens on it at its size, and a maximized window reopens maximized on the same monitor at its last windowed size. (Before, the app did not name the display to place on; GPUI assumed the primary monitor and replaced the saved spot with the default 1536×1061 window on the primary.)

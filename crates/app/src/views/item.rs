@@ -39,6 +39,8 @@ use crate::views::{add_to_playlist, edit_playlist};
 use crate::zoom::{dp, dp_px};
 
 const BACKDROP_H: f32 = 340.;
+/// The narrowest the title gets beside the actions before they move under it.
+const TITLE_MIN_W: f32 = 280.;
 const DETAIL_POSTER_W: f32 = 200.;
 const DETAIL_POSTER_H: f32 = 300.;
 const PICKER_W: f32 = 260.;
@@ -647,7 +649,7 @@ impl ItemPage {
             })
             .collect();
         h_flex()
-            .flex_none()
+            .flex_wrap()
             // The rings' room is outside the column's right edge.
             .mr(dp(-ACTION_RING_GAP))
             .gap(dp(ACTION_GAP - ACTION_RING_GAP * 2.))
@@ -780,15 +782,17 @@ impl ItemPage {
             .when(!title.is_empty(), |el| {
                 el.child(div().text_color(cx.theme().muted_foreground).child(title))
             })
-            // The title, with the actions on the right.
+            // The title, with the actions on the right; in a narrow window the actions go under
+            // it rather than squeezing it to a word a line.
             .child(
                 h_flex()
+                    .flex_wrap()
                     .gap_4()
                     .justify_between()
                     .child(
                         div()
                             .flex_1()
-                            .min_w_0()
+                            .min_w(dp(TITLE_MIN_W))
                             .text_size(dp(40.))
                             .line_height(dp(48.))
                             .font_weight(FontWeight::BOLD)
