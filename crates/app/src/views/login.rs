@@ -371,10 +371,13 @@ impl LoginView {
 
     fn render_server_step(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
-            .gap_3()
+            .gap_4()
             .children(self.render_accounts(cx))
-            .child(field_label("Server address", cx))
-            .child(Input::new(&self.server_input).disabled(self.busy))
+            .child(field(
+                "Server address",
+                Input::new(&self.server_input).disabled(self.busy),
+                cx,
+            ))
             .child(
                 Button::new("connect")
                     .primary()
@@ -393,7 +396,7 @@ impl LoginView {
             info.version.as_deref().unwrap_or("?")
         );
         v_flex()
-            .gap_3()
+            .gap_4()
             .child(
                 h_flex()
                     .justify_between()
@@ -405,10 +408,16 @@ impl LoginView {
                             .on_click(cx.listener(|this, _, window, cx| this.change_server(window, cx))),
                     ),
             )
-            .child(field_label("Username", cx))
-            .child(Input::new(&self.username_input).disabled(self.busy))
-            .child(field_label("Password", cx))
-            .child(Input::new(&self.password_input).mask_toggle().disabled(self.busy))
+            .child(field(
+                "Username",
+                Input::new(&self.username_input).disabled(self.busy),
+                cx,
+            ))
+            .child(field(
+                "Password",
+                Input::new(&self.password_input).mask_toggle().disabled(self.busy),
+                cx,
+            ))
             .child(
                 Button::new("sign-in")
                     .primary()
@@ -517,6 +526,11 @@ impl Render for LoginView {
 
 fn field_label(text: &'static str, cx: &App) -> Div {
     div().text_sm().text_color(cx.theme().muted_foreground).child(text)
+}
+
+/// A label above its field, closer to it than to the next one.
+fn field(label: &'static str, input: impl IntoElement, cx: &App) -> Div {
+    v_flex().gap_2().child(field_label(label, cx)).child(input)
 }
 
 /// Tries each candidate URL in turn and returns the first supported Jellyfin server.

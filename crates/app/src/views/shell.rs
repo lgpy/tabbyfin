@@ -605,6 +605,7 @@ impl ShellView {
                         .ghost()
                         .h(dp(TOP_BAR_BUTTON))
                         .child(bar_icon(IconName::ArrowLeft))
+                        .tooltip("Back")
                         .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx)))
                         .into_any_element(),
                 ))

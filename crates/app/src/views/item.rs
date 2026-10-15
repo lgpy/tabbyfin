@@ -330,7 +330,7 @@ impl ItemPage {
             let (client, nav, page) = (client.clone(), nav.clone(), page.clone());
             let (item_id, name) = (item_id.clone(), name.clone());
             alert
-                .title(format!("Delete {name}?"))
+                .title(format!("Delete “{name}”?"))
                 .description(DELETE_PLAYLIST_NOTE)
                 .button_props(
                     DialogButtonProps::default()

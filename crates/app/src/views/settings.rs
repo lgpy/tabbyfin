@@ -208,7 +208,9 @@ impl SettingsPage {
             cx.update(|window, cx| match result {
                 Ok(()) => window.push_notification(Notification::success("Image cache cleared."), cx),
                 Err(err) => {
-                    window.push_notification(Notification::error(format!("Couldn't clear the cache: {err}")), cx)
+                    tracing::warn!("clearing the image cache failed: {err}");
+                    let message = "Couldn't clear the image cache. Close anything using its folder and try again.";
+                    window.push_notification(Notification::error(message), cx)
                 }
             })
             .ok();
@@ -311,24 +313,23 @@ impl SettingsPage {
             C(TextSize),
             C(Animations),
             Title("Playback"),
-            C(Autoplay),
-            C(AutoSkip),
             Hint(
-                "Audio and subtitle languages follow your Jellyfin profile (Settings → Playback in the web \
-                 client), as does whether subtitles show by default."
+                "Audio and subtitle languages, and whether subtitles show by default, follow your Jellyfin \
+                 profile (Settings → Playback in the web client)."
                     .into(),
             ),
+            C(Autoplay),
+            C(AutoSkip),
             C(Bitrate),
             Hint(
-                "Videos above this bitrate are transcoded by the server, which uses its CPU or GPU. Lower it for \
-                 slow connections; other videos play the original file. Automatic measures the connection \
-                 before playing (every 10 minutes at most) and uses 80% of it."
+                "Videos above this bitrate are transcoded by the server. Lower it for slow connections. \
+                 Automatic measures the connection before playing (at most every 10 minutes) and uses 80% of it."
                     .into(),
             ),
             C(PreferHevc),
             Hint(
-                "HEVC needs about half the bandwidth of H.264 for the same picture, but is much harder for the \
-                 server to encode. Used only if the server allows it (Dashboard → Playback → Transcoding)."
+                "HEVC needs half the bandwidth of H.264 for the same picture, but is much harder for the server to \
+                 encode. Used only if the server allows it (Dashboard → Playback → Transcoding)."
                     .into(),
             ),
             Title("Home"),
@@ -576,8 +577,12 @@ impl Focusable for SettingsPage {
 impl Render for SettingsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mut control_index = 0;
-        let lines: Vec<AnyElement> = self
-            .lines()
+        let lines = self.lines();
+        // A hint sits close to the title or control it follows, which it's about.
+        let follows_control: Vec<bool> = std::iter::once(false)
+            .chain(lines.iter().map(|line| matches!(line, Line::Control(_))))
+            .collect();
+        let lines: Vec<AnyElement> = lines
             .into_iter()
             .enumerate()
             .map(|(i, line)| {
@@ -590,7 +595,7 @@ impl Render for SettingsPage {
                         .child(title)
                         .into_any_element(),
                     Line::Hint(text) => div()
-                        .pt_3()
+                        .map(|el| if follows_control[i] { el.pt_1() } else { el.pt_2() })
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .child(text)
