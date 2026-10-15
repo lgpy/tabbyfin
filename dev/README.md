@@ -27,6 +27,7 @@ Every video is 60 s long and has:
 - English and Japanese audio tracks.
 - An embedded English subtitle track.
 - Chapters: Intro (0–10 s), Episode, and Credits (the last 15 s), for skip intro and the up-next card. `make-media.sh` adds them to videos made before it did; rescan the library afterwards.
+- Trickplay tiles (a 320 px thumbnail every 10 s) for the seek-bar preview. The setup script turns them on and starts the server's generation task without waiting; they appear a minute or two later.
 
 Remote metadata and image fetchers are turned off, so the fake titles never match real TMDb or TVDb entries.
 
