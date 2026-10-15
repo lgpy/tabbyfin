@@ -59,7 +59,7 @@ cp "$here/../LICENSE" "$here/THIRD_PARTY.md" "$appdir/usr/share/doc/jelly-gpui/"
     --library "$libmpv" "${extra[@]}" \
     --exclude-library 'libvulkan.so*' \
     --desktop-file "$here/jelly-gpui.desktop" \
-    --icon-file "$here/jelly-gpui.svg" \
+    --icon-file "$here/jelly-gpui.png" \
     --output appimage
 )
 mv "$work/jelly-gpui-$version-linux-x86_64.AppImage" "$out/"
