@@ -1,4 +1,4 @@
-//! Settings: playback, image cache, logs and account info.
+//! Settings: appearance, playback, image cache, logs and account info.
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::notification::Notification;
@@ -7,10 +7,18 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::*;
 
-use crate::config::{self, Config};
+use crate::config::{self, Config, ThemePreference};
 use crate::images::ImageCache;
 use crate::session::Session;
+use crate::theme;
 use crate::tracks::{Choice, ChoiceSelect};
+
+/// The theme choices, in the order the picker lists them.
+const THEMES: [(ThemePreference, &str); 3] = [
+    (ThemePreference::System, "Follow the system"),
+    (ThemePreference::Light, "Light"),
+    (ThemePreference::Dark, "Dark"),
+];
 
 /// Max streaming bitrate choices in Mbit/s; 0 is no limit.
 const BITRATES_MBPS: [i32; 10] = [0, 120, 60, 40, 20, 10, 8, 4, 2, 1];
@@ -18,6 +26,7 @@ const BITRATES_MBPS: [i32; 10] = [0, 120, 60, 40, 20, 10, 8, 4, 2, 1];
 pub struct SettingsPage {
     session: Session,
     scroll: ScrollHandle,
+    theme: ChoiceSelect,
     bitrate: ChoiceSelect,
     autoplay: bool,
     auto_skip: bool,
@@ -42,18 +51,40 @@ impl SettingsPage {
             .collect();
         let selected = BITRATES_MBPS.iter().position(|&m| m == current).unwrap_or(0);
         let bitrate = cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx));
-        let _subscriptions = vec![cx.subscribe(&bitrate, |_, _, event: &SelectEvent<Vec<Choice>>, _| {
-            if let SelectEvent::Confirm(Some(mbps)) = event {
-                let mut config = Config::load();
-                config.max_streaming_bitrate = (*mbps > 0).then(|| *mbps as u64 * 1_000_000);
-                if let Err(err) = config.save() {
-                    tracing::warn!("failed to save config: {err:#}");
-                }
+        let themes: Vec<Choice> = THEMES
+            .iter()
+            .enumerate()
+            .map(|(i, (_, label))| Choice {
+                label: (*label).into(),
+                value: i as i32,
+            })
+            .collect();
+        let current_theme = THEMES.iter().position(|(t, _)| *t == config.theme).unwrap_or(0);
+        let theme = cx.new(|cx| SelectState::new(themes, Some(IndexPath::default().row(current_theme)), window, cx));
+        let theme_changed = cx.subscribe_in(&theme, window, |_, _, event: &SelectEvent<Vec<Choice>>, window, cx| {
+            if let SelectEvent::Confirm(Some(i)) = event
+                && let Some((preference, _)) = THEMES.get(*i as usize)
+            {
+                save(|config| config.theme = *preference);
+                theme::apply(*preference, Some(window), cx);
             }
-        })];
+        });
+        let _subscriptions = vec![
+            theme_changed,
+            cx.subscribe(&bitrate, |_, _, event: &SelectEvent<Vec<Choice>>, _| {
+                if let SelectEvent::Confirm(Some(mbps)) = event {
+                    let mut config = Config::load();
+                    config.max_streaming_bitrate = (*mbps > 0).then(|| *mbps as u64 * 1_000_000);
+                    if let Err(err) = config.save() {
+                        tracing::warn!("failed to save config: {err:#}");
+                    }
+                }
+            }),
+        ];
         Self {
             session,
             scroll: ScrollHandle::new(),
+            theme,
             bitrate,
             autoplay,
             auto_skip,
@@ -144,6 +175,14 @@ impl Render for SettingsPage {
                     .p_6()
                     .gap_8()
                     .max_w(px(720.))
+                    .child(
+                        section("Appearance", cx).child(
+                            h_flex()
+                                .gap_4()
+                                .child(div().text_sm().child("Theme"))
+                                .child(Select::new(&self.theme).w(px(180.))),
+                        ),
+                    )
                     .child(
                         section("Playback", cx)
                             .child(

@@ -165,3 +165,11 @@ Code-level and startup checks only so far: the development harness cannot send m
 - ⬜ **Hovering the seek bar** shows the time under the mouse, close to where a click would seek.
 - ⬜ **Clicking the clock** switches to the time left, and the choice survives a restart.
 - ⬜ The next episode keeps the speed and size and drops the delays; a **SyncPlay** group shows "Normal in SyncPlay" and stays at 1×.
+
+## 14. Theme (4.3)
+
+✅ In WSLg with a config set to light: Home, an item page (the backdrop fades into the light background) and Settings render with the light theme. Set to follow the system, the app came up light, as WSLg reports.
+
+- ⬜ **Switching in Settings** applies at once, without a restart, on every page.
+- ⬜ **Follow the system** on Windows, macOS and a Linux desktop, including switching the system between light and dark while the app runs.
+- ⬜ Every page in light: login, libraries (sort and filter menus), search, seasons and episodes, the SyncPlay popover, notifications.

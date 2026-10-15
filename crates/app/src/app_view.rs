@@ -11,7 +11,7 @@ use crate::config::{Config, SavedServer};
 use crate::session::{Session, client_info, describe_error};
 use crate::views::login::{LoginEvent, LoginView, Prefill};
 use crate::views::shell::{ShellEvent, ShellView};
-use crate::{credentials, runtime, window};
+use crate::{credentials, runtime, theme, window};
 
 /// How long after the last window bounds change its size and position are saved. Dragging
 /// produces a stream of changes; only the end of the drag matters.
@@ -34,6 +34,7 @@ pub struct AppView {
     placement_save: Option<Task<()>>,
     /// `last_placement` changed since it was last saved; closing the window saves it right away.
     placement_unsaved: bool,
+    _appearance: Subscription,
 }
 
 impl AppView {
@@ -53,6 +54,7 @@ impl AppView {
             last_placement: placement,
             placement_save: None,
             placement_unsaved: false,
+            _appearance: theme::follow_system(window),
         };
         match config.server {
             Some(saved) => this.restore(saved, true, window, cx),

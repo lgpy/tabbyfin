@@ -16,17 +16,17 @@ mod router;
 mod runtime;
 mod session;
 mod syncplay;
+mod theme;
 mod tracks;
 mod views;
 mod window;
 
-use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 use tracing_subscriber::EnvFilter;
 
 use crate::app_view::AppView;
 use crate::changes::Changes;
-use crate::config::Config;
+use crate::config::{Config, ThemePreference};
 use crate::views::player::{
     self, ExitPlayer, NextChapter, NextEpisode, PrevChapter, SeekBackward, SeekForward, Skip, SpeedDown, SpeedUp,
     SubtitleDelayDown, SubtitleDelayUp, ToggleFullscreen, ToggleMute, TogglePause, VolumeDown, VolumeUp,
@@ -117,7 +117,8 @@ fn main() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
-            Theme::change(ThemeMode::Dark, None, cx);
+            let config = Config::load();
+            theme::apply(config.theme, None, cx);
             Changes::init(cx);
             let search_key = if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" };
             cx.bind_keys([
@@ -145,7 +146,6 @@ fn main() {
             ]);
             cx.bind_keys(browse::key_bindings());
 
-            let config = Config::load();
             let launch = window::launch_placement(&config, cx);
             let options = WindowOptions {
                 window_bounds: Some(launch.window_bounds()),
@@ -157,6 +157,10 @@ fn main() {
                 ..Default::default()
             };
             gpui_kit::open_window(options, cx, |window, cx| {
+                // Again with the window, whose appearance is the reliable one on Linux.
+                if config.theme == ThemePreference::System {
+                    theme::apply(ThemePreference::System, Some(window), cx);
+                }
                 cx.new(|cx| AppView::new(config, launch.placement, window, cx))
             })
             .expect("failed to open window");
