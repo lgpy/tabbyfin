@@ -36,6 +36,52 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # The API client against real servers: the newest we develop against and the oldest we
+  # support, set up like the dev servers (dev/README.md) with the same synthetic media.
+  integration:
+    name: Integration (Jellyfin ${{ matrix.jellyfin }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        jellyfin: ["12.2", "10.11.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: integration
+      - name: Cache the test media
+        id: media
+        uses: actions/cache@v4
+        with:
+          path: dev/.data/media
+          key: dev-media-${{ hashFiles('dev/make-media.sh') }}
+      - name: Generate the test media
+        if: steps.media.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          dev/make-media.sh
+      - name: Start Jellyfin
+        # As the runner's user, like the dev compose file, so the bind mounts stay writable.
+        run: |
+          mkdir -p dev/.data/config dev/.data/cache
+          docker run -d --name jellyfin --user "$(id -u):$(id -g)" -p 8096:8096 \
+            -v "$PWD/dev/.data/config:/config" -v "$PWD/dev/.data/cache:/cache" \
+            -v "$PWD/dev/.data/media:/media:ro" \
+            jellyfin/jellyfin:${{ matrix.jellyfin }}
+      - name: Set up the server
+        timeout-minutes: 10
+        run: python3 -I dev/setup-server.py
+      - name: Smoke test
+        run: cargo run -p jellyfin --example smoke
+      - name: Websocket check
+        run: cargo run -p jellyfin --example socket
+      - name: Server log
+        if: failure()
+        run: docker logs jellyfin
+
   package:
     name: Package (${{ matrix.target }})
     needs: check
