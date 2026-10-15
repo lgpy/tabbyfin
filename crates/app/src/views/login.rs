@@ -15,6 +15,7 @@ use jellyfin::{Client, ClientInfo, Error, MIN_SUPPORTED_VERSION};
 use crate::config::SavedServer;
 use crate::runtime;
 use crate::session::{self, Session, describe_error};
+use crate::zoom::dp;
 
 /// How long to keep retrying while the server reports that it is starting up.
 const STARTUP_WAIT: Duration = Duration::from_secs(120);
@@ -472,7 +473,7 @@ impl Render for LoginView {
             .bg(cx.theme().background)
             .child(
                 v_flex()
-                    .w(px(380.))
+                    .w(dp(380.))
                     .gap_4()
                     .child(
                         v_flex()

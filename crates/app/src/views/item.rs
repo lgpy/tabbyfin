@@ -25,8 +25,10 @@ use crate::images::ImageCache;
 use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
 use crate::router::{Navigator, Route};
 use crate::runtime;
+use crate::smooth_scroll::smooth_wheel;
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, cycle_choice, step_choice, track_pickers};
 use crate::views::{add_to_playlist, edit_playlist};
+use crate::zoom::{dp, dp_px};
 
 const BACKDROP_H: f32 = 340.;
 const DETAIL_POSTER_W: f32 = 200.;
@@ -614,7 +616,7 @@ impl ItemPage {
             // Room around the button for the keyboard cursor's ring.
             div()
                 .relative()
-                .p(px(ACTION_RING_GAP))
+                .p(dp(ACTION_RING_GAP))
                 .rounded_lg()
                 .child(button)
                 .when(self.cursor.is_selected(ACTIONS, i), |el| {
@@ -623,8 +625,8 @@ impl ItemPage {
         });
         h_flex()
             .pt_2()
-            .ml(px(-ACTION_RING_GAP))
-            .gap(px(8. - ACTION_RING_GAP * 2.))
+            .ml(dp(-ACTION_RING_GAP))
+            .gap(dp(8. - ACTION_RING_GAP * 2.))
             .children(buttons)
     }
 
@@ -745,7 +747,7 @@ impl ItemPage {
             })
             .child(self.render_actions(item, cx))
             .when_some(item.overview.clone(), |el, overview| {
-                el.child(div().pt_2().max_w(px(820.)).child(overview))
+                el.child(div().pt_2().max_w(dp(820.)).child(overview))
             });
 
         div()
@@ -758,7 +760,7 @@ impl ItemPage {
                         .top_0()
                         .left_0()
                         .right_0()
-                        .h(px(BACKDROP_H))
+                        .h(dp(BACKDROP_H))
                         .overflow_hidden()
                         .child(backdrop)
                         .child(div().absolute().inset_0().bg(linear_gradient(
@@ -774,18 +776,18 @@ impl ItemPage {
                     .items_start()
                     .gap_6()
                     .px_6()
-                    .pt(px(if has_backdrop { BACKDROP_H - 160. } else { 24. }))
+                    .pt(dp(if has_backdrop { BACKDROP_H - 160. } else { 24. }))
                     .child(
                         div()
                             .flex_none()
-                            .w(px(DETAIL_POSTER_W))
-                            .h(px(DETAIL_POSTER_H))
+                            .w(dp(DETAIL_POSTER_W))
+                            .h(dp(DETAIL_POSTER_H))
                             .rounded_md()
                             .overflow_hidden()
                             .bg(cx.theme().muted)
                             .child(poster),
                     )
-                    .child(info.pt(px(if has_backdrop { 120. } else { 0. }))),
+                    .child(info.pt(dp(if has_backdrop { 120. } else { 0. }))),
             )
     }
 
@@ -805,7 +807,7 @@ impl ItemPage {
                     .gap_4()
                     .child(
                         div()
-                            .w(px(90.))
+                            .w(dp(90.))
                             .flex_none()
                             .text_color(cx.theme().muted_foreground)
                             .child(label),
@@ -813,9 +815,9 @@ impl ItemPage {
                     .child(
                         div()
                             .relative()
-                            .child(Select::new(select).w(px(PICKER_W)).menu_width(px(PICKER_W * 1.5)))
+                            .child(Select::new(select).w(dp(PICKER_W)).menu_width(dp(PICKER_W * 1.5)))
                             .when(self.cursor.is_selected(PICKERS, i), |el| {
-                                el.child(selection_ring(cx).rounded_lg().m(px(-ACTION_RING_GAP)))
+                                el.child(selection_ring(cx).rounded_lg().m(dp(-ACTION_RING_GAP)))
                             }),
                     )
             });
@@ -847,8 +849,8 @@ impl ItemPage {
                     .collect();
                 h_flex()
                     .px_6()
-                    .pb(px(CARD_GAP))
-                    .gap(px(CARD_GAP))
+                    .pb(dp(CARD_GAP))
+                    .gap(dp(CARD_GAP))
                     .items_start()
                     .children(cards)
                     .into_any_element()
@@ -931,8 +933,8 @@ impl ItemPage {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(LANDSCAPE_W))
-                            .h(px(LANDSCAPE_H))
+                            .w(dp(LANDSCAPE_W))
+                            .h(dp(LANDSCAPE_H))
                             .rounded_md()
                             .overflow_hidden()
                             .bg(cx.theme().muted)
@@ -975,8 +977,9 @@ impl ItemPage {
     fn children_section(&self, data: &ItemData, window: &Window) -> Section {
         match data.item.kind {
             BaseItemKind::Series | BaseItemKind::BoxSet => {
-                let available = window.viewport_size().width - px(48.);
-                let columns = ((available + px(CARD_GAP)) / px(POSTER_W + CARD_GAP)).floor() as usize;
+                let available = window.viewport_size().width - dp_px(48., window);
+                let columns =
+                    ((available + dp_px(CARD_GAP, window)) / dp_px(POSTER_W + CARD_GAP, window)).floor() as usize;
                 Section::grid(data.children.len(), columns)
             }
             BaseItemKind::Season | BaseItemKind::Playlist => Section::grid(data.children.len(), 1),
@@ -1144,6 +1147,7 @@ impl ItemPage {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
+            .on_scroll_wheel(smooth_wheel("item", &self.scroll))
             .pb_8()
             .child(self.render_header(item, cx))
             .children(self.render_pickers(cx).map(|pickers| div().pt_6().child(pickers)))

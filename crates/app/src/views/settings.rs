@@ -10,6 +10,7 @@ use gpui_kit::*;
 
 use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::components::selection_ring;
+use crate::smooth_scroll::smooth_wheel;
 
 use crate::config::{self, Config, SubtitleColor, SubtitleStyle, ThemePreference};
 use crate::images::ImageCache;
@@ -17,6 +18,7 @@ use crate::playback::PlaybackManager;
 use crate::session::Session;
 use crate::theme;
 use crate::tracks::{Choice, ChoiceSelect, cycle_choice, step_choice};
+use crate::zoom::dp;
 
 /// The theme choices, in the order the picker lists them.
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -354,7 +356,7 @@ impl SettingsPage {
             | Control::SubtitleStyle
             | Control::SubtitleSize => {
                 let select = self.select(control).expect("a picker");
-                Select::new(select).w(px(180.)).into_any_element()
+                Select::new(select).w(dp(180.)).into_any_element()
             }
             Control::Autoplay => switch(
                 "autoplay",
@@ -389,7 +391,7 @@ impl SettingsPage {
         let ringed = |element: AnyElement| {
             div()
                 .relative()
-                .p(px(RING_GAP))
+                .p(dp(RING_GAP))
                 .rounded_lg()
                 .child(element)
                 .when(self.cursor.is_selected(0, index), |el| {
@@ -398,12 +400,12 @@ impl SettingsPage {
         };
         match self.select(control) {
             Some(_) => h_flex()
-                .gap(px(16. - RING_GAP))
-                .child(div().w(px(170.)).flex_none().text_sm().child(control_label(control)))
+                .gap(dp(16. - RING_GAP))
+                .child(div().w(dp(170.)).flex_none().text_sm().child(control_label(control)))
                 .child(ringed(element))
                 .into_any_element(),
             // A ring's width to the left, so the switch or button lines up with the text.
-            None => h_flex().ml(px(-RING_GAP)).child(ringed(element)).into_any_element(),
+            None => h_flex().ml(dp(-RING_GAP)).child(ringed(element)).into_any_element(),
         }
     }
 }
@@ -515,12 +517,12 @@ impl Render for SettingsPage {
                     Line::Control(control) => {
                         control_index += 1;
                         div()
-                            .pt(px(12. - RING_GAP))
+                            .pt(dp(12. - RING_GAP))
                             .child(self.render_control(control, control_index - 1, cx))
                             .into_any_element()
                     }
                 };
-                div().w_full().max_w(px(CONTENT_W)).child(element).into_any_element()
+                div().w_full().max_w(dp(CONTENT_W)).child(element).into_any_element()
             })
             .collect();
         on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(
@@ -529,6 +531,7 @@ impl Render for SettingsPage {
                 .size_full()
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
+                .on_scroll_wheel(smooth_wheel("settings", &self.scroll))
                 .p_6()
                 .children(lines),
         )

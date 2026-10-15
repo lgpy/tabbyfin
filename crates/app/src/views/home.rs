@@ -19,6 +19,7 @@ use crate::components::{
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
+use crate::smooth_scroll::smooth_wheel;
 
 const SHELF_LIMIT: u32 = 24;
 const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
@@ -330,6 +331,7 @@ impl HomePage {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
+            .on_scroll_wheel(smooth_wheel("home", &self.scroll))
             .py_6()
             .gap_8()
             .text_color(cx.theme().foreground)

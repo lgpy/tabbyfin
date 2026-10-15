@@ -51,6 +51,9 @@ pub struct Config {
     /// Skip intros and recaps without asking. `None` means no.
     #[serde(default)]
     pub auto_skip_intro: Option<bool>,
+    /// UI zoom from Ctrl+= and Ctrl+-, 1.0 being 100%. `None` means 1.0.
+    #[serde(default)]
+    pub ui_zoom: Option<f32>,
     /// The playback in progress, saved every few seconds. Still set on launch means the app
     /// didn't exit cleanly (e.g. mpv or a driver crashed), so its stop gets reported then.
     #[serde(default)]

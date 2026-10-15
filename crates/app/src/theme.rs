@@ -13,6 +13,8 @@ pub fn apply(preference: ThemePreference, window: Option<&mut Window>, cx: &mut 
         ThemePreference::Light => Theme::change(ThemeMode::Light, window, cx),
         ThemePreference::Dark => Theme::change(ThemeMode::Dark, window, cx),
     }
+    // A theme change resets the font size the zoom sets.
+    crate::zoom::apply(cx);
 }
 
 /// Follows the system appearance in `window` while the preference is to.

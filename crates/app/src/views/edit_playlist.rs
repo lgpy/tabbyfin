@@ -15,15 +15,16 @@ use crate::changes::Changes;
 use crate::components::{Load, selection_ring};
 use crate::router::Navigator;
 use crate::runtime;
+use crate::zoom::{dp, dp_px};
 
 pub fn open(client: Client, nav: Navigator, playlist_id: String, name: String, window: &mut Window, cx: &mut App) {
     let editor = cx.new(|cx| EditPlaylist::new(client, nav, playlist_id, name, window, cx));
     let input = editor.read(cx).input.clone();
-    window.open_dialog(cx, move |dialog, _, _| {
+    window.open_dialog(cx, move |dialog, window, _| {
         let save = editor.clone();
         dialog
             .title("Edit playlist")
-            .w(px(420.))
+            .w(dp_px(420., window))
             // Enter is the dialog's Confirm; the dialog closes once the save went through.
             .on_ok(move |_, window, cx| {
                 save.update(cx, |editor, cx| editor.save(window, cx));
@@ -168,7 +169,7 @@ impl Render for EditPlaylist {
             Load::Loaded(public) => div()
                 .relative()
                 .p_1()
-                .m(px(-4.))
+                .m(dp(-4.))
                 .rounded_lg()
                 .when(on_switch, |el| el.child(selection_ring(cx).rounded_lg()))
                 .child(

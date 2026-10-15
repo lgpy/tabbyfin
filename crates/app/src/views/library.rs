@@ -23,7 +23,9 @@ use crate::config::{Config, LibraryView};
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
+use crate::smooth_scroll::smooth_wheel;
 use crate::tracks::{Choice, ChoiceSelect, cycle_choice};
+use crate::zoom::{dp, dp_px};
 
 const PAGE_SIZE: usize = 100;
 const GRID_PADDING: f32 = 24.;
@@ -498,8 +500,10 @@ impl LibraryPage {
     /// Cards per row at the window's width, next to the letter bar when it shows.
     fn columns(&self, window: &Window) -> usize {
         let bar = if self.letters_shown() { LETTER_BAR_W } else { 0. };
-        let available = window.viewport_size().width - px(GRID_PADDING * 2. + bar);
-        ((available + px(CARD_GAP)) / px(POSTER_W + CARD_GAP)).floor().max(1.) as usize
+        let available = window.viewport_size().width - dp_px(GRID_PADDING * 2. + bar, window);
+        ((available + dp_px(CARD_GAP, window)) / dp_px(POSTER_W + CARD_GAP, window))
+            .floor()
+            .max(1.) as usize
     }
 
     /// Scrolls to the first name starting with `letter`. Its index is the number of names
@@ -569,7 +573,7 @@ impl LibraryPage {
     fn render_letters(&self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .flex_none()
-            .w(px(LETTER_BAR_W))
+            .w(dp(LETTER_BAR_W))
             .h_full()
             .py_2()
             .justify_between()
@@ -678,9 +682,9 @@ impl LibraryPage {
                 .collect();
             h_flex()
                 .id(("row", row))
-                .h(px(ROW_H))
-                .px(px(GRID_PADDING))
-                .gap(px(CARD_GAP))
+                .h(dp(ROW_H))
+                .px(dp(GRID_PADDING))
+                .gap(dp(CARD_GAP))
                 .items_start()
                 .children(cards)
         })
@@ -889,7 +893,7 @@ impl LibraryPage {
                     _ => 150.,
                 };
                 let select = self.tool_select(tool).expect("a picker");
-                div().w(px(width)).child(Select::new(select).small()).into_any_element()
+                div().w(dp(width)).child(Select::new(select).small()).into_any_element()
             }
         }
     }
@@ -912,9 +916,9 @@ impl Render for LibraryPage {
         let muted = cx.theme().muted_foreground;
         let mut toolbar = h_flex()
             .flex_none()
-            .px(px(GRID_PADDING - RING_GAP))
+            .px(dp(GRID_PADDING - RING_GAP))
             .pt_4()
-            .gap(px(8. - RING_GAP * 2.))
+            .gap(dp(8. - RING_GAP * 2.))
             .flex_wrap()
             .text_sm();
         for (i, (tool, element)) in tools.into_iter().enumerate() {
@@ -927,11 +931,11 @@ impl Render for LibraryPage {
                 toolbar = toolbar.child(div().w_4());
             }
             toolbar = toolbar
-                .children(label.map(|label| div().px(px(RING_GAP)).text_color(muted).child(label)))
+                .children(label.map(|label| div().px(dp(RING_GAP)).text_color(muted).child(label)))
                 .child(
                     div()
                         .relative()
-                        .p(px(RING_GAP))
+                        .p(dp(RING_GAP))
                         .rounded_lg()
                         .child(element)
                         .when(self.cursor.is_selected(TOOLBAR, i), |el| {
@@ -985,6 +989,7 @@ impl LibraryPage {
             cx.processor(move |this, rows: Range<usize>, _window, cx| this.render_rows(rows, columns, cx)),
         )
         .track_scroll(&self.scroll)
+        .on_scroll_wheel(smooth_wheel("library-grid", &self.scroll.0.borrow().base_handle))
         .flex_1()
         .h_full()
         .pt_4();

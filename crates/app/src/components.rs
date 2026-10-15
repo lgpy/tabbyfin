@@ -9,6 +9,7 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ChapterInfo, I
 use jellyfin::{ImageRequest, Ticks};
 
 use crate::images::ImageCache;
+use crate::zoom::dp;
 
 pub const POSTER_W: f32 = 150.;
 pub const POSTER_H: f32 = 225.;
@@ -148,7 +149,7 @@ fn progress_bar(fraction: f32, cx: &App) -> impl IntoElement {
         .bottom_0()
         .left_0()
         .right_0()
-        .h(px(4.))
+        .h(dp(4.))
         .bg(black().opacity(0.6))
         .child(div().h_full().w(relative(fraction)).bg(cx.theme().primary))
 }
@@ -179,7 +180,7 @@ fn card(
     let image = remote_image(image, Some(item), cx);
     v_flex()
         .id(id)
-        .w(px(width))
+        .w(dp(width))
         .flex_none()
         .gap_1()
         .cursor_pointer()
@@ -187,8 +188,8 @@ fn card(
         .child(
             div()
                 .relative()
-                .w(px(width))
-                .h(px(height))
+                .w(dp(width))
+                .h(dp(height))
                 .rounded_md()
                 .overflow_hidden()
                 .bg(cx.theme().muted)
@@ -256,7 +257,7 @@ pub fn chapter_card(
     let name = chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1));
     v_flex()
         .id(id)
-        .w(px(LANDSCAPE_W))
+        .w(dp(LANDSCAPE_W))
         .flex_none()
         .gap_1()
         .cursor_pointer()
@@ -264,8 +265,8 @@ pub fn chapter_card(
         .child(
             div()
                 .relative()
-                .w(px(LANDSCAPE_W))
-                .h(px(LANDSCAPE_H))
+                .w(dp(LANDSCAPE_W))
+                .h(dp(LANDSCAPE_H))
                 .rounded_md()
                 .overflow_hidden()
                 .bg(cx.theme().muted)
@@ -312,7 +313,7 @@ pub fn person_card(
     };
     v_flex()
         .id(id.into())
-        .w(px(PERSON_W))
+        .w(dp(PERSON_W))
         .flex_none()
         .gap_1()
         .cursor_pointer()
@@ -320,8 +321,8 @@ pub fn person_card(
         .child(
             div()
                 .relative()
-                .w(px(PERSON_W))
-                .h(px(PERSON_H))
+                .w(dp(PERSON_W))
+                .h(dp(PERSON_H))
                 .rounded_md()
                 .overflow_hidden()
                 .bg(cx.theme().muted)
@@ -365,11 +366,11 @@ fn kind_label(kind: &str) -> String {
 /// Grey card used while a grid page is still loading.
 pub fn placeholder_card(cx: &App) -> impl IntoElement {
     v_flex()
-        .w(px(POSTER_W))
+        .w(dp(POSTER_W))
         .flex_none()
         .gap_1()
-        .child(div().w(px(POSTER_W)).h(px(POSTER_H)).rounded_md().bg(cx.theme().muted))
-        .child(div().h(px(CARD_TEXT_H - 4.)))
+        .child(div().w(dp(POSTER_W)).h(dp(POSTER_H)).rounded_md().bg(cx.theme().muted))
+        .child(div().h(dp(CARD_TEXT_H - 4.)))
 }
 
 /// A titled, horizontally scrolling row of cards. The cards are the direct children of
@@ -409,7 +410,7 @@ pub fn shelf_with_rail(
                 .flex()
                 .px_6()
                 .pb_2()
-                .gap(px(CARD_GAP))
+                .gap(dp(CARD_GAP))
                 .overflow_x_scroll()
                 .track_scroll(scroll)
                 .children(cards),

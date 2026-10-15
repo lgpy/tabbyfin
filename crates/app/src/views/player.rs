@@ -8,6 +8,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::popover::{Popover, PopoverState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::spinner::Spinner;
@@ -23,8 +24,10 @@ use player::libmpv::Frame;
 use crate::components::{remote_image, timestamp};
 use crate::markers::{self, SegmentKind};
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
+use crate::smooth_scroll::smooth_wheel;
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_choices};
 use crate::trickplay::Trickplay;
+use crate::zoom::dp;
 
 actions!(
     player,
@@ -66,6 +69,10 @@ const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 const CHAPTER_MARK_H: f32 = 8.;
 /// Width of the seek-bar preview thumbnail.
 const PREVIEW_W: f32 = 192.;
+/// A row of a settings tab's track list.
+const TRACK_ROW_H: f32 = 28.;
+/// The tracks a list shows before it scrolls.
+const TRACK_ROWS: f32 = 5.;
 
 /// The frame on screen.
 #[derive(Clone)]
@@ -108,6 +115,9 @@ pub struct PlayerPage {
     menu_open: bool,
     /// The settings menu's tab, kept while the player is open.
     settings_tab: SettingsTab,
+    /// The chapters menu's list, and the settings menu's track list (one tab shows at a time).
+    chapter_scroll: ScrollHandle,
+    track_scroll: ScrollHandle,
     /// The seek bar's bounds from the last paint, to turn the mouse position into a time.
     seek_bounds: Bounds<Pixels>,
     /// The mouse's x over the seek bar, in window coordinates.
@@ -207,6 +217,8 @@ impl PlayerPage {
             hide_controls: None,
             menu_open: false,
             settings_tab: SettingsTab::Audio,
+            chapter_scroll: ScrollHandle::new(),
+            track_scroll: ScrollHandle::new(),
             seek_bounds: Bounds::default(),
             seek_hover: None,
             show_remaining: crate::config::Config::load().show_remaining_time.unwrap_or(false),
@@ -663,10 +675,10 @@ impl PlayerPage {
                         div()
                             .absolute()
                             .top(relative(0.5))
-                            .mt(px(-CHAPTER_MARK_H / 2.))
+                            .mt(dp(-CHAPTER_MARK_H / 2.))
                             .left(relative(fraction))
-                            .w(px(2.))
-                            .h(px(CHAPTER_MARK_H))
+                            .w(dp(2.))
+                            .h(dp(CHAPTER_MARK_H))
                             .bg(white().opacity(0.6))
                     }))
                     .when_some(hover, |el, (offset, time)| {
@@ -738,7 +750,7 @@ impl PlayerPage {
                             .tooltip(if muted { "Unmute (M)" } else { "Mute (M)" })
                             .on_click(cx.listener(|this, _, window, cx| this.toggle_mute(&ToggleMute, window, cx))),
                     )
-                    .child(div().flex_none().w(px(96.)).child(Slider::new(&self.volume).w_full()))
+                    .child(div().flex_none().w(dp(96.)).child(Slider::new(&self.volume).w_full()))
                     .child(
                         div()
                             .id("time")
@@ -871,7 +883,7 @@ impl PlayerPage {
             };
             let remaining = state.duration.map(|d| d.saturating_sub(state.position));
             v_flex()
-                .w(px(320.))
+                .w(dp(320.))
                 .p_3()
                 .gap_2()
                 .rounded_lg()
@@ -928,8 +940,8 @@ impl PlayerPage {
             div()
                 .occlude()
                 .absolute()
-                .right(px(24.))
-                .bottom(px(bottom))
+                .right(dp(24.))
+                .bottom(dp(bottom))
                 .child(prompt),
         )
     }
@@ -949,6 +961,7 @@ const CHAPTER_THUMB_W: f32 = 128.;
 const CHAPTER_THUMB_H: f32 = 72.;
 
 fn chapters_panel(page: &Entity<PlayerPage>, cx: &mut Context<PopoverState>) -> AnyElement {
+    let scroll = page.read(cx).chapter_scroll.clone();
     let popover = cx.entity();
     let state = page.read(cx).now_playing.read(cx);
     let item_id = state.item.id.clone();
@@ -981,8 +994,8 @@ fn chapters_panel(page: &Entity<PlayerPage>, cx: &mut Context<PopoverState>) -> 
                 .child(
                     div()
                         .flex_none()
-                        .w(px(CHAPTER_THUMB_W))
-                        .h(px(CHAPTER_THUMB_H))
+                        .w(dp(CHAPTER_THUMB_W))
+                        .h(dp(CHAPTER_THUMB_H))
                         .rounded_sm()
                         .overflow_hidden()
                         .bg(cx.theme().muted)
@@ -1001,9 +1014,11 @@ fn chapters_panel(page: &Entity<PlayerPage>, cx: &mut Context<PopoverState>) -> 
         .collect();
     v_flex()
         .id("chapter-list")
-        .w(px(340.))
-        .max_h(px(420.))
+        .w(dp(340.))
+        .max_h(dp(420.))
         .overflow_y_scroll()
+        .track_scroll(&scroll)
+        .on_scroll_wheel(smooth_wheel("chapter-list", &scroll))
         .gap_1()
         .children(rows)
         .into_any_element()
@@ -1026,9 +1041,9 @@ fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
     let stepper = |name: &'static str, value: String, down: Button, up: Button, reset: Button| {
         h_flex()
             .gap_1()
-            .child(div().w(px(110.)).text_sm().child(name))
+            .child(div().w(dp(110.)).text_sm().child(name))
             .child(down)
-            .child(div().w(px(56.)).text_sm().text_center().child(value))
+            .child(div().w(dp(56.)).text_sm().text_center().child(value))
             .child(up)
             .child(reset)
     };
@@ -1042,7 +1057,7 @@ fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
 
     let speed_row = h_flex()
         .gap_1()
-        .child(div().w(px(110.)).text_sm().child("Speed"))
+        .child(div().w(dp(110.)).text_sm().child("Speed"))
         .children(if in_group {
             vec![
                 div()
@@ -1079,6 +1094,7 @@ fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
         SubtitleChoice::Off => SUBTITLES_OFF,
         SubtitleChoice::Auto => state.source.default_subtitle_stream_index.unwrap_or(SUBTITLES_OFF),
     };
+    let track_scroll = page.read(cx).track_scroll.clone();
     let audio_list = {
         let page = page.clone();
         track_list(
@@ -1086,6 +1102,7 @@ fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
             "No audio tracks",
             &audio_choices,
             audio_selected,
+            &track_scroll,
             cx,
             move |value, cx| {
                 page.update(cx, |this, cx| {
@@ -1101,6 +1118,7 @@ fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
             "No subtitles",
             &subtitle_choices,
             Some(subtitle_selected),
+            &track_scroll,
             cx,
             move |value, cx| {
                 let choice = match value {
@@ -1182,7 +1200,7 @@ fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
     v_flex()
         .p_1()
         .gap_3()
-        .min_w(px(380.))
+        .min_w(dp(380.))
         .child(
             TabBar::new("player-settings-tabs")
                 .segmented()
@@ -1220,6 +1238,7 @@ fn track_list(
     empty: &'static str,
     choices: &[Choice],
     selected: Option<i32>,
+    scroll: &ScrollHandle,
     cx: &App,
     choose: impl Fn(i32, &mut App) + 'static,
 ) -> AnyElement {
@@ -1236,18 +1255,21 @@ fn track_list(
         .unwrap_or(choices[0].value);
     let choose = Rc::new(choose);
     let hover = cx.theme().accent;
-    v_flex()
+    let list = v_flex()
         .id(id)
-        .max_h(px(220.))
+        .max_h(dp(TRACK_ROW_H * TRACK_ROWS))
         .overflow_y_scroll()
+        .track_scroll(scroll)
+        .on_scroll_wheel(smooth_wheel("track-list", scroll))
         .children(choices.iter().enumerate().map(|(i, choice)| {
             let value = choice.value;
             let choose = choose.clone();
             h_flex()
                 .id((id, i))
+                .flex_none()
+                .h(dp(TRACK_ROW_H))
                 .gap_2()
                 .px_2()
-                .py_1()
                 .rounded_md()
                 .cursor_pointer()
                 .hover(move |style| style.bg(hover))
@@ -1259,7 +1281,13 @@ fn track_list(
                         .when(value == selected, |el| el.child(Icon::new(IconName::Check).small())),
                 )
                 .child(div().text_sm().truncate().child(choice.label.clone()))
-        }))
+        }));
+    div()
+        .relative()
+        // Sets the track apart from the delays and sizes below it.
+        .mb_2()
+        .child(list)
+        .vertical_scrollbar(scroll)
         .into_any_element()
 }
 
@@ -1299,8 +1327,8 @@ fn badge(text: impl Into<SharedString>) -> impl IntoElement {
 fn picker(select: &ChoiceSelect, width: f32, menu_width: f32) -> impl IntoElement {
     div()
         .flex_none()
-        .w(px(width))
-        .child(Select::new(select).small().w_full().menu_width(px(menu_width)))
+        .w(dp(width))
+        .child(Select::new(select).small().w_full().menu_width(dp(menu_width)))
 }
 
 impl Focusable for PlayerPage {
