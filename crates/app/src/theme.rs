@@ -13,7 +13,11 @@ pub fn apply(preference: ThemePreference, window: Option<&mut Window>, cx: &mut 
         ThemePreference::Light => Theme::change(ThemeMode::Light, window, cx),
         ThemePreference::Dark => Theme::change(ThemeMode::Dark, window, cx),
     }
-    // A theme change resets the font size the zoom sets.
+    // Rounder than gpui-kit's 6 and 8. A theme change resets these, and the font size the
+    // zoom sets.
+    let theme = Theme::global_mut(cx);
+    theme.radius = px(10.);
+    theme.radius_lg = px(12.);
     crate::zoom::apply(cx);
 }
 

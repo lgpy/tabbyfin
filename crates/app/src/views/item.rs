@@ -2,13 +2,14 @@
 //! (whose entries can be reordered and removed here).
 
 use std::collections::VecDeque;
+use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::select::{Select, SelectEvent, SelectState};
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, IndexPath, WindowExt, h_flex, v_flex};
+use gpui_kit::component::select::{Select, SelectState};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ChapterInfo, ItemField, ItemSortBy};
@@ -17,16 +18,18 @@ use jellyfin::{Client, ItemsQuery, Ticks};
 use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
-    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, centered_spinner, chapter_card, episode_label,
-    error_state, landscape_card, landscape_image, person_card, poster_card, remote_image, runtime_text, selection_ring,
-    shelf, timestamp,
+    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, centered_message, centered_spinner, chapter_card,
+    episode_card, episode_label, error_state, landscape_card, landscape_image, person_card, poster_card_scaled,
+    remote_image, rounded_image, runtime_text, selection_ring, shelf, shelf_with_rail, timestamp,
 };
 use crate::images::ImageCache;
-use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
+use crate::motion;
+use crate::playback::{PlayOptions, PlaybackManager};
+use crate::rail_drag::RailDrag;
 use crate::router::{Navigator, Route};
 use crate::runtime;
 use crate::smooth_scroll::smooth_wheel;
-use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, cycle_choice, step_choice, track_pickers};
+use crate::tracks::{Choice, ChoiceSelect, cycle_choice, step_choice};
 use crate::views::{add_to_playlist, edit_playlist};
 use crate::zoom::{dp, dp_px};
 
@@ -45,16 +48,21 @@ struct ItemData {
     similar: Vec<BaseItemDto>,
 }
 
+/// A series' season opened on its page, and its episodes once loaded.
+struct OpenSeason {
+    id: String,
+    name: String,
+    episodes: Load<Vec<BaseItemDto>>,
+}
+
 /// How many items "More like this" shows.
 const SIMILAR_LIMIT: u32 = 12;
 
-/// Version and track choices for a playable item. Defaults come from the server, which
-/// applies the user's language preferences.
+/// The version choice for a playable item with more than one. Audio and subtitles aren't
+/// picked here: the server's defaults apply (the user's language preferences), and the
+/// player's settings menu changes them.
 struct Pickers {
     version: Option<ChoiceSelect>,
-    audio: Option<ChoiceSelect>,
-    subtitle: Option<ChoiceSelect>,
-    _version_changed: Option<Subscription>,
 }
 
 pub struct ItemPage {
@@ -68,6 +76,11 @@ pub struct ItemPage {
     chapters_scroll: ScrollHandle,
     extras_scroll: ScrollHandle,
     similar_scroll: ScrollHandle,
+    /// Dragging the shelves sideways.
+    rail_drag: RailDrag,
+    /// The season of a series whose episodes show in a row under the seasons.
+    open_season: Option<OpenSeason>,
+    episodes_scroll: ScrollHandle,
     cursor: Cursor,
     focus_handle: FocusHandle,
     /// Playlist changes waiting to be sent, in order. They're already shown; the server gets
@@ -109,6 +122,9 @@ impl ItemPage {
             chapters_scroll: ScrollHandle::new(),
             extras_scroll: ScrollHandle::new(),
             similar_scroll: ScrollHandle::new(),
+            rail_drag: RailDrag::default(),
+            open_season: None,
+            episodes_scroll: ScrollHandle::new(),
             cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
             playlist_edits: VecDeque::new(),
@@ -134,6 +150,10 @@ impl ItemPage {
                     Ok(data) => Load::Loaded(data),
                     Err(err) => Load::Failed(this.nav.handle_error(&err, cx)),
                 };
+                // Its episodes' watched state and progress may have changed too.
+                if let Some(id) = this.open_season.as_ref().map(|season| season.id.clone()) {
+                    this.load_episodes(id, cx);
+                }
                 cx.notify();
             })
             .ok();
@@ -153,12 +173,6 @@ impl ItemPage {
             options.media_source_id = selected(&pickers.version)
                 .and_then(|i| data.item.media_sources.get(i as usize))
                 .map(|source| source.id.clone());
-            options.audio_stream_index = selected(&pickers.audio);
-            options.subtitle = match selected(&pickers.subtitle) {
-                Some(SUBTITLES_OFF) => SubtitleChoice::Off,
-                Some(index) => SubtitleChoice::Stream(index),
-                None => SubtitleChoice::Auto,
-            };
         }
         let item = data.item.clone();
         PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
@@ -374,7 +388,7 @@ impl ItemPage {
         if data.item.media_sources.is_empty() {
             return;
         }
-        let sources = data.item.media_sources.clone();
+        let sources = &data.item.media_sources;
         let version = (sources.len() > 1).then(|| {
             let choices = sources
                 .iter()
@@ -386,45 +400,7 @@ impl ItemPage {
                 .collect();
             cx.new(|cx| SelectState::new(choices, Some(IndexPath::default()), window, cx))
         });
-        let _version_changed = version.as_ref().map(|select| {
-            cx.subscribe_in(
-                select,
-                window,
-                move |this, _, event: &SelectEvent<Vec<Choice>>, window, cx| {
-                    let SelectEvent::Confirm(Some(index)) = event else {
-                        return;
-                    };
-                    if let Some(source) = sources.get(*index as usize) {
-                        let (audio, subtitle) = track_pickers(
-                            source,
-                            source.default_audio_stream_index,
-                            source.default_subtitle_stream_index,
-                            window,
-                            cx,
-                        );
-                        if let Some(pickers) = &mut this.pickers {
-                            pickers.audio = audio;
-                            pickers.subtitle = subtitle;
-                        }
-                        cx.notify();
-                    }
-                },
-            )
-        });
-        let first = &data.item.media_sources[0];
-        let (audio, subtitle) = track_pickers(
-            first,
-            first.default_audio_stream_index,
-            first.default_subtitle_stream_index,
-            window,
-            cx,
-        );
-        self.pickers = Some(Pickers {
-            version,
-            audio,
-            subtitle,
-            _version_changed,
-        });
+        self.pickers = Some(Pickers { version });
     }
 }
 
@@ -574,59 +550,92 @@ impl ItemPage {
     fn render_actions(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
         let (played, favorite) = (is_played(item), is_favorite(item));
         let buttons = item_actions(item).into_iter().enumerate().map(|(i, action)| {
-            let button = match action {
-                ItemAction::Resume(position) => Button::new("resume")
-                    .primary()
-                    .icon(IconName::Play)
-                    .label(format!("Resume from {}", timestamp(position.into()))),
-                ItemAction::PlayFromStart => Button::new("play-start").outline().label("Play from beginning"),
-                ItemAction::Play => Button::new("play").primary().icon(IconName::Play).label("Play"),
-                ItemAction::TogglePlayed => Button::new("toggle-played")
-                    .outline()
-                    .icon(if played { IconName::CircleCheck } else { IconName::Check })
-                    .label(if played { "Watched" } else { "Mark watched" }),
-                ItemAction::PlayAll => Button::new("play-all").primary().icon(IconName::Play).label("Play all"),
-                ItemAction::Shuffle => Button::new("shuffle").outline().icon(Lucide::Shuffle).label("Shuffle"),
-                ItemAction::Trailer => Button::new("trailer")
-                    .outline()
-                    .icon(if item.local_trailer_count.unwrap_or(0) > 0 {
+            // Icons only; the tooltip says what each does.
+            let (id, icon, tooltip, primary): (&'static str, Icon, SharedString, bool) = match action {
+                ItemAction::Resume(position) => (
+                    "resume",
+                    IconName::Play.into(),
+                    format!("Resume from {}", timestamp(position.into())).into(),
+                    true,
+                ),
+                ItemAction::PlayFromStart => (
+                    "play-start",
+                    Lucide::RotateCcw.into(),
+                    "Play from beginning".into(),
+                    false,
+                ),
+                ItemAction::Play => ("play", IconName::Play.into(), "Play".into(), true),
+                ItemAction::TogglePlayed => (
+                    "toggle-played",
+                    if played { IconName::CircleCheck } else { IconName::Check }.into(),
+                    if played { "Mark unwatched" } else { "Mark watched" }.into(),
+                    false,
+                ),
+                ItemAction::PlayAll => ("play-all", IconName::Play.into(), "Play all".into(), true),
+                ItemAction::Shuffle => ("shuffle", Lucide::Shuffle.into(), "Shuffle".into(), false),
+                ItemAction::Trailer => (
+                    "trailer",
+                    if item.local_trailer_count.unwrap_or(0) > 0 {
                         Lucide::Clapperboard
                     } else {
                         Lucide::ExternalLink
-                    })
-                    .label("Trailer"),
-                ItemAction::ToggleFavorite => Button::new("toggle-favorite")
-                    .outline()
-                    .icon(if favorite { Lucide::HeartOff } else { Lucide::Heart })
-                    .label(if favorite { "Remove favorite" } else { "Favorite" }),
-                ItemAction::AddToPlaylist => Button::new("add-to-playlist")
-                    .outline()
-                    .icon(Lucide::ListPlus)
-                    .label("Add to playlist"),
-                ItemAction::EditPlaylist => Button::new("edit-playlist")
-                    .outline()
-                    .icon(Lucide::Pencil)
-                    .label("Edit"),
-                ItemAction::DeletePlaylist => Button::new("delete-playlist")
-                    .outline()
-                    .icon(Lucide::Trash)
-                    .label("Delete playlist"),
+                    }
+                    .into(),
+                    "Trailer".into(),
+                    false,
+                ),
+                ItemAction::ToggleFavorite => (
+                    "toggle-favorite",
+                    if favorite { Lucide::HeartOff } else { Lucide::Heart }.into(),
+                    if favorite { "Remove favorite" } else { "Favorite" }.into(),
+                    false,
+                ),
+                ItemAction::AddToPlaylist => (
+                    "add-to-playlist",
+                    Lucide::ListPlus.into(),
+                    "Add to playlist".into(),
+                    false,
+                ),
+                ItemAction::EditPlaylist => ("edit-playlist", Lucide::Pencil.into(), "Edit playlist".into(), false),
+                ItemAction::DeletePlaylist => {
+                    ("delete-playlist", Lucide::Trash.into(), "Delete playlist".into(), false)
+                }
             };
+            // Playing is the main action, so it's named; the rest are icons.
+            let label = match action {
+                ItemAction::Resume(_) => Some("Resume"),
+                ItemAction::Play => Some("Play"),
+                ItemAction::PlayAll => Some("Play all"),
+                _ => None,
+            };
+            let button = Button::new(id)
+                .map(|b| if primary { b.primary() } else { b.outline() })
+                .h(dp(ACTION_SIZE))
+                .child(icon.size(dp(ACTION_ICON)))
+                .map(|b| match label {
+                    Some(label) => b
+                        .px(dp(ACTION_SIZE / 2.))
+                        .gap_2()
+                        .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(label)),
+                    None => b.w(dp(ACTION_SIZE)),
+                })
+                .tooltip(tooltip);
             let button = button.on_click(cx.listener(move |this, _, window, cx| this.run_action(action, window, cx)));
             // Room around the button for the keyboard cursor's ring.
             div()
                 .relative()
                 .p(dp(ACTION_RING_GAP))
-                .rounded_lg()
+                .rounded_xl()
                 .child(button)
                 .when(self.cursor.is_selected(ACTIONS, i), |el| {
-                    el.child(selection_ring(cx).rounded_lg())
+                    el.child(selection_ring(cx).rounded_xl())
                 })
         });
         h_flex()
-            .pt_2()
-            .ml(dp(-ACTION_RING_GAP))
-            .gap(dp(8. - ACTION_RING_GAP * 2.))
+            .flex_none()
+            // The rings' room is outside the column's right edge.
+            .mr(dp(-ACTION_RING_GAP))
+            .gap(dp(ACTION_GAP - ACTION_RING_GAP * 2.))
             .children(buttons)
     }
 
@@ -692,7 +701,7 @@ impl ItemPage {
         let backdrop = item.backdrop_image().map(|r| r.fill_width(1280));
         let has_backdrop = backdrop.is_some();
         let backdrop = remote_image(backdrop, Some(item), cx);
-        let poster = remote_image(
+        let poster = rounded_image(
             item.primary_image()
                 .map(|r| r.fill_width((DETAIL_POSTER_W * 2.) as u32)),
             Some(item),
@@ -710,7 +719,22 @@ impl ItemPage {
             .when(!title.is_empty(), |el| {
                 el.child(div().text_color(cx.theme().muted_foreground).child(title))
             })
-            .child(div().text_3xl().font_weight(FontWeight::BOLD).child(item.name.clone()))
+            // The title, with the actions on the right.
+            .child(
+                h_flex()
+                    .gap_4()
+                    .justify_between()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(dp(40.))
+                            .line_height(dp(48.))
+                            .font_weight(FontWeight::BOLD)
+                            .child(item.name.clone()),
+                    )
+                    .child(self.render_actions(item, cx)),
+            )
             .child(
                 div()
                     .text_sm()
@@ -734,20 +758,27 @@ impl ItemPage {
                         .child(studios.join(", ")),
                 )
             })
-            .when(!item.tags.is_empty(), |el| {
-                el.child(h_flex().flex_wrap().gap_1().children(item.tags.iter().map(|tag| {
-                    div()
-                        .px_2()
-                        .rounded_md()
-                        .bg(cx.theme().muted)
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tag.clone())
-                })))
-            })
-            .child(self.render_actions(item, cx))
             .when_some(item.overview.clone(), |el, overview| {
                 el.child(div().pt_2().max_w(dp(820.)).child(overview))
+            })
+            // Under the synopsis, as wide as it, set apart from it.
+            .when(!item.tags.is_empty(), |el| {
+                el.child(
+                    h_flex()
+                        .pt_4()
+                        .max_w(dp(820.))
+                        .flex_wrap()
+                        .gap_1()
+                        .children(item.tags.iter().map(|tag| {
+                            div()
+                                .px_2()
+                                .rounded_lg()
+                                .bg(cx.theme().muted)
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tag.clone())
+                        })),
+                )
             });
 
         div()
@@ -782,7 +813,7 @@ impl ItemPage {
                             .flex_none()
                             .w(dp(DETAIL_POSTER_W))
                             .h(dp(DETAIL_POSTER_H))
-                            .rounded_md()
+                            .rounded_xl()
                             .overflow_hidden()
                             .bg(cx.theme().muted)
                             .child(poster),
@@ -793,11 +824,7 @@ impl ItemPage {
 
     fn render_pickers(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let pickers = self.pickers.as_ref()?;
-        let labeled = [
-            ("Version", &pickers.version),
-            ("Audio", &pickers.audio),
-            ("Subtitles", &pickers.subtitle),
-        ];
+        let labeled = [("Version", &pickers.version)];
         let rows = labeled
             .into_iter()
             .filter_map(|(label, select)| Some((label, select.as_ref()?)))
@@ -817,7 +844,7 @@ impl ItemPage {
                             .relative()
                             .child(Select::new(select).w(dp(PICKER_W)).menu_width(dp(PICKER_W * 1.5)))
                             .when(self.cursor.is_selected(PICKERS, i), |el| {
-                                el.child(selection_ring(cx).rounded_lg().m(dp(-ACTION_RING_GAP)))
+                                el.child(selection_ring(cx).rounded_xl().m(dp(-ACTION_RING_GAP)))
                             }),
                     )
             });
@@ -825,6 +852,96 @@ impl ItemPage {
     }
 
     /// Season cards in rows of `columns`.
+    /// Opens `season`'s episodes under the seasons, or closes them if they're open.
+    fn toggle_season(&mut self, season: &BaseItemDto, cx: &mut Context<Self>) {
+        if self.open_season.as_ref().is_some_and(|open| open.id == season.id) {
+            self.open_season = None;
+        } else {
+            self.open_season = Some(OpenSeason {
+                id: season.id.clone(),
+                name: season.name.clone(),
+                episodes: Load::Loading,
+            });
+            self.episodes_scroll.set_offset(point(px(0.), px(0.)));
+            self.load_episodes(season.id.clone(), cx);
+        }
+        cx.notify();
+    }
+
+    /// Fetches the open season's episodes, unless another season opens meanwhile.
+    fn load_episodes(&mut self, season_id: String, cx: &mut Context<Self>) {
+        let client = self.client.clone();
+        let series_id = self.item_id.clone();
+        cx.spawn(async move |this, cx| {
+            let result = runtime::spawn({
+                let season_id = season_id.clone();
+                async move {
+                    client
+                        .episodes(&series_id, Some(&season_id), &[ItemField::Overview])
+                        .await
+                }
+            })
+            .await;
+            this.update(cx, |this, cx| {
+                let Some(open) = this.open_season.as_mut().filter(|open| open.id == season_id) else {
+                    return;
+                };
+                open.episodes = match result {
+                    Ok(episodes) => Load::Loaded(episodes.items),
+                    Err(err) => Load::Failed(this.nav.handle_error(&err, cx)),
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The open season's episodes, as a row under the seasons.
+    fn render_episodes(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let open = self.open_season.as_ref()?;
+        let content = match &open.episodes {
+            Load::Loaded(episodes) if !episodes.is_empty() => {
+                let cards = episodes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, episode)| {
+                        let nav = self.nav.clone();
+                        let target = episode.clone();
+                        episode_card(
+                            ("episode", i),
+                            episode,
+                            BIG_CARD_SCALE,
+                            self.cursor.is_selected(EPISODES, i),
+                            self.rail_drag.guard(move |_, window, cx| nav.open(&target, window, cx)),
+                            cx,
+                        )
+                        .into_any_element()
+                    })
+                    .collect();
+                shelf_with_rail(
+                    "season-episodes",
+                    open.name.clone(),
+                    cards,
+                    BIG_CARD_GAP,
+                    SHELF_TITLE_GAP,
+                    &self.episodes_scroll,
+                    self.rail_drag.rail(&self.episodes_scroll),
+                    cx,
+                )
+                .into_any_element()
+            }
+            Load::Loaded(_) => centered_message("No episodes in this season.", cx).into_any_element(),
+            Load::Loading => div().h(dp(LANDSCAPE_H)).child(centered_spinner()).into_any_element(),
+            Load::Failed(message) => centered_message(message.clone(), cx).into_any_element(),
+        };
+        // Rises in each time a season opens.
+        let id = ElementId::from((ElementId::from("season-episodes"), open.id.clone()));
+        // A tinted band across the page, that reads as part of the seasons above.
+        let band = div().mb_6().py_4().bg(cx.theme().muted.opacity(0.35)).child(content);
+        Some(motion::enter(band, id, Duration::ZERO).into_any_element())
+    }
+
     fn season_rows(&self, seasons: &[BaseItemDto], columns: usize, cx: &mut Context<Self>) -> Vec<AnyElement> {
         seasons
             .chunks(columns)
@@ -837,11 +954,23 @@ impl ItemPage {
                         let i = r * columns + c;
                         let nav = self.nav.clone();
                         let target = season.clone();
-                        poster_card(
+                        // A series' seasons open their episodes here; a collection's items
+                        // open their pages.
+                        let is_season = season.kind == BaseItemKind::Season;
+                        let open = self.open_season.as_ref().is_some_and(|open| open.id == season.id);
+                        let page = cx.entity();
+                        poster_card_scaled(
                             ("season", i),
                             season,
-                            self.cursor.is_selected(CHILDREN, i),
-                            move |_, window, cx| nav.open(&target, window, cx),
+                            BIG_CARD_SCALE,
+                            self.cursor.is_selected(CHILDREN, i) || open,
+                            move |_, window, cx| {
+                                if is_season {
+                                    page.update(cx, |this, cx| this.toggle_season(&target, cx));
+                                } else {
+                                    nav.open(&target, window, cx);
+                                }
+                            },
                             cx,
                         )
                         .into_any_element()
@@ -849,8 +978,8 @@ impl ItemPage {
                     .collect();
                 h_flex()
                     .px_6()
-                    .pb(dp(CARD_GAP))
-                    .gap(dp(CARD_GAP))
+                    .pb(dp(BIG_CARD_GAP))
+                    .gap(dp(BIG_CARD_GAP))
                     .items_start()
                     .children(cards)
                     .into_any_element()
@@ -867,7 +996,7 @@ impl ItemPage {
             .map(|(i, episode)| {
                 let nav = self.nav.clone();
                 let target = episode.clone();
-                let image = remote_image(
+                let image = rounded_image(
                     landscape_image(episode).map(|r| r.fill_width((LANDSCAPE_W * 2.) as u32)),
                     Some(episode),
                     cx,
@@ -925,7 +1054,7 @@ impl ItemPage {
                     .items_start()
                     .gap_4()
                     .p_2()
-                    .rounded_md()
+                    .rounded_lg()
                     .cursor_pointer()
                     .hover(|style| style.bg(cx.theme().muted))
                     .when(selected, |el| el.bg(cx.theme().muted))
@@ -935,7 +1064,7 @@ impl ItemPage {
                             .flex_none()
                             .w(dp(LANDSCAPE_W))
                             .h(dp(LANDSCAPE_H))
-                            .rounded_md()
+                            .rounded_xl()
                             .overflow_hidden()
                             .bg(cx.theme().muted)
                             .child(image),
@@ -978,8 +1107,9 @@ impl ItemPage {
         match data.item.kind {
             BaseItemKind::Series | BaseItemKind::BoxSet => {
                 let available = window.viewport_size().width - dp_px(48., window);
+                let card = POSTER_W * BIG_CARD_SCALE;
                 let columns =
-                    ((available + dp_px(CARD_GAP, window)) / dp_px(POSTER_W + CARD_GAP, window)).floor() as usize;
+                    ((available + dp_px(BIG_CARD_GAP, window)) / dp_px(card + BIG_CARD_GAP, window)).floor() as usize;
                 Section::grid(data.children.len(), columns)
             }
             BaseItemKind::Season | BaseItemKind::Playlist => Section::grid(data.children.len(), 1),
@@ -987,19 +1117,30 @@ impl ItemPage {
         }
     }
 
-    /// Scroll-container child index of the children's title.
+    /// Scroll-container child index of the children's title, after the chapters.
     fn children_title_index(&self, data: &ItemData) -> usize {
-        self.people_index(data) + usize::from(!data.item.people.is_empty())
+        self.chapters_index() + usize::from(!chapters(&data.item).is_empty())
     }
 
-    /// Scroll-container child index of the extras shelf: after the children's title and rows.
-    fn extras_index(&self, data: &ItemData, window: &Window) -> usize {
+    /// Scroll-container child index of the open season's episodes: after the children's title
+    /// and rows.
+    fn episodes_index(&self, data: &ItemData, window: &Window) -> usize {
         let children = self.children_section(data, window);
         let block = match children.len {
             0 => 0,
             len => 1 + len.div_ceil(children.columns),
         };
         self.children_title_index(data) + block
+    }
+
+    /// Scroll-container child index of the cast shelf: after the open season's episodes.
+    fn people_index(&self, data: &ItemData, window: &Window) -> usize {
+        self.episodes_index(data, window) + usize::from(self.open_season.is_some())
+    }
+
+    /// Scroll-container child index of the extras shelf.
+    fn extras_index(&self, data: &ItemData, window: &Window) -> usize {
+        self.people_index(data, window) + usize::from(!data.item.people.is_empty())
     }
 
     /// Scroll-container child index of the "More like this" shelf.
@@ -1018,7 +1159,7 @@ impl ItemPage {
                     ("extra", i),
                     extra,
                     self.cursor.is_selected(EXTRAS, i),
-                    move |_, _, cx| play_extra(&target, cx),
+                    self.rail_drag.guard(move |_, _, cx| play_extra(&target, cx)),
                     cx,
                 )
                 .into_any_element()
@@ -1026,7 +1167,14 @@ impl ItemPage {
             .collect();
         div()
             .pt_6()
-            .child(shelf("extras", "Extras", cards, &self.extras_scroll, cx))
+            .child(shelf(
+                "extras",
+                "Extras",
+                cards,
+                &self.extras_scroll,
+                self.rail_drag.rail(&self.extras_scroll),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1036,11 +1184,12 @@ impl ItemPage {
             .enumerate()
             .map(|(i, item)| {
                 let (nav, target) = (self.nav.clone(), item.clone());
-                poster_card(
+                poster_card_scaled(
                     ("similar", i),
                     item,
+                    BIG_CARD_SCALE,
                     self.cursor.is_selected(SIMILAR, i),
-                    move |_, window, cx| nav.open(&target, window, cx),
+                    self.rail_drag.guard(move |_, window, cx| nav.open(&target, window, cx)),
                     cx,
                 )
                 .into_any_element()
@@ -1048,18 +1197,22 @@ impl ItemPage {
             .collect();
         div()
             .pt_6()
-            .child(shelf("similar", "More like this", cards, &self.similar_scroll, cx))
+            .child(shelf_with_rail(
+                "similar",
+                "More like this",
+                cards,
+                BIG_CARD_GAP,
+                SHELF_TITLE_GAP,
+                &self.similar_scroll,
+                self.rail_drag.rail(&self.similar_scroll),
+                cx,
+            ))
             .into_any_element()
     }
 
     /// Scroll-container child index of the chapters shelf, after the header and pickers.
     fn chapters_index(&self) -> usize {
         1 + usize::from(self.pickers.is_some())
-    }
-
-    /// Scroll-container child index of the cast shelf.
-    fn people_index(&self, data: &ItemData) -> usize {
-        self.chapters_index() + usize::from(!chapters(&data.item).is_empty())
     }
 
     /// Chapters to jump into: their image, name and start. Chosen, the item plays from there
@@ -1076,7 +1229,8 @@ impl ItemPage {
                     i,
                     chapter,
                     self.cursor.is_selected(CHAPTERS, i),
-                    cx.listener(move |this, _, _, cx| this.play(Some(start), cx)),
+                    self.rail_drag
+                        .guard(cx.listener(move |this, _, _, cx| this.play(Some(start), cx))),
                     cx,
                 )
                 .into_any_element()
@@ -1084,7 +1238,14 @@ impl ItemPage {
             .collect();
         div()
             .pt_6()
-            .child(shelf("chapters", "Chapters", cards, &self.chapters_scroll, cx))
+            .child(shelf(
+                "chapters",
+                "Chapters",
+                cards,
+                &self.chapters_scroll,
+                self.rail_drag.rail(&self.chapters_scroll),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1101,8 +1262,10 @@ impl ItemPage {
                 person_card(
                     ("person", i),
                     person,
+                    BIG_CARD_SCALE,
                     self.cursor.is_selected(PEOPLE, i),
-                    move |_, window, cx| nav.push(route.clone(), window, cx),
+                    self.rail_drag
+                        .guard(move |_, window, cx| nav.push(route.clone(), window, cx)),
                     cx,
                 )
                 .into_any_element()
@@ -1110,7 +1273,16 @@ impl ItemPage {
             .collect();
         div()
             .pt_6()
-            .child(shelf("people", "Cast & crew", cards, &self.people_scroll, cx))
+            .child(shelf_with_rail(
+                "people",
+                "Cast & crew",
+                cards,
+                BIG_CARD_GAP,
+                SHELF_TITLE_GAP,
+                &self.people_scroll,
+                self.rail_drag.rail(&self.people_scroll),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1142,7 +1314,7 @@ impl ItemPage {
 
         // The header, pickers, title and rows are the scroll container's direct children,
         // for `browse::reveal` (see `children_title_index`).
-        v_flex()
+        let page = v_flex()
             .id("item")
             .size_full()
             .overflow_y_scroll()
@@ -1153,9 +1325,6 @@ impl ItemPage {
             .children(self.render_pickers(cx).map(|pickers| div().pt_6().child(pickers)))
             .when(!chapters(item).is_empty(), |el| {
                 el.child(self.render_chapters(item, cx))
-            })
-            .when(!item.people.is_empty(), |el| {
-                el.child(self.render_people(&item.people, cx))
             })
             .when_some(title, |el, title| {
                 el.child(
@@ -1169,13 +1338,17 @@ impl ItemPage {
                 )
             })
             .children(rows)
+            .children(self.render_episodes(cx))
+            .when(!item.people.is_empty(), |el| {
+                el.child(self.render_people(&item.people, cx))
+            })
             .when(!data.extras.is_empty(), |el| {
                 el.child(self.render_extras(&data.extras, cx))
             })
             .when(!data.similar.is_empty(), |el| {
                 el.child(self.render_similar(&data.similar, cx))
-            })
-            .into_any_element()
+            });
+        self.rail_drag.track(page).into_any_element()
     }
 }
 
@@ -1263,19 +1436,32 @@ fn play_extra(extra: &BaseItemDto, cx: &mut App) {
 const DELETE_PLAYLIST_NOTE: &str =
     "The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.";
 
+/// Cast & crew and "More like this": larger cards, further apart, like Home's.
+const BIG_CARD_SCALE: f32 = 1.2;
+const BIG_CARD_GAP: f32 = 24.;
+/// Between a shelf's title and its cards, as [`shelf`] has it.
+const SHELF_TITLE_GAP: f32 = 16.;
+
 /// Cursor sections, top to bottom.
 const ACTIONS: usize = 0;
-/// Version, audio and subtitle pickers, one per row; Left and Right change them.
+/// The version picker; Left and Right change it.
 const PICKERS: usize = 1;
 const CHAPTERS: usize = 2;
-const PEOPLE: usize = 3;
-const CHILDREN: usize = 4;
-const EXTRAS: usize = 5;
-const SIMILAR: usize = 6;
+const CHILDREN: usize = 3;
+/// The open season's episodes.
+const EPISODES: usize = 4;
+const PEOPLE: usize = 5;
+const EXTRAS: usize = 6;
+const SIMILAR: usize = 7;
 /// Scroll-container child index of the pickers, after the header.
 const PICKERS_INDEX: usize = 1;
 /// Padding around each action button, where the cursor's ring goes.
 const ACTION_RING_GAP: f32 = 3.;
+/// The action buttons, square, and their icons.
+const ACTION_SIZE: f32 = 48.;
+const ACTION_ICON: f32 = 24.;
+/// Between the action buttons.
+const ACTION_GAP: f32 = 16.;
 
 impl Browse for ItemPage {
     fn cursor(&mut self) -> &mut Cursor {
@@ -1290,8 +1476,9 @@ impl Browse for ItemPage {
             Section::row(item_actions(&data.item).len()),
             Section::grid(self.picker_selects().len(), 1),
             Section::row(chapters(&data.item).len()),
-            Section::row(data.item.people.len()),
             self.children_section(data, window),
+            Section::row(self.open_episodes().len()),
+            Section::row(data.item.people.len()),
             Section::row(data.extras.len()),
             Section::row(data.similar.len()),
         ]
@@ -1312,8 +1499,13 @@ impl Browse for ItemPage {
             browse::reveal(&self.chapters_scroll, position.index, px(24.));
             return;
         }
+        if position.section == EPISODES {
+            browse::reveal(&self.scroll, self.episodes_index(data, window), px(CARD_GAP));
+            browse::reveal(&self.episodes_scroll, position.index, px(24.));
+            return;
+        }
         if position.section == PEOPLE {
-            browse::reveal(&self.scroll, self.people_index(data), px(CARD_GAP));
+            browse::reveal(&self.scroll, self.people_index(data, window), px(CARD_GAP));
             browse::reveal(&self.people_scroll, position.index, px(24.));
             return;
         }
@@ -1361,6 +1553,10 @@ impl Browse for ItemPage {
                 let start = chapter.start_position_ticks;
                 self.play(Some(start), cx);
             }
+        } else if position.section == EPISODES {
+            if let Some(episode) = self.open_episodes().get(position.index) {
+                self.nav.open(episode, window, cx);
+            }
         } else if position.section == PEOPLE {
             if let Some(person) = data.item.people.get(position.index) {
                 let route = Route::Person {
@@ -1378,22 +1574,31 @@ impl Browse for ItemPage {
                 self.nav.open(item, window, cx);
             }
         } else if let Some(child) = data.children.get(position.index) {
-            self.nav.open(child, window, cx);
+            if child.kind == BaseItemKind::Season {
+                let child = child.clone();
+                self.toggle_season(&child, cx);
+            } else {
+                self.nav.open(child, window, cx);
+            }
         }
     }
 }
 
 impl ItemPage {
+    /// The open season's episodes, once loaded.
+    fn open_episodes(&self) -> &[BaseItemDto] {
+        match self.open_season.as_ref().map(|open| &open.episodes) {
+            Some(Load::Loaded(episodes)) => episodes,
+            _ => &[],
+        }
+    }
+
     /// The pickers shown, top to bottom.
     fn picker_selects(&self) -> Vec<ChoiceSelect> {
         let Some(pickers) = &self.pickers else {
             return Vec::new();
         };
-        [&pickers.version, &pickers.audio, &pickers.subtitle]
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect()
+        pickers.version.iter().cloned().collect()
     }
 }
 
