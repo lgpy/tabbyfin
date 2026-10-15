@@ -95,6 +95,10 @@ run = [
   "packaging/package.sh {{arg(name='target')}} dist",
 ]
 
+[tasks."package:appimage"]
+description = "Build the Linux AppImage in an Ubuntu 22.04 container, so it runs on older distributions too"
+run = "packaging/appimage-docker.sh dist"
+
 # CI (GitHub Actions)
 
 [tasks."ci:build"]

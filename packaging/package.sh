@@ -3,7 +3,7 @@
 # Run `cargo build --release --target <target>` first.
 #
 #   linux   (x86_64-unknown-linux-gnu): .tar.gz and .deb (needs cargo-deb), which use the system
-#           libmpv, and an AppImage with libmpv bundled (needs libmpv2; see appimage.sh)
+#           libmpv. The AppImage is built separately, in Ubuntu 22.04 (appimage-docker.sh).
 #   windows (x86_64-pc-windows-msvc):   .zip with libmpv-2.dll and ANGLE next to jelly-gpui.exe, and
 #           an installer from the same files when Inno Setup's ISCC is found (on the PATH, in
 #           its default folder, or $ISCC)
@@ -31,7 +31,6 @@ case "$target" in
       "$stage/$name/"
     tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
     (cd "$root" && cargo deb -p jelly-gpui --target "$target" --no-build --output "$out/")
-    "$packaging/appimage.sh" "$bin_dir/jelly-gpui" "$version" "$out"
     ;;
 
   x86_64-pc-windows-msvc)

@@ -95,7 +95,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Automatic bitrate** over a real slow link (Wi-Fi, a phone hotspot, or a remote server): the measurement in the log is plausible and playback transcodes to fit. Only a mocked 4 Mbit/s and the local 1.1 Gbit/s were tried.
 - ⬜ **HEVC transcodes** on a server with hardware HEVC encoding (only software x265 on the dev server).
 
-- ⬜ The **AppImage** on a real Linux desktop (GNOME, KDE; Wayland and X11), from the file manager, and on a distribution other than Ubuntu.
+- ⬜ The **AppImage** on a real Linux desktop (GNOME, KDE; Wayland and X11), from the file manager, on a distribution other than Ubuntu, and on a 2022-era one (Ubuntu 22.04, Debian 12) with a real GPU (in a 22.04 container the window was black: old software Vulkan).
 - ⬜ The **Windows installer from CI** (a release build inside): install, the Start-menu entry, the app running from it, upgrade from an older version while it's running, uninstall.
 
 - ⬜ **Text size following the system** on Windows (Settings → Accessibility → Text size) and GNOME (Large Text), after a restart; only fixed sizes were tried (130% and 150% in WSL, light theme).
