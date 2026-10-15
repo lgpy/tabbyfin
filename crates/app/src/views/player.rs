@@ -1,5 +1,6 @@
 //! Full-window player for embedded mpv: the video plus GPUI controls on top.
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,7 +11,8 @@ use gpui_kit::component::popover::Popover;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -20,7 +22,7 @@ use player::libmpv::Frame;
 use crate::components::timestamp;
 use crate::markers::{self, SegmentKind};
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
-use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
+use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_choices};
 use crate::trickplay::Trickplay;
 
 actions!(
@@ -99,12 +101,12 @@ pub struct PlayerPage {
     version: Option<ChoiceSelect>,
     /// Seek-bar previews, once the session knows the server has tiles for this version.
     trickplay: Option<Entity<Trickplay>>,
-    audio: Option<ChoiceSelect>,
-    subtitle: Option<ChoiceSelect>,
     controls_visible: bool,
     hide_controls: Option<Task<()>>,
     /// The settings menu is open, which keeps the controls up.
     menu_open: bool,
+    /// The settings menu's tab, kept while the player is open.
+    settings_tab: SettingsTab,
     /// The seek bar's bounds from the last paint, to turn the mouse position into a time.
     seek_bounds: Bounds<Pixels>,
     /// The mouse's x over the seek bar, in window coordinates.
@@ -120,15 +122,7 @@ impl PlayerPage {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
 
-        let state = now_playing.read(cx);
-        let subtitle_index = match state.subtitle {
-            SubtitleChoice::Stream(index) => Some(index),
-            SubtitleChoice::Off => Some(SUBTITLES_OFF),
-            SubtitleChoice::Auto => state.source.default_subtitle_stream_index,
-        };
-        let source = state.source.clone();
-        let initial_volume = state.volume as f32;
-        let (audio, subtitle) = track_pickers(&source, state.audio, subtitle_index, window, cx);
+        let initial_volume = now_playing.read(cx).volume as f32;
         let volume = cx.new(|_| {
             SliderState::new()
                 .min(0.)
@@ -137,7 +131,7 @@ impl PlayerPage {
                 .default_value(initial_volume)
         });
 
-        let mut subscriptions = vec![
+        let subscriptions = vec![
             cx.observe_in(&now_playing, window, |this, _, window, cx| {
                 this.sync_seek_bar(window, cx);
                 this.sync_volume(window, cx);
@@ -161,27 +155,6 @@ impl PlayerPage {
                 this.send(UiCommand::SetVolume(value as f64), cx);
             }),
         ];
-        if let Some(select) = &audio {
-            subscriptions.push(cx.subscribe(select, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
-                if let SelectEvent::Confirm(Some(index)) = event {
-                    let index = *index;
-                    this.now_playing.update(cx, |state, cx| state.change_audio(index, cx));
-                }
-            }));
-        }
-        if let Some(select) = &subtitle {
-            subscriptions.push(cx.subscribe(select, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
-                if let SelectEvent::Confirm(Some(index)) = event {
-                    let choice = match *index {
-                        SUBTITLES_OFF => SubtitleChoice::Off,
-                        index => SubtitleChoice::Stream(index),
-                    };
-                    this.now_playing
-                        .update(cx, |state, cx| state.change_subtitle(choice, cx));
-                }
-            }));
-        }
-
         let mut frames = now_playing.read(cx).video.frames();
         let _frames = cx.spawn_in(window, async move |this, cx| {
             while frames.changed().await.is_ok() {
@@ -229,11 +202,10 @@ impl PlayerPage {
             auto_skipped: None,
             version: None,
             trickplay: None,
-            audio,
-            subtitle,
             controls_visible: true,
             hide_controls: None,
             menu_open: false,
+            settings_tab: SettingsTab::Audio,
             seek_bounds: Bounds::default(),
             seek_hover: None,
             show_remaining: crate::config::Config::load().show_remaining_time.unwrap_or(false),
@@ -801,8 +773,6 @@ impl PlayerPage {
                         )
                     })
                     .children(self.version.as_ref().map(|s| picker(s, 140., 240.)))
-                    .children(self.audio.as_ref().map(|s| picker(s, 200., 320.)))
-                    .children(self.subtitle.as_ref().map(|s| picker(s, 200., 320.)))
                     .child(self.render_settings(cx))
                     .child(
                         Button::new("fullscreen")
@@ -1003,62 +973,218 @@ fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
                 })
                 .collect()
         });
+    let tab = page.read(cx).settings_tab;
+    // From the playing version every time, so the lists follow a version switch, and the
+    // selection follows track changes made from a remote.
+    let (audio_choices, subtitle_choices) = track_choices(&state.source);
+    let audio_selected = state.audio.or(state.source.default_audio_stream_index);
+    let subtitle_selected = match state.subtitle {
+        SubtitleChoice::Stream(index) => index,
+        SubtitleChoice::Off => SUBTITLES_OFF,
+        SubtitleChoice::Auto => state.source.default_subtitle_stream_index.unwrap_or(SUBTITLES_OFF),
+    };
+    let audio_list = {
+        let page = page.clone();
+        track_list(
+            "audio-tracks",
+            "No audio tracks",
+            &audio_choices,
+            audio_selected,
+            cx,
+            move |value, cx| {
+                page.update(cx, |this, cx| {
+                    this.now_playing.update(cx, |state, cx| state.change_audio(value, cx));
+                });
+            },
+        )
+    };
+    let subtitle_list = {
+        let page = page.clone();
+        track_list(
+            "subtitle-tracks",
+            "No subtitles",
+            &subtitle_choices,
+            Some(subtitle_selected),
+            cx,
+            move |value, cx| {
+                let choice = match value {
+                    SUBTITLES_OFF => SubtitleChoice::Off,
+                    index => SubtitleChoice::Stream(index),
+                };
+                page.update(cx, |this, cx| {
+                    this.now_playing
+                        .update(cx, |state, cx| state.change_subtitle(choice, cx));
+                });
+            },
+        )
+    };
+    let content: Vec<AnyElement> = match tab {
+        SettingsTab::Audio => vec![
+            section_label("Track", cx),
+            audio_list,
+            stepper(
+                "Audio delay",
+                delay(adjustments.audio_delay),
+                button(
+                    "audio-delay-down",
+                    "−0.1".into(),
+                    Box::new(|a| a.audio_delay -= Adjustments::DELAY_STEP),
+                ),
+                button(
+                    "audio-delay-up",
+                    "+0.1".into(),
+                    Box::new(|a| a.audio_delay += Adjustments::DELAY_STEP),
+                ),
+                button("audio-delay-reset", "Reset".into(), Box::new(|a| a.audio_delay = 0.)),
+            )
+            .into_any_element(),
+        ],
+        SettingsTab::Subtitles => vec![
+            section_label("Track", cx),
+            subtitle_list,
+            stepper(
+                "Subtitle delay",
+                delay(adjustments.subtitle_delay),
+                button(
+                    "sub-delay-down",
+                    "−0.1".into(),
+                    Box::new(|a| a.subtitle_delay -= Adjustments::DELAY_STEP),
+                ),
+                button(
+                    "sub-delay-up",
+                    "+0.1".into(),
+                    Box::new(|a| a.subtitle_delay += Adjustments::DELAY_STEP),
+                ),
+                button("sub-delay-reset", "Reset".into(), Box::new(|a| a.subtitle_delay = 0.)),
+            )
+            .into_any_element(),
+            stepper(
+                "Subtitle size",
+                format!("{:.0}%", adjustments.subtitle_scale * 100.),
+                button(
+                    "sub-size-down",
+                    "−".into(),
+                    Box::new(|a| a.subtitle_scale -= Adjustments::SCALE_STEP),
+                ),
+                button(
+                    "sub-size-up",
+                    "+".into(),
+                    Box::new(|a| a.subtitle_scale += Adjustments::SCALE_STEP),
+                ),
+                button("sub-size-reset", "Reset".into(), Box::new(|a| a.subtitle_scale = 1.)),
+            )
+            .into_any_element(),
+        ],
+        SettingsTab::General => vec![speed_row.into_any_element()],
+    };
+    let hint = match tab {
+        SettingsTab::Audio => None,
+        SettingsTab::Subtitles => Some("Keys: z and x change the subtitle delay."),
+        SettingsTab::General => Some("Keys: [ and ] change the speed."),
+    };
+    let tabs_page = page.clone();
     v_flex()
         .p_1()
-        .gap_2()
-        .child(speed_row)
-        .child(stepper(
-            "Subtitle delay",
-            delay(adjustments.subtitle_delay),
-            button(
-                "sub-delay-down",
-                "−0.1".into(),
-                Box::new(|a| a.subtitle_delay -= Adjustments::DELAY_STEP),
-            ),
-            button(
-                "sub-delay-up",
-                "+0.1".into(),
-                Box::new(|a| a.subtitle_delay += Adjustments::DELAY_STEP),
-            ),
-            button("sub-delay-reset", "Reset".into(), Box::new(|a| a.subtitle_delay = 0.)),
-        ))
-        .child(stepper(
-            "Audio delay",
-            delay(adjustments.audio_delay),
-            button(
-                "audio-delay-down",
-                "−0.1".into(),
-                Box::new(|a| a.audio_delay -= Adjustments::DELAY_STEP),
-            ),
-            button(
-                "audio-delay-up",
-                "+0.1".into(),
-                Box::new(|a| a.audio_delay += Adjustments::DELAY_STEP),
-            ),
-            button("audio-delay-reset", "Reset".into(), Box::new(|a| a.audio_delay = 0.)),
-        ))
-        .child(stepper(
-            "Subtitle size",
-            format!("{:.0}%", adjustments.subtitle_scale * 100.),
-            button(
-                "sub-size-down",
-                "−".into(),
-                Box::new(|a| a.subtitle_scale -= Adjustments::SCALE_STEP),
-            ),
-            button(
-                "sub-size-up",
-                "+".into(),
-                Box::new(|a| a.subtitle_scale += Adjustments::SCALE_STEP),
-            ),
-            button("sub-size-reset", "Reset".into(), Box::new(|a| a.subtitle_scale = 1.)),
-        ))
+        .gap_3()
+        .min_w(px(380.))
         .child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child("Keys: [ and ] change the speed, z and x the subtitle delay."),
+            TabBar::new("player-settings-tabs")
+                .segmented()
+                .small()
+                .selected_index(tab as usize)
+                .children(SettingsTab::ALL.map(|tab| Tab::new().label(tab.label())))
+                .on_click(move |index, _, cx| {
+                    tabs_page.update(cx, |this, cx| {
+                        this.settings_tab = SettingsTab::ALL[*index];
+                        cx.notify();
+                    });
+                }),
         )
+        .child(v_flex().gap_2().children(content))
+        .when_some(hint, |el, hint| {
+            el.child(div().text_xs().text_color(cx.theme().muted_foreground).child(hint))
+        })
         .into_any_element()
+}
+
+/// A small heading inside a settings tab.
+fn section_label(text: &'static str, cx: &App) -> AnyElement {
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(text)
+        .into_any_element()
+}
+
+/// A settings tab's list of tracks to pick from, the selected one checked. A plain list rather
+/// than a select: a select's menu would count as a click outside the settings popover and
+/// close it.
+fn track_list(
+    id: &'static str,
+    empty: &'static str,
+    choices: &[Choice],
+    selected: Option<i32>,
+    cx: &App,
+    choose: impl Fn(i32, &mut App) + 'static,
+) -> AnyElement {
+    if choices.is_empty() {
+        return div()
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+            .child(empty)
+            .into_any_element();
+    }
+    // Without a track saved or a default, the first one plays.
+    let selected = selected
+        .filter(|value| choices.iter().any(|c| c.value == *value))
+        .unwrap_or(choices[0].value);
+    let choose = Rc::new(choose);
+    let hover = cx.theme().accent;
+    v_flex()
+        .id(id)
+        .max_h(px(220.))
+        .overflow_y_scroll()
+        .children(choices.iter().enumerate().map(|(i, choice)| {
+            let value = choice.value;
+            let choose = choose.clone();
+            h_flex()
+                .id((id, i))
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .cursor_pointer()
+                .hover(move |style| style.bg(hover))
+                .on_click(move |_, _, cx| choose(value, cx))
+                .child(
+                    div()
+                        .flex_none()
+                        .size_4()
+                        .when(value == selected, |el| el.child(Icon::new(IconName::Check).small())),
+                )
+                .child(div().text_sm().truncate().child(choice.label.clone()))
+        }))
+        .into_any_element()
+}
+
+/// The tabs of the player's settings menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsTab {
+    Audio,
+    Subtitles,
+    General,
+}
+
+impl SettingsTab {
+    const ALL: [Self; 3] = [Self::Audio, Self::Subtitles, Self::General];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Audio => "Audio",
+            Self::Subtitles => "Subtitles",
+            Self::General => "General",
+        }
+    }
 }
 
 /// A small label in the player's bars.

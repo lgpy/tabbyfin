@@ -39,6 +39,34 @@ fn label(stream: &MediaStream) -> SharedString {
         .into()
 }
 
+/// The audio and subtitle choices of a media source: its audio tracks, and "Off" followed by
+/// its subtitle tracks. Empty for a kind the source lacks.
+pub fn track_choices(source: &MediaSourceInfo) -> (Vec<Choice>, Vec<Choice>) {
+    let choices = |kind| -> Vec<Choice> {
+        source
+            .media_streams
+            .iter()
+            .filter(|s| s.kind == kind)
+            .map(|s| Choice {
+                label: label(s),
+                value: s.index,
+            })
+            .collect()
+    };
+    let audio = choices(MediaStreamType::Audio);
+    let mut subtitles = choices(MediaStreamType::Subtitle);
+    if !subtitles.is_empty() {
+        subtitles.insert(
+            0,
+            Choice {
+                label: "Off".into(),
+                value: SUBTITLES_OFF,
+            },
+        );
+    }
+    (audio, subtitles)
+}
+
 /// Audio and subtitle pickers for a media source, with `audio` / `subtitle` (Jellyfin stream
 /// indexes, [`SUBTITLES_OFF`] for none) preselected. `None` for a kind the source lacks.
 pub fn track_pickers<V: 'static>(
@@ -48,33 +76,12 @@ pub fn track_pickers<V: 'static>(
     window: &mut Window,
     cx: &mut Context<V>,
 ) -> (Option<ChoiceSelect>, Option<ChoiceSelect>) {
-    let streams = |kind| -> Vec<&MediaStream> { source.media_streams.iter().filter(|s| s.kind == kind).collect() };
-
-    let audio_streams = streams(MediaStreamType::Audio);
-    let audio = (!audio_streams.is_empty()).then(|| {
-        let choices: Vec<Choice> = audio_streams
-            .iter()
-            .map(|s| Choice {
-                label: label(s),
-                value: s.index,
-            })
-            .collect();
-        let selected = choices.iter().position(|c| Some(c.value) == audio).unwrap_or(0);
-        cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
-    });
-
-    let subtitle_streams = streams(MediaStreamType::Subtitle);
-    let subtitle = (!subtitle_streams.is_empty()).then(|| {
-        let mut choices = vec![Choice {
-            label: "Off".into(),
-            value: SUBTITLES_OFF,
-        }];
-        choices.extend(subtitle_streams.iter().map(|s| Choice {
-            label: label(s),
-            value: s.index,
-        }));
-        let selected = choices.iter().position(|c| Some(c.value) == subtitle).unwrap_or(0);
-        cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
-    });
-    (audio, subtitle)
+    let mut picker = |choices: Vec<Choice>, value: Option<i32>| {
+        (!choices.is_empty()).then(|| {
+            let selected = choices.iter().position(|c| Some(c.value) == value).unwrap_or(0);
+            cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
+        })
+    };
+    let (audio_choices, subtitle_choices) = track_choices(source);
+    (picker(audio_choices, audio), picker(subtitle_choices, subtitle))
 }
