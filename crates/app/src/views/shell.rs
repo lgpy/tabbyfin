@@ -302,7 +302,8 @@ impl ShellView {
             .child(
                 Button::new("home")
                     .ghost()
-                    .label("Home")
+                    .icon(Lucide::House)
+                    .tooltip("Home")
                     .on_click(cx.listener(|this, _, window, cx| this.home(window, cx))),
             )
             .child(div().flex_1().truncate().font_weight(FontWeight::SEMIBOLD).child(title))
