@@ -54,8 +54,12 @@ fn image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, rounded: bool, c
         .zip(req.tag.as_deref())
         .and_then(|(item, tag)| item.blur_hash(req.image_type, tag));
     let preview = hash.and_then(|hash| cache.update(cx, |cache, cx| cache.placeholder(hash, cx)));
+    // Pinned to the parent's edges: a `size_full` image's percentage height doesn't resolve here,
+    // so it'd take the picture's own aspect ratio and run past the card's (clipped, square) bottom.
     let cover = |image| {
         img(ImageSource::Render(image))
+            .absolute()
+            .inset_0()
             .size_full()
             .object_fit(ObjectFit::Cover)
             .when(rounded, |img| img.rounded_xl())
