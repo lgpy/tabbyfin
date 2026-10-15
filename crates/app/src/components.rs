@@ -188,7 +188,7 @@ fn progress_bar(fraction: f32, cx: &App) -> impl IntoElement {
         .h(dp(4.))
         .rounded_full()
         .overflow_hidden()
-        .bg(black().opacity(0.6))
+        .bg(crate::theme::over_video::track())
         .child(
             div()
                 .h_full()
@@ -260,7 +260,6 @@ fn card_with_text(
         .w(dp(width))
         .flex_none()
         .gap_1()
-        .cursor_pointer()
         .on_click(on_click)
         .child(
             div()
@@ -400,7 +399,6 @@ pub fn chapter_card(
         .w(dp(LANDSCAPE_W))
         .flex_none()
         .gap_1()
-        .cursor_pointer()
         .on_click(on_click)
         .child(
             div()
@@ -458,7 +456,6 @@ pub fn person_card(
         .w(dp(width))
         .flex_none()
         .gap_1()
-        .cursor_pointer()
         .on_click(on_click)
         .child(
             div()

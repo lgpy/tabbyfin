@@ -245,7 +245,6 @@ impl AddToPlaylist {
                     .px_2()
                     .py_1p5()
                     .rounded_lg()
-                    .cursor_pointer()
                     .when(i == self.highlighted, |el| el.bg(cx.theme().accent))
                     .hover(|style| style.bg(cx.theme().muted))
                     .on_click(cx.listener(move |this, _, window, cx| this.choose(i, window, cx)))

@@ -26,6 +26,7 @@ use crate::markers::{self, SegmentKind};
 use crate::motion;
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::smooth_scroll::smooth_wheel;
+use crate::theme::over_video as ov;
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_choices};
 use crate::trickplay::Trickplay;
 use crate::zoom::dp;
@@ -620,15 +621,22 @@ impl PlayerPage {
             .gap_3()
             .bg(linear_gradient(
                 180.,
-                linear_color_stop(black().opacity(0.7), 0.),
-                linear_color_stop(black().opacity(0.), 1.),
+                linear_color_stop(ov::scrim(), 0.),
+                linear_color_stop(ov::clear(), 1.),
             ))
             .child(
                 control_button("exit-player", IconName::ArrowLeft, CONTROL)
                     .tooltip("Back (Esc)")
                     .on_click(cx.listener(|this, _, window, cx| this.exit_player(&ExitPlayer, window, cx))),
             )
-            .child(div().flex_1().text_lg().text_color(white()).truncate().child(title))
+            .child(
+                div()
+                    .flex_1()
+                    .text_lg()
+                    .text_color(ov::foreground())
+                    .truncate()
+                    .child(title),
+            )
             .when(state.group_item.is_some(), |el| el.child(badge("SyncPlay")))
             .when(state.is_transcoding(), |el| el.child(badge("Transcoding")));
 
@@ -644,8 +652,8 @@ impl PlayerPage {
             .gap_2()
             .bg(linear_gradient(
                 0.,
-                linear_color_stop(black().opacity(0.8), 0.),
-                linear_color_stop(black().opacity(0.), 1.),
+                linear_color_stop(ov::scrim_strong(), 0.),
+                linear_color_stop(ov::clear(), 1.),
             ))
             .children(self.seek.as_ref().map(|seek| {
                 let page = cx.entity();
@@ -680,7 +688,7 @@ impl PlayerPage {
                             .left(relative(fraction))
                             .w(dp(2.))
                             .h(dp(CHAPTER_MARK_H))
-                            .bg(white().opacity(0.6))
+                            .bg(ov::mark())
                     }))
                     .when_some(hover, |el, (offset, time)| {
                         // Centred on the mouse, but kept over the bar.
@@ -703,16 +711,16 @@ impl PlayerPage {
                                             .h(px(PREVIEW_W / aspect_ratio))
                                             .rounded_sm()
                                             .border_1()
-                                            .border_color(white().opacity(0.6)),
+                                            .border_color(ov::mark()),
                                     )
                                 })
                                 .child(
                                     div()
                                         .px_1()
                                         .rounded_sm()
-                                        .bg(black().opacity(0.8))
+                                        .bg(ov::surface())
                                         .text_xs()
-                                        .text_color(white())
+                                        .text_color(ov::foreground())
                                         .child(timestamp(time)),
                                 ),
                         )
@@ -721,7 +729,7 @@ impl PlayerPage {
             .child(
                 h_flex()
                     .gap_3()
-                    .text_color(white())
+                    .text_color(ov::foreground())
                     .child(
                         control_button(
                             "play-pause",
@@ -752,8 +760,7 @@ impl PlayerPage {
                             .id("time")
                             .ml_2()
                             .text_sm()
-                            .text_color(white().opacity(0.9))
-                            .cursor_pointer()
+                            .text_color(ov::foreground())
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_remaining(cx)))
                             .child(time),
                     )
@@ -869,15 +876,15 @@ impl PlayerPage {
                 .p_3()
                 .gap_2()
                 .rounded_xl()
-                .bg(black().opacity(0.8))
-                .text_color(white())
-                .child(div().text_sm().text_color(white().opacity(0.7)).child("Up next"))
+                .bg(ov::surface())
+                .text_color(ov::foreground())
+                .child(div().text_sm().text_color(ov::muted_foreground()).child("Up next"))
                 .child(div().truncate().child(label))
                 .when_some(remaining.filter(|_| state.autoplay), |el, remaining| {
                     el.child(
                         div()
                             .text_sm()
-                            .text_color(white().opacity(0.7))
+                            .text_color(ov::muted_foreground())
                             .child(format!("Starts in {} s", remaining.as_secs())),
                     )
                 })
@@ -905,8 +912,8 @@ impl PlayerPage {
                 .p_3()
                 .gap_3()
                 .rounded_xl()
-                .bg(black().opacity(0.8))
-                .text_color(white())
+                .bg(ov::surface())
+                .text_color(ov::foreground())
                 .child(div().text_sm().child(format!("Resumed from {}", timestamp(from))))
                 .child(
                     Button::new("start-over")
@@ -967,7 +974,6 @@ fn chapters_panel(page: &Entity<PlayerPage>, cx: &mut Context<PopoverState>) -> 
                 .gap_3()
                 .p_1()
                 .rounded_lg()
-                .cursor_pointer()
                 .when(current == Some(chapter.index), |el| el.bg(cx.theme().accent))
                 .hover(|style| style.bg(cx.theme().muted))
                 .on_click(move |_, window, cx| {
@@ -1257,7 +1263,6 @@ fn track_list(
                 .gap_2()
                 .px_2()
                 .rounded_lg()
-                .cursor_pointer()
                 .hover(move |style| style.bg(hover))
                 .on_click(move |_, _, cx| choose(value, cx))
                 .child(
@@ -1313,9 +1318,9 @@ fn badge(text: impl Into<SharedString>) -> impl IntoElement {
         .flex_none()
         .px_2()
         .rounded_lg()
-        .bg(black().opacity(0.5))
+        .bg(ov::surface_subtle())
         .text_sm()
-        .text_color(white().opacity(0.8))
+        .text_color(ov::muted_foreground())
         .child(text.into())
 }
 
@@ -1349,7 +1354,7 @@ impl Render for PlayerPage {
             .id("player")
             .relative()
             .size_full()
-            .bg(black())
+            .bg(ov::backdrop())
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_pause))

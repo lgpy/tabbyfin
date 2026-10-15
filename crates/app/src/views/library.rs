@@ -588,7 +588,6 @@ impl LibraryPage {
                     .id(("letter", letter as usize))
                     .px_1()
                     .rounded_sm()
-                    .cursor_pointer()
                     .hover(|style| style.bg(cx.theme().accent).text_color(cx.theme().accent_foreground))
                     .on_click(cx.listener(move |this, _, window, cx| this.jump_to(letter, false, window, cx)))
                     .child(letter.to_string())
