@@ -274,7 +274,8 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
    - More: seek to the group's position.
    - In WSL with software rendering, a member drifts up to about 0.4 s while playback warms up, is back within 0.1 s after about 8 s, and stays within ±70 ms after that.
 
-Not yet: track changes that need a new transcode, and version switches, don't stay in sync.
+8. **Local reloads:** another version, or a transcode restarted for other tracks, reloads the item here only (`NowPlaying::reload` → `SyncPlay::reload`): report `Buffering` (the server pauses everyone and keeps the group's position), load paused as the same queue entry, report `Ready` once loaded (the server resumes everyone, or first has this member seek if it landed elsewhere). The old session stops being watched first, or it would answer `Ready` at once.
+9. **The queue:** the SyncPlay menu lists the group's queue (names fetched by id) with the playing entry marked: `SetPlaylistItem` plays an entry, `MovePlaylistItem` and `RemoveFromPlaylist` edit it, `SetShuffleMode` and `SetRepeatMode` set the modes. The changes come back as queue updates to everyone.
 
 ## 6. App architecture (GPUI side)
 
