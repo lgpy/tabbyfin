@@ -208,8 +208,8 @@ impl Client {
             .await
     }
 
-    /// Creates a playlist of videos owned by the signed-in user, with `ids` in it, and returns
-    /// its id.
+    /// Creates a private playlist of videos owned by the signed-in user, with `ids` in it, and
+    /// returns its id. (Left out, `IsPublic` defaults to shared with everyone on 10.11 and 12.2.)
     pub async fn create_playlist(&self, name: &str, ids: &[String]) -> Result<String> {
         #[derive(serde::Serialize)]
         #[serde(rename_all = "PascalCase")]
@@ -217,6 +217,7 @@ impl Client {
             name: &'a str,
             ids: &'a [String],
             media_type: &'a str,
+            is_public: bool,
         }
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "PascalCase")]
@@ -227,9 +228,38 @@ impl Client {
             name,
             ids,
             media_type: "Video",
+            is_public: false,
         };
         let created: Created = self.post("/Playlists", &Query::new(), Some(&body)).await?;
         Ok(created.id)
+    }
+
+    /// Whether a playlist is shared with everyone on the server.
+    pub async fn playlist_is_public(&self, playlist_id: &str) -> Result<bool> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Playlist {
+            #[serde(default)]
+            open_access: bool,
+        }
+        let playlist: Playlist = self.get(&format!("/Playlists/{playlist_id}"), &Query::new()).await?;
+        Ok(playlist.open_access)
+    }
+
+    /// Renames a playlist and/or shares it with everyone; `None` leaves that as it is. Other
+    /// users' playlists answer 404.
+    pub async fn update_playlist(&self, playlist_id: &str, name: Option<&str>, is_public: Option<bool>) -> Result<()> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Body<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            name: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            is_public: Option<bool>,
+        }
+        let body = Body { name, is_public };
+        self.post_no_content(&format!("/Playlists/{playlist_id}"), &Query::new(), Some(&body))
+            .await
     }
 
     /// Appends items to a playlist. A series or season adds its episodes. 12.2 adds an item

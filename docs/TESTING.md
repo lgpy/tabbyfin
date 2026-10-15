@@ -43,6 +43,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ Favoriting from another device shows up in the Home shelf (via the live connection).
 ✅ Playlist editing on 12.2 with the keyboard: Alt+Down then Delete on the first entry (the server's order matched), *Add to playlist* to an existing playlist, again (says it's already there), to a new one, and *Delete playlist*. The API round trip is in the `smoke` example (both versions).
 
+✅ *Edit* on a playlist by keyboard: renamed, shared with everyone (the server's `OpenAccess`), and the `smoke` example checks private creation, rename and sharing on both versions.
+
 - ⬜ **Playlist editing with the mouse**: the entry buttons, clicking a playlist in the *Add to playlist* dialog, and quick repeated moves landing in the server's order. As a second user (dev2), adding to dev's playlist or deleting it gives the "belongs to someone else" message.
 - ⬜ **Collections and playlists** from a real library (TMDb collections, a long playlist): *Play all* and *Shuffle* go through the whole list, the up-next card names the next entry, and playing something else ends the queue.
 - ⬜ *Play all* while in a SyncPlay group plays the list for the whole group.

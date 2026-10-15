@@ -221,8 +221,17 @@ async fn main() -> anyhow::Result<()> {
     client.remove_from_playlist(&playlist, &[entry(&entries[0])?]).await?;
     let entries = client.playlist_items(&playlist, &[]).await?.items;
     ensure!(ids(&entries) == [movie.id.clone()], "remove didn't stick");
+    ensure!(!client.playlist_is_public(&playlist).await?, "a new playlist is shared");
+    client
+        .update_playlist(&playlist, Some("smoke test renamed"), Some(true))
+        .await?;
+    ensure!(client.playlist_is_public(&playlist).await?, "sharing didn't stick");
+    ensure!(
+        client.item(&playlist, &[]).await?.name == "smoke test renamed",
+        "rename didn't stick"
+    );
     client.delete_item(&playlist).await?;
-    ok("playlist created, added to, reordered, trimmed and deleted");
+    ok("playlist created (private), added to, reordered, trimmed, renamed, shared and deleted");
 
     // Jellyfin 12.0+; older servers have no such route, which reads as no collections.
     let collections = client.item_collections(&movie.id).await?;

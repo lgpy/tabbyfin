@@ -26,7 +26,7 @@ use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
 use crate::router::{Navigator, Route};
 use crate::runtime;
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, cycle_choice, step_choice, track_pickers};
-use crate::views::add_to_playlist;
+use crate::views::{add_to_playlist, edit_playlist};
 
 const BACKDROP_H: f32 = 340.;
 const DETAIL_POSTER_W: f32 = 200.;
@@ -585,6 +585,10 @@ impl ItemPage {
                     .outline()
                     .icon(Lucide::ListPlus)
                     .label("Add to playlist"),
+                ItemAction::EditPlaylist => Button::new("edit-playlist")
+                    .outline()
+                    .icon(Lucide::Pencil)
+                    .label("Edit"),
                 ItemAction::DeletePlaylist => Button::new("delete-playlist")
                     .outline()
                     .icon(Lucide::Trash)
@@ -647,6 +651,11 @@ impl ItemPage {
             ItemAction::AddToPlaylist => {
                 let Load::Loaded(data) = &self.data else { return };
                 add_to_playlist::open(self.client.clone(), self.nav.clone(), &data.item, window, cx);
+            }
+            ItemAction::EditPlaylist => {
+                let Load::Loaded(data) = &self.data else { return };
+                let (id, name) = (data.item.id.clone(), data.item.name.clone());
+                edit_playlist::open(self.client.clone(), self.nav.clone(), id, name, window, cx);
             }
             ItemAction::DeletePlaylist => self.confirm_delete(window, cx),
             // A trailer file plays here; a trailer on the web opens in the browser.
@@ -1146,6 +1155,8 @@ enum ItemAction {
     PlayAll,
     Shuffle,
     AddToPlaylist,
+    /// Rename or share. Offered on every playlist; the server refuses other users' ones.
+    EditPlaylist,
     /// Only offered when the server says the user may delete it.
     DeletePlaylist,
 }
@@ -1179,6 +1190,9 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
         BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video | BaseItemKind::Series | BaseItemKind::Season
     ) {
         actions.push(ItemAction::AddToPlaylist);
+    }
+    if item.kind == BaseItemKind::Playlist {
+        actions.push(ItemAction::EditPlaylist);
     }
     if item.kind == BaseItemKind::Playlist && item.can_delete == Some(true) {
         actions.push(ItemAction::DeletePlaylist);
