@@ -39,6 +39,7 @@ pub struct AppView {
     /// `last_placement` changed since it was last saved; closing the window saves it right away.
     placement_unsaved: bool,
     _appearance: Subscription,
+    _text_size: Subscription,
 }
 
 impl AppView {
@@ -60,6 +61,7 @@ impl AppView {
             placement_save: None,
             placement_unsaved: false,
             _appearance: theme::follow_system(window),
+            _text_size: theme::follow_system_text_size(window, cx),
         };
         match config.server {
             Some(saved) => this.restore(saved, true, window, cx),

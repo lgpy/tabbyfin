@@ -403,7 +403,7 @@ impl SettingsPage {
             | Control::SubtitleStyle
             | Control::SubtitleSize => {
                 let select = self.select(control).expect("a picker");
-                Select::new(select).w(rems(180. / 16.)).into_any_element()
+                Select::new(select).w(rems(220. / 16.)).into_any_element()
             }
             Control::Autoplay => switch(
                 "autoplay",

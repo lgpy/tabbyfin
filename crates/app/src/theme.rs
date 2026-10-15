@@ -1,7 +1,7 @@
 //! The light or dark theme, from the user's choice or the system's appearance, and the text
 //! size.
 
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
@@ -48,14 +48,48 @@ pub fn text_scale(setting: Option<u16>) -> f32 {
     scale.clamp(0.75, 2.)
 }
 
-/// The system's text size, read once: Windows' *Accessibility → Text size*, GNOME's text
-/// scaling factor (also set by its *Large Text* switch); 1.0 elsewhere or if it can't be read.
+/// The system's text size as last read (`recheck_system_text_size`).
+static SYSTEM_SCALE: Mutex<Option<f32>> = Mutex::new(None);
+
+/// The system's text size: Windows' *Accessibility → Text size*, GNOME's text scaling factor
+/// (also set by its *Large Text* switch), KDE's general font size against its default 10 pt;
+/// 1.0 elsewhere or if it can't be read. Read at launch, then again whenever the window
+/// becomes active.
 pub fn system_text_scale() -> f32 {
-    static SCALE: OnceLock<f32> = OnceLock::new();
-    *SCALE.get_or_init(|| {
-        read_system_text_scale()
-            .filter(|s| s.is_finite() && *s > 0.)
-            .unwrap_or(1.)
+    *SYSTEM_SCALE
+        .lock()
+        .unwrap()
+        .get_or_insert_with(read_valid_system_text_scale)
+}
+
+fn read_valid_system_text_scale() -> f32 {
+    read_system_text_scale()
+        .filter(|s| s.is_finite() && *s > 0.)
+        .unwrap_or(1.)
+}
+
+/// Follows changes to the system text size while the setting follows the system. Systems
+/// don't tell apps reliably, so it's read again whenever `window` becomes active: after
+/// changing it in the system settings, switching back to the app applies it.
+pub fn follow_system_text_size<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Subscription {
+    cx.observe_window_activation(window, |_, window, cx| {
+        if !window.is_window_active() || Config::load().text_size.is_some() {
+            return;
+        }
+        // Reading it starts a process (`reg`, `gsettings`); keep that off the UI thread.
+        let read = cx.background_spawn(async { read_valid_system_text_scale() });
+        cx.spawn(async move |_, cx| {
+            let scale = read.await;
+            let changed = SYSTEM_SCALE.lock().unwrap().replace(scale) != Some(scale);
+            if changed {
+                tracing::info!(scale, "system text size changed");
+                cx.update(|cx| {
+                    apply_text_size(cx);
+                    cx.refresh_windows();
+                });
+            }
+        })
+        .detach();
     })
 }
 
@@ -78,6 +112,21 @@ fn read_system_text_scale() -> Option<f32> {
 
 #[cfg(target_os = "linux")]
 fn read_system_text_scale() -> Option<f32> {
+    let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| desktop.split(':').any(|d| d == "KDE"));
+    if kde {
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::home_dir().map(|home| home.join(".config")))?;
+        let kdeglobals = std::fs::read_to_string(config.join("kdeglobals")).ok();
+        // No `font` entry: KDE's default size, so 100%.
+        return Some(
+            kdeglobals
+                .as_deref()
+                .and_then(parse_kde_font_size)
+                .unwrap_or(KDE_DEFAULT_POINTS)
+                / KDE_DEFAULT_POINTS,
+        );
+    }
     let output = std::process::Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "text-scaling-factor"])
         .output()
@@ -87,6 +136,31 @@ fn read_system_text_scale() -> Option<f32> {
 
 #[cfg(not(any(windows, target_os = "linux")))]
 fn read_system_text_scale() -> Option<f32> {
+    None
+}
+
+/// KDE's default general font size (Noto Sans 10), which counts as 100%.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const KDE_DEFAULT_POINTS: f32 = 10.;
+
+/// The point size of the general font in `kdeglobals`: `font=Noto Sans,11,-1,5,…` in the
+/// `[General]` group.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_kde_font_size(kdeglobals: &str) -> Option<f32> {
+    let mut general = false;
+    for line in kdeglobals.lines().map(str::trim) {
+        if line.starts_with('[') {
+            general = line == "[General]";
+        } else if general && let Some(value) = line.strip_prefix("font=") {
+            return value
+                .split(',')
+                .nth(1)?
+                .trim()
+                .parse()
+                .ok()
+                .filter(|points: &f32| *points > 0.);
+        }
+    }
     None
 }
 
@@ -109,7 +183,7 @@ pub fn follow_system(window: &mut Window) -> Subscription {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_reg_dword, text_scale};
+    use super::{parse_kde_font_size, parse_reg_dword, text_scale};
 
     #[test]
     fn reads_the_windows_text_size() {
@@ -126,5 +200,14 @@ mod tests {
     fn chosen_sizes_win_and_stay_in_range() {
         assert_eq!(text_scale(Some(130)), 1.3);
         assert_eq!(text_scale(Some(400)), 2.);
+    }
+
+    #[test]
+    fn reads_the_kde_font_size() {
+        let kdeglobals = "[General]\nColorScheme=BreezeDark\nfont=Noto Sans,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1\n\n[WM]\nfont=Noto Sans,9,-1,5,700,0,0,0,0,0\n";
+        assert_eq!(parse_kde_font_size(kdeglobals), Some(12.));
+        // The general font only, not the window title's.
+        assert_eq!(parse_kde_font_size("[WM]\nfont=Noto Sans,9,-1,5\n"), None);
+        assert_eq!(parse_kde_font_size("[General]\nfont=Inter,10.5,-1,5\n"), Some(10.5));
     }
 }
