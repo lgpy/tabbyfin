@@ -196,3 +196,10 @@ Code-level and startup checks only so far: the development harness cannot send m
 - ⬜ **Real hovering** along a long film: thumbnails follow the mouse, appear quickly after the first hover over a sheet's range, and stay on screen at the bar's ends.
 - ⬜ An item **without tiles** shows only the time; a version switch shows the new version's tiles.
 - ⬜ **10.11** (the same endpoints) with tiles generated.
+
+## 18. Resume prompt (2.1.10)
+
+✅ With `JELLY_GPUI_KEYS` against 12.2: Shift+P from S01E02 resumed S01E01 at 0:25 with "Resumed from 0:25 · Start over", and Enter restarted it from 0:00.
+
+- ⬜ **Autoplay** into an episode with a resume point shows the card, and it goes away by itself after 10 s.
+- ⬜ Clicking **Start over**; in a **SyncPlay** group it's a group seek.

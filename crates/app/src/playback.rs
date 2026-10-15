@@ -52,6 +52,9 @@ pub struct PlayOptions {
     pub start_paused: bool,
     /// The SyncPlay queue entry this plays, when the group controls playback.
     pub group_item: Option<String>,
+    /// `start` is the item's resume point, taken without asking (next episode, autoplay), so
+    /// the player offers to start over.
+    pub resumed: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -202,6 +205,9 @@ struct Details {
 /// Trickplay tile sets by media source id, then thumbnail width (see [`crate::trickplay`]).
 pub type TrickplayTiles = HashMap<String, HashMap<String, TrickplayInfo>>;
 
+/// How long into playback from a resume point the player offers to start over.
+const RESUME_PROMPT_FOR: Duration = Duration::from_secs(10);
+
 /// When the up-next card shows without an Outro segment: this long before the end.
 const UP_NEXT_BEFORE_END: Duration = Duration::from_secs(20);
 
@@ -243,6 +249,8 @@ pub struct NowPlaying {
     pub stream: StreamInfo,
     /// The SyncPlay queue entry, while a group controls playback.
     pub group_item: Option<String>,
+    /// Where playback resumed without asking, while the player may still offer to start over.
+    pub resumed_from: Option<Duration>,
     /// Counts [`PlayerEvent::Restarted`]: playback resumed after loading or seeking.
     pub restarts: u64,
     commands: mpsc::UnboundedSender<UiCommand>,
@@ -303,6 +311,21 @@ impl NowPlaying {
         if let Some(next) = self.next.clone() {
             PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_from_resume(&next, cx));
         }
+    }
+
+    /// The resume point to offer starting over from: shown for the first [`RESUME_PROMPT_FOR`]
+    /// of playback from it, and gone after a seek elsewhere.
+    pub fn resume_prompt(&self) -> Option<Duration> {
+        let from = self.resumed_from.filter(|_| !self.loading)?;
+        let window = from.saturating_sub(Duration::from_secs(2))..from + RESUME_PROMPT_FOR;
+        window.contains(&self.position).then_some(from)
+    }
+
+    /// Plays from the beginning instead of the resume point.
+    pub fn start_over(&mut self, cx: &mut Context<Self>) {
+        self.resumed_from = None;
+        self.control(UiCommand::SeekTo(Duration::ZERO), cx);
+        cx.notify();
     }
 
     /// Plays the previous episode (or movie of the collection) from its resume point.
@@ -500,6 +523,7 @@ impl PlaybackManager {
             item,
             PlayOptions {
                 start,
+                resumed: start.is_some(),
                 ..Default::default()
             },
             cx,
@@ -597,6 +621,7 @@ impl PlaybackManager {
         }
         let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
         let group_item = options.group_item.clone();
+        let resumed_from = options.start.filter(|_| options.resumed).map(Duration::from);
         let retry_options = options.clone();
         let queued = self.queue.front().cloned();
         let (updates_tx, mut updates) = mpsc::unbounded_channel();
@@ -652,6 +677,7 @@ impl PlaybackManager {
                             segments: Vec::new(),
                             stream,
                             group_item: group_item.clone(),
+                            resumed_from,
                             restarts: 0,
                             commands,
                         });
@@ -746,6 +772,7 @@ impl PlaybackManager {
                         cx.emit(PlaybackEvent::Notice(notice.into()));
                         let options = PlayOptions {
                             start: Some(position),
+                            resumed: false,
                             ..retry_options
                         };
                         let item = item.clone();

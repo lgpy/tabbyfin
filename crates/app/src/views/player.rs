@@ -368,6 +368,8 @@ impl PlayerPage {
             self.send(UiCommand::SeekTo(segment.end), cx);
         } else if state.show_up_next() {
             self.now_playing.update(cx, |state, cx| state.play_next(cx));
+        } else if state.resume_prompt().is_some() {
+            self.now_playing.update(cx, |state, cx| state.start_over(cx));
         }
     }
 
@@ -883,7 +885,22 @@ impl PlayerPage {
                 )
                 .into_any_element()
         } else {
-            return None;
+            let from = state.resume_prompt()?;
+            h_flex()
+                .p_3()
+                .gap_3()
+                .rounded_lg()
+                .bg(black().opacity(0.8))
+                .text_color(white())
+                .child(div().text_sm().child(format!("Resumed from {}", timestamp(from))))
+                .child(
+                    Button::new("start-over")
+                        .primary()
+                        .icon(Lucide::RotateCcw)
+                        .label("Start over")
+                        .on_click(cx.listener(|this, _, window, cx| this.skip(&Skip, window, cx))),
+                )
+                .into_any_element()
         };
         let bottom = if self.controls_visible { 120. } else { 32. };
         Some(

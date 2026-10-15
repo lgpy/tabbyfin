@@ -40,7 +40,7 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
 | M | Mute |
 | Shift+N / Shift+P | Next / previous episode (or movie of the collection) |
 | PgUp / PgDn | Previous / next chapter |
-| Enter or S | Skip the intro, or play the next episode from the up-next card |
+| Enter or S | Skip the intro, play the next episode from the up-next card, or start over after an automatic resume |
 | [ / ] | Slower / faster |
 | Z / X | Subtitle delay −0.1 s / +0.1 s |
 | F | Fullscreen |
