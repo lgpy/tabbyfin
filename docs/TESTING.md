@@ -21,7 +21,10 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ Home shelves, library grid, search (Enter into results, Up back to the box), item page buttons, seasons and episodes, Back keeping the cursor; Enter on Resume plays and Esc returns focus to the item page.
 
+✅ Item page pickers by keyboard (Test Movie: version to 720p rebuilt the track pickers, then audio and subtitles stepped), W on a season's first episode (watched off and on again on the server), and Settings (theme to Light, autoplay off, subtitle colour to Yellow, saved to the config; the page scrolls with the cursor).
+
 - ⬜ With a **real keyboard**: the ring appears on the first arrow key, a mouse click hides it.
+- ⬜ Changing a picker by keyboard and then by mouse (or the other way) keeps them in step, and playing after a keyboard change uses the chosen version and tracks.
 - ⬜ A **large library** (hundreds of items): the grid scrolls to keep the selection visible, including rows that are still loading.
 - ⬜ **Window resize** while the cursor is in the library grid or search results (the column count changes).
 - ⬜ Clicking a picker or the search box and then pressing arrow keys doesn't move the cursor unexpectedly.

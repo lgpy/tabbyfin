@@ -150,7 +150,7 @@ impl ShellView {
     pub fn push(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
         let nav = Navigator::new(cx.entity().downgrade());
         let client = self.session.client.clone();
-        let mut focus = None;
+        let focus;
         let page = match route {
             Route::Home => Page {
                 title: "Home".into(),
@@ -210,7 +210,11 @@ impl ShellView {
             },
             Route::Settings => Page {
                 title: "Settings".into(),
-                view: cx.new(|cx| SettingsPage::new(self.session.clone(), window, cx)).into(),
+                view: {
+                    let page = cx.new(|cx| SettingsPage::new(self.session.clone(), window, cx));
+                    focus = Some(focuser(&page));
+                    page.into()
+                },
                 focus: None,
                 is_player: false,
             },

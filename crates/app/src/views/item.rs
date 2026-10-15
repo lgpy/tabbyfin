@@ -25,7 +25,7 @@ use crate::images::ImageCache;
 use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
 use crate::router::{Navigator, Route};
 use crate::runtime;
-use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
+use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, cycle_choice, step_choice, track_pickers};
 use crate::views::add_to_playlist;
 
 const BACKDROP_H: f32 = 340.;
@@ -281,15 +281,27 @@ impl ItemPage {
         .detach();
     }
 
-    /// Alt+Up, Alt+Down and Delete on a highlighted playlist entry.
+    /// W on a highlighted episode (or season, or entry) toggles it watched; Alt+Up, Alt+Down
+    /// and Delete move and remove a playlist entry.
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(position) = self.cursor.selected() else { return };
         let Load::Loaded(data) = &self.data else { return };
-        if position.section != CHILDREN || data.item.kind != BaseItemKind::Playlist {
+        if position.section != CHILDREN {
             return;
         }
         let keystroke = &event.keystroke;
         let modifiers = keystroke.modifiers;
+        if keystroke.key == "w" && !modifiers.modified() {
+            if let Some(child) = data.children.get(position.index) {
+                let (id, played) = (child.id.clone(), is_played(child));
+                cx.stop_propagation();
+                self.set_played(id, !played, window, cx);
+            }
+            return;
+        }
+        if data.item.kind != BaseItemKind::Playlist {
+            return;
+        }
         let action = match keystroke.key.as_str() {
             "up" if modifiers.alt && !modifiers.control && !modifiers.shift => EntryAction::Up,
             "down" if modifiers.alt && !modifiers.control && !modifiers.shift => EntryAction::Down,
@@ -754,27 +766,35 @@ impl ItemPage {
 
     fn render_pickers(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let pickers = self.pickers.as_ref()?;
-        let row = |label: &'static str, select: &ChoiceSelect| {
-            h_flex()
-                .gap_4()
-                .child(
-                    div()
-                        .w(px(90.))
-                        .flex_none()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(label),
-                )
-                .child(Select::new(select).w(px(PICKER_W)).menu_width(px(PICKER_W * 1.5)))
-        };
-        Some(
-            v_flex()
-                .px_6()
-                .gap_2()
-                .text_sm()
-                .when_some(pickers.version.as_ref(), |el, s| el.child(row("Version", s)))
-                .when_some(pickers.audio.as_ref(), |el, s| el.child(row("Audio", s)))
-                .when_some(pickers.subtitle.as_ref(), |el, s| el.child(row("Subtitles", s))),
-        )
+        let labeled = [
+            ("Version", &pickers.version),
+            ("Audio", &pickers.audio),
+            ("Subtitles", &pickers.subtitle),
+        ];
+        let rows = labeled
+            .into_iter()
+            .filter_map(|(label, select)| Some((label, select.as_ref()?)))
+            .enumerate()
+            .map(|(i, (label, select))| {
+                h_flex()
+                    .gap_4()
+                    .child(
+                        div()
+                            .w(px(90.))
+                            .flex_none()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .child(Select::new(select).w(px(PICKER_W)).menu_width(px(PICKER_W * 1.5)))
+                            .when(self.cursor.is_selected(PICKERS, i), |el| {
+                                el.child(selection_ring(cx).rounded_lg().m(px(-ACTION_RING_GAP)))
+                            }),
+                    )
+            });
+        Some(v_flex().px_6().gap_2().text_sm().children(rows))
     }
 
     /// Season cards in rows of `columns`.
@@ -909,7 +929,11 @@ impl ItemPage {
                         Button::new(("toggle-played", i))
                             .ghost()
                             .icon(if played { IconName::CircleCheck } else { IconName::Check })
-                            .tooltip(if played { "Mark unwatched" } else { "Mark watched" })
+                            .tooltip(if played {
+                                "Mark unwatched (W)"
+                            } else {
+                                "Mark watched (W)"
+                            })
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 // Don't open the episode underneath.
                                 cx.stop_propagation();
@@ -1173,10 +1197,14 @@ const DELETE_PLAYLIST_NOTE: &str =
 
 /// Cursor sections, top to bottom.
 const ACTIONS: usize = 0;
-const PEOPLE: usize = 1;
-const CHILDREN: usize = 2;
-const EXTRAS: usize = 3;
-const SIMILAR: usize = 4;
+/// Version, audio and subtitle pickers, one per row; Left and Right change them.
+const PICKERS: usize = 1;
+const PEOPLE: usize = 2;
+const CHILDREN: usize = 3;
+const EXTRAS: usize = 4;
+const SIMILAR: usize = 5;
+/// Scroll-container child index of the pickers, after the header.
+const PICKERS_INDEX: usize = 1;
 /// Padding around each action button, where the cursor's ring goes.
 const ACTION_RING_GAP: f32 = 3.;
 
@@ -1191,6 +1219,7 @@ impl Browse for ItemPage {
         };
         vec![
             Section::row(item_actions(&data.item).len()),
+            Section::grid(self.picker_selects().len(), 1),
             Section::row(data.item.people.len()),
             self.children_section(data, window),
             Section::row(data.extras.len()),
@@ -1204,6 +1233,10 @@ impl Browse for ItemPage {
             return;
         }
         let Load::Loaded(data) = &self.data else { return };
+        if position.section == PICKERS {
+            browse::reveal(&self.scroll, PICKERS_INDEX, px(CARD_GAP));
+            return;
+        }
         if position.section == PEOPLE {
             browse::reveal(&self.scroll, self.people_index(), px(CARD_GAP));
             browse::reveal(&self.people_scroll, position.index, px(24.));
@@ -1227,11 +1260,26 @@ impl Browse for ItemPage {
         browse::reveal(&self.scroll, title + 1 + row, px(CARD_GAP));
     }
 
+    fn adjust(&mut self, position: Position, forward: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if position.section != PICKERS {
+            return false;
+        }
+        if let Some(select) = self.picker_selects().get(position.index) {
+            step_choice(select, forward, window, cx);
+        }
+        // At either end the cursor stays put, rather than leaving the picker.
+        true
+    }
+
     fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
         let Load::Loaded(data) = &self.data else { return };
         if position.section == ACTIONS {
             if let Some(&action) = item_actions(&data.item).get(position.index) {
                 self.run_action(action, window, cx);
+            }
+        } else if position.section == PICKERS {
+            if let Some(select) = self.picker_selects().get(position.index) {
+                cycle_choice(select, window, cx);
             }
         } else if position.section == PEOPLE {
             if let Some(person) = data.item.people.get(position.index) {
@@ -1252,6 +1300,20 @@ impl Browse for ItemPage {
         } else if let Some(child) = data.children.get(position.index) {
             self.nav.open(child, window, cx);
         }
+    }
+}
+
+impl ItemPage {
+    /// The pickers shown, top to bottom.
+    fn picker_selects(&self) -> Vec<ChoiceSelect> {
+        let Some(pickers) = &self.pickers else {
+            return Vec::new();
+        };
+        [&pickers.version, &pickers.audio, &pickers.subtitle]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect()
     }
 }
 
