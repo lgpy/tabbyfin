@@ -17,13 +17,13 @@ use crate::browse::{Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
     CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_message, centered_spinner, error_state, placeholder_card,
-    poster_card,
+    poster_card, selection_ring,
 };
 use crate::config::{Config, LibraryView};
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
-use crate::tracks::{Choice, ChoiceSelect};
+use crate::tracks::{Choice, ChoiceSelect, cycle_choice};
 
 const PAGE_SIZE: usize = 100;
 const GRID_PADDING: f32 = 24.;
@@ -31,6 +31,28 @@ const ROW_H: f32 = POSTER_H + CARD_TEXT_H + CARD_GAP;
 /// The jump bar's letters; `#` is the top (names starting with digits or symbols).
 const LETTERS: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const LETTER_BAR_W: f32 = 28.;
+
+/// Cursor sections: the toolbar's controls, then the grid.
+const TOOLBAR: usize = 0;
+const GRID: usize = 1;
+const GRID_START: Position = Position {
+    section: GRID,
+    index: 0,
+};
+/// Space around a toolbar control for the cursor's ring.
+const RING_GAP: f32 = 3.;
+
+/// The toolbar's controls, left to right, as the keyboard cursor sees them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tool {
+    Sort,
+    Order,
+    Show,
+    Genre,
+    Year,
+    Resolution,
+    Clear,
+}
 
 /// What the grid lists.
 pub enum Source {
@@ -186,7 +208,7 @@ impl LibraryPage {
             generation: 0,
             error: None,
             scroll: UniformListScrollHandle::new(),
-            cursor: Cursor::default(),
+            cursor: Cursor::starting_at(GRID_START),
             focus_handle: cx.focus_handle(),
             _subscriptions: vec![
                 cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
@@ -354,6 +376,18 @@ impl LibraryPage {
             });
         }
         self.change_view(cx);
+        // The Clear button is gone now; from the keyboard, land on the control before it.
+        if self
+            .cursor
+            .selected()
+            .is_some_and(|position| position.section == TOOLBAR)
+        {
+            let last = self.tools().len() - 1;
+            self.cursor.show_at(Position {
+                section: TOOLBAR,
+                index: last,
+            });
+        }
     }
 
     /// The sort or filter changed: remember it and load the grid again from the top.
@@ -369,7 +403,14 @@ impl LibraryPage {
         self.items.clear();
         self.pages_requested.clear();
         self.error = None;
-        self.cursor = Cursor::default();
+        // Changed from the toolbar, the cursor stays there; otherwise it starts on the grid.
+        if self
+            .cursor
+            .selected()
+            .is_none_or(|position| position.section != TOOLBAR)
+        {
+            self.cursor = Cursor::starting_at(GRID_START);
+        }
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.request_page(0, cx);
         cx.notify();
@@ -433,7 +474,7 @@ impl LibraryPage {
     fn land(&mut self, index: usize, highlight: bool, columns: usize, cx: &mut Context<Self>) {
         self.scroll.scroll_to_item(index / columns, ScrollStrategy::Top);
         if highlight {
-            self.cursor.show_at(Position { section: 0, index });
+            self.cursor.show_at(Position { section: GRID, index });
         }
         cx.notify();
     }
@@ -553,7 +594,7 @@ impl LibraryPage {
                         poster_card(
                             ("item", index),
                             item,
-                            self.cursor.is_selected(0, index),
+                            self.cursor.is_selected(GRID, index),
                             move |_, window, cx| nav.open(&target, window, cx),
                             cx,
                         )
@@ -664,17 +705,112 @@ impl Browse for LibraryPage {
     }
 
     fn sections(&self, window: &Window, _cx: &App) -> Vec<Section> {
-        vec![Section::grid(self.total.unwrap_or(0), self.columns(window))]
+        vec![
+            Section::row(self.tools().len()),
+            Section::grid(self.total.unwrap_or(0), self.columns(window)),
+        ]
     }
 
+    /// The toolbar stays put above the grid; only the grid scrolls.
     fn reveal(&mut self, position: Position, window: &mut Window, _cx: &mut Context<Self>) {
-        self.scroll
-            .scroll_to_item(position.index / self.columns(window), ScrollStrategy::Nearest);
+        if position.section == GRID {
+            self.scroll
+                .scroll_to_item(position.index / self.columns(window), ScrollStrategy::Nearest);
+        }
     }
 
+    /// Enter on a toolbar picker moves it to the next choice (Left and Right move along the
+    /// toolbar); on a button it presses it; on a card it opens it.
     fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(Some(item)) = self.items.get(position.index) {
-            self.nav.open(item, window, cx);
+        if position.section == GRID {
+            if let Some(Some(item)) = self.items.get(position.index) {
+                self.nav.open(item, window, cx);
+            }
+            return;
+        }
+        let Some(tool) = self.tools().get(position.index).copied() else {
+            return;
+        };
+        match tool {
+            Tool::Order => self.toggle_order(cx),
+            Tool::Clear => self.clear_filters(window, cx),
+            tool => {
+                if let Some(select) = self.tool_select(tool) {
+                    cycle_choice(&select.clone(), window, cx);
+                }
+            }
+        }
+    }
+}
+
+impl LibraryPage {
+    /// The toolbar's controls shown now, left to right.
+    fn tools(&self) -> Vec<Tool> {
+        let mut tools = vec![Tool::Sort, Tool::Order, Tool::Show];
+        if let Some(scope) = &self.filter_scope {
+            if !self.genres.is_empty() {
+                tools.push(Tool::Genre);
+            }
+            if !self.years.is_empty() {
+                tools.push(Tool::Year);
+            }
+            if scope.resolution {
+                tools.push(Tool::Resolution);
+            }
+        }
+        if self.filtered() {
+            tools.push(Tool::Clear);
+        }
+        tools
+    }
+
+    fn tool_select(&self, tool: Tool) -> Option<&ChoiceSelect> {
+        match tool {
+            Tool::Sort => Some(&self.sort),
+            Tool::Show => Some(&self.filter),
+            Tool::Genre => Some(&self.genre),
+            Tool::Year => Some(&self.year),
+            Tool::Resolution => Some(&self.resolution),
+            Tool::Order | Tool::Clear => None,
+        }
+    }
+
+    fn render_tool(&self, tool: Tool, cx: &mut Context<Self>) -> AnyElement {
+        let random = self.view.sort == "random";
+        match tool {
+            Tool::Order => Button::new("sort-order")
+                .ghost()
+                .small()
+                .icon(if self.view.descending {
+                    Lucide::ArrowDownWideNarrow
+                } else {
+                    Lucide::ArrowUpNarrowWide
+                })
+                .tooltip(if random {
+                    "Shuffle again"
+                } else if self.view.descending {
+                    "Descending"
+                } else {
+                    "Ascending"
+                })
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_order(cx)))
+                .into_any_element(),
+            Tool::Clear => Button::new("clear-filters")
+                .ghost()
+                .small()
+                .label("Clear filters")
+                .on_click(cx.listener(|this, _, window, cx| this.clear_filters(window, cx)))
+                .into_any_element(),
+            tool => {
+                let width = match tool {
+                    Tool::Sort | Tool::Genre => 160.,
+                    Tool::Show => 140.,
+                    Tool::Year => 120.,
+                    _ => 150.,
+                };
+                let select = self.tool_select(tool).expect("a picker");
+                div().w(px(width)).child(Select::new(select).small()).into_any_element()
+            }
         }
     }
 }
@@ -688,62 +824,45 @@ impl Focusable for LibraryPage {
 impl Render for LibraryPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = self.render_content(window, cx);
-        let random = self.view.sort == "random";
-        let toolbar = h_flex()
+        let tools: Vec<(Tool, AnyElement)> = self
+            .tools()
+            .into_iter()
+            .map(|tool| (tool, self.render_tool(tool, cx)))
+            .collect();
+        let muted = cx.theme().muted_foreground;
+        let mut toolbar = h_flex()
             .flex_none()
-            .px(px(GRID_PADDING))
+            .px(px(GRID_PADDING - RING_GAP))
             .pt_4()
-            .gap_2()
+            .gap(px(8. - RING_GAP * 2.))
             .flex_wrap()
-            .text_sm()
-            .child(div().text_color(cx.theme().muted_foreground).child("Sort"))
-            .child(div().w(px(160.)).child(Select::new(&self.sort).small()))
-            .child(
-                Button::new("sort-order")
-                    .ghost()
-                    .small()
-                    .icon(if self.view.descending {
-                        Lucide::ArrowDownWideNarrow
-                    } else {
-                        Lucide::ArrowUpNarrowWide
-                    })
-                    .tooltip(if random {
-                        "Shuffle again"
-                    } else if self.view.descending {
-                        "Descending"
-                    } else {
-                        "Ascending"
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_order(cx))),
-            )
-            .child(div().w_4())
-            .child(div().text_color(cx.theme().muted_foreground).child("Show"))
-            .child(div().w(px(140.)).child(Select::new(&self.filter).small()))
-            .when_some(self.filter_scope.as_ref(), |el, scope| {
-                el.when(!self.genres.is_empty(), |el| {
-                    el.child(div().w(px(160.)).child(Select::new(&self.genre).small()))
-                })
-                .when(!self.years.is_empty(), |el| {
-                    el.child(div().w(px(120.)).child(Select::new(&self.year).small()))
-                })
-                .when(scope.resolution, |el| {
-                    el.child(div().w(px(150.)).child(Select::new(&self.resolution).small()))
-                })
-            })
-            .when(self.filtered(), |el| {
-                el.child(
-                    Button::new("clear-filters")
-                        .ghost()
-                        .small()
-                        .label("Clear filters")
-                        .on_click(cx.listener(|this, _, window, cx| this.clear_filters(window, cx))),
-                )
-            })
-            .child(div().flex_1())
-            .children(
-                self.total
-                    .map(|total| div().text_color(cx.theme().muted_foreground).child(item_count(total))),
-            );
+            .text_sm();
+        for (i, (tool, element)) in tools.into_iter().enumerate() {
+            let label = match tool {
+                Tool::Sort => Some("Sort"),
+                Tool::Show => Some("Show"),
+                _ => None,
+            };
+            if tool == Tool::Show {
+                toolbar = toolbar.child(div().w_4());
+            }
+            toolbar = toolbar
+                .children(label.map(|label| div().px(px(RING_GAP)).text_color(muted).child(label)))
+                .child(
+                    div()
+                        .relative()
+                        .p(px(RING_GAP))
+                        .rounded_lg()
+                        .child(element)
+                        .when(self.cursor.is_selected(TOOLBAR, i), |el| {
+                            el.child(selection_ring(cx).rounded_lg())
+                        }),
+                );
+        }
+        let toolbar = toolbar.child(div().flex_1()).children(
+            self.total
+                .map(|total| div().text_color(cx.theme().muted_foreground).child(item_count(total))),
+        );
         on_browse_actions(v_flex().size_full().track_focus(&self.focus_handle), cx)
             .on_key_down(cx.listener(Self::type_letter))
             .child(toolbar)
