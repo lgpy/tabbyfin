@@ -19,6 +19,7 @@ mise run dev:min      # Jellyfin 10.11 on :8097, plus the API smoke test against
 mise run smoke        # cargo run -p jellyfin --example smoke against the dev server
 mise run ci:build     # build packages for every OS on GitHub Actions into dist/
 mise run flatpak:sources # after any Cargo.lock change: regenerate the Flatpak's offline crate list
+mise run deps:mirror  # after changing packaging/*.lock: copy the pinned files to the repo's deps release
 dev/win-run.sh [secs] # cross-build (mingw) and run on the Windows host from WSL
 ```
 

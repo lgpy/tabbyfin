@@ -20,10 +20,6 @@ work="$(mktemp -d "$dest/.angle.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 cd "$work"
 
-sha256() {
-  if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
-}
-
 extract() { # <archive> <member>...
   local archive="$1"
   shift
@@ -43,12 +39,7 @@ with zstandard.open(sys.argv[1], "rb") as f, tarfile.open(fileobj=f, mode="r|") 
 for entry in "${ANGLE_PACKAGES[@]}"; do
   read -r package sha files <<<"$entry"
   # `+` in names (libstdc++) must be escaped in the URL.
-  curl -fsSL -o "$package" "$ANGLE_BASE_URL/${package//+/%2B}"
-  actual="$(sha256 "$package")"
-  if [[ "$actual" != "$sha" ]]; then
-    echo "checksum mismatch for $package: expected $sha, got $actual" >&2
-    exit 1
-  fi
+  "$here/download.sh" "$ANGLE_BASE_URL/${package//+/%2B}" "$sha" "$package"
   members=()
   for file in $files; do members+=("ucrt64/$file"); done
   extract "$package" "${members[@]}"
