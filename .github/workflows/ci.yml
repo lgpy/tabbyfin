@@ -125,6 +125,9 @@ jobs:
       - run: cargo build --release --locked -p jelly-gpui --target ${{ matrix.target }}
       - name: Package
         shell: bash
+        env:
+          # packaging/download.sh fetches pinned files from this repo's `deps` release.
+          GH_TOKEN: ${{ github.token }}
         run: packaging/package.sh ${{ matrix.target }} dist
       - uses: actions/upload-artifact@v4
         with:
@@ -140,6 +143,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build in Ubuntu 22.04
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: packaging/appimage-docker.sh dist
       - uses: actions/upload-artifact@v4
         with:

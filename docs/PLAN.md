@@ -252,6 +252,8 @@ for z in 256 128 64 48 32 16; do rsvg-convert -w $z -h $z packaging/jelly-gpui.s
 convert /tmp/icon-{256,128,64,48,32,16}.png packaging/jelly-gpui.ico
 ```
 
+**Pinned downloads** (`packaging/mpv.lock`, `angle.lock`, `linuxdeploy.lock`) go through `packaging/download.sh`, which tries our copy first (the repo's `deps` release, one asset per file, named by its SHA256; fetched with `gh` and CI's token while the repo is private), then the original URL, and checks the checksum either way. After changing a lock file, `mise run deps:mirror` uploads the new file. The Flatpak's sources (libass, libplacebo, mpv, crates) aren't mirrored: Flathub-style builds fetch them from their projects.
+
 `packaging/THIRD_PARTY.md` holds mpv's license (GPL-2.0-or-later) and source information, and ships in the packages.
 
 **Builds:** `.github/workflows/ci.yml` runs clippy and the tests on all three OSes. On a `v*` tag, or when started by hand, it also packages all four targets:

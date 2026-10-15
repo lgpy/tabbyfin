@@ -103,6 +103,10 @@ run = "packaging/appimage-docker.sh dist"
 description = "Build the Flatpak bundle (needs flatpak and flatpak-builder)"
 run = "packaging/flatpak/build.sh dist"
 
+[tasks."deps:mirror"]
+description = "Upload the pinned downloads (packaging/*.lock) to the repo's deps release, after changing a lock file"
+run = "packaging/mirror-deps.sh"
+
 [tasks."flatpak:sources"]
 description = "Regenerate the Flatpak's cargo-sources.json after Cargo.lock changes"
 run = "packaging/flatpak/update-cargo-sources.sh"

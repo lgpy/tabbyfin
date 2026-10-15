@@ -13,8 +13,15 @@ mkdir -p "$root/$out" "$root/target/appimage"
 rust="$(sed -n 's/^rust = { version = "\([^"]*\)".*/\1/p' "$root/mise.toml")"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n1)"
 
+# linuxdeploy is fetched here, where `gh` can reach our copy of it (packaging/download.sh).
+# shellcheck source=linuxdeploy.lock
+source "$root/packaging/linuxdeploy.lock"
+"$root/packaging/download.sh" "$LINUXDEPLOY_X86_64_URL" "$LINUXDEPLOY_X86_64_SHA256" \
+  "$root/target/appimage/linuxdeploy-x86_64.AppImage"
+
 docker run --rm -v "$root":/src -w /src \
   -e RUST="$rust" -e VERSION="$version" -e OUT="$out" -e OWNER="$(id -u):$(id -g)" \
+  -e LINUXDEPLOY=/src/target/appimage/linuxdeploy-x86_64.AppImage \
   ubuntu:22.04 bash -c '
 set -euo pipefail
 # Files written here belong to root; hand them back whatever happens.

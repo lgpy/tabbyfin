@@ -40,12 +40,9 @@ done
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 tool="$work/linuxdeploy-x86_64.AppImage"
-curl -fsSL -o "$tool" "$LINUXDEPLOY_X86_64_URL"
-actual="$(sha256sum "$tool" | cut -d' ' -f1)"
-if [[ "$actual" != "$LINUXDEPLOY_X86_64_SHA256" ]]; then
-  echo "checksum mismatch for linuxdeploy: expected $LINUXDEPLOY_X86_64_SHA256, got $actual" >&2
-  exit 1
-fi
+# appimage-docker.sh fetches it outside the container (where `gh` can reach our copy).
+[[ -n "${LINUXDEPLOY:-}" ]] && cp "$LINUXDEPLOY" "$tool"
+"$here/download.sh" "$LINUXDEPLOY_X86_64_URL" "$LINUXDEPLOY_X86_64_SHA256" "$tool"
 chmod +x "$tool"
 
 appdir="$work/AppDir"

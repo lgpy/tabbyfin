@@ -33,9 +33,7 @@ done
 if [[ ! -f "$dest/libmpv-2.dll" ]]; then
   # shellcheck source=../packaging/mpv.lock
   source "$root/packaging/mpv.lock"
-  curl -fsSL -o "$dest/mpv-dev.7z" "$LIBMPV_WINDOWS_X86_64_URL"
-  actual="$(sha256sum "$dest/mpv-dev.7z" | cut -d' ' -f1)"
-  [[ "$actual" == "$LIBMPV_WINDOWS_X86_64_SHA256" ]] || { echo "libmpv checksum mismatch: $actual" >&2; exit 1; }
+  "$root/packaging/download.sh" "$LIBMPV_WINDOWS_X86_64_URL" "$LIBMPV_WINDOWS_X86_64_SHA256" "$dest/mpv-dev.7z"
   (cd "$dest" && tar.exe -xf mpv-dev.7z libmpv-2.dll && rm mpv-dev.7z)
 fi
 
