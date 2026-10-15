@@ -9,8 +9,9 @@ use std::time::Duration;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::popover::{Popover, PopoverState};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -77,12 +78,10 @@ enum Menu {
     Account,
 }
 
-/// A choice in a top-bar menu, in the order the menu lists them. The keyboard highlight is an
+/// A choice in the SyncPlay panel, in the order it lists them (the account menu is a
+/// [`PopupMenu`], which has its own keyboard handling). The keyboard highlight is an
 /// index into these.
 enum MenuEntry {
-    SwitchAccount(SavedServer),
-    AddAccount,
-    SignOut,
     JoinGroup(String),
     NewGroup,
     ToggleShuffle,
@@ -128,9 +127,11 @@ pub struct ShellView {
     /// The open top-bar menu, and the entry the keyboard highlights (none when opened with a
     /// click).
     menu: Option<(Menu, Option<usize>)>,
-    /// What an open menu focuses. Menus render in an overlay outside the shell, so their
+    /// What the open SyncPlay panel focuses. It renders in an overlay outside the shell, so its
     /// content forwards keys to `on_key_down` (see `menu_keys`).
     menu_focus: FocusHandle,
+    /// The account menu, built fresh each time it opens, and its dismissal.
+    account_menu: Option<(Entity<PopupMenu>, Subscription)>,
 }
 
 impl EventEmitter<ShellEvent> for ShellView {}
@@ -181,6 +182,7 @@ impl ShellView {
             top_bar: None,
             menu: None,
             menu_focus: cx.focus_handle(),
+            account_menu: None,
         };
         this.push(Route::Home, window, cx);
         #[cfg(debug_assertions)]
@@ -457,15 +459,23 @@ impl ShellView {
                 self.top_bar = None;
                 self.toggle_settings(window, cx);
             }
-            TopBarItem::SyncPlay => self.open_menu(Menu::SyncPlay, Some(0), cx),
-            TopBarItem::Account => self.open_menu(Menu::Account, Some(0), cx),
+            TopBarItem::SyncPlay => self.open_menu(Menu::SyncPlay, Some(0), window, cx),
+            TopBarItem::Account => self.open_menu(Menu::Account, None, window, cx),
         }
     }
 
     /// Opens a top-bar menu, with fresh contents.
-    fn open_menu(&mut self, menu: Menu, highlight: Option<usize>, cx: &mut Context<Self>) {
+    fn open_menu(&mut self, menu: Menu, highlight: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
         match menu {
-            Menu::Account => self.accounts = Config::load().accounts,
+            Menu::Account => {
+                self.accounts = Config::load().accounts;
+                let account_menu = self.build_account_menu(window, cx);
+                account_menu.focus_handle(cx).focus(window, cx);
+                let dismissed = cx.subscribe_in(&account_menu, window, |this, _, _: &DismissEvent, window, cx| {
+                    this.menu_toggled(Menu::Account, false, window, cx)
+                });
+                self.account_menu = Some((account_menu, dismissed));
+            }
             Menu::SyncPlay => SyncPlay::global(cx).update(cx, |syncplay, cx| syncplay.refresh_groups(cx)),
         }
         self.menu = Some((menu, highlight));
@@ -474,18 +484,7 @@ impl ShellView {
 
     fn menu_entries(&self, menu: Menu, cx: &App) -> Vec<MenuEntry> {
         match menu {
-            Menu::Account => {
-                let current = self.session.account_key();
-                let mut entries: Vec<MenuEntry> = self
-                    .accounts
-                    .iter()
-                    .filter(|account| account.credential_account() != current)
-                    .cloned()
-                    .map(MenuEntry::SwitchAccount)
-                    .collect();
-                entries.extend([MenuEntry::AddAccount, MenuEntry::SignOut]);
-                entries
-            }
+            Menu::Account => Vec::new(),
             Menu::SyncPlay => {
                 let syncplay = SyncPlay::global(cx).read(cx);
                 if syncplay.group.is_some() {
@@ -527,9 +526,6 @@ impl ShellView {
         }
         self.leave_top_bar(window, cx);
         match entry {
-            MenuEntry::SwitchAccount(account) => cx.emit(ShellEvent::SwitchAccount(account)),
-            MenuEntry::AddAccount => cx.emit(ShellEvent::AddAccount),
-            MenuEntry::SignOut => cx.emit(ShellEvent::SignOut),
             MenuEntry::JoinGroup(id) => syncplay.update(cx, |syncplay, cx| syncplay.join(id, cx)),
             MenuEntry::NewGroup => {
                 let name = new_group_name(&self.session);
@@ -658,14 +654,17 @@ impl ShellView {
     /// The user button and its menu: the saved accounts to switch to, adding one, signing out.
     fn render_account(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity();
-        let current = self.session.account_key();
+        let account_menu = self.account_menu.as_ref().map(|(menu, _)| menu.clone());
         Popover::new("account")
             .anchor(Anchor::TopRight)
-            .open(matches!(self.menu, Some((Menu::Account, _))))
-            .track_focus(&self.menu_focus)
-            .on_open_change({
-                let shell = shell.clone();
-                move |open, window, cx| shell.update(cx, |this, cx| this.menu_toggled(Menu::Account, *open, window, cx))
+            // The menu draws its own surface and dismisses itself.
+            .appearance(false)
+            .open(matches!(self.menu, Some((Menu::Account, _))) && account_menu.is_some())
+            .when_some(account_menu.as_ref(), |popover, menu| {
+                popover.track_focus(&menu.focus_handle(cx))
+            })
+            .on_open_change(move |open, window, cx| {
+                shell.update(cx, |this, cx| this.menu_toggled(Menu::Account, *open, window, cx))
             })
             .trigger(
                 Button::new("account-button")
@@ -677,24 +676,56 @@ impl ShellView {
                         None => self.session.user.name.clone(),
                     }),
             )
-            .content({
-                let shell = shell.clone();
-                move |_, window, cx| {
-                    let panel = account_panel(&shell, &current, window, cx);
-                    menu_keys(&shell, panel, cx)
-                }
+            .content(move |_, _, _| match &account_menu {
+                Some(menu) => menu.clone().into_any_element(),
+                None => div().into_any_element(),
             })
+    }
+
+    /// The account menu: the saved accounts to switch between, then adding one and signing
+    /// out. Each choice goes to the app view through a [`ShellEvent`].
+    fn build_account_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> Entity<PopupMenu> {
+        let shell = cx.entity().downgrade();
+        let current = self.session.account_key();
+        let accounts = self.accounts.clone();
+        PopupMenu::build(window, cx, move |mut menu, _, _| {
+            let emit = |event: Box<dyn Fn() -> ShellEvent>| {
+                let shell = shell.clone();
+                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                    shell.update(cx, |_, cx| cx.emit(event())).ok();
+                }
+            };
+            // Every saved account, the current one checked (choosing it just closes the menu).
+            for account in &accounts {
+                let label = account.label();
+                let is_current = account.credential_account() == current;
+                let account = account.clone();
+                menu = menu.item(PopupMenuItem::new(label).checked(is_current).when(!is_current, |item| {
+                    item.on_click(emit(Box::new(move || ShellEvent::SwitchAccount(account.clone()))))
+                }));
+            }
+            menu.separator()
+                .item(
+                    PopupMenuItem::new("Add account…")
+                        .icon(IconName::Plus)
+                        .on_click(emit(Box::new(|| ShellEvent::AddAccount))),
+                )
+                .item(PopupMenuItem::new("Sign out").on_click(emit(Box::new(|| ShellEvent::SignOut))))
+        })
     }
 
     /// A menu opened with the mouse, or closed (a click outside, Esc, or a choice in it).
     fn menu_toggled(&mut self, menu: Menu, open: bool, window: &mut Window, cx: &mut Context<Self>) {
         if open {
-            self.open_menu(menu, None, cx);
+            self.open_menu(menu, None, window, cx);
         } else if self.menu.is_some_and(|(m, _)| m == menu) {
             self.menu = None;
-            // Back to the top bar, if the keyboard came from there.
+            self.account_menu = None;
+            // Back to the top bar if the keyboard came from there, else to the page.
             if self.top_bar.is_some() {
                 self.focus_handle.focus(window, cx);
+            } else {
+                self.focus_top(window, cx);
             }
             cx.notify();
         }
@@ -756,80 +787,6 @@ fn avatar(name: &str, cx: &App) -> impl IntoElement {
 
 fn new_group_name(session: &Session) -> String {
     format!("{}'s group", session.user.name)
-}
-
-/// The account menu: other saved accounts first, then adding one and signing out. Each choice
-/// closes the menu and goes to the app view through a [`ShellEvent`].
-fn account_panel(
-    shell: &Entity<ShellView>,
-    current: &str,
-    _window: &mut Window,
-    cx: &mut Context<PopoverState>,
-) -> AnyElement {
-    let popover = cx.entity();
-    let choose = move |event: fn() -> ShellEvent| {
-        let (shell, popover) = (shell.clone(), popover.clone());
-        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-            popover.update(cx, |popover, cx| popover.dismiss(window, cx));
-            shell.update(cx, |_, cx| cx.emit(event()));
-        }
-    };
-    let highlight = shell.read(cx).menu_highlight(Menu::Account);
-    let accounts = &shell.read(cx).accounts;
-    let current_label = accounts
-        .iter()
-        .find(|account| account.credential_account() == current)
-        .map(SavedServer::label);
-    let others: Vec<AnyElement> = accounts
-        .iter()
-        .filter(|account| account.credential_account() != current)
-        .enumerate()
-        .map(|(i, account)| {
-            let (shell, popover, account) = (shell.clone(), cx.entity(), account.clone());
-            Button::new(("switch-account", i))
-                .ghost()
-                .w_full()
-                .justify_start()
-                .label(account.label())
-                .selected(highlight == Some(i))
-                .on_click(move |_, window, cx| {
-                    popover.update(cx, |popover, cx| popover.dismiss(window, cx));
-                    let account = account.clone();
-                    shell.update(cx, |_, cx| cx.emit(ShellEvent::SwitchAccount(account)));
-                })
-                .into_any_element()
-        })
-        .collect();
-    let others_count = others.len();
-    let muted = cx.theme().muted_foreground;
-    v_flex()
-        .w(dp(280.))
-        .gap_1()
-        .children(current_label.map(|label| div().px_2().pb_1().text_sm().text_color(muted).child(label)))
-        .when(!others.is_empty(), |el| {
-            el.child(div().px_2().pt_1().text_xs().text_color(muted).child("Switch to"))
-                .children(others)
-        })
-        .child(
-            Button::new("add-account")
-                .ghost()
-                .w_full()
-                .justify_start()
-                .icon(IconName::Plus)
-                .label("Add account…")
-                .selected(highlight == Some(others_count))
-                .on_click(choose(|| ShellEvent::AddAccount)),
-        )
-        .child(
-            Button::new("sign-out")
-                .ghost()
-                .w_full()
-                .justify_start()
-                .label("Sign out")
-                .selected(highlight == Some(others_count + 1))
-                .on_click(choose(|| ShellEvent::SignOut)),
-        )
-        .into_any_element()
 }
 
 impl ShellView {
