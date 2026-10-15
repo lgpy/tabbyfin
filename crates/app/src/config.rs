@@ -205,7 +205,19 @@ impl Config {
     pub fn load() -> Self {
         let mut config = match std::fs::read_to_string(path()) {
             Ok(text) => toml::from_str(&text).unwrap_or_else(|err| {
-                tracing::warn!("ignoring unreadable config {}: {err}", path().display());
+                // The defaults get saved over it soon (a new device id at once), so keep a copy:
+                // the saved accounts are in there.
+                let backup = path().with_extension("toml.unreadable");
+                let kept = std::fs::write(&backup, &text).is_ok();
+                tracing::warn!(
+                    "ignoring unreadable config {}{}: {err}",
+                    path().display(),
+                    if kept {
+                        format!(" (kept as {})", backup.display())
+                    } else {
+                        String::new()
+                    }
+                );
                 Config::default()
             }),
             Err(_) => Config::default(),
@@ -252,7 +264,11 @@ impl Config {
         let path = path();
         std::fs::create_dir_all(dir()).context("creating config dir")?;
         let text = toml::to_string_pretty(self)?;
-        std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
+        // Written aside and renamed over the config, so a crash mid-write can't leave half a
+        // file (which would read as unreadable and lose the saved accounts).
+        let temp = path.with_extension("toml.tmp");
+        std::fs::write(&temp, text).with_context(|| format!("writing {}", temp.display()))?;
+        std::fs::rename(&temp, &path).with_context(|| format!("replacing {}", path.display()))
     }
 }
 
