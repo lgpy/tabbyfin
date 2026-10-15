@@ -98,6 +98,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ The **AppImage** on a real Linux desktop (GNOME, KDE; Wayland and X11), from the file manager, and on a distribution other than Ubuntu.
 - ⬜ The **Windows installer from CI** (a release build inside): install, the Start-menu entry, the app running from it, upgrade from an older version while it's running, uninstall.
 
+- ⬜ **Text size following the system** on Windows (Settings → Accessibility → Text size) and GNOME (Large Text), after a restart; only fixed sizes were tried (130% and 150% in WSL, light theme).
+
 ## 6. SyncPlay (2.4.3–2.4.6)
 
 ✅ Against the scripted member (`cargo run -p jellyfin --example syncplay`): following the group (load, Ready, Unpause, Pause, Unpause, Seek, Stop) and leading it (Play on an item page, Space, →, Esc); the popover in and out of a group; drift correction catching up 0.8 s.

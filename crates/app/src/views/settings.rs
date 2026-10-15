@@ -46,6 +46,7 @@ const CONTENT_W: f32 = 720.;
 pub struct SettingsPage {
     session: Session,
     scroll: ScrollHandle,
+    text_size: ChoiceSelect,
     cursor: Cursor,
     focus_handle: FocusHandle,
     theme: ChoiceSelect,
@@ -73,6 +74,21 @@ impl SettingsPage {
         subscriptions.push(on_pick(&theme, &THEMES, window, cx, |preference, window, cx| {
             save(|config| config.theme = preference);
             theme::apply(preference, Some(window), cx);
+        }));
+
+        // `None` follows the system; its size is shown, as it can differ from 100%.
+        let system = format!("Follow the system ({:.0}%)", theme::system_text_scale() * 100.);
+        let text_sizes: Vec<(Option<u16>, String)> = std::iter::once((None, system))
+            .chain(
+                theme::TEXT_SIZES
+                    .iter()
+                    .map(|&percent| (Some(percent), format!("{percent}%"))),
+            )
+            .collect();
+        let text_size = options_select(&text_sizes, &config.text_size, window, cx);
+        subscriptions.push(on_pick(&text_size, &text_sizes, window, cx, |size, _, cx| {
+            save(|config| config.text_size = size);
+            theme::apply_text_size(cx);
         }));
 
         let subtitle_color = options_select(&SUBTITLE_COLORS, &config.subtitle_color.unwrap_or_default(), window, cx);
@@ -124,6 +140,7 @@ impl SettingsPage {
         Self {
             session,
             scroll: ScrollHandle::new(),
+            text_size,
             cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
             theme,
@@ -242,6 +259,7 @@ fn save(change: impl FnOnce(&mut Config)) {
 #[derive(Clone, Copy, PartialEq)]
 enum Control {
     Theme,
+    TextSize,
     Autoplay,
     AutoSkip,
     Bitrate,
@@ -277,6 +295,7 @@ impl SettingsPage {
         vec![
             Title("Appearance"),
             C(Theme),
+            C(TextSize),
             Title("Playback"),
             C(Autoplay),
             C(AutoSkip),
@@ -347,6 +366,7 @@ impl SettingsPage {
     fn select(&self, control: Control) -> Option<&ChoiceSelect> {
         match control {
             Control::Theme => Some(&self.theme),
+            Control::TextSize => Some(&self.text_size),
             Control::Bitrate => Some(&self.bitrate),
             Control::SubtitleColor => Some(&self.subtitle_color),
             Control::SubtitleStyle => Some(&self.subtitle_style),
@@ -377,12 +397,13 @@ impl SettingsPage {
             };
         let element = match control {
             Control::Theme
+            | Control::TextSize
             | Control::Bitrate
             | Control::SubtitleColor
             | Control::SubtitleStyle
             | Control::SubtitleSize => {
                 let select = self.select(control).expect("a picker");
-                Select::new(select).w(px(180.)).into_any_element()
+                Select::new(select).w(rems(180. / 16.)).into_any_element()
             }
             Control::Autoplay => switch(
                 "autoplay",
@@ -433,7 +454,13 @@ impl SettingsPage {
         match self.select(control) {
             Some(_) => h_flex()
                 .gap(px(16. - RING_GAP))
-                .child(div().w(px(170.)).flex_none().text_sm().child(control_label(control)))
+                .child(
+                    div()
+                        .w(rems(170. / 16.))
+                        .flex_none()
+                        .text_sm()
+                        .child(control_label(control)),
+                )
                 .child(ringed(element))
                 .into_any_element(),
             // A ring's width to the left, so the switch or button lines up with the text.
@@ -446,6 +473,7 @@ impl SettingsPage {
 fn control_label(control: Control) -> &'static str {
     match control {
         Control::Theme => "Theme",
+        Control::TextSize => "Text size",
         Control::Bitrate => "Max streaming bitrate",
         Control::SubtitleColor => "Colour",
         Control::SubtitleStyle => "Style",

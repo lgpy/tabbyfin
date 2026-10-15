@@ -813,7 +813,11 @@ impl ItemPage {
                     .child(
                         div()
                             .relative()
-                            .child(Select::new(select).w(px(PICKER_W)).menu_width(px(PICKER_W * 1.5)))
+                            .child(
+                                Select::new(select)
+                                    .w(rems(PICKER_W / 16.))
+                                    .menu_width(rems(PICKER_W * 1.5 / 16.)),
+                            )
                             .when(self.cursor.is_selected(PICKERS, i), |el| {
                                 el.child(selection_ring(cx).rounded_lg().m(px(-ACTION_RING_GAP)))
                             }),
