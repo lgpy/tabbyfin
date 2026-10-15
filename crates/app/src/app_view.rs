@@ -30,22 +30,29 @@ pub struct AppView {
     _screen_subscription: Option<Subscription>,
     /// The placement last seen. `placement_save` is the pending write; replacing it restarts the
     /// timer, so only the last change of a drag is saved.
-    last_placement: Option<window::Placement>,
+    last_placement: window::Placement,
     placement_save: Option<Task<()>>,
+    /// `last_placement` changed since it was last saved; closing the window saves it right away.
+    placement_unsaved: bool,
 }
 
 impl AppView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(config: Config, placement: window::Placement, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe_window_bounds(window, |this, window, cx| this.remember_window_bounds(window, cx))
             .detach();
-        let config = Config::load();
+        let view = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_, cx| {
+            view.update(cx, |this, cx| this.save_placement(cx)).ok();
+            true
+        });
         let mut this = Self {
             device_id: config.device_id,
             saved: config.server.clone(),
             screen: Screen::Restoring,
             _screen_subscription: None,
-            last_placement: None,
+            last_placement: placement,
             placement_save: None,
+            placement_unsaved: false,
         };
         match config.server {
             Some(saved) => this.restore(saved, true, window, cx),
@@ -68,15 +75,17 @@ impl AppView {
             return;
         }
         self.last_placement = placement;
+        self.placement_unsaved = true;
         self.placement_save = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(SAVE_PLACEMENT_AFTER).await;
-            this.update_in(cx, |this, _, cx| {
-                if let Some(placement) = this.last_placement {
-                    window::save_placement(placement, cx);
-                }
-            })
-            .ok();
+            this.update(cx, |this, cx| this.save_placement(cx)).ok();
         }));
+    }
+
+    fn save_placement(&mut self, cx: &mut App) {
+        if std::mem::take(&mut self.placement_unsaved) {
+            window::save_placement(self.last_placement, cx);
+        }
     }
 
     /// Signs back in with the stored token. Falls back to the sign-in screen, pre-filled with

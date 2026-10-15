@@ -17,33 +17,45 @@ pub struct Launch {
     /// The display the window was last on. `None` lets the platform pick, which is the main
     /// display.
     pub display_id: Option<DisplayId>,
-    pub bounds: WindowBounds,
-    /// Whether the window was maximized. GPUI keeps only the rect of `WindowBounds` (the state
-    /// is flattened on the way to the platform), so the maximized state is re-applied with
-    /// `Window::zoom_window` after the window opens.
-    pub maximized: bool,
+    /// The placement the window opens with, which is also the starting point for remembering
+    /// later changes.
+    pub placement: Placement,
+}
+
+impl Launch {
+    /// The bounds for `WindowOptions`; GPUI maximizes a window opened with `Maximized`.
+    pub fn window_bounds(&self) -> WindowBounds {
+        if self.placement.maximized {
+            WindowBounds::Maximized(self.placement.bounds)
+        } else {
+            WindowBounds::Windowed(self.placement.bounds)
+        }
+    }
 }
 
 /// Where to open the main window: the saved spot and its display when the window's centre still
 /// lands on a connected display, otherwise the default centred window. The display is passed
 /// along because Windows only places a window on a display it is told about and assumes the
 /// primary monitor otherwise, which would pull a window saved on a second monitor back to it.
-pub fn launch_placement(cx: &App) -> Launch {
+pub fn launch_placement(config: &Config, cx: &App) -> Launch {
     let displays = cx.displays();
-    let config = Config::load();
     match config
         .window_bounds
         .and_then(|saved| placed_bounds(saved, &display_bounds(&displays)))
     {
         Some((bounds, index)) => Launch {
             display_id: Some(displays[index].id()),
-            bounds: WindowBounds::Windowed(bounds),
-            maximized: config.window_maximized,
+            placement: Placement {
+                bounds,
+                maximized: config.window_maximized,
+            },
         },
         None => Launch {
             display_id: None,
-            bounds: WindowBounds::centered(size(px(DEFAULT_WIDTH), px(DEFAULT_HEIGHT)), cx),
-            maximized: false,
+            placement: Placement {
+                bounds: Bounds::centered(None, size(px(DEFAULT_WIDTH), px(DEFAULT_HEIGHT)), cx),
+                maximized: false,
+            },
         },
     }
 }
@@ -66,27 +78,26 @@ pub struct Placement {
 
 /// Folds one window state into the remembered placement. Fullscreen keeps the previous placement,
 /// because playback fullscreen is transient. A maximized window keeps its last windowed bounds
-/// and changes only the flag; with no windowed bounds known yet, the config already holds a
-/// usable placement, so nothing is published.
-pub fn remember(previous: Option<Placement>, state: WindowState) -> Option<Placement> {
+/// and changes only the flag: Windows and Wayland report the restore bounds while maximized, but
+/// X11 reports the maximized rect.
+pub fn remember(previous: Placement, state: WindowState) -> Placement {
     if state.fullscreen {
         return previous;
     }
     if state.maximized {
-        return previous.map(|placement| Placement {
-            bounds: placement.bounds,
+        return Placement {
+            bounds: previous.bounds,
             maximized: true,
-        });
+        };
     }
-    Some(Placement {
+    Placement {
         bounds: state.bounds,
         maximized: false,
-    })
+    }
 }
 
 /// Saves the placement, so the next launch reopens the window there. Bounds that land on no
-/// display are ignored: a minimized window reports a position far outside every screen, and
-/// stale ones are left over when a monitor is unplugged.
+/// display are ignored, so a window dragged off every screen doesn't come back off-screen.
 pub fn save_placement(placement: Placement, cx: &App) {
     if !lands_on_display(&placement.bounds, &display_bounds(&cx.displays())) {
         return;
@@ -171,7 +182,8 @@ mod tests {
 
     #[test]
     fn a_windowed_state_is_remembered() {
-        let remembered = remember(None, windowed(10., 20., 800., 600.)).expect("remembered");
+        let previous = placement(0., 0., 1280., 800., true);
+        let remembered = remember(previous, windowed(10., 20., 800., 600.));
         assert!(!remembered.maximized);
         assert_eq!(remembered.bounds.origin.x.as_f32(), 10.);
         assert_eq!(remembered.bounds.size.width.as_f32(), 800.);
@@ -185,7 +197,7 @@ mod tests {
             maximized: true,
             fullscreen: false,
         };
-        let remembered = remember(Some(previous), state).expect("remembered");
+        let remembered = remember(previous, state);
         assert!(remembered.maximized);
         assert_eq!(remembered.bounds.size.width.as_f32(), 800.);
     }
@@ -193,19 +205,9 @@ mod tests {
     #[test]
     fn unmaximizing_updates_the_bounds() {
         let previous = placement(10., 20., 800., 600., true);
-        let remembered = remember(Some(previous), windowed(30., 40., 900., 700.)).expect("remembered");
+        let remembered = remember(previous, windowed(30., 40., 900., 700.));
         assert!(!remembered.maximized);
         assert_eq!(remembered.bounds.origin.x.as_f32(), 30.);
-    }
-
-    #[test]
-    fn a_window_maximized_before_any_windowed_state_remembers_nothing() {
-        let state = WindowState {
-            bounds: rect(0., 0., 1920., 1080.),
-            maximized: true,
-            fullscreen: false,
-        };
-        assert!(remember(None, state).is_none());
     }
 
     #[test]
@@ -216,8 +218,7 @@ mod tests {
             maximized: false,
             fullscreen: true,
         };
-        assert_eq!(remember(Some(previous), state), Some(previous));
-        assert!(remember(None, state).is_none());
+        assert_eq!(remember(previous, state), previous);
     }
 
     #[test]

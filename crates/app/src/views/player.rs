@@ -46,6 +46,9 @@ const VOLUME_STEP: f64 = 5.;
 const SCROLL_LINES_PER_STEP: f32 = 3.;
 /// Trackpad pixels per wheel line, for platforms that send pixel deltas (macOS).
 const PIXELS_PER_LINE: f32 = 30.;
+/// The most volume steps one wheel event makes. Windows scales a notch by the user's lines per
+/// notch, and its "one screen at a time" setting turns a notch into billions of lines.
+const MAX_STEPS_PER_SCROLL: f32 = 4.;
 const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 const CHAPTER_MARK_H: f32 = 8.;
 
@@ -73,6 +76,9 @@ pub struct PlayerPage {
     /// Wheel lines not yet turned into a volume step, so trackpad deltas add up instead of
     /// being ignored.
     scroll_pending: f32,
+    /// Whether playback was paused before the last single click on the video, which a double
+    /// click restores.
+    paused_before_click: bool,
     /// Skip intros and recaps as they start (a setting).
     auto_skip: bool,
     /// The segment last skipped automatically, so seeking back into it doesn't skip again.
@@ -195,6 +201,7 @@ impl PlayerPage {
             volume,
             adjusting_volume: false,
             scroll_pending: 0.,
+            paused_before_click: false,
             auto_skip: crate::config::Config::load().auto_skip_intro.unwrap_or(false),
             auto_skipped: None,
             version: None,
@@ -403,12 +410,17 @@ impl PlayerPage {
     }
 
     /// Clicking the video toggles pause. A double click toggles fullscreen; its first click
-    /// already toggled pause, so the second toggles it back first.
+    /// already toggled pause, so the second restores the state from before it. Not a second
+    /// toggle: in a SyncPlay group the first pause hasn't come back from the server yet, so
+    /// both toggles would ask the group to pause.
     fn click_video(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event.click_count() {
-            1 => self.toggle_pause(&TogglePause, window, cx),
+            1 => {
+                self.paused_before_click = self.now_playing.read(cx).paused;
+                self.toggle_pause(&TogglePause, window, cx);
+            }
             2 => {
-                self.send(UiCommand::TogglePause, cx);
+                self.send(UiCommand::SetPause(self.paused_before_click), cx);
                 self.toggle_fullscreen(&ToggleFullscreen, window, cx);
                 self.show_controls(window, cx);
             }
@@ -781,16 +793,17 @@ fn shared_texture(frame: player::libmpv::SharedFrame) -> SharedTexture {
 }
 
 /// Turns a wheel delta (in lines, positive is scrolling up) into whole volume steps, keeping
-/// the leftover lines for the next event.
+/// the leftover lines for the next event. One event makes at most `MAX_STEPS_PER_SCROLL`.
 fn scroll_steps(pending: f32, lines: f32) -> (f32, i32) {
-    let total = pending + lines;
+    let limit = MAX_STEPS_PER_SCROLL * SCROLL_LINES_PER_STEP;
+    let total = (pending + lines).clamp(-limit, limit);
     let steps = (total / SCROLL_LINES_PER_STEP).trunc() as i32;
     (total - steps as f32 * SCROLL_LINES_PER_STEP, steps)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SCROLL_LINES_PER_STEP, scroll_steps};
+    use super::{MAX_STEPS_PER_SCROLL, SCROLL_LINES_PER_STEP, scroll_steps};
 
     #[test]
     fn a_wheel_notch_is_one_volume_step() {
@@ -819,6 +832,15 @@ mod tests {
         let (pending, steps) = scroll_steps(0., -2. * SCROLL_LINES_PER_STEP);
         assert_eq!(steps, -2);
         assert_eq!(pending, 0.);
+    }
+
+    #[test]
+    fn a_huge_delta_is_capped() {
+        let (pending, steps) = scroll_steps(0., 4_294_967_295.);
+        assert_eq!(steps, MAX_STEPS_PER_SCROLL as i32);
+        assert_eq!(pending, 0.);
+        let (_, steps) = scroll_steps(0., -4_294_967_295.);
+        assert_eq!(steps, -(MAX_STEPS_PER_SCROLL as i32));
     }
 
     #[test]
