@@ -260,6 +260,10 @@ impl ShellView {
     }
 
     fn back(&mut self, _: &Back, window: &mut Window, cx: &mut Context<Self>) {
+        self.go_back(window, cx);
+    }
+
+    pub fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Leaving the player stops playback; the page closes when the session ends.
         if self.stack.last().is_some_and(|page| page.is_player) {
             PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));

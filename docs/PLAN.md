@@ -135,6 +135,7 @@ We use the user-scoped routes without a userId, such as `/UserViews` and `/Items
 
 ### 4.3 Other 12.x behavior changes to handle
 
+- **Playlist entries (10.11 and 12.2):** an entry's `PlaylistItemId` is the item's own id, and 12.2 adds an item already in a playlist a second time (10.11 skips it), so the copies can't be removed separately. *Add to playlist* checks for the item first. Other users' shared playlists report `CanDelete: true` but answer 403 to changes.
 - **Resolution filters (10.11 and 12.2):** `GET /Items` with `is4K=false` matches nothing on either version, and 12.2's `isHd=true` also returns the hidden items of a movie's alternate versions. The library filters use `minWidth` / `maxWidth` instead, which 12.2 applies to an item's widest version and 10.11 to its first. Found while building the library filters.
 - **Direct play needs subtitle profiles (12.2):** a `PlaybackInfo` device profile without `SubtitleProfiles` gets `SupportsDirectPlay: false` on every source in 12.2 (10.11 still allows direct play). The app's profile always lists them. Found while capturing test fixtures.
 

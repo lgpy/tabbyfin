@@ -113,6 +113,12 @@ pub struct BaseItemDto {
     pub parent_index_number: Option<i32>,
     pub child_count: Option<u32>,
     pub recursive_item_count: Option<u32>,
+    /// A playlist entry's id, for moving or removing it. Present on playlist items; on 10.11
+    /// and 12.2 it's the item's own id, so duplicate entries can't be told apart.
+    pub playlist_item_id: Option<String>,
+    /// Only present when requested with [`crate::models::ItemField::CanDelete`]. Not a
+    /// permission check for playlists: other users' shared playlists report `true` too.
+    pub can_delete: Option<bool>,
 
     pub user_data: Option<UserItemDataDto>,
 
@@ -406,6 +412,7 @@ wire_enum!(
         Trickplay = "Trickplay",
         Tags = "Tags",
         RemoteTrailers = "RemoteTrailers",
+        CanDelete = "CanDelete",
     }
 );
 

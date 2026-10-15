@@ -1,3 +1,4 @@
+pub mod add_to_playlist;
 pub mod home;
 pub mod item;
 pub mod library;
