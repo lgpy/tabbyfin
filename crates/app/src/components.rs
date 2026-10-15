@@ -35,6 +35,16 @@ pub enum Load<T> {
 /// An image filling its parent. While it loads, its blurhash from `item` if there is one, or
 /// nothing (the parent's background shows).
 pub fn remote_image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, cx: &mut App) -> AnyElement {
+    image(req, item, false, cx)
+}
+
+/// [`remote_image`] with the cards' rounded corners. The image has to be rounded itself: a
+/// rounded parent clips it to its rectangle only.
+pub fn rounded_image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, cx: &mut App) -> AnyElement {
+    image(req, item, true, cx)
+}
+
+fn image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, rounded: bool, cx: &mut App) -> AnyElement {
     let Some(req) = req else {
         return div().size_full().into_any_element();
     };
@@ -44,7 +54,12 @@ pub fn remote_image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, cx: &
         .zip(req.tag.as_deref())
         .and_then(|(item, tag)| item.blur_hash(req.image_type, tag));
     let preview = hash.and_then(|hash| cache.update(cx, |cache, cx| cache.placeholder(hash, cx)));
-    let cover = |image| img(ImageSource::Render(image)).size_full().object_fit(ObjectFit::Cover);
+    let cover = |image| {
+        img(ImageSource::Render(image))
+            .size_full()
+            .object_fit(ObjectFit::Cover)
+            .when(rounded, |img| img.rounded_xl())
+    };
     let Some(image) = image else {
         return match preview {
             Some(preview) => cover(preview).into_any_element(),
@@ -157,15 +172,24 @@ fn played_badge(cx: &App) -> impl IntoElement {
         .child(Icon::new(IconName::Check).xsmall())
 }
 
+/// Inset from the card's edges, clear of its rounded corners.
 fn progress_bar(fraction: f32, cx: &App) -> impl IntoElement {
     div()
         .absolute()
-        .bottom_0()
-        .left_0()
-        .right_0()
+        .bottom_2()
+        .left_2()
+        .right_2()
         .h(dp(4.))
+        .rounded_full()
+        .overflow_hidden()
         .bg(black().opacity(0.6))
-        .child(div().h_full().w(relative(fraction)).bg(cx.theme().primary))
+        .child(
+            div()
+                .h_full()
+                .w(relative(fraction))
+                .rounded_full()
+                .bg(cx.theme().primary),
+        )
 }
 
 /// The keyboard cursor's highlight, drawn over its parent's edge (inside, so scrolling
@@ -174,7 +198,7 @@ pub fn selection_ring(cx: &App) -> Div {
     div()
         .absolute()
         .inset_0()
-        .rounded_md()
+        .rounded_xl()
         .border_3()
         .border_color(cx.theme().foreground)
 }
@@ -189,9 +213,42 @@ fn card(
     cx: &mut App,
 ) -> Stateful<Div> {
     let (title, subtitle) = card_text(item);
+    let title = div().text_sm().truncate().child(title).into_any_element();
+    let subtitle = div()
+        .text_xs()
+        .truncate()
+        .text_color(cx.theme().muted_foreground)
+        .child(subtitle)
+        .into_any_element();
+    card_with_text(
+        id,
+        item,
+        (width, height),
+        image,
+        title,
+        Some(subtitle),
+        selected,
+        on_click,
+        cx,
+    )
+}
+
+/// [`card`] with its own title, and what goes under it if anything.
+#[allow(clippy::too_many_arguments)]
+fn card_with_text(
+    id: ElementId,
+    item: &BaseItemDto,
+    (width, height): (f32, f32),
+    image: Option<ImageRequest>,
+    title: AnyElement,
+    under: Option<AnyElement>,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut App,
+) -> Stateful<Div> {
     let played = is_played(item);
     let progress = progress(item);
-    let image = remote_image(image, Some(item), cx);
+    let image = rounded_image(image, Some(item), cx);
     v_flex()
         .id(id)
         .w(dp(width))
@@ -204,7 +261,7 @@ fn card(
                 .relative()
                 .w(dp(width))
                 .h(dp(height))
-                .rounded_md()
+                .rounded_xl()
                 .overflow_hidden()
                 .bg(cx.theme().muted)
                 .hover(|style| style.opacity(0.8))
@@ -213,14 +270,59 @@ fn card(
                 .when_some(progress, |el, fraction| el.child(progress_bar(fraction, cx)))
                 .when(selected, |el| el.child(selection_ring(cx))),
         )
-        .child(div().text_sm().truncate().child(title))
-        .child(
+        .child(title)
+        .children(under)
+}
+
+/// An episode in its season's row: "Episode 2" and its name (the season is already the row's
+/// title), `scale` times a landscape card's size.
+pub fn episode_card(
+    id: impl Into<ElementId>,
+    episode: &BaseItemDto,
+    scale: f32,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let (width, height) = (LANDSCAPE_W * scale, LANDSCAPE_H * scale);
+    let image = landscape_image(episode).map(|r| r.fill_width((width * 2.).ceil() as u32));
+    // "Episode 2" then its name, dimmer; a little below the image, and larger than other
+    // cards' titles. The name is cut short when it doesn't fit.
+    let number = episode.index_number.map(|number| format!("Episode {number}"));
+    // Untitled episodes are named "Episode 3" by Jellyfin, which would say it twice.
+    let name = Some(episode.name.trim()).filter(|name| !name.is_empty() && !is_placeholder_episode_name(name));
+    let title = h_flex()
+        .pt_1()
+        .gap_2()
+        .min_w_0()
+        .text_base()
+        .children(number.map(|number| div().flex_none().font_weight(FontWeight::MEDIUM).child(number)))
+        .children(name.map(|name| {
             div()
-                .text_xs()
+                .min_w_0()
                 .truncate()
                 .text_color(cx.theme().muted_foreground)
-                .child(subtitle),
-        )
+                .child(name.to_owned())
+        }))
+        .into_any_element();
+    card_with_text(
+        id.into(),
+        episode,
+        (width, height),
+        image,
+        title,
+        None,
+        selected,
+        on_click,
+        cx,
+    )
+}
+
+/// "Episode 3", "episode 03": the name Jellyfin gives an episode without a title.
+fn is_placeholder_episode_name(name: &str) -> bool {
+    name.split_once(' ').is_some_and(|(word, number)| {
+        word.eq_ignore_ascii_case("episode") && !number.is_empty() && number.chars().all(|c| c.is_ascii_digit())
+    })
 }
 
 pub fn poster_card(
@@ -230,8 +332,21 @@ pub fn poster_card(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut App,
 ) -> Stateful<Div> {
-    let image = item.primary_image().map(|r| r.fill_width((POSTER_W * 2.) as u32));
-    card(id.into(), item, (POSTER_W, POSTER_H), image, selected, on_click, cx)
+    poster_card_scaled(id, item, 1., selected, on_click, cx)
+}
+
+/// [`poster_card`], `scale` times the size.
+pub fn poster_card_scaled(
+    id: impl Into<ElementId>,
+    item: &BaseItemDto,
+    scale: f32,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let (width, height) = (POSTER_W * scale, POSTER_H * scale);
+    let image = item.primary_image().map(|r| r.fill_width((width * 2.).ceil() as u32));
+    card(id.into(), item, (width, height), image, selected, on_click, cx)
 }
 
 pub fn landscape_card(
@@ -241,16 +356,21 @@ pub fn landscape_card(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut App,
 ) -> Stateful<Div> {
-    let image = landscape_image(item).map(|r| r.fill_width((LANDSCAPE_W * 2.) as u32));
-    card(
-        id.into(),
-        item,
-        (LANDSCAPE_W, LANDSCAPE_H),
-        image,
-        selected,
-        on_click,
-        cx,
-    )
+    landscape_card_scaled(id, item, 1., selected, on_click, cx)
+}
+
+/// [`landscape_card`], `scale` times the size.
+pub fn landscape_card_scaled(
+    id: impl Into<ElementId>,
+    item: &BaseItemDto,
+    scale: f32,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let (width, height) = (LANDSCAPE_W * scale, LANDSCAPE_H * scale);
+    let image = landscape_image(item).map(|r| r.fill_width((width * 2.).ceil() as u32));
+    card(id.into(), item, (width, height), image, selected, on_click, cx)
 }
 
 /// A chapter of `item_id`: its image when the server extracted one, its name and start.
@@ -267,7 +387,7 @@ pub fn chapter_card(
         index: Some(index as u32),
         ..ImageRequest::new(item_id, ImageType::Chapter, Some(tag)).fill_width((LANDSCAPE_W * 2.) as u32)
     });
-    let image = remote_image(image, None, cx);
+    let image = rounded_image(image, None, cx);
     let name = chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1));
     v_flex()
         .id(id)
@@ -281,7 +401,7 @@ pub fn chapter_card(
                 .relative()
                 .w(dp(LANDSCAPE_W))
                 .h(dp(LANDSCAPE_H))
-                .rounded_md()
+                .rounded_xl()
                 .overflow_hidden()
                 .bg(cx.theme().muted)
                 .hover(|style| style.opacity(0.8))
@@ -300,20 +420,22 @@ pub fn chapter_card(
 pub const PERSON_W: f32 = 120.;
 pub const PERSON_H: f32 = 180.;
 
-/// A cast or crew member: photo (or initials), name, and role or job.
+/// A cast or crew member, `scale` times the base size.
 pub fn person_card(
     id: impl Into<ElementId>,
     person: &BaseItemPerson,
+    scale: f32,
     selected: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut App,
 ) -> Stateful<Div> {
+    let (width, height) = (PERSON_W * scale, PERSON_H * scale);
     let photo = person
         .primary_image_tag
         .clone()
-        .map(|tag| ImageRequest::new(&person.id, ImageType::Primary, Some(tag)).fill_width((PERSON_W * 2.) as u32));
+        .map(|tag| ImageRequest::new(&person.id, ImageType::Primary, Some(tag)).fill_width((width * 2.).ceil() as u32));
     let has_photo = photo.is_some();
-    let photo = remote_image(photo, None, cx);
+    let photo = rounded_image(photo, None, cx);
     let initials: String = person
         .name
         .split_whitespace()
@@ -327,7 +449,7 @@ pub fn person_card(
     };
     v_flex()
         .id(id.into())
-        .w(dp(PERSON_W))
+        .w(dp(width))
         .flex_none()
         .gap_1()
         .cursor_pointer()
@@ -335,9 +457,9 @@ pub fn person_card(
         .child(
             div()
                 .relative()
-                .w(dp(PERSON_W))
-                .h(dp(PERSON_H))
-                .rounded_md()
+                .w(dp(width))
+                .h(dp(height))
+                .rounded_xl()
                 .overflow_hidden()
                 .bg(cx.theme().muted)
                 .hover(|style| style.opacity(0.8))
@@ -383,27 +505,33 @@ pub fn placeholder_card(cx: &App) -> impl IntoElement {
         .w(dp(POSTER_W))
         .flex_none()
         .gap_1()
-        .child(div().w(dp(POSTER_W)).h(dp(POSTER_H)).rounded_md().bg(cx.theme().muted))
+        .child(div().w(dp(POSTER_W)).h(dp(POSTER_H)).rounded_xl().bg(cx.theme().muted))
         .child(div().h(dp(CARD_TEXT_H - 4.)))
 }
 
-/// A titled, horizontally scrolling row of cards. The cards are the direct children of
-/// `scroll`, so [`crate::browse::reveal`] can scroll to them.
+/// A titled, horizontally scrolling row of cards, for the item pages: more room under the
+/// title than [`shelf_with_rail`]'s default. The cards are the direct children of `scroll`,
+/// so [`crate::browse::reveal`] can scroll to them; `rail` adds listeners or styles to their
+/// row.
 pub fn shelf(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
     cards: Vec<AnyElement>,
     scroll: &ScrollHandle,
+    rail: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
     cx: &App,
 ) -> impl IntoElement {
-    shelf_with_rail(id, title, cards, scroll, |rail| rail, cx)
+    shelf_with_rail(id, title, cards, CARD_GAP, 16., scroll, rail, cx)
 }
 
-/// [`shelf`], with `rail` adding listeners or styles to the scrolling row of cards.
+/// A titled, horizontally scrolling row of cards, `gap` apart and `title_gap` below the title.
+#[allow(clippy::too_many_arguments)]
 pub fn shelf_with_rail(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
     cards: Vec<AnyElement>,
+    gap: f32,
+    title_gap: f32,
     scroll: &ScrollHandle,
     rail: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
     cx: &App,
@@ -439,7 +567,7 @@ pub fn shelf_with_rail(
             })
     };
     v_flex()
-        .gap_2()
+        .gap(dp(title_gap))
         .child(
             h_flex()
                 .px_6()
@@ -468,7 +596,7 @@ pub fn shelf_with_rail(
                 .flex()
                 .px_6()
                 .pb_2()
-                .gap(dp(CARD_GAP))
+                .gap(dp(gap))
                 .overflow_x_scroll()
                 .track_scroll(scroll)
                 .children(cards),
@@ -505,4 +633,19 @@ pub fn error_state(
         .gap_3()
         .child(div().text_color(cx.theme().muted_foreground).child(message.into()))
         .child(Button::new("retry").outline().label("Retry").on_click(on_retry))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_placeholder_episode_name;
+
+    #[test]
+    fn jellyfins_names_for_untitled_episodes() {
+        assert!(is_placeholder_episode_name("Episode 3"));
+        assert!(is_placeholder_episode_name("episode 03"));
+        assert!(!is_placeholder_episode_name("Episode"));
+        assert!(!is_placeholder_episode_name("Episode IV"));
+        assert!(!is_placeholder_episode_name("Frozen Bonds"));
+        assert!(!is_placeholder_episode_name("Episode 3: The Return"));
+    }
 }

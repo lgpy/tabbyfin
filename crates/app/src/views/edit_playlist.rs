@@ -170,8 +170,8 @@ impl Render for EditPlaylist {
                 .relative()
                 .p_1()
                 .m(dp(-4.))
-                .rounded_lg()
-                .when(on_switch, |el| el.child(selection_ring(cx).rounded_lg()))
+                .rounded_xl()
+                .when(on_switch, |el| el.child(selection_ring(cx).rounded_xl()))
                 .child(
                     Switch::new("playlist-public")
                         .checked(*public)

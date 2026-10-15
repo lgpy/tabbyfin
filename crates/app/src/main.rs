@@ -12,6 +12,7 @@ mod live;
 mod markers;
 mod motion;
 mod playback;
+mod rail_drag;
 mod remote;
 mod router;
 mod runtime;

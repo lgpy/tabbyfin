@@ -1,4 +1,5 @@
-//! Version and track pickers, shared by the item page (before playing) and the player.
+//! Version pickers (the item page's and the player's) and the audio and subtitle choices of a
+//! media source (the player's settings menu).
 
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::select::{SelectEvent, SelectItem, SelectState};
@@ -100,23 +101,4 @@ pub fn track_choices(source: &MediaSourceInfo) -> (Vec<Choice>, Vec<Choice>) {
         );
     }
     (audio, subtitles)
-}
-
-/// Audio and subtitle pickers for a media source, with `audio` / `subtitle` (Jellyfin stream
-/// indexes, [`SUBTITLES_OFF`] for none) preselected. `None` for a kind the source lacks.
-pub fn track_pickers<V: 'static>(
-    source: &MediaSourceInfo,
-    audio: Option<i32>,
-    subtitle: Option<i32>,
-    window: &mut Window,
-    cx: &mut Context<V>,
-) -> (Option<ChoiceSelect>, Option<ChoiceSelect>) {
-    let mut picker = |choices: Vec<Choice>, value: Option<i32>| {
-        (!choices.is_empty()).then(|| {
-            let selected = choices.iter().position(|c| Some(c.value) == value).unwrap_or(0);
-            cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
-        })
-    };
-    let (audio_choices, subtitle_choices) = track_choices(source);
-    (picker(audio_choices, audio), picker(subtitle_choices, subtitle))
 }

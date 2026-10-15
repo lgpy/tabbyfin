@@ -70,6 +70,10 @@ const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 const CHAPTER_MARK_H: f32 = 8.;
 /// Width of the seek-bar preview thumbnail.
 const PREVIEW_W: f32 = 192.;
+/// The control bars' buttons, square, and play/pause, larger; icons are this share of a side.
+const CONTROL: f32 = 40.;
+const PLAY_CONTROL: f32 = 48.;
+const CONTROL_ICON: f32 = 0.52;
 /// A row of a settings tab's track list.
 const TRACK_ROW_H: f32 = 28.;
 /// The tracks a list shows before it scrolls.
@@ -622,9 +626,7 @@ impl PlayerPage {
                 linear_color_stop(black().opacity(0.), 1.),
             ))
             .child(
-                Button::new("exit-player")
-                    .ghost()
-                    .icon(IconName::ArrowLeft)
+                control_button("exit-player", IconName::ArrowLeft, CONTROL)
                     .tooltip("Back (Esc)")
                     .on_click(cx.listener(|this, _, window, cx| this.exit_player(&ExitPlayer, window, cx))),
             )
@@ -720,34 +722,29 @@ impl PlayerPage {
             }))
             .child(
                 h_flex()
-                    .gap_1()
+                    .gap_3()
                     .text_color(white())
                     .child(
-                        Button::new("play-pause")
-                            .ghost()
-                            .large()
-                            .icon(if paused { Lucide::Play } else { Lucide::Pause })
-                            .tooltip(if paused { "Play (Space)" } else { "Pause (Space)" })
-                            .on_click(cx.listener(|this, _, window, cx| this.toggle_pause(&TogglePause, window, cx))),
+                        control_button(
+                            "play-pause",
+                            if paused { Lucide::Play } else { Lucide::Pause },
+                            PLAY_CONTROL,
+                        )
+                        .tooltip(if paused { "Play (Space)" } else { "Pause (Space)" })
+                        .on_click(cx.listener(|this, _, window, cx| this.toggle_pause(&TogglePause, window, cx))),
                     )
                     .child(
-                        Button::new("back-10")
-                            .ghost()
-                            .icon(Lucide::Rewind)
+                        control_button("back-10", Lucide::Rewind, CONTROL)
                             .tooltip("Back 10 s (←)")
                             .on_click(cx.listener(|this, _, window, cx| this.seek_backward(&SeekBackward, window, cx))),
                     )
                     .child(
-                        Button::new("forward-10")
-                            .ghost()
-                            .icon(Lucide::FastForward)
+                        control_button("forward-10", Lucide::FastForward, CONTROL)
                             .tooltip("Forward 10 s (→)")
                             .on_click(cx.listener(|this, _, window, cx| this.seek_forward(&SeekForward, window, cx))),
                     )
                     .child(
-                        Button::new("mute")
-                            .ghost()
-                            .icon(if muted { Lucide::VolumeX } else { Lucide::Volume2 })
+                        control_button("mute", if muted { Lucide::VolumeX } else { Lucide::Volume2 }, CONTROL)
                             .tooltip(if muted { "Unmute (M)" } else { "Mute (M)" })
                             .on_click(cx.listener(|this, _, window, cx| this.toggle_mute(&ToggleMute, window, cx))),
                     )
@@ -755,7 +752,7 @@ impl PlayerPage {
                     .child(
                         div()
                             .id("time")
-                            .ml_3()
+                            .ml_2()
                             .text_sm()
                             .text_color(white().opacity(0.9))
                             .cursor_pointer()
@@ -766,9 +763,7 @@ impl PlayerPage {
                     .child(div().flex_1())
                     .when_some(previous_tip, |el, tip| {
                         el.child(
-                            Button::new("previous-item")
-                                .ghost()
-                                .icon(Lucide::SkipBack)
+                            control_button("previous-item", Lucide::SkipBack, CONTROL)
                                 .tooltip(tip)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.previous_episode(&PreviousEpisode, window, cx)
@@ -777,9 +772,7 @@ impl PlayerPage {
                     })
                     .when_some(next_tip, |el, tip| {
                         el.child(
-                            Button::new("next-item")
-                                .ghost()
-                                .icon(Lucide::SkipForward)
+                            control_button("next-item", Lucide::SkipForward, CONTROL)
                                 .tooltip(tip)
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.next_episode(&NextEpisode, window, cx)),
@@ -790,19 +783,19 @@ impl PlayerPage {
                     .children(self.render_chapters(cx))
                     .child(self.render_settings(cx))
                     .child(
-                        Button::new("fullscreen")
-                            .ghost()
-                            .icon(if fullscreen { Lucide::Minimize } else { Lucide::Maximize })
-                            .tooltip(if fullscreen {
-                                "Exit fullscreen (F)"
-                            } else {
-                                "Fullscreen (F)"
-                            })
-                            .on_click(
-                                cx.listener(|this, _, window, cx| {
-                                    this.toggle_fullscreen(&ToggleFullscreen, window, cx)
-                                }),
-                            ),
+                        control_button(
+                            "fullscreen",
+                            if fullscreen { Lucide::Minimize } else { Lucide::Maximize },
+                            CONTROL,
+                        )
+                        .tooltip(if fullscreen {
+                            "Exit fullscreen (F)"
+                        } else {
+                            "Fullscreen (F)"
+                        })
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.toggle_fullscreen(&ToggleFullscreen, window, cx)),
+                        ),
                     ),
             );
 
@@ -829,12 +822,7 @@ impl PlayerPage {
                         });
                     }
                 })
-                .trigger(
-                    Button::new("chapters")
-                        .ghost()
-                        .icon(Lucide::ListVideo)
-                        .tooltip("Chapters"),
-                )
+                .trigger(control_button("chapters", Lucide::ListVideo, CONTROL).tooltip("Chapters"))
                 .content(move |_, _, cx| chapters_panel(&page, cx)),
         )
     }
@@ -854,12 +842,7 @@ impl PlayerPage {
                     });
                 }
             })
-            .trigger(
-                Button::new("settings")
-                    .ghost()
-                    .icon(Lucide::Settings2)
-                    .tooltip("Playback settings"),
-            )
+            .trigger(control_button("settings", Lucide::Settings2, CONTROL).tooltip("Playback settings"))
             .content(move |_, _, cx| settings_panel(&page, cx))
     }
 
@@ -887,7 +870,7 @@ impl PlayerPage {
                 .w(dp(320.))
                 .p_3()
                 .gap_2()
-                .rounded_lg()
+                .rounded_xl()
                 .bg(black().opacity(0.8))
                 .text_color(white())
                 .child(div().text_sm().text_color(white().opacity(0.7)).child("Up next"))
@@ -923,7 +906,7 @@ impl PlayerPage {
             let card = h_flex()
                 .p_3()
                 .gap_3()
-                .rounded_lg()
+                .rounded_xl()
                 .bg(black().opacity(0.8))
                 .text_color(white())
                 .child(div().text_sm().child(format!("Resumed from {}", timestamp(from))))
@@ -985,7 +968,7 @@ fn chapters_panel(page: &Entity<PlayerPage>, cx: &mut Context<PopoverState>) -> 
                 .id(("chapter", chapter.index))
                 .gap_3()
                 .p_1()
-                .rounded_md()
+                .rounded_lg()
                 .cursor_pointer()
                 .when(current == Some(chapter.index), |el| el.bg(cx.theme().accent))
                 .hover(|style| style.bg(cx.theme().muted))
@@ -1272,7 +1255,7 @@ fn track_list(
                 .h(dp(TRACK_ROW_H))
                 .gap_2()
                 .px_2()
-                .rounded_md()
+                .rounded_lg()
                 .cursor_pointer()
                 .hover(move |style| style.bg(hover))
                 .on_click(move |_, _, cx| choose(value, cx))
@@ -1313,12 +1296,22 @@ impl SettingsTab {
     }
 }
 
+/// A control-bar button: a square, its icon a size up from a plain button's. (A button sizes
+/// the icon it's given with `icon`, so it goes in as a child.)
+fn control_button(id: &'static str, icon: impl Into<Icon>, size: f32) -> Button {
+    Button::new(id)
+        .ghost()
+        .w(dp(size))
+        .h(dp(size))
+        .child(icon.into().size(dp(size * CONTROL_ICON)))
+}
+
 /// A small label in the player's bars.
 fn badge(text: impl Into<SharedString>) -> impl IntoElement {
     div()
         .flex_none()
         .px_2()
-        .rounded_md()
+        .rounded_lg()
         .bg(black().opacity(0.5))
         .text_sm()
         .text_color(white().opacity(0.8))

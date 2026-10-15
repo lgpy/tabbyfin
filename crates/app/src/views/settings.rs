@@ -411,10 +411,10 @@ impl SettingsPage {
             div()
                 .relative()
                 .p(dp(RING_GAP))
-                .rounded_lg()
+                .rounded_xl()
                 .child(element)
                 .when(self.cursor.is_selected(0, index), |el| {
-                    el.child(selection_ring(cx).rounded_lg())
+                    el.child(selection_ring(cx).rounded_xl())
                 })
         };
         match self.select(control) {

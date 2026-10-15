@@ -11,7 +11,7 @@ use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::popover::{Popover, PopoverState};
-use gpui_kit::component::{ActiveTheme, IconName, Selectable, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Selectable, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::GroupState;
@@ -37,6 +37,17 @@ use crate::zoom::dp;
 actions!(jelly, [Back, OpenSearch]);
 
 pub const KEY_CONTEXT: &str = "Shell";
+
+const TOP_BAR_H: f32 = 72.;
+const TOP_BAR_ICON: f32 = 24.;
+/// The top bar's buttons' height.
+const TOP_BAR_BUTTON: f32 = 40.;
+
+/// A top-bar button's icon, a size up from a button's own. (A button sizes the icon it's
+/// given with `icon`, so these go in as children.)
+fn bar_icon(icon: impl Into<Icon>) -> Icon {
+    icon.into().size(dp(TOP_BAR_ICON))
+}
 
 /// The top bar's buttons, in order, for the keyboard: Up past a page's first row reaches
 /// them, Left and Right move along, Enter presses, Down or Esc returns to the page.
@@ -420,7 +431,7 @@ impl ShellView {
             }
             TopBarItem::Settings => {
                 self.top_bar = None;
-                self.push(Route::Settings, window, cx);
+                self.toggle_settings(window, cx);
             }
             TopBarItem::SyncPlay => self.open_menu(Menu::SyncPlay, Some(0), cx),
             TopBarItem::Account => self.open_menu(Menu::Account, Some(0), cx),
@@ -487,6 +498,20 @@ impl ShellView {
         }
     }
 
+    /// The Settings button: opens Settings, or closes it (back to the page before) when it's on
+    /// top.
+    fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let on_top = self
+            .stack
+            .last()
+            .is_some_and(|page| page.view.clone().downcast::<SettingsPage>().is_ok());
+        if on_top {
+            self.go_back(window, cx);
+        } else {
+            self.push(Route::Settings, window, cx);
+        }
+    }
+
     pub fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Leaving the player stops playback; the page closes when the session ends.
         if self.stack.last().is_some_and(|page| page.is_player) {
@@ -519,16 +544,18 @@ impl ShellView {
         let ring = |item: TopBarItem, element: AnyElement| {
             div()
                 .relative()
-                .rounded_md()
+                .rounded_lg()
                 .child(element)
                 .when(keyboard == Some(item), |el| el.child(selection_ring(cx)))
         };
         let title = self.stack.last().map(|p| p.title.clone()).unwrap_or_default();
         h_flex()
-            .h(dp(52.))
+            .h(dp(TOP_BAR_H))
             .flex_none()
-            .px_4()
-            .gap_2()
+            .px_6()
+            .gap_4()
+            // The account name; the title sets its own.
+            .text_lg()
             .border_b_1()
             .border_color(cx.theme().border)
             // Only when there's a page to go back to.
@@ -537,7 +564,8 @@ impl ShellView {
                     TopBarItem::Back,
                     Button::new("back")
                         .ghost()
-                        .icon(IconName::ArrowLeft)
+                        .h(dp(TOP_BAR_BUTTON))
+                        .child(bar_icon(IconName::ArrowLeft))
                         .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx)))
                         .into_any_element(),
                 ))
@@ -546,17 +574,26 @@ impl ShellView {
                 TopBarItem::Home,
                 Button::new("home")
                     .ghost()
-                    .icon(Lucide::House)
+                    .h(dp(TOP_BAR_BUTTON))
+                    .child(bar_icon(Lucide::House))
                     .tooltip("Home")
                     .on_click(cx.listener(|this, _, window, cx| this.home(window, cx)))
                     .into_any_element(),
             ))
-            .child(div().flex_1().truncate().font_weight(FontWeight::SEMIBOLD).child(title))
+            .child(
+                div()
+                    .flex_1()
+                    .truncate()
+                    .text_xl()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            )
             .child(ring(
                 TopBarItem::Search,
                 Button::new("search")
                     .ghost()
-                    .icon(IconName::Search)
+                    .h(dp(TOP_BAR_BUTTON))
+                    .child(bar_icon(IconName::Search))
                     .tooltip("Search")
                     .on_click(cx.listener(|this, _, window, cx| this.open_search(&OpenSearch, window, cx)))
                     .into_any_element(),
@@ -566,9 +603,10 @@ impl ShellView {
                 TopBarItem::Settings,
                 Button::new("settings")
                     .ghost()
-                    .icon(IconName::Settings)
+                    .h(dp(TOP_BAR_BUTTON))
+                    .child(bar_icon(IconName::Settings))
                     .tooltip("Settings")
-                    .on_click(cx.listener(|this, _, window, cx| this.push(Route::Settings, window, cx)))
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_settings(window, cx)))
                     .into_any_element(),
             ))
             .child(ring(TopBarItem::Account, account))
@@ -589,8 +627,9 @@ impl ShellView {
             .trigger(
                 Button::new("account-button")
                     .ghost()
-                    .label(self.session.user.name.clone())
-                    .icon(IconName::ChevronDown)
+                    .h(dp(TOP_BAR_BUTTON))
+                    .child(bar_icon(IconName::ChevronDown))
+                    .child(self.session.user.name.clone())
                     .tooltip(self.session.server.server_name.clone().unwrap_or_default()),
             )
             .content({
@@ -746,7 +785,8 @@ impl ShellView {
             .trigger(
                 Button::new("syncplay-button")
                     .ghost()
-                    .icon(Lucide::Users)
+                    .h(dp(TOP_BAR_BUTTON))
+                    .child(bar_icon(Lucide::Users))
                     .when(in_group, |b| b.primary())
                     .tooltip("Watch together (SyncPlay)"),
             )
