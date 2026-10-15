@@ -3,9 +3,11 @@
 # needs (FFmpeg, libass…), so it runs where mpv isn't installed. linuxdeploy leaves out the
 # libraries every desktop has and that must match the system (glibc, GL, X11), and Vulkan's
 # loader is left out too: it has to find the system's drivers, and GPUI can't run without it.
-# The AppImage runs on distributions with this glibc or newer.
 #
-#   packaging/appimage.sh <binary> <version> <out-dir>     (needs libmpv2 installed)
+#   packaging/appimage.sh <binary> <version> <out-dir>     (needs libmpv installed)
+#
+# The AppImage needs the glibc of the system it's built on, so releases build it in Ubuntu
+# 22.04 (packaging/appimage-docker.sh).
 set -euo pipefail
 
 binary="$(realpath "$1")"
@@ -19,9 +21,11 @@ source "$here/linuxdeploy.lock"
 system_lib() { # <soname>: its path, from the linker cache
   ldconfig -p | sed -n "s/.*$1 (libc6,x86-64) => //p" | head -n1
 }
+# libmpv.so.2 (mpv 0.35+), or libmpv.so.1 on older systems like Ubuntu 22.04.
 libmpv="$(system_lib 'libmpv\.so\.2')"
+[[ -n "$libmpv" ]] || libmpv="$(system_lib 'libmpv\.so\.1')"
 if [[ -z "$libmpv" ]]; then
-  echo "libmpv.so.2 isn't installed (apt install libmpv2)" >&2
+  echo "libmpv isn't installed (apt install libmpv2, or libmpv1 on older systems)" >&2
   exit 1
 fi
 # libmpv needs these, and linuxdeploy's exclude list leaves them out as if every desktop had

@@ -56,7 +56,7 @@ Download the package for your system from the [releases](https://github.com/lgpy
 | Windows 10/11 (x86_64) | `jelly-gpui-<version>-windows-x86_64-setup.exe` | Installs for your user (no admin rights needed), with a Start-menu entry and an uninstaller in Settings → Apps. libmpv and ANGLE are included. The build isn't code-signed, so SmartScreen may ask before it runs. |
 | Windows, portable | `jelly-gpui-<version>-windows-x86_64.zip` | The same files: unzip anywhere and run `jelly-gpui.exe`. |
 | Debian, Ubuntu (x86_64) | `jelly-gpui_<version>-1_amd64.deb` | `sudo apt install ./jelly-gpui_<version>-1_amd64.deb` pulls in `libmpv2` and Vulkan. |
-| Other Linux (x86_64) | `jelly-gpui-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it. libmpv is included; needs a Vulkan driver and a 2024 or newer distribution (glibc 2.39, e.g. Ubuntu 24.04, Fedora 40). Without FUSE, run it with `--appimage-extract-and-run`. |
+| Other Linux (x86_64) | `jelly-gpui-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it. libmpv is included; needs a Vulkan driver and a 2022 or newer distribution (glibc 2.35: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21…). Without FUSE, run it with `--appimage-extract-and-run`. |
 | Linux, tarball | `jelly-gpui-<version>-linux-x86_64.tar.gz` | Needs libmpv (`libmpv.so.2`) and a Vulkan driver installed. For a menu entry, copy `jelly-gpui` to `~/.local/bin/`, `jelly-gpui.desktop` to `~/.local/share/applications/` and `jelly-gpui.svg` to `~/.local/share/icons/hicolor/scalable/apps/`. |
 | macOS 12+ (Apple silicon, Intel) | `jelly-gpui-<version>-macos-<arch>.zip` | Needs `brew install mpv` for playback. The app is ad-hoc signed, not notarised: right-click it and choose Open the first time. |
 
