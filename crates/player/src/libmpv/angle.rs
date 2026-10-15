@@ -256,6 +256,7 @@ impl GpuRenderer {
             if !super::video::hardware_renderer(&renderer) || renderer.contains("WARP") {
                 return Err(fail(&egl, failed(format!("{renderer} is a software renderer"))));
             }
+            super::video::adapt_to_renderer(core, &renderer);
 
             // ANGLE's own D3D11 device: the shared textures (and mpv's decoder) live on it.
             let mut device: egl::Attrib = 0;
