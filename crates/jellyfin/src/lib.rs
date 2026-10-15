@@ -26,7 +26,10 @@ pub use items::{ItemsQuery, SortOrder};
 pub use playback::{PlayMethod, PlaybackInfoRequest, PlaybackInfoResponse, PlaybackReport};
 pub use remote::{Capabilities, GeneralCommand, PlayCommand, PlayRequest, PlaystateCommand, PlaystateRequest};
 pub use socket::{ServerMessage, SocketEvent};
-pub use syncplay::{BufferReport, Command, CommandKind, GroupInfo, GroupState, GroupUpdate, PlayQueue, QueueItem};
+pub use syncplay::{
+    BufferReport, Command, CommandKind, GroupInfo, GroupState, GroupUpdate, PlayQueue, QueueItem, RepeatMode,
+    ShuffleMode,
+};
 pub use system::{MIN_SUPPORTED_VERSION, ServerVersion};
 pub use ticks::Ticks;
 pub use time::{ClockSample, ServerClock};

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.lgpy.jelly-gpui</id>
+  <name>jelly-gpui</name>
+  <summary>Desktop client for Jellyfin</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.lgpy">
+    <name>lgpy</name>
+  </developer>
+  <description>
+    <p>
+      A native desktop client for Jellyfin media servers. Browse your libraries, search, and
+      play movies and shows inside the window with mpv, including direct play of most formats,
+      transcoding when needed, chapters, skip intro, subtitles and audio tracks.
+    </p>
+    <p>
+      It can also be controlled from other Jellyfin clients, and watch together with others
+      through SyncPlay.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.lgpy.jelly-gpui.desktop</launchable>
+  <url type="homepage">https://github.com/lgpy/jelly-gpui</url>
+  <url type="bugtracker">https://github.com/lgpy/jelly-gpui/issues</url>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <releases>
+    <release version="0.1.0" date="2026-10-15"/>
+  </releases>
+</component>

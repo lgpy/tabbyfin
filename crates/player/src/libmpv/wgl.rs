@@ -3,10 +3,9 @@
 //! textures by their share handles and draws them, so frames never pass through the CPU.
 //! See `docs/in-app-video.md` (phase 2) and `examples/dx_interop_probe.rs`.
 
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
-use tokio::sync::watch;
 use windows::Win32::Foundation::{HANDLE, HMODULE, HWND};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::*;
@@ -18,38 +17,15 @@ use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW};
 use windows::core::{BOOL, Interface, PCSTR, w};
 
-use super::video::{
-    Frame, PARAM_API_TYPE, PARAM_INVALID, RenderControl, SharedFrame, UPDATE_FRAME, Wakeup, fit, on_update,
+use super::Core;
+use super::opengl::{
+    Backend, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER, GL_FRAMEBUFFER_COMPLETE, GL_RENDERER, GL_TEXTURE_2D, GetProcAddress,
+    failed,
 };
-use super::{Core, RenderParam, cstring};
+use super::video::SharedFrame;
 use crate::{Error, Result};
 
-const PARAM_OPENGL_INIT_PARAMS: c_int = 2;
-const PARAM_OPENGL_FBO: c_int = 3;
-const PARAM_FLIP_Y: c_int = 4;
-
-const GL_TEXTURE_2D: u32 = 0x0DE1;
-const GL_FRAMEBUFFER: u32 = 0x8D40;
-const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
-const GL_FRAMEBUFFER_COMPLETE: u32 = 0x8CD5;
 const WGL_ACCESS_WRITE_DISCARD_NV: u32 = 0x0002;
-
-/// Frames in flight: GPUI draws the latest while mpv renders into the oldest.
-const RING: usize = 3;
-
-#[repr(C)]
-struct OpenGlInitParams {
-    get_proc_address: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
-    get_proc_address_ctx: *mut c_void,
-}
-
-#[repr(C)]
-struct OpenGlFbo {
-    fbo: c_int,
-    w: c_int,
-    h: c_int,
-    internal_format: c_int,
-}
 
 #[allow(non_snake_case)]
 struct Interop {
@@ -95,12 +71,8 @@ fn gl_proc<T: Copy>(name: &str) -> Result<T> {
     Ok(unsafe { std::mem::transmute_copy(&f) })
 }
 
-fn failed(what: impl std::fmt::Display) -> Error {
-    Error::GpuUnavailable(what.to_string())
-}
-
 /// One shared texture, registered with GL and attached to its own framebuffer.
-struct Slot {
+pub(crate) struct Slot {
     texture: ID3D11Texture2D,
     share: HANDLE,
     gl_texture: u32,
@@ -108,7 +80,7 @@ struct Slot {
     interop: HANDLE,
 }
 
-pub(crate) struct GpuRenderer {
+pub(crate) struct Wgl {
     hwnd: HWND,
     hdc: HDC,
     glrc: HGLRC,
@@ -116,15 +88,11 @@ pub(crate) struct GpuRenderer {
     context: ID3D11DeviceContext,
     interop_device: HANDLE,
     fns: Interop,
-    mpv_context: *mut c_void,
-    ring: Vec<Slot>,
-    size: (u32, u32),
-    next: usize,
 }
 
-impl GpuRenderer {
-    /// Sets up OpenGL, D3D11 and the mpv render context on the calling (render) thread.
-    pub fn new(core: &Core, control: &RenderControl) -> Result<Self> {
+impl Wgl {
+    /// Sets up OpenGL, D3D11 and the interop between them on the calling (render) thread.
+    pub fn new(core: &Core) -> Result<Self> {
         // SAFETY: Win32/WGL/D3D11 setup on this thread; every handle is checked.
         unsafe {
             let instance = GetModuleHandleW(None).map_err(failed)?;
@@ -230,37 +198,6 @@ impl GpuRenderer {
                 return Err(fail(failed("wglDXOpenDeviceNV failed")));
             }
 
-            let api_type = cstring("opengl");
-            let mut init = OpenGlInitParams {
-                get_proc_address,
-                get_proc_address_ctx: ptr::null_mut(),
-            };
-            let mut params = [
-                RenderParam {
-                    kind: PARAM_API_TYPE,
-                    data: api_type.as_ptr() as *mut c_void,
-                },
-                RenderParam {
-                    kind: PARAM_OPENGL_INIT_PARAMS,
-                    data: &mut init as *mut _ as *mut c_void,
-                },
-                RenderParam {
-                    kind: PARAM_INVALID,
-                    data: ptr::null_mut(),
-                },
-            ];
-            let mut mpv_context = ptr::null_mut();
-            let code = (core.api.render_create)(&mut mpv_context, core.mpv, params.as_mut_ptr());
-            if let Err(err) = core.api.check("mpv_render_context_create(opengl)", code) {
-                let _ = (fns.wglDXCloseDeviceNV)(interop_device);
-                return Err(fail(err));
-            }
-            (core.api.render_set_update_callback)(
-                mpv_context,
-                Some(on_update),
-                &control.wakeup as *const Wakeup as *mut c_void,
-            );
-
             Ok(Self {
                 hwnd,
                 hdc,
@@ -269,85 +206,36 @@ impl GpuRenderer {
                 context,
                 interop_device,
                 fns,
-                mpv_context,
-                ring: Vec::new(),
-                size: (0, 0),
-                next: 0,
             })
         }
     }
+}
 
-    pub fn run(&mut self, core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>) {
-        let mut last_size = None;
-        while control.wait() {
-            // SAFETY: render context calls happen only on this thread.
-            let flags = unsafe { (core.api.render_update)(self.mpv_context) };
-            let Some(size) = fit(core, control) else { continue };
-            if flags & UPDATE_FRAME == 0 && last_size == Some(size) {
-                continue;
-            }
-            last_size = Some(size);
-            match self.render(core, size) {
-                Ok(frame) => {
-                    frames.send_replace(Some(Frame::Shared(frame)));
-                }
-                Err(err) => tracing::warn!("GPU frame failed: {err}"),
-            }
-        }
-        // SAFETY: the context is current on this thread; free mpv's context before the GL one.
-        unsafe {
-            (core.api.render_set_update_callback)(self.mpv_context, None, ptr::null_mut());
-            (core.api.render_free)(self.mpv_context);
-        }
+impl Backend for Wgl {
+    type Slot = Slot;
+
+    fn proc_address(&self) -> (GetProcAddress, *mut c_void) {
+        (get_proc_address, ptr::null_mut())
     }
 
-    fn render(&mut self, core: &Core, (width, height): (u32, u32)) -> Result<SharedFrame> {
-        if self.size != (width, height) || self.ring.is_empty() {
-            self.release_ring();
-            for _ in 0..RING {
-                let slot = self.create_slot(width, height)?;
-                self.ring.push(slot);
-            }
-            self.size = (width, height);
-            self.next = 0;
-        }
-        let slot = &self.ring[self.next];
-        self.next = (self.next + 1) % RING;
-
+    fn render(
+        &self,
+        slot: &Slot,
+        (width, height): (u32, u32),
+        draw: impl FnOnce(u32) -> Result<()>,
+    ) -> Result<SharedFrame> {
         // SAFETY: GL and interop calls on the thread owning the context; `slot` is registered.
         unsafe {
             let mut objects = [slot.interop];
             if !(self.fns.wglDXLockObjectsNV)(self.interop_device, 1, objects.as_mut_ptr()).as_bool() {
                 return Err(failed("wglDXLockObjectsNV failed"));
             }
-            let mut fbo = OpenGlFbo {
-                fbo: slot.fbo as c_int,
-                w: width as c_int,
-                h: height as c_int,
-                internal_format: 0,
-            };
-            // The interop texture already has D3D's row order (verified on AMD), so no flip.
-            let mut flip: c_int = 0;
-            let mut params = [
-                RenderParam {
-                    kind: PARAM_OPENGL_FBO,
-                    data: &mut fbo as *mut _ as *mut c_void,
-                },
-                RenderParam {
-                    kind: PARAM_FLIP_Y,
-                    data: &mut flip as *mut _ as *mut c_void,
-                },
-                RenderParam {
-                    kind: PARAM_INVALID,
-                    data: ptr::null_mut(),
-                },
-            ];
-            let code = (core.api.render_render)(self.mpv_context, params.as_mut_ptr());
+            let drawn = draw(slot.fbo);
             // Make sure the frame is complete before another device reads it.
             glFinish();
             let _ = (self.fns.wglDXUnlockObjectsNV)(self.interop_device, 1, objects.as_mut_ptr());
             self.context.Flush();
-            core.api.check("mpv_render_context_render", code)?;
+            drawn?;
         }
         Ok(SharedFrame {
             handle: slot.share.0 as usize,
@@ -414,33 +302,26 @@ impl GpuRenderer {
                 interop,
             };
             if status != GL_FRAMEBUFFER_COMPLETE {
-                self.release_slot(&slot);
+                self.release_slot(slot);
                 return Err(failed(format!("framebuffer incomplete: {status:#x}")));
             }
             Ok(slot)
         }
     }
 
-    fn release_slot(&self, slot: &Slot) {
+    fn release_slot(&self, slot: Slot) {
         // SAFETY: objects created by this renderer, on the context's thread.
         unsafe {
             (self.fns.glDeleteFramebuffers)(1, &slot.fbo);
             let _ = (self.fns.wglDXUnregisterObjectNV)(self.interop_device, slot.interop);
             glDeleteTextures(1, &slot.gl_texture);
         }
-        let _ = &slot.texture;
-    }
-
-    fn release_ring(&mut self) {
-        for slot in std::mem::take(&mut self.ring) {
-            self.release_slot(&slot);
-        }
+        drop(slot.texture);
     }
 }
 
-impl Drop for GpuRenderer {
+impl Drop for Wgl {
     fn drop(&mut self) {
-        self.release_ring();
         // SAFETY: tear down in reverse order of creation, on the thread that created them.
         unsafe {
             let _ = (self.fns.wglDXCloseDeviceNV)(self.interop_device);

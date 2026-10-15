@@ -11,10 +11,10 @@ use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::popover::{Popover, PopoverState};
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Selectable, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jellyfin::GroupState;
+use jellyfin::{GroupState, RepeatMode, ShuffleMode};
 
 use crate::browse::{MoveDown, MoveUp};
 use crate::components::selection_ring;
@@ -85,6 +85,11 @@ enum MenuEntry {
     SignOut,
     JoinGroup(String),
     NewGroup,
+    ToggleShuffle,
+    CycleRepeat,
+    /// An entry of the group's queue, by playlist item id: Enter plays it, Delete removes
+    /// it, Alt+Up and Alt+Down move it.
+    QueueEntry(String),
     LeaveGroup,
 }
 
@@ -379,21 +384,40 @@ impl ShellView {
 
     /// Keys in the top bar and its menus. (Esc arrives as `Back`, bound before this runs.)
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.modifiers.modified() {
-            return;
-        }
+        let modifiers = event.keystroke.modifiers;
         let key = event.keystroke.key.as_str();
         if let Some((menu, Some(highlight))) = self.menu {
-            let count = self.menu_entries(menu, cx).len();
-            match key {
-                "down" if highlight + 1 < count => self.menu = Some((menu, Some(highlight + 1))),
-                "up" if highlight > 0 => self.menu = Some((menu, Some(highlight - 1))),
-                "enter" => self.choose_menu_entry(menu, highlight, window, cx),
-                "up" | "down" => {}
+            let entries = self.menu_entries(menu, cx);
+            let queue_entry = match entries.get(highlight) {
+                Some(MenuEntry::QueueEntry(id)) => Some(id.clone()),
+                _ => None,
+            };
+            let syncplay = SyncPlay::global(cx);
+            match (key, queue_entry) {
+                // Moving a queue entry: the highlight goes with it, if there's room.
+                ("up" | "down", Some(id)) if modifiers.alt && !modifiers.control && !modifiers.shift => {
+                    let by = if key == "up" { -1 } else { 1 };
+                    let target = highlight.checked_add_signed(by);
+                    if let Some(target) = target.filter(|t| matches!(entries.get(*t), Some(MenuEntry::QueueEntry(_)))) {
+                        syncplay.update(cx, |syncplay, cx| syncplay.move_entry(id, by, cx));
+                        self.menu = Some((menu, Some(target)));
+                    }
+                }
+                ("delete", Some(id)) if !modifiers.modified() => {
+                    syncplay.update(cx, |syncplay, cx| syncplay.remove_entry(id, cx));
+                }
+                _ if modifiers.modified() => return,
+                ("down", _) if highlight + 1 < entries.len() => self.menu = Some((menu, Some(highlight + 1))),
+                ("up", _) if highlight > 0 => self.menu = Some((menu, Some(highlight - 1))),
+                ("enter", _) => self.choose_menu_entry(menu, highlight, window, cx),
+                ("up" | "down", _) => {}
                 _ => return,
             }
             cx.stop_propagation();
             cx.notify();
+            return;
+        }
+        if modifiers.modified() {
             return;
         }
         let Some(item) = self.top_bar.filter(|_| self.focus_handle.is_focused(window)) else {
@@ -465,7 +489,18 @@ impl ShellView {
             Menu::SyncPlay => {
                 let syncplay = SyncPlay::global(cx).read(cx);
                 if syncplay.group.is_some() {
-                    return vec![MenuEntry::LeaveGroup];
+                    let mut entries = Vec::new();
+                    if let Some(queue) = syncplay.queue.as_ref().filter(|q| !q.playlist.is_empty()) {
+                        entries.extend([MenuEntry::ToggleShuffle, MenuEntry::CycleRepeat]);
+                        entries.extend(
+                            queue
+                                .playlist
+                                .iter()
+                                .map(|entry| MenuEntry::QueueEntry(entry.playlist_item_id.clone())),
+                        );
+                    }
+                    entries.push(MenuEntry::LeaveGroup);
+                    return entries;
                 }
                 let mut entries: Vec<MenuEntry> = syncplay
                     .groups
@@ -478,13 +513,19 @@ impl ShellView {
         }
     }
 
-    /// Does what a menu entry's button does, and closes the menu.
+    /// Does what a menu entry's button does, and closes the menu (shuffle and repeat leave it
+    /// open, to see the change).
     fn choose_menu_entry(&mut self, menu: Menu, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.menu_entries(menu, cx).into_iter().nth(index) else {
             return;
         };
-        self.leave_top_bar(window, cx);
         let syncplay = SyncPlay::global(cx);
+        match entry {
+            MenuEntry::ToggleShuffle => return syncplay.update(cx, |syncplay, cx| syncplay.toggle_shuffle(cx)),
+            MenuEntry::CycleRepeat => return syncplay.update(cx, |syncplay, cx| syncplay.cycle_repeat(cx)),
+            _ => {}
+        }
+        self.leave_top_bar(window, cx);
         match entry {
             MenuEntry::SwitchAccount(account) => cx.emit(ShellEvent::SwitchAccount(account)),
             MenuEntry::AddAccount => cx.emit(ShellEvent::AddAccount),
@@ -494,7 +535,9 @@ impl ShellView {
                 let name = new_group_name(&self.session);
                 syncplay.update(cx, |syncplay, cx| syncplay.create(name, cx));
             }
+            MenuEntry::QueueEntry(id) => syncplay.update(cx, |syncplay, cx| syncplay.play_entry(id, cx)),
             MenuEntry::LeaveGroup => syncplay.update(cx, |syncplay, cx| syncplay.leave(cx)),
+            MenuEntry::ToggleShuffle | MenuEntry::CycleRepeat => {}
         }
     }
 
@@ -820,6 +863,119 @@ impl ShellView {
     }
 }
 
+/// The Leave button's place in the keyboard's entries: after shuffle, repeat and the queue.
+fn leave_index(state: &SyncPlay) -> usize {
+    state
+        .queue
+        .as_ref()
+        .filter(|q| !q.playlist.is_empty())
+        .map_or(0, |q| 2 + q.playlist.len())
+}
+
+/// The group's queue: shuffle and repeat, then the entries (the playing one highlighted), each
+/// with buttons to play it, move it and remove it. Indexes match `ShellView::menu_entries`.
+fn group_queue(syncplay: &Entity<SyncPlay>, highlight: Option<usize>, cx: &App) -> Option<AnyElement> {
+    let state = syncplay.read(cx);
+    let queue = state.queue.as_ref().filter(|q| !q.playlist.is_empty())?;
+    let muted = cx.theme().muted_foreground;
+    let action = |syncplay: &Entity<SyncPlay>, run: fn(&mut SyncPlay, &mut Context<SyncPlay>)| {
+        let syncplay = syncplay.clone();
+        move |_: &ClickEvent, _: &mut Window, cx: &mut App| syncplay.update(cx, run)
+    };
+    let shuffled = queue.shuffle_mode == ShuffleMode::Shuffle;
+    let repeat_label = match queue.repeat_mode {
+        RepeatMode::RepeatNone => "Repeat: off",
+        RepeatMode::RepeatAll => "Repeat: all",
+        RepeatMode::RepeatOne => "Repeat: one",
+    };
+    let modes = h_flex()
+        .gap_1()
+        .child(
+            Button::new("syncplay-shuffle")
+                .small()
+                .ghost()
+                .icon(Lucide::Shuffle)
+                .label(if shuffled { "Shuffled" } else { "In order" })
+                .selected(highlight == Some(0))
+                .on_click(action(syncplay, |s, cx| s.toggle_shuffle(cx))),
+        )
+        .child(
+            Button::new("syncplay-repeat")
+                .small()
+                .ghost()
+                .icon(if queue.repeat_mode == RepeatMode::RepeatOne {
+                    Lucide::Repeat1
+                } else {
+                    Lucide::Repeat
+                })
+                .label(repeat_label)
+                .selected(highlight == Some(1))
+                .on_click(action(syncplay, |s, cx| s.cycle_repeat(cx))),
+        );
+    let last = queue.playlist.len() - 1;
+    let rows = queue.playlist.iter().enumerate().map(|(i, entry)| {
+        let name = state.names.get(&entry.item_id).cloned().unwrap_or_else(|| "…".into());
+        let playing = queue.playing_item_index == i as i32;
+        let id = entry.playlist_item_id.clone();
+        let button = |key: &'static str, icon: Lucide, tip: &'static str, disabled: bool| {
+            Button::new(SharedString::from(format!("{key}-{id}")))
+                .xsmall()
+                .ghost()
+                .icon(icon)
+                .tooltip(tip)
+                .disabled(disabled)
+        };
+        let (play, up, down, remove) = (id.clone(), id.clone(), id.clone(), id.clone());
+        let syncplay = syncplay.clone();
+        h_flex()
+            .id(SharedString::from(format!("queue-{id}")))
+            .gap_1()
+            .px_1()
+            .rounded_md()
+            .when(highlight == Some(2 + i), |el| el.bg(cx.theme().accent))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .cursor_pointer()
+                    .when(playing, |el| el.font_weight(FontWeight::SEMIBOLD))
+                    .when(!playing, |el| el.text_color(muted))
+                    .child(name)
+                    .on_mouse_down(MouseButton::Left, {
+                        let syncplay = syncplay.clone();
+                        move |_, _, cx| syncplay.update(cx, |s, cx| s.play_entry(play.clone(), cx))
+                    }),
+            )
+            .child(
+                button("queue-up", Lucide::ArrowUp, "Move up (Alt+Up)", i == 0).on_click({
+                    let syncplay = syncplay.clone();
+                    move |_, _, cx| syncplay.update(cx, |s, cx| s.move_entry(up.clone(), -1, cx))
+                }),
+            )
+            .child(
+                button("queue-down", Lucide::ArrowDown, "Move down (Alt+Down)", i == last).on_click({
+                    let syncplay = syncplay.clone();
+                    move |_, _, cx| syncplay.update(cx, |s, cx| s.move_entry(down.clone(), 1, cx))
+                }),
+            )
+            .child(
+                button("queue-remove", Lucide::X, "Remove (Delete)", false)
+                    .on_click(move |_, _, cx| syncplay.update(cx, |s, cx| s.remove_entry(remove.clone(), cx))),
+            )
+            .into_any_element()
+    });
+    Some(
+        v_flex()
+            .gap_1()
+            .child(div().pt_1().text_sm().text_color(muted).child("Queue"))
+            .child(modes)
+            .children(rows)
+            .into_any_element(),
+    )
+}
+
 /// `highlight` is the keyboard's entry, as `ShellView::menu_entries` lists them.
 fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, highlight: Option<usize>, cx: &mut App) -> AnyElement {
     let state = syncplay.read(cx);
@@ -847,11 +1003,12 @@ fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, highlight: Option
                         .text_color(muted)
                         .child("Anything you play now plays for everyone in the group."),
                 )
+                .children(group_queue(syncplay, highlight, cx))
                 .child(
                     Button::new("syncplay-leave")
                         .outline()
                         .label("Leave group")
-                        .selected(highlight == Some(0))
+                        .selected(highlight == Some(leave_index(state)))
                         .on_click({
                             let syncplay = syncplay.clone();
                             move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.leave(cx))

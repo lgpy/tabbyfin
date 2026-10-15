@@ -18,17 +18,7 @@ asset="${url##*/}"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-curl -fsSL -o "$work/$asset" "$url"
-
-if command -v sha256sum >/dev/null; then
-  actual="$(sha256sum "$work/$asset" | cut -d' ' -f1)"
-else
-  actual="$(shasum -a 256 "$work/$asset" | cut -d' ' -f1)"
-fi
-if [[ "$actual" != "$sha" ]]; then
-  echo "checksum mismatch for $asset: expected $sha, got $actual" >&2
-  exit 1
-fi
+"$here/download.sh" "$url" "$sha" "$work/$asset"
 
 mkdir -p "$dest"
 # A .7z: needs 7-Zip (on Windows CI runners) or a libarchive tar (bsdtar, Windows' tar.exe).

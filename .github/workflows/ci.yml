@@ -112,15 +112,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev \
-            libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libssl-dev
+            libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libssl-dev \
+            libmpv2
       - name: Install cargo-deb
         if: runner.os == 'Linux'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deb
+      - name: Install Inno Setup (Windows installer)
+        if: runner.os == 'Windows'
+        run: choco install innosetup --version 6.7.1 --no-progress -y
       - run: cargo build --release --locked -p jelly-gpui --target ${{ matrix.target }}
       - name: Package
         shell: bash
+        env:
+          # packaging/download.sh fetches pinned files from this repo's `deps` release.
+          GH_TOKEN: ${{ github.token }}
         run: packaging/package.sh ${{ matrix.target }} dist
       - uses: actions/upload-artifact@v4
         with:
@@ -128,9 +135,43 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  appimage:
+    name: Package (AppImage)
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build in Ubuntu 22.04
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: packaging/appimage-docker.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jelly-gpui-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  flatpak:
+    name: Package (Flatpak)
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flatpak-builder
+        run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - name: Build
+        run: packaging/flatpak/build.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jelly-gpui-flatpak
+          path: dist/*.flatpak
+          if-no-files-found: error
+
   release:
     name: Release
-    needs: package
+    needs: [package, appimage, flatpak]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

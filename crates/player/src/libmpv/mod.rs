@@ -9,6 +9,8 @@ mod angle;
 #[cfg(target_os = "linux")]
 mod egl;
 mod embedded;
+#[cfg(any(windows, target_os = "linux"))]
+mod opengl;
 mod video;
 #[cfg(windows)]
 mod wgl;
@@ -109,28 +111,29 @@ const EXTRA_DIRS: &[&str] = if cfg!(target_os = "macos") {
 
 impl Api {
     pub fn load() -> Result<Self, Error> {
-        let mut last_error = String::new();
-        for name in LIBRARY_NAMES {
-            // Next to the executable first (bundled), then the system search path, then the
-            // extra folders.
-            let bundled = std::env::current_exe()
-                .ok()
-                .and_then(|exe| Some(exe.parent()?.join(name)));
-            let candidates = bundled
+        // Bundled first, any version: next to the executable (Windows), or in ../lib (the
+        // Linux AppImage's usr/bin and usr/lib, which may carry libmpv.so.1 where the system
+        // has libmpv.so.2). Then the system search path, then the extra folders.
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|exe| Some(exe.parent()?.to_owned()));
+        let bundled = exe_dir.iter().flat_map(|dir| {
+            LIBRARY_NAMES
                 .iter()
-                .map(|p| p.as_os_str().to_owned())
-                .chain([(*name).into()])
-                .chain(
-                    EXTRA_DIRS
-                        .iter()
-                        .map(|dir| std::path::Path::new(dir).join(name).into_os_string()),
-                );
-            for candidate in candidates {
-                // SAFETY: loading libmpv runs no unexpected initialization code.
-                match unsafe { Library::new(&candidate) } {
-                    Ok(lib) => return Self::from_library(lib),
-                    Err(err) => last_error = err.to_string(),
-                }
+                .flat_map(move |name| [dir.join(name), dir.join("../lib").join(name)])
+        });
+        let system = LIBRARY_NAMES.iter().map(std::path::PathBuf::from);
+        let extra = EXTRA_DIRS.iter().flat_map(|dir| {
+            LIBRARY_NAMES
+                .iter()
+                .map(move |name| std::path::Path::new(dir).join(name))
+        });
+        let mut last_error = String::new();
+        for candidate in bundled.chain(system).chain(extra) {
+            // SAFETY: loading libmpv runs no unexpected initialization code.
+            match unsafe { Library::new(candidate.as_os_str()) } {
+                Ok(lib) => return Self::from_library(lib),
+                Err(err) => last_error = err.to_string(),
             }
         }
         Err(Error::LibmpvUnavailable(last_error))

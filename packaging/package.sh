@@ -2,8 +2,11 @@
 # Packages a release build for one target into <out-dir> (default: dist/).
 # Run `cargo build --release --target <target>` first.
 #
-#   linux   (x86_64-unknown-linux-gnu): .tar.gz and .deb (needs cargo-deb); uses the system libmpv
-#   windows (x86_64-pc-windows-msvc):   .zip with libmpv-2.dll and ANGLE next to jelly-gpui.exe
+#   linux   (x86_64-unknown-linux-gnu): .tar.gz and .deb (needs cargo-deb), which use the system
+#           libmpv. The AppImage is built separately, in Ubuntu 22.04 (appimage-docker.sh).
+#   windows (x86_64-pc-windows-msvc):   .zip with libmpv-2.dll and ANGLE next to jelly-gpui.exe, and
+#           an installer from the same files when Inno Setup's ISCC is found (on the PATH, in
+#           its default folder, or $ISCC)
 #   macos   (aarch64/x86_64-apple-darwin): .zip of jelly-gpui.app, ad-hoc signed; needs Homebrew's
 #           libmpv (brew install mpv) until libmpv is bundled
 set -euo pipefail
@@ -41,6 +44,7 @@ case "$target" in
     else
       (cd "$stage" && zip -qr "$out/$name.zip" "$name")
     fi
+    "$packaging/installer.sh" "$version" "$stage/$name" "$out"
     ;;
 
   aarch64-apple-darwin | x86_64-apple-darwin)

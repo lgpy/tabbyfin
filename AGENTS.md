@@ -18,6 +18,8 @@ mise run dev:setup    # Jellyfin 12.2 dev server on :8096 with generated media (
 mise run dev:min      # Jellyfin 10.11 on :8097, plus the API smoke test against it
 mise run smoke        # cargo run -p jellyfin --example smoke against the dev server
 mise run ci:build     # build packages for every OS on GitHub Actions into dist/
+mise run flatpak:sources # after any Cargo.lock change: regenerate the Flatpak's offline crate list
+mise run deps:mirror  # after changing packaging/*.lock: copy the pinned files to the repo's deps release
 dev/win-run.sh [secs] # cross-build (mingw) and run on the Windows host from WSL
 ```
 
@@ -26,7 +28,7 @@ GitHub CI also runs an `integration` job: Jellyfin 12.2 and 10.11.11 in Docker, 
 ## Workspace
 
 - `crates/jellyfin`: the API client, no UI dependencies. `Client` (reqwest/rustls, header auth only — legacy auth is off in 12.x), typed models (`wire_enum!` maps unknown strings to `Other`), playback negotiation, the session websocket (`Client::socket()`, upgraded through reqwest), remote-control messages and session capabilities (`remote.rs`), SyncPlay requests and messages, and `ServerClock` (`/GetUtcTime`).
-- `crates/player`: mpv playback. `libmpv/` loads libmpv at runtime (`dlopen`) and renders through `video.rs`: ANGLE (`angle.rs`, zero-copy d3d11va) or WGL (`wgl.rs`) into shared D3D11 textures on Windows, OpenGL into exported Vulkan memory on Linux (`egl.rs`), or software BGRA pixels. By default libmpv runs in a separate **player host process** — the same executable started with `--player-host` (`host.rs`, `remote.rs`, `wire.rs`; `JELLY_GPUI_PLAYER=embedded` keeps it in-process). `main` must check `::player::is_host_process()` before starting any UI.
+- `crates/player`: mpv playback. `libmpv/` loads libmpv at runtime (`dlopen`) and renders through `video.rs`: ANGLE (`angle.rs`, zero-copy d3d11va) or WGL (`wgl.rs`) into shared D3D11 textures on Windows, OpenGL into exported Vulkan memory on Linux (`egl.rs`), or software BGRA pixels. The three GPU paths are `opengl::Backend`s: `opengl.rs` holds what they share (mpv's render context, the 3-texture ring, the render loop), each backend only its GL context, shared textures and frame sync. By default libmpv runs in a separate **player host process** — the same executable started with `--player-host` (`host.rs`, `remote.rs`, `wire.rs`; `JELLY_GPUI_PLAYER=embedded` keeps it in-process). `main` must check `::player::is_host_process()` before starting any UI.
 - `crates/app` (binary `jelly-gpui`): GPUI views and app state.
 - `third_party/gpui/`: vendored, patched `gpui-pre*` crates for shared-texture surfaces (`[patch.crates-io]`); see its `PATCHES.md` before bumping gpui-kit. Never depend on `gpui` directly; gpui-kit pins and re-exports it.
 
