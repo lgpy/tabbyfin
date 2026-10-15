@@ -16,7 +16,9 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::host::HOST_ARG;
-use crate::libmpv::{Frame, SharedFrame, VideoFrame, VideoOutput};
+#[cfg(any(windows, target_os = "linux"))]
+use crate::libmpv::SharedFrame;
+use crate::libmpv::{Frame, VideoFrame, VideoOutput};
 use crate::wire::{self, Message, Request};
 use crate::{EndReason, Error, PlayerEvent, Result};
 
