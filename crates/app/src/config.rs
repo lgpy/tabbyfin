@@ -210,7 +210,12 @@ pub fn log_dir() -> PathBuf {
 }
 
 /// Platform cache dir, for data that can be deleted at any time (e.g. images).
+/// The image cache. Under the config folder when `JELLY_GPUI_CONFIG_DIR` is set, so test runs
+/// don't fill the real cache.
 pub fn cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("JELLY_GPUI_CONFIG_DIR") {
+        return PathBuf::from(dir).join("cache");
+    }
     project_dirs()
         .map(|d| d.cache_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".jelly-gpui/cache"))
