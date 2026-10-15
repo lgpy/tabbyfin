@@ -111,20 +111,20 @@ impl Api {
     pub fn load() -> Result<Self, Error> {
         let mut last_error = String::new();
         for name in LIBRARY_NAMES {
-            // Next to the executable first (bundled), then the system search path, then the
-            // extra folders.
-            let bundled = std::env::current_exe()
+            // Bundled first: next to the executable (Windows), or in ../lib (the Linux
+            // AppImage's usr/bin and usr/lib). Then the system search path, then the extra
+            // folders.
+            let exe_dir = std::env::current_exe()
                 .ok()
-                .and_then(|exe| Some(exe.parent()?.join(name)));
-            let candidates = bundled
+                .and_then(|exe| Some(exe.parent()?.to_owned()));
+            let bundled = exe_dir
                 .iter()
-                .map(|p| p.as_os_str().to_owned())
-                .chain([(*name).into()])
-                .chain(
-                    EXTRA_DIRS
-                        .iter()
-                        .map(|dir| std::path::Path::new(dir).join(name).into_os_string()),
-                );
+                .flat_map(|dir| [dir.join(name), dir.join("../lib").join(name)]);
+            let candidates = bundled.map(|p| p.into_os_string()).chain([(*name).into()]).chain(
+                EXTRA_DIRS
+                    .iter()
+                    .map(|dir| std::path::Path::new(dir).join(name).into_os_string()),
+            );
             for candidate in candidates {
                 // SAFETY: loading libmpv runs no unexpected initialization code.
                 match unsafe { Library::new(&candidate) } {
