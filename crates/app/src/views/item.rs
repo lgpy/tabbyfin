@@ -1,10 +1,14 @@
-//! Detail page for a movie, series, season or episode.
+//! Detail page for a movie, series, season or episode, and for collections and playlists
+//! (whose entries can be reordered and removed here).
+
+use std::collections::VecDeque;
 
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants};
+use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
-use gpui_kit::component::{ActiveTheme, IconName, IndexPath, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, IconName, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ItemField, ItemSortBy};
@@ -22,6 +26,7 @@ use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
 use crate::router::{Navigator, Route};
 use crate::runtime;
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
+use crate::views::add_to_playlist;
 
 const BACKDROP_H: f32 = 340.;
 const DETAIL_POSTER_W: f32 = 200.;
@@ -62,7 +67,25 @@ pub struct ItemPage {
     similar_scroll: ScrollHandle,
     cursor: Cursor,
     focus_handle: FocusHandle,
+    /// Playlist changes waiting to be sent, in order. They're already shown; the server gets
+    /// them one at a time, so moves land in the order they were made.
+    playlist_edits: VecDeque<PlaylistEdit>,
+    sending_edit: bool,
     _subscriptions: Vec<Subscription>,
+}
+
+/// A change to a playlist's entries, by entry id.
+enum PlaylistEdit {
+    Move { entry_id: String, to: usize },
+    Remove { entry_id: String },
+}
+
+/// What a playlist entry's buttons (or Alt+Up, Alt+Down and Delete) do.
+#[derive(Clone, Copy)]
+enum EntryAction {
+    Up,
+    Down,
+    Remove,
 }
 
 impl ItemPage {
@@ -84,6 +107,8 @@ impl ItemPage {
             similar_scroll: ScrollHandle::new(),
             cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
+            playlist_edits: VecDeque::new(),
+            sending_edit: false,
             _subscriptions,
         };
         this.reload(cx);
@@ -92,6 +117,11 @@ impl ItemPage {
 
     /// Fetches the item again. The current content stays up until the new data arrives.
     fn reload(&mut self, cx: &mut Context<Self>) {
+        // A reload in the middle of playlist edits would show the playlist half-edited; the
+        // last edit reloads instead.
+        if self.sending_edit {
+            return;
+        }
         let (client, item_id) = (self.client.clone(), self.item_id.clone());
         cx.spawn(async move |this, cx| {
             let result = runtime::spawn(load(client, item_id)).await;
@@ -157,6 +187,167 @@ impl ItemPage {
             .ok();
         })
         .detach();
+    }
+
+    /// Moves or removes a playlist entry: on screen right away, then on the server.
+    fn edit_entry(&mut self, index: usize, action: EntryAction, window: &mut Window, cx: &mut Context<Self>) {
+        let Load::Loaded(data) = &mut self.data else { return };
+        if data.item.kind != BaseItemKind::Playlist || index >= data.children.len() {
+            return;
+        }
+        let Some(entry_id) = data.children[index].playlist_item_id.clone() else {
+            return;
+        };
+        let to = match action {
+            EntryAction::Up if index > 0 => index - 1,
+            EntryAction::Down if index + 1 < data.children.len() => index + 1,
+            EntryAction::Up | EntryAction::Down => return,
+            EntryAction::Remove => {
+                data.children.remove(index);
+                // The cursor stays on the row that took this one's place.
+                let len = data.children.len();
+                if self.cursor.is_selected(CHILDREN, index) && len > 0 {
+                    self.cursor.show_at(Position {
+                        section: CHILDREN,
+                        index: index.min(len - 1),
+                    });
+                }
+                self.playlist_edits.push_back(PlaylistEdit::Remove { entry_id });
+                self.send_edits(window, cx);
+                cx.notify();
+                return;
+            }
+        };
+        let entry = data.children.remove(index);
+        data.children.insert(to, entry);
+        if self.cursor.is_selected(CHILDREN, index) {
+            self.cursor.show_at(Position {
+                section: CHILDREN,
+                index: to,
+            });
+            self.reveal(
+                Position {
+                    section: CHILDREN,
+                    index: to,
+                },
+                window,
+                cx,
+            );
+        }
+        self.playlist_edits.push_back(PlaylistEdit::Move { entry_id, to });
+        self.send_edits(window, cx);
+        cx.notify();
+    }
+
+    /// Sends the next queued playlist edit. When the queue runs dry the page reloads, for the
+    /// playlist's new runtime and to match what the server ended up with. A failure drops the
+    /// rest and reloads too.
+    fn send_edits(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sending_edit {
+            return;
+        }
+        let Some(edit) = self.playlist_edits.pop_front() else {
+            self.reload(cx);
+            return;
+        };
+        self.sending_edit = true;
+        let (client, playlist_id) = (self.client.clone(), self.item_id.clone());
+        cx.spawn_in(window, async move |this, cx| {
+            let result = runtime::spawn(async move {
+                match edit {
+                    PlaylistEdit::Move { entry_id, to } => {
+                        client.move_playlist_entry(&playlist_id, &entry_id, to).await
+                    }
+                    PlaylistEdit::Remove { entry_id } => client.remove_from_playlist(&playlist_id, &[entry_id]).await,
+                }
+            })
+            .await;
+            this.update_in(cx, |this, window, cx| {
+                this.sending_edit = false;
+                if let Err(err) = result {
+                    this.playlist_edits.clear();
+                    let message = match err {
+                        jellyfin::Error::Forbidden => {
+                            "This playlist belongs to someone else; it can't be changed.".into()
+                        }
+                        err => this.nav.handle_error(&err, cx),
+                    };
+                    window.push_notification(Notification::error(message), cx);
+                }
+                this.send_edits(window, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Alt+Up, Alt+Down and Delete on a highlighted playlist entry.
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(position) = self.cursor.selected() else { return };
+        let Load::Loaded(data) = &self.data else { return };
+        if position.section != CHILDREN || data.item.kind != BaseItemKind::Playlist {
+            return;
+        }
+        let keystroke = &event.keystroke;
+        let modifiers = keystroke.modifiers;
+        let action = match keystroke.key.as_str() {
+            "up" if modifiers.alt && !modifiers.control && !modifiers.shift => EntryAction::Up,
+            "down" if modifiers.alt && !modifiers.control && !modifiers.shift => EntryAction::Down,
+            "delete" if !modifiers.modified() => EntryAction::Remove,
+            _ => return,
+        };
+        cx.stop_propagation();
+        self.edit_entry(position.index, action, window, cx);
+    }
+
+    /// Asks before deleting the playlist, then goes back to the page before it.
+    fn confirm_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Load::Loaded(data) = &self.data else { return };
+        let (client, nav) = (self.client.clone(), self.nav.clone());
+        let (item_id, name) = (data.item.id.clone(), data.item.name.clone());
+        let page = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (client, nav, page) = (client.clone(), nav.clone(), page.clone());
+            let (item_id, name) = (item_id.clone(), name.clone());
+            alert
+                .title(format!("Delete {name}?"))
+                .description(DELETE_PLAYLIST_NOTE)
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text("Delete")
+                        .ok_variant(ButtonVariant::Danger)
+                        .show_cancel(true),
+                )
+                .on_ok(move |_, window, cx| {
+                    let (client, nav, page) = (client.clone(), nav.clone(), page.clone());
+                    let (item_id, name) = (item_id.clone(), name.clone());
+                    window
+                        .spawn(cx, async move |cx| {
+                            let result = runtime::spawn(async move { client.delete_item(&item_id).await }).await;
+                            cx.update(|window, cx| match result {
+                                Ok(()) => {
+                                    window.push_notification(Notification::success(format!("Deleted {name}.")), cx);
+                                    Changes::notify_user_data(cx);
+                                    if page.upgrade().is_some() {
+                                        nav.back(window, cx);
+                                    }
+                                }
+                                Err(err) => {
+                                    let message = match err {
+                                        jellyfin::Error::Forbidden => {
+                                            format!("{name} belongs to someone else; it can't be deleted.").into()
+                                        }
+                                        err => nav.handle_error(&err, cx),
+                                    };
+                                    window.push_notification(Notification::error(message), cx);
+                                }
+                            })
+                            .ok();
+                        })
+                        .detach();
+                    true
+                })
+        });
     }
 
     fn ensure_pickers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -233,6 +424,7 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
                 ItemField::Studios,
                 ItemField::Tags,
                 ItemField::RemoteTrailers,
+                ItemField::CanDelete,
             ],
         )
         .await?;
@@ -377,6 +569,14 @@ impl ItemPage {
                     .outline()
                     .icon(if favorite { Lucide::HeartOff } else { Lucide::Heart })
                     .label(if favorite { "Remove favorite" } else { "Favorite" }),
+                ItemAction::AddToPlaylist => Button::new("add-to-playlist")
+                    .outline()
+                    .icon(Lucide::ListPlus)
+                    .label("Add to playlist"),
+                ItemAction::DeletePlaylist => Button::new("delete-playlist")
+                    .outline()
+                    .icon(Lucide::Trash)
+                    .label("Delete playlist"),
             };
             let button = button.on_click(cx.listener(move |this, _, window, cx| this.run_action(action, window, cx)));
             // Room around the button for the keyboard cursor's ring.
@@ -432,6 +632,11 @@ impl ItemPage {
                 let (id, favorite) = (data.item.id.clone(), is_favorite(&data.item));
                 self.mark(id, Mark::Favorite(!favorite), window, cx);
             }
+            ItemAction::AddToPlaylist => {
+                let Load::Loaded(data) = &self.data else { return };
+                add_to_playlist::open(self.client.clone(), self.nav.clone(), &data.item, window, cx);
+            }
+            ItemAction::DeletePlaylist => self.confirm_delete(window, cx),
             // A trailer file plays here; a trailer on the web opens in the browser.
             ItemAction::Trailer => {
                 let Load::Loaded(data) = &self.data else { return };
@@ -606,7 +811,9 @@ impl ItemPage {
             .collect()
     }
 
-    fn episode_rows(&self, episodes: &[BaseItemDto], cx: &mut Context<Self>) -> Vec<AnyElement> {
+    /// Episodes of a season, or a playlist's entries (`playlist`), which get buttons to move and
+    /// remove them.
+    fn episode_rows(&self, episodes: &[BaseItemDto], playlist: bool, cx: &mut Context<Self>) -> Vec<AnyElement> {
         episodes
             .iter()
             .enumerate()
@@ -633,6 +840,38 @@ impl ItemPage {
                 let played = is_played(episode);
                 let episode_id = episode.id.clone();
                 let selected = self.cursor.is_selected(CHILDREN, i);
+                let entry_button = |id: &'static str, icon: Lucide, tooltip: &'static str, action: EntryAction| {
+                    Button::new((id, i))
+                        .ghost()
+                        .icon(icon)
+                        .tooltip(tooltip)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.edit_entry(i, action, window, cx);
+                        }))
+                };
+                let entry_buttons = playlist.then(|| {
+                    h_flex()
+                        .child(
+                            entry_button("entry-up", Lucide::ArrowUp, "Move up (Alt+Up)", EntryAction::Up)
+                                .disabled(i == 0),
+                        )
+                        .child(
+                            entry_button(
+                                "entry-down",
+                                Lucide::ArrowDown,
+                                "Move down (Alt+Down)",
+                                EntryAction::Down,
+                            )
+                            .disabled(i + 1 == episodes.len()),
+                        )
+                        .child(entry_button(
+                            "entry-remove",
+                            Lucide::X,
+                            "Remove from playlist (Delete)",
+                            EntryAction::Remove,
+                        ))
+                });
                 let row = h_flex()
                     .id(("episode", i))
                     .relative()
@@ -665,6 +904,7 @@ impl ItemPage {
                                 el.child(div().text_sm().line_clamp(3).child(overview))
                             }),
                     )
+                    .children(entry_buttons)
                     .child(
                         Button::new(("toggle-played", i))
                             .ghost()
@@ -813,8 +1053,8 @@ impl ItemPage {
                 Some("In this collection"),
                 self.season_rows(&data.children, children.columns, cx),
             ),
-            BaseItemKind::Playlist => (Some("Playlist"), self.episode_rows(&data.children, cx)),
-            _ => (Some("Episodes"), self.episode_rows(&data.children, cx)),
+            BaseItemKind::Playlist => (Some("Playlist"), self.episode_rows(&data.children, true, cx)),
+            _ => (Some("Episodes"), self.episode_rows(&data.children, false, cx)),
         };
 
         // The header, pickers, title and rows are the scroll container's direct children,
@@ -881,6 +1121,9 @@ enum ItemAction {
     /// Collections and playlists: everything in order, or shuffled.
     PlayAll,
     Shuffle,
+    AddToPlaylist,
+    /// Only offered when the server says the user may delete it.
+    DeletePlaylist,
 }
 
 /// The buttons under an item's title, in order.
@@ -907,6 +1150,15 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
     }
     actions.push(ItemAction::TogglePlayed);
     actions.push(ItemAction::ToggleFavorite);
+    if matches!(
+        item.kind,
+        BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video | BaseItemKind::Series | BaseItemKind::Season
+    ) {
+        actions.push(ItemAction::AddToPlaylist);
+    }
+    if item.kind == BaseItemKind::Playlist && item.can_delete == Some(true) {
+        actions.push(ItemAction::DeletePlaylist);
+    }
     actions
 }
 
@@ -915,6 +1167,9 @@ fn play_extra(extra: &BaseItemDto, cx: &mut App) {
     let extra = extra.clone();
     PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&extra, PlayOptions::default(), cx));
 }
+
+const DELETE_PLAYLIST_NOTE: &str =
+    "The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.";
 
 /// Cursor sections, top to bottom.
 const ACTIONS: usize = 0;
@@ -1009,6 +1264,8 @@ impl Focusable for ItemPage {
 impl Render for ItemPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = self.render_content(window, cx);
-        on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(content)
+        on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx)
+            .on_key_down(cx.listener(Self::on_key_down))
+            .child(content)
     }
 }

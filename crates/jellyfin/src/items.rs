@@ -208,6 +208,62 @@ impl Client {
             .await
     }
 
+    /// Creates a playlist of videos owned by the signed-in user, with `ids` in it, and returns
+    /// its id.
+    pub async fn create_playlist(&self, name: &str, ids: &[String]) -> Result<String> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Body<'a> {
+            name: &'a str,
+            ids: &'a [String],
+            media_type: &'a str,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Created {
+            id: String,
+        }
+        let body = Body {
+            name,
+            ids,
+            media_type: "Video",
+        };
+        let created: Created = self.post("/Playlists", &Query::new(), Some(&body)).await?;
+        Ok(created.id)
+    }
+
+    /// Appends items to a playlist. A series or season adds its episodes. 12.2 adds an item
+    /// that's already there a second time; 10.11 skips it.
+    pub async fn add_to_playlist(&self, playlist_id: &str, ids: &[String]) -> Result<()> {
+        let mut q = Query::new();
+        q.list("ids", ids);
+        self.post_no_content::<()>(&format!("/Playlists/{playlist_id}/Items"), &q, None)
+            .await
+    }
+
+    /// Removes entries (by [`BaseItemDto::playlist_item_id`]) from a playlist.
+    pub async fn remove_from_playlist(&self, playlist_id: &str, entry_ids: &[String]) -> Result<()> {
+        let mut q = Query::new();
+        q.list("entryIds", entry_ids);
+        self.delete_with_query(&format!("/Playlists/{playlist_id}/Items"), &q)
+            .await
+    }
+
+    /// Moves an entry (by [`BaseItemDto::playlist_item_id`]) to `index` in the playlist.
+    pub async fn move_playlist_entry(&self, playlist_id: &str, entry_id: &str, index: usize) -> Result<()> {
+        self.post_no_content::<()>(
+            &format!("/Playlists/{playlist_id}/Items/{entry_id}/Move/{index}"),
+            &Query::new(),
+            None,
+        )
+        .await
+    }
+
+    /// Deletes an item from the server (and its files, for media). Used for playlists.
+    pub async fn delete_item(&self, item_id: &str) -> Result<()> {
+        self.delete(&format!("/Items/{item_id}")).await
+    }
+
     /// Intro, outro and similar segments, from the server's segment provider plugins. Empty
     /// when none are installed.
     pub async fn media_segments(&self, item_id: &str) -> Result<Vec<MediaSegmentDto>> {
