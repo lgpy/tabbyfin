@@ -10,7 +10,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 ## 1. Goals for v1
 
 **In scope**
-- Sign in to a server with a username and password, or with Quick Connect. The session is kept between launches.
+- Sign in to a server with a username and password, or with Quick Connect. The session is kept between launches. Several accounts (servers or users) can be saved and switched between.
 - Browse libraries:
   - Home: Continue Watching, Next Up, and Latest.
   - Library grids.

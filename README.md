@@ -9,6 +9,7 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
 ## Features
 
 - **Sign in** with a username and password, or with Quick Connect. The session is kept between launches, and the token is stored in the system keychain.
+- **Several servers and users**: accounts stay signed in side by side; switch from the menu under your name, or pick one on the sign-in screen.
 - **Browse:**
   - Home: Continue Watching, Next Up, Latest.
   - Library grids, and movie, series, season and episode pages.

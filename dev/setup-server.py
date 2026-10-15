@@ -79,6 +79,11 @@ def main():
 
     token = request("/Users/AuthenticateByName", "POST", {"Username": USER, "Pw": PASS})["AccessToken"]
 
+    # A second user, for switching accounts.
+    if not any(user["Name"] == "dev2" for user in request("/Users", token=token)):
+        print("adding user dev2")
+        request("/Users/New", "POST", {"Name": "dev2", "Password": "dev2"}, token)
+
     existing = {f["Name"] for f in request("/Library/VirtualFolders", token=token)}
     for name, collection_type, path, _ in LIBRARIES:
         if name not in existing:

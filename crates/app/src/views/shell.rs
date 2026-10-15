@@ -8,12 +8,13 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::popover::Popover;
+use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::GroupState;
 
+use crate::config::{Config, SavedServer};
 use crate::images::ImageCache;
 use crate::playback::{PlaybackEvent, PlaybackManager};
 use crate::remote::{Remote, RemoteEvent};
@@ -35,6 +36,10 @@ pub enum ShellEvent {
     SignOut,
     /// The server rejected the session token.
     SessionExpired,
+    /// Switch to another saved account.
+    SwitchAccount(SavedServer),
+    /// Sign in to another server or user, keeping this session to come back to.
+    AddAccount,
 }
 
 struct Page {
@@ -53,6 +58,8 @@ pub struct ShellView {
     _playback: Subscription,
     _syncplay: Vec<Subscription>,
     _remote: Subscription,
+    /// The saved accounts, for the account menu (read when it opens).
+    accounts: Vec<SavedServer>,
     /// The session websocket; dropped (disconnecting) with the shell on sign-out.
     _live: Task<()>,
 }
@@ -62,8 +69,8 @@ impl EventEmitter<ShellEvent> for ShellView {}
 impl ShellView {
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
         ImageCache::init(session.client.clone(), cx);
-        PlaybackManager::init(session.client.clone(), cx);
-        crate::playback::report_unfinished(&session.client);
+        PlaybackManager::init(session.client.clone(), session.account_key(), cx);
+        crate::playback::report_unfinished(&session.client, &session.account_key());
         SyncPlay::init(session.client.clone(), cx);
         let syncplay = SyncPlay::global(cx);
         let _syncplay = vec![
@@ -100,6 +107,7 @@ impl ShellView {
             _playback,
             _syncplay,
             _remote,
+            accounts: Config::load().accounts,
             _live,
         };
         this.push(Route::Home, window, cx);
@@ -136,8 +144,6 @@ impl ShellView {
             }
             this.push(route, window, cx);
         }
-        #[cfg(debug_assertions)]
-        replay_debug_keys(window, cx);
         this
     }
 
@@ -315,19 +321,104 @@ impl ShellView {
                     .tooltip("Settings")
                     .on_click(cx.listener(|this, _, window, cx| this.push(Route::Settings, window, cx))),
             )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.session.user.name.clone()),
-            )
-            .child(
-                Button::new("sign-out")
-                    .ghost()
-                    .label("Sign out")
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ShellEvent::SignOut))),
-            )
+            .child(self.render_account(cx))
     }
+
+    /// The user button and its menu: the saved accounts to switch to, adding one, signing out.
+    fn render_account(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let shell = cx.entity();
+        let current = self.session.account_key();
+        Popover::new("account")
+            .anchor(Anchor::TopRight)
+            .on_open_change({
+                let shell = shell.clone();
+                move |open, _, cx| {
+                    if *open {
+                        shell.update(cx, |this, cx| {
+                            this.accounts = Config::load().accounts;
+                            cx.notify();
+                        });
+                    }
+                }
+            })
+            .trigger(
+                Button::new("account-button")
+                    .ghost()
+                    .label(self.session.user.name.clone())
+                    .icon(IconName::ChevronDown)
+                    .tooltip(self.session.server.server_name.clone().unwrap_or_default()),
+            )
+            .content(move |_, window, cx| account_panel(&shell, &current, window, cx))
+    }
+}
+
+/// The account menu: other saved accounts first, then adding one and signing out. Each choice
+/// closes the menu and goes to the app view through a [`ShellEvent`].
+fn account_panel(
+    shell: &Entity<ShellView>,
+    current: &str,
+    _window: &mut Window,
+    cx: &mut Context<PopoverState>,
+) -> AnyElement {
+    let popover = cx.entity();
+    let choose = move |event: fn() -> ShellEvent| {
+        let (shell, popover) = (shell.clone(), popover.clone());
+        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+            popover.update(cx, |popover, cx| popover.dismiss(window, cx));
+            shell.update(cx, |_, cx| cx.emit(event()));
+        }
+    };
+    let accounts = &shell.read(cx).accounts;
+    let current_label = accounts
+        .iter()
+        .find(|account| account.credential_account() == current)
+        .map(SavedServer::label);
+    let others: Vec<AnyElement> = accounts
+        .iter()
+        .filter(|account| account.credential_account() != current)
+        .enumerate()
+        .map(|(i, account)| {
+            let (shell, popover, account) = (shell.clone(), cx.entity(), account.clone());
+            Button::new(("switch-account", i))
+                .ghost()
+                .w_full()
+                .justify_start()
+                .label(account.label())
+                .on_click(move |_, window, cx| {
+                    popover.update(cx, |popover, cx| popover.dismiss(window, cx));
+                    let account = account.clone();
+                    shell.update(cx, |_, cx| cx.emit(ShellEvent::SwitchAccount(account)));
+                })
+                .into_any_element()
+        })
+        .collect();
+    let muted = cx.theme().muted_foreground;
+    v_flex()
+        .w(px(280.))
+        .gap_1()
+        .children(current_label.map(|label| div().px_2().pb_1().text_sm().text_color(muted).child(label)))
+        .when(!others.is_empty(), |el| {
+            el.child(div().px_2().pt_1().text_xs().text_color(muted).child("Switch to"))
+                .children(others)
+        })
+        .child(
+            Button::new("add-account")
+                .ghost()
+                .w_full()
+                .justify_start()
+                .icon(IconName::Plus)
+                .label("Add account…")
+                .on_click(choose(|| ShellEvent::AddAccount)),
+        )
+        .child(
+            Button::new("sign-out")
+                .ghost()
+                .w_full()
+                .justify_start()
+                .label("Sign out")
+                .on_click(choose(|| ShellEvent::SignOut)),
+        )
+        .into_any_element()
 }
 
 impl ShellView {
@@ -498,35 +589,6 @@ fn notify_update(window: &mut Window, cx: &mut Context<ShellView>) {
 fn focuser<T: Focusable>(page: &Entity<T>) -> Focuser {
     let page = page.clone();
     Rc::new(move |cx| page.read(cx).focus_handle(cx))
-}
-
-/// Dev aid: `JELLY_GPUI_KEYS="down right enter wait escape"` presses keys after startup, for
-/// testing keyboard navigation without touching the desktop. `wait` pauses for a second.
-#[cfg(debug_assertions)]
-fn replay_debug_keys(window: &mut Window, cx: &mut Context<ShellView>) {
-    use std::time::Duration;
-
-    let Ok(keys) = std::env::var("JELLY_GPUI_KEYS") else {
-        return;
-    };
-    cx.spawn_in(window, async move |_, cx| {
-        cx.background_executor().timer(Duration::from_secs(3)).await;
-        for key in keys.split_whitespace() {
-            if key == "wait" {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-                continue;
-            }
-            match Keystroke::parse(key) {
-                Ok(keystroke) => {
-                    tracing::info!("debug key: {key}");
-                    cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx)).ok();
-                }
-                Err(err) => tracing::warn!("bad debug key {key:?}: {err}"),
-            }
-            cx.background_executor().timer(Duration::from_millis(250)).await;
-        }
-    })
-    .detach();
 }
 
 /// Dev aid: open a page on top of Home at startup, for screenshots and quick iteration.

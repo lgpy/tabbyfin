@@ -10,6 +10,13 @@ pub struct Session {
     pub server: PublicSystemInfo,
 }
 
+impl Session {
+    /// This user on this server, as [`crate::config::SavedServer::credential_account`].
+    pub fn account_key(&self) -> String {
+        crate::config::account_key(self.server.id.as_deref().unwrap_or_default(), &self.user.id)
+    }
+}
+
 pub fn client_info(device_id: &str) -> ClientInfo {
     let device = gethostname::gethostname().to_string_lossy().into_owned();
     ClientInfo {

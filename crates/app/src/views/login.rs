@@ -1,4 +1,4 @@
-//! Sign-in flow: server address, then username/password or Quick Connect.
+//! Sign-in flow: a saved account, or a server address, then username/password or Quick Connect.
 
 use std::time::{Duration, Instant};
 
@@ -6,12 +6,13 @@ use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme, Disableable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::models::PublicSystemInfo;
 use jellyfin::{Client, ClientInfo, Error, MIN_SUPPORTED_VERSION};
 
+use crate::config::SavedServer;
 use crate::runtime;
 use crate::session::{self, Session, describe_error};
 
@@ -24,6 +25,12 @@ pub enum LoginEvent {
     LoggedIn(Box<Session>),
     /// The server answered, and the form was opened with `resume_saved_session`.
     ServerReachable,
+    /// Sign in to a saved account with its stored token.
+    UseAccount(SavedServer),
+    /// Remove a saved account.
+    ForgetAccount(SavedServer),
+    /// Go back to the session that was signed in (adding an account).
+    Cancel,
 }
 
 /// Values to start the form with, e.g. after sign-out or an expired session.
@@ -38,6 +45,10 @@ pub struct Prefill {
 
 pub struct LoginView {
     device_id: String,
+    /// Saved accounts to continue as, most recently used first.
+    accounts: Vec<SavedServer>,
+    /// Another account is signed in and waiting (adding an account).
+    can_cancel: bool,
     resume_saved_session: bool,
     server_input: Entity<InputState>,
     username_input: Entity<InputState>,
@@ -58,7 +69,14 @@ pub struct LoginView {
 impl EventEmitter<LoginEvent> for LoginView {}
 
 impl LoginView {
-    pub fn new(device_id: String, prefill: Option<Prefill>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        device_id: String,
+        prefill: Option<Prefill>,
+        accounts: Vec<SavedServer>,
+        can_cancel: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let (url, username, error, resume_saved_session) = match prefill {
             Some(p) => (p.url, p.username, p.error, p.resume_saved_session),
             None => (String::new(), String::new(), None, false),
@@ -97,6 +115,8 @@ impl LoginView {
 
         let mut this = Self {
             device_id,
+            accounts,
+            can_cancel,
             resume_saved_session,
             server_input,
             username_input,
@@ -289,6 +309,48 @@ impl LoginView {
         }));
     }
 
+    pub fn set_accounts(&mut self, accounts: Vec<SavedServer>, cx: &mut Context<Self>) {
+        self.accounts = accounts;
+        cx.notify();
+    }
+
+    /// The saved accounts, each to continue as or remove.
+    fn render_accounts(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.accounts.is_empty() {
+            return None;
+        }
+        let rows = self.accounts.iter().enumerate().map(|(i, account)| {
+            let (use_it, forget) = (account.clone(), account.clone());
+            h_flex()
+                .gap_1()
+                .child(
+                    Button::new(("use-account", i))
+                        .outline()
+                        .flex_1()
+                        .justify_start()
+                        .label(account.label())
+                        .disabled(self.busy)
+                        .on_click(cx.listener(move |_, _, _, cx| cx.emit(LoginEvent::UseAccount(use_it.clone())))),
+                )
+                .child(
+                    Button::new(("forget-account", i))
+                        .ghost()
+                        .icon(IconName::Close)
+                        .tooltip("Remove this account")
+                        .disabled(self.busy)
+                        .on_click(cx.listener(move |_, _, _, cx| cx.emit(LoginEvent::ForgetAccount(forget.clone())))),
+                )
+        });
+        Some(
+            v_flex()
+                .gap_2()
+                .child(field_label("Saved accounts", cx))
+                .children(rows)
+                .child(div().pt_2().child(field_label("Or sign in to another", cx)))
+                .into_any_element(),
+        )
+    }
+
     fn cancel(&mut self, cx: &mut Context<Self>) {
         self.task = None;
         self.busy = false;
@@ -309,6 +371,7 @@ impl LoginView {
     fn render_server_step(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
             .gap_3()
+            .children(self.render_accounts(cx))
             .child(field_label("Server address", cx))
             .child(Input::new(&self.server_input).disabled(self.busy))
             .child(
@@ -424,6 +487,17 @@ impl Render for LoginView {
                     )
                     .when_some(self.error.clone(), |el, error| {
                         el.child(Alert::error("login-error", error))
+                    })
+                    .when(self.can_cancel, |el| {
+                        el.child(
+                            h_flex().child(
+                                Button::new("cancel-add-account")
+                                    .ghost()
+                                    .icon(IconName::ArrowLeft)
+                                    .label("Back to your account")
+                                    .on_click(cx.listener(|_, _, _, cx| cx.emit(LoginEvent::Cancel))),
+                            ),
+                        )
                     })
                     .when_some(self.status.clone(), |el, status| {
                         el.child(

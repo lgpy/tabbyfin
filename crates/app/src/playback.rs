@@ -434,6 +434,8 @@ impl NowPlaying {
 
 pub struct PlaybackManager {
     client: Client,
+    /// The signed-in account ([`crate::config::SavedServer::credential_account`]).
+    account: String,
     /// Stops the running session when sent or dropped.
     stop: Option<oneshot::Sender<()>>,
     /// Counts sessions, so the end of a replaced session doesn't close its successor's player.
@@ -462,7 +464,7 @@ impl EventEmitter<PlaybackEvent> for PlaybackManager {}
 
 impl PlaybackManager {
     /// Installs the manager for a signed-in session, replacing (and stopping) any previous one.
-    pub fn init(client: Client, cx: &mut App) {
+    pub fn init(client: Client, account: String, cx: &mut App) {
         let config = Config::load();
         let volume = config.volume.unwrap_or(DEFAULT_VOLUME);
         let adjustments = Adjustments {
@@ -472,6 +474,7 @@ impl PlaybackManager {
         .clamped();
         let manager = cx.new(|_| PlaybackManager {
             client,
+            account,
             stop: None,
             generation: 0,
             active: false,
@@ -638,14 +641,14 @@ impl PlaybackManager {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
 
         let session = {
-            let (client, item) = (self.client.clone(), item.clone());
+            let (client, item, account) = (self.client.clone(), item.clone(), self.account.clone());
             runtime::spawn(async move {
                 let channels = Channels {
                     stop: stop_rx,
                     updates: updates_tx,
                     commands: commands_rx,
                 };
-                run_session(client, item, options, (volume, muted), adjustments, channels).await
+                run_session(client, item, options, (volume, muted), adjustments, account, channels).await
             })
         };
 
@@ -1076,6 +1079,7 @@ async fn run_session(
     options: PlayOptions,
     (volume, muted): (f64, bool),
     adjustments: Adjustments,
+    account: String,
     mut channels: Channels,
 ) -> Result<Ended, String> {
     let info = client
@@ -1258,7 +1262,7 @@ async fn run_session(
                             }
                         }
                         report_or_log(client.report_playback_start(&report).await, "start");
-                        save_unfinished(Some(&report));
+                        save_unfinished(Some(&report), &account);
                         started = true;
                     }
                     PlayerEvent::Position(position) => report.position = Ticks::from(position),
@@ -1315,7 +1319,7 @@ async fn run_session(
             _ = ticker.tick(), if started => {
                 volume_report = None;
                 report_or_log(client.report_playback_progress(&report).await, "progress");
-                save_unfinished(Some(&report));
+                save_unfinished(Some(&report), &account);
             }
             _ = &mut channels.stop, if !stopping => {
                 // Replaced by a new session or signed out: ask mpv to quit and keep going until
@@ -1329,7 +1333,7 @@ async fn run_session(
     details_task.abort();
     if started {
         report_or_log(client.report_playback_stopped(&report).await, "stop");
-        save_unfinished(None);
+        save_unfinished(None, &account);
     }
     if let (PlayMethod::Transcode, Some(id)) = (method, &info.play_session_id) {
         report_or_log(client.stop_transcoding(id).await, "transcode stop");
@@ -1440,9 +1444,10 @@ async fn apply_command(
 
 /// Remembers the running playback in the config (or forgets it when it ends), so a crash
 /// can be reported on the next launch.
-fn save_unfinished(report: Option<&PlaybackReport>) {
+fn save_unfinished(report: Option<&PlaybackReport>, account: &str) {
     let mut config = Config::load();
     config.unfinished_playback = report.map(|report| UnfinishedPlayback {
+        account: Some(account.to_owned()),
         item_id: report.item_id.clone(),
         media_source_id: report.media_source_id.clone(),
         play_session_id: report.play_session_id.clone(),
@@ -1454,10 +1459,14 @@ fn save_unfinished(report: Option<&PlaybackReport>) {
 }
 
 /// On launch: if the last run ended mid-playback (a crash), tell the server where it stopped,
-/// so the resume point is right and the session doesn't look like it's still playing.
-pub fn report_unfinished(client: &Client) {
+/// so the resume point is right and the session doesn't look like it's still playing. Only
+/// the account that was playing reports it; it waits for that one to sign in otherwise.
+pub fn report_unfinished(client: &Client, account: &str) {
     let mut config = Config::load();
-    let Some(unfinished) = config.unfinished_playback.take() else {
+    let Some(unfinished) = config
+        .unfinished_playback
+        .take_if(|unfinished| unfinished.account.as_deref().is_none_or(|a| a == account))
+    else {
         return;
     };
     if let Err(err) = config.save() {

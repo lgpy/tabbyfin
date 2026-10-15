@@ -16,7 +16,7 @@ docker compose -f dev/compose.yaml up -d     # start the server on http://localh
 ./dev/setup-server.py                        # run the startup wizard, create libraries, scan
 ```
 
-Login: `dev` / `dev`. Legacy authorization is disabled, which is the 12.x default.
+Login: `dev` / `dev` (an administrator), and `dev2` / `dev2` for testing several users. Legacy authorization is disabled, which is the 12.x default.
 
 **Library contents**
 - `Test Movie (2024)`: three versions (1080p and 720p H.264, and 4K HEVC 10-bit for hardware decoding), a local trailer and a featurette (20 s each, without chapters). Both movies get a genre, a studio and a tag from the setup script (locked), for the item page and "More like this".
