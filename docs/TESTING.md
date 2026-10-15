@@ -181,3 +181,10 @@ Code-level and startup checks only so far: the development harness cannot send m
 - ⬜ The **buttons** and their tooltips, and the up-next card offering a collection's next movie.
 - ⬜ A remote **previous** from the dashboard: restarts the item, or within 5 s goes to the previous one.
 - ⬜ A movie in **several collections** uses the first the server lists.
+
+## 16. Image memory (6.6)
+
+✅ With the budget lowered to 1 MB and the keep-recent window to 1 s (a local build only): leaving Home for an item page and a library, and coming back, dropped 10, 10 and 9 images, and Home's images reloaded from disk and showed correctly.
+
+- ⬜ A **10k-item library**: scroll the whole grid and check the process memory levels off instead of growing, and that scrolling back up doesn't flash placeholders for long.
+- ⬜ **Long session** (an hour of browsing and playback): memory stays flat.

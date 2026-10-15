@@ -33,12 +33,15 @@ pub fn remote_image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, cx: &
     };
     let cache = ImageCache::global(cx);
     if let Some(image) = cache.update(cx, |cache, cx| cache.get(&req, cx)) {
-        return img(image).size_full().object_fit(ObjectFit::Cover).into_any_element();
+        return img(ImageSource::Render(image))
+            .size_full()
+            .object_fit(ObjectFit::Cover)
+            .into_any_element();
     }
     let hash = item
         .zip(req.tag.as_deref())
         .and_then(|(item, tag)| item.blur_hash(req.image_type, tag));
-    match hash.and_then(|hash| cache.update(cx, |cache, _| cache.placeholder(hash))) {
+    match hash.and_then(|hash| cache.update(cx, |cache, cx| cache.placeholder(hash, cx))) {
         Some(preview) => img(ImageSource::Render(preview))
             .size_full()
             .object_fit(ObjectFit::Cover)

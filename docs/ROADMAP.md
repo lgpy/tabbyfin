@@ -155,7 +155,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 | 6.3 | **Error messages** | P2 | S | ✅ Done: starting with the server down or still booting keeps the saved session, says it will sign back in automatically, and does so when the server answers (checked with the dev server stopped and restarted); a dropped connection reads "may be restarting"; wrong password, expired session and missing libmpv have their own wording; playback reconnects (2.2.2). Not rechecked here: an expired token while browsing. |
 | 6.4 | **Accessibility** | P3 | L | GPUI's screen-reader support is limited. At least ensure good contrast, keyboard reachability (3.1), and text that scales with the system setting. |
 | 6.5 | **Localisation** | P3 | M | All strings are English and inline. Extract them before the UI grows much more. |
-| 6.6 | **Performance pass** | P3 | M | Profile large libraries (10k+ items) for grid scrolling and image decode, and check memory over long sessions (the image cache has no size limit in memory). |
+| 6.6 | **Performance pass** | P3 | M | Partly done: images in memory are bounded. The app decodes them itself (off the UI thread) instead of through GPUI, whose asset cache and texture atlas kept every image ever shown, and keeps 256 MB of decoded pixels, dropping the least recently used from memory and the atlas (images used in the last 10 s stay, so what's on screen never thrashes). Still to do: profile a 10k-item library for grid scrolling, and memory over a long session. |
 
 ---
 
