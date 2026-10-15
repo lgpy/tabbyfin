@@ -10,6 +10,7 @@ mod credentials;
 mod images;
 mod live;
 mod markers;
+mod motion;
 mod playback;
 mod remote;
 mod router;
@@ -125,6 +126,7 @@ fn main() {
             let config = Config::load();
             theme::apply(config.theme, None, cx);
             zoom::init(&config, cx);
+            motion::init(&config, cx);
             Changes::init(cx);
             let search_key = if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" };
             cx.bind_keys([

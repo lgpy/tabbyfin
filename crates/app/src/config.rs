@@ -51,6 +51,9 @@ pub struct Config {
     /// Skip intros and recaps without asking. `None` means no.
     #[serde(default)]
     pub auto_skip_intro: Option<bool>,
+    /// Animations, smooth scrolling included. `None` means on.
+    #[serde(default)]
+    pub animations: Option<bool>,
     /// UI zoom from Ctrl+= and Ctrl+-, 1.0 being 100%. `None` means 1.0.
     #[serde(default)]
     pub ui_zoom: Option<f32>,
