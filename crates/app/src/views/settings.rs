@@ -53,6 +53,7 @@ pub struct SettingsPage {
     subtitle_style: ChoiceSelect,
     subtitle_size: ChoiceSelect,
     bitrate: ChoiceSelect,
+    animations: bool,
     autoplay: bool,
     auto_skip: bool,
     check_updates: bool,
@@ -62,6 +63,7 @@ pub struct SettingsPage {
 impl SettingsPage {
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let config = Config::load();
+        let animations = config.animations.unwrap_or(true);
         let autoplay = config.autoplay_next_episode.unwrap_or(true);
         let auto_skip = config.auto_skip_intro.unwrap_or(false);
         let check_updates = config.check_for_updates.unwrap_or(true);
@@ -121,11 +123,19 @@ impl SettingsPage {
             subtitle_style,
             subtitle_size,
             bitrate,
+            animations,
             autoplay,
             auto_skip,
             check_updates,
             _subscriptions: subscriptions,
         }
+    }
+
+    fn set_animations(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.animations = on;
+        save(|config| config.animations = Some(on));
+        crate::motion::set_enabled(on, cx);
+        cx.notify();
     }
 
     fn set_autoplay(&mut self, autoplay: bool, cx: &mut Context<Self>) {
@@ -225,6 +235,7 @@ fn save(change: impl FnOnce(&mut Config)) {
 #[derive(Clone, Copy, PartialEq)]
 enum Control {
     Theme,
+    Animations,
     Autoplay,
     AutoSkip,
     Bitrate,
@@ -259,6 +270,7 @@ impl SettingsPage {
         vec![
             Title("Appearance"),
             C(Theme),
+            C(Animations),
             Title("Playback"),
             C(Autoplay),
             C(AutoSkip),
@@ -333,6 +345,7 @@ impl SettingsPage {
     /// Sets a switch, or flips it with `None`.
     fn set_switch(&mut self, control: Control, on: Option<bool>, cx: &mut Context<Self>) {
         match control {
+            Control::Animations => self.set_animations(on.unwrap_or(!self.animations), cx),
             Control::Autoplay => self.set_autoplay(on.unwrap_or(!self.autoplay), cx),
             Control::AutoSkip => self.set_auto_skip(on.unwrap_or(!self.auto_skip), cx),
             Control::CheckUpdates => self.set_check_updates(on.unwrap_or(!self.check_updates), cx),
@@ -358,6 +371,12 @@ impl SettingsPage {
                 let select = self.select(control).expect("a picker");
                 Select::new(select).w(dp(180.)).into_any_element()
             }
+            Control::Animations => switch(
+                "animations",
+                self.animations,
+                "Animations and smooth scrolling",
+                Self::set_animations,
+            ),
             Control::Autoplay => switch(
                 "autoplay",
                 self.autoplay,

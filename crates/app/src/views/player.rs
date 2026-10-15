@@ -23,6 +23,7 @@ use player::libmpv::Frame;
 
 use crate::components::{remote_image, timestamp};
 use crate::markers::{self, SegmentKind};
+use crate::motion;
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::smooth_scroll::smooth_wheel;
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_choices};
@@ -866,13 +867,13 @@ impl PlayerPage {
     /// (above them when they're up).
     fn render_prompt(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let state = self.now_playing.read(cx);
-        let prompt = if let Some(segment) = state.skippable() {
-            Button::new("skip-segment")
+        let (kind, prompt) = if let Some(segment) = state.skippable() {
+            let skip = Button::new("skip-segment")
                 .large()
                 .icon(Lucide::SkipForward)
                 .label(segment.kind.skip_label())
-                .on_click(cx.listener(|this, _, window, cx| this.skip(&Skip, window, cx)))
-                .into_any_element()
+                .on_click(cx.listener(|this, _, window, cx| this.skip(&Skip, window, cx)));
+            ("skip", skip.into_any_element())
         } else if state.show_up_next() {
             let next = state.next.as_ref()?;
             let (series, episode) = crate::components::card_text(next);
@@ -882,7 +883,7 @@ impl PlayerPage {
                 series
             };
             let remaining = state.duration.map(|d| d.saturating_sub(state.position));
-            v_flex()
+            let card = v_flex()
                 .w(dp(320.))
                 .p_3()
                 .gap_2()
@@ -915,11 +916,11 @@ impl PlayerPage {
                                 .label("Cancel")
                                 .on_click(cx.listener(|this, _, _, cx| this.cancel_up_next(cx))),
                         ),
-                )
-                .into_any_element()
+                );
+            ("up-next", card.into_any_element())
         } else {
             let from = state.resume_prompt()?;
-            h_flex()
+            let card = h_flex()
                 .p_3()
                 .gap_3()
                 .rounded_lg()
@@ -932,8 +933,8 @@ impl PlayerPage {
                         .icon(Lucide::RotateCcw)
                         .label("Start over")
                         .on_click(cx.listener(|this, _, window, cx| this.skip(&Skip, window, cx))),
-                )
-                .into_any_element()
+                );
+            ("resume", card.into_any_element())
         };
         let bottom = if self.controls_visible { 120. } else { 32. };
         Some(
@@ -942,7 +943,8 @@ impl PlayerPage {
                 .absolute()
                 .right(dp(24.))
                 .bottom(dp(bottom))
-                .child(prompt),
+                // Each kind slides in when it appears.
+                .child(motion::slide_in(div().child(prompt), kind)),
         )
     }
 }
@@ -1408,7 +1410,10 @@ impl Render for PlayerPage {
                 )
             })
             .when(self.controls_visible, |el| {
-                el.child(self.render_controls(fullscreen, cx))
+                el.child(motion::fade_in(
+                    div().absolute().inset_0().child(self.render_controls(fullscreen, cx)),
+                    "player-controls",
+                ))
             })
             .children(self.render_prompt(cx))
     }

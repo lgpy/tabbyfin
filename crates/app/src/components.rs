@@ -1,5 +1,7 @@
 //! Shared building blocks for browsing pages.
 
+use std::hash::{Hash, Hasher};
+
 use gpui_kit::component::button::Button;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, v_flex};
@@ -9,6 +11,7 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ChapterInfo, I
 use jellyfin::{ImageRequest, Ticks};
 
 use crate::images::ImageCache;
+use crate::motion;
 use crate::zoom::dp;
 
 pub const POSTER_W: f32 = 150.;
@@ -33,22 +36,30 @@ pub fn remote_image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, cx: &
         return div().size_full().into_any_element();
     };
     let cache = ImageCache::global(cx);
-    if let Some(image) = cache.update(cx, |cache, cx| cache.get(&req, cx)) {
-        return img(ImageSource::Render(image))
-            .size_full()
-            .object_fit(ObjectFit::Cover)
-            .into_any_element();
-    }
+    let image = cache.update(cx, |cache, cx| cache.get(&req, cx));
     let hash = item
         .zip(req.tag.as_deref())
         .and_then(|(item, tag)| item.blur_hash(req.image_type, tag));
-    match hash.and_then(|hash| cache.update(cx, |cache, cx| cache.placeholder(hash, cx))) {
-        Some(preview) => img(ImageSource::Render(preview))
-            .size_full()
-            .object_fit(ObjectFit::Cover)
-            .into_any_element(),
-        None => div().size_full().into_any_element(),
-    }
+    let preview = hash.and_then(|hash| cache.update(cx, |cache, cx| cache.placeholder(hash, cx)));
+    let cover = |image| img(ImageSource::Render(image)).size_full().object_fit(ObjectFit::Cover);
+    let Some(image) = image else {
+        return match preview {
+            Some(preview) => cover(preview).into_any_element(),
+            None => div().size_full().into_any_element(),
+        };
+    };
+    // Fades in over the blurred preview when it loads (and when its page opens).
+    let id = {
+        let mut hasher = std::hash::DefaultHasher::new();
+        req.hash(&mut hasher);
+        ("image", hasher.finish() as usize)
+    };
+    div()
+        .relative()
+        .size_full()
+        .children(preview.map(cover))
+        .child(motion::fade_in(div().absolute().inset_0().child(cover(image)), id))
+        .into_any_element()
 }
 
 /// Wide image for an item: its own thumb/backdrop, then the parent's, then the primary image

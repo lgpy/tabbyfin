@@ -4,6 +4,7 @@
 //! position.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::actions::Confirm;
@@ -19,6 +20,7 @@ use crate::browse::{MoveDown, MoveUp};
 use crate::components::selection_ring;
 use crate::config::{Config, SavedServer};
 use crate::images::ImageCache;
+use crate::motion;
 use crate::playback::{PlaybackEvent, PlaybackManager};
 use crate::remote::{Remote, RemoteEvent};
 use crate::router::{Navigator, Route};
@@ -856,7 +858,16 @@ impl Focusable for ShellView {
 
 impl Render for ShellView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let page = self.stack.last().map(|p| p.view.clone());
+        let page = self.stack.last().map(|p| {
+            let view = p.view.clone();
+            let id = ("page", view.entity_id().as_u64() as usize);
+            let page = div().size_full().child(view);
+            if p.is_player {
+                page.into_any_element()
+            } else {
+                motion::enter(page, id, Duration::ZERO).into_any_element()
+            }
+        });
         let show_top_bar = !self.stack.last().is_some_and(|p| p.is_player);
         v_flex()
             .size_full()

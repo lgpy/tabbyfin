@@ -4,6 +4,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -17,12 +18,15 @@ use crate::components::{
     Load, centered_message, centered_spinner, error_state, landscape_card, poster_card, shelf_with_rail,
 };
 use crate::images::ImageCache;
+use crate::motion;
 use crate::router::Navigator;
 use crate::runtime;
 use crate::smooth_scroll::smooth_wheel;
 
 const SHELF_LIMIT: u32 = 24;
 const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
+/// The delay between one shelf appearing and the next.
+const SHELF_STAGGER: Duration = Duration::from_millis(60);
 /// How far the mouse moves with the button down before a press on a shelf becomes a drag.
 const DRAG_THRESHOLD: Pixels = px(4.);
 
@@ -310,15 +314,16 @@ impl HomePage {
                             }),
                         )
                 };
-                shelf_with_rail(
+                let shelf = shelf_with_rail(
                     shelf.id.clone(),
                     shelf.title.clone(),
                     cards,
                     &self.shelf_scrolls[s],
                     rail,
                     cx,
-                )
-                .into_any_element()
+                );
+                // One after another, down the page.
+                motion::enter(div().child(shelf), ("shelf", s), SHELF_STAGGER * s as u32).into_any_element()
             })
             .collect();
         if sections.is_empty() {
