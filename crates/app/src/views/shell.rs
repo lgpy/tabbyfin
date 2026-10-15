@@ -18,7 +18,7 @@ use gpui_kit::*;
 use jellyfin::{GroupState, RepeatMode, ShuffleMode};
 
 use crate::browse::{MoveDown, MoveUp};
-use crate::components::selection_ring;
+use crate::components::{menu_left_focus, menu_popover, selection_ring};
 use crate::config::{Config, SavedServer};
 use crate::images::ImageCache;
 use crate::motion;
@@ -654,32 +654,26 @@ impl ShellView {
     /// The user button and its menu: the saved accounts to switch to, adding one, signing out.
     fn render_account(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity();
-        let account_menu = self.account_menu.as_ref().map(|(menu, _)| menu.clone());
-        Popover::new("account")
-            .anchor(Anchor::TopRight)
-            // The menu draws its own surface and dismisses itself.
-            .appearance(false)
-            .open(matches!(self.menu, Some((Menu::Account, _))) && account_menu.is_some())
-            .when_some(account_menu.as_ref(), |popover, menu| {
-                popover.track_focus(&menu.focus_handle(cx))
-            })
-            .on_open_change(move |open, window, cx| {
-                shell.update(cx, |this, cx| this.menu_toggled(Menu::Account, *open, window, cx))
-            })
-            .trigger(
-                Button::new("account-button")
-                    .ghost()
-                    .h(dp(TOP_BAR_BUTTON))
-                    .child(avatar(&self.session.user.name, cx))
-                    .tooltip(match &self.session.server.server_name {
-                        Some(server) => format!("{} on {server}", self.session.user.name),
-                        None => self.session.user.name.clone(),
-                    }),
-            )
-            .content(move |_, _, _| match &account_menu {
-                Some(menu) => menu.clone().into_any_element(),
-                None => div().into_any_element(),
-            })
+        let account_menu = self
+            .account_menu
+            .as_ref()
+            .filter(|_| matches!(self.menu, Some((Menu::Account, _))))
+            .map(|(menu, _)| menu.clone());
+        menu_popover(
+            "account",
+            Anchor::TopRight,
+            account_menu,
+            Button::new("account-button")
+                .ghost()
+                .h(dp(TOP_BAR_BUTTON))
+                .child(avatar(&self.session.user.name, cx))
+                .tooltip(match &self.session.server.server_name {
+                    Some(server) => format!("{} on {server}", self.session.user.name),
+                    None => self.session.user.name.clone(),
+                }),
+            move |open, window, cx| shell.update(cx, |this, cx| this.menu_toggled(Menu::Account, *open, window, cx)),
+            cx,
+        )
     }
 
     /// The account menu: the saved accounts to switch between, then adding one and signing
@@ -720,7 +714,12 @@ impl ShellView {
             self.open_menu(menu, None, window, cx);
         } else if self.menu.is_some_and(|(m, _)| m == menu) {
             self.menu = None;
-            self.account_menu = None;
+            let account_menu = self.account_menu.take();
+            // A choice that moved focus (adding an account) keeps it.
+            if account_menu.is_some_and(|(menu, _)| !menu_left_focus(&menu, window, cx)) {
+                cx.notify();
+                return;
+            }
             // Back to the top bar if the keyboard came from there, else to the page.
             if self.top_bar.is_some() {
                 self.focus_handle.focus(window, cx);

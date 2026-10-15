@@ -3,6 +3,8 @@
 use std::hash::{Hash, Hasher};
 
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::menu::PopupMenu;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -637,6 +639,39 @@ pub fn error_state(
         .gap_3()
         .child(div().text_color(cx.theme().muted_foreground).child(message.into()))
         .child(Button::new("retry").outline().label("Retry").on_click(on_retry))
+}
+
+/// A menu the keyboard cursor can open as well as the mouse: a [`PopupMenu`] in a controlled
+/// popover (gpui-kit's `DropdownMenu` only opens on a click). `menu` is the open menu, built
+/// by the owner when it opens; `on_open_change` hears a click on the trigger.
+pub fn menu_popover(
+    id: impl Into<ElementId>,
+    anchor: Anchor,
+    menu: Option<Entity<PopupMenu>>,
+    trigger: Button,
+    on_open_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Popover {
+    Popover::new(id)
+        .anchor(anchor)
+        // The menu draws its own surface and dismisses itself.
+        .appearance(false)
+        .open(menu.is_some())
+        .when_some(menu.as_ref(), |popover, menu| {
+            popover.track_focus(&menu.focus_handle(cx))
+        })
+        .on_open_change(on_open_change)
+        .trigger(trigger)
+        .content(move |_, _, _| match &menu {
+            Some(menu) => menu.clone().into_any_element(),
+            None => div().into_any_element(),
+        })
+}
+
+/// Whether focus should go back to the owner after `menu` closed: it's still in the menu or
+/// nowhere, rather than in something a choice opened (a dialog, another page).
+pub fn menu_left_focus(menu: &Entity<PopupMenu>, window: &Window, cx: &App) -> bool {
+    menu.focus_handle(cx).contains_focused(window, cx) || window.focused(cx).is_none()
 }
 
 #[cfg(test)]

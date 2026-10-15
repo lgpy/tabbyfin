@@ -5,8 +5,9 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants, Toggle, ToggleVariants};
 use gpui_kit::component::dialog::DialogButtonProps;
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, IndexPath, WindowExt, h_flex, v_flex};
@@ -19,8 +20,9 @@ use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, centered_message, centered_spinner, chapter_card,
-    episode_card, episode_label, error_state, landscape_card, landscape_image, person_card, poster_card_scaled,
-    remote_image, rounded_image, runtime_text, selection_ring, shelf, shelf_with_rail, timestamp,
+    episode_card, episode_label, error_state, landscape_card, landscape_image, menu_left_focus, menu_popover,
+    person_card, poster_card_scaled, remote_image, rounded_image, runtime_text, selection_ring, shelf, shelf_with_rail,
+    timestamp,
 };
 use crate::images::ImageCache;
 use crate::motion;
@@ -87,6 +89,8 @@ pub struct ItemPage {
     /// them one at a time, so moves land in the order they were made.
     playlist_edits: VecDeque<PlaylistEdit>,
     sending_edit: bool,
+    /// The open More menu, and its dismissal.
+    more_menu: Option<(Entity<PopupMenu>, Subscription)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -129,6 +133,7 @@ impl ItemPage {
             focus_handle: cx.focus_handle(),
             playlist_edits: VecDeque::new(),
             sending_edit: false,
+            more_menu: None,
             _subscriptions,
         };
         this.reload(cx);
@@ -546,91 +551,124 @@ fn is_favorite(item: &BaseItemDto) -> bool {
 }
 
 impl ItemPage {
-    /// Play / Resume buttons and the watched toggle.
+    /// The actions on the title's line: playing it, named, then icon buttons. Watched and
+    /// Favorite are toggles, pressed while on; the less frequent actions are under More.
     fn render_actions(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
         let (played, favorite) = (is_played(item), is_favorite(item));
-        let buttons = item_actions(item).into_iter().enumerate().map(|(i, action)| {
-            // Icons only; the tooltip says what each does.
-            let (id, icon, tooltip, primary): (&'static str, Icon, SharedString, bool) = match action {
-                ItemAction::Resume(position) => (
-                    "resume",
-                    IconName::Play.into(),
-                    format!("Resume from {}", timestamp(position.into())).into(),
-                    true,
-                ),
-                ItemAction::PlayFromStart => (
-                    "play-start",
-                    Lucide::RotateCcw.into(),
-                    "Play from beginning".into(),
-                    false,
-                ),
-                ItemAction::Play => ("play", IconName::Play.into(), "Play".into(), true),
-                ItemAction::TogglePlayed => (
-                    "toggle-played",
-                    if played { IconName::CircleCheck } else { IconName::Check }.into(),
-                    if played { "Mark unwatched" } else { "Mark watched" }.into(),
-                    false,
-                ),
-                ItemAction::PlayAll => ("play-all", IconName::Play.into(), "Play all".into(), true),
-                ItemAction::Shuffle => ("shuffle", Lucide::Shuffle.into(), "Shuffle".into(), false),
-                ItemAction::Trailer => (
-                    "trailer",
-                    if item.local_trailer_count.unwrap_or(0) > 0 {
-                        Lucide::Clapperboard
-                    } else {
-                        Lucide::ExternalLink
-                    }
-                    .into(),
-                    "Trailer".into(),
-                    false,
-                ),
-                ItemAction::ToggleFavorite => (
-                    "toggle-favorite",
-                    if favorite { Lucide::HeartOff } else { Lucide::Heart }.into(),
-                    if favorite { "Remove favorite" } else { "Favorite" }.into(),
-                    false,
-                ),
-                ItemAction::AddToPlaylist => (
-                    "add-to-playlist",
-                    Lucide::ListPlus.into(),
-                    "Add to playlist".into(),
-                    false,
-                ),
-                ItemAction::EditPlaylist => ("edit-playlist", Lucide::Pencil.into(), "Edit playlist".into(), false),
-                ItemAction::DeletePlaylist => {
-                    ("delete-playlist", Lucide::Trash.into(), "Delete playlist".into(), false)
-                }
-            };
-            // Playing is the main action, so it's named; the rest are icons.
-            let label = match action {
-                ItemAction::Resume(_) => Some("Resume"),
-                ItemAction::Play => Some("Play"),
-                ItemAction::PlayAll => Some("Play all"),
-                _ => None,
-            };
-            let button = Button::new(id)
-                .map(|b| if primary { b.primary() } else { b.outline() })
-                .h(dp(ACTION_SIZE))
-                .child(icon.size(dp(ACTION_ICON)))
-                .map(|b| match label {
-                    Some(label) => b
-                        .px(dp(ACTION_SIZE / 2.))
-                        .gap_2()
-                        .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(label)),
-                    None => b.w(dp(ACTION_SIZE)),
-                })
-                .tooltip(tooltip);
-            let button = button.on_click(cx.listener(move |this, _, window, cx| this.run_action(action, window, cx)));
-            // Room around the button for the keyboard cursor's ring.
+        // Room around each button for the keyboard cursor's ring.
+        let ring = |i: usize, element: AnyElement| {
             div()
                 .relative()
                 .p(dp(ACTION_RING_GAP))
                 .rounded_xl()
-                .child(button)
+                .child(element)
                 .when(self.cursor.is_selected(ACTIONS, i), |el| {
                     el.child(selection_ring(cx).rounded_xl())
                 })
-        });
+        };
+        let icon_button = |id: &'static str, icon: Icon| {
+            Button::new(id)
+                .outline()
+                .size(dp(ACTION_SIZE))
+                .child(icon.size(dp(ACTION_ICON)))
+        };
+        let buttons: Vec<_> = item_actions(item)
+            .into_iter()
+            .enumerate()
+            .map(|(i, action)| {
+                let (id, icon, tooltip, primary): (&'static str, Icon, SharedString, bool) = match action {
+                    ItemAction::TogglePlayed | ItemAction::ToggleFavorite => {
+                        let (id, icon, tooltip, on) = if matches!(action, ItemAction::TogglePlayed) {
+                            let icon = if played { IconName::CircleCheck } else { IconName::Check };
+                            ("toggle-played", Icon::new(icon), "Watched", played)
+                        } else {
+                            ("toggle-favorite", Icon::new(Lucide::Heart), "Favorite", favorite)
+                        };
+                        let toggle = Toggle::new(id)
+                            .outline()
+                            .size(dp(ACTION_SIZE))
+                            .icon(icon.size(dp(ACTION_ICON)))
+                            .checked(on)
+                            .tooltip(tooltip)
+                            .on_click(
+                                cx.listener(move |this, _: &bool, window, cx| this.run_action(action, window, cx)),
+                            );
+                        return ring(i, toggle.into_any_element());
+                    }
+                    ItemAction::More => {
+                        let page = cx.entity();
+                        let menu = self.more_menu.as_ref().map(|(menu, _)| menu.clone());
+                        let trigger = icon_button("more", Icon::new(Lucide::Ellipsis)).tooltip("More");
+                        let popover = menu_popover(
+                            "more-menu",
+                            Anchor::TopRight,
+                            menu,
+                            trigger,
+                            move |open, window, cx| {
+                                page.update(cx, |this, cx| {
+                                    if *open {
+                                        this.open_more(window, cx);
+                                    }
+                                })
+                            },
+                            cx,
+                        );
+                        return ring(i, popover.into_any_element());
+                    }
+                    // In the More menu.
+                    ItemAction::AddToPlaylist | ItemAction::EditPlaylist | ItemAction::DeletePlaylist => {
+                        unreachable!("not a button")
+                    }
+                    ItemAction::Resume(position) => (
+                        "resume",
+                        IconName::Play.into(),
+                        format!("Resume from {}", timestamp(position.into())).into(),
+                        true,
+                    ),
+                    ItemAction::PlayFromStart => (
+                        "play-start",
+                        Lucide::RotateCcw.into(),
+                        "Play from beginning".into(),
+                        false,
+                    ),
+                    ItemAction::Play => ("play", IconName::Play.into(), "Play".into(), true),
+                    ItemAction::PlayAll => ("play-all", IconName::Play.into(), "Play all".into(), true),
+                    ItemAction::Shuffle => ("shuffle", Lucide::Shuffle.into(), "Shuffle".into(), false),
+                    ItemAction::Trailer => (
+                        "trailer",
+                        if item.local_trailer_count.unwrap_or(0) > 0 {
+                            Lucide::Clapperboard
+                        } else {
+                            Lucide::ExternalLink
+                        }
+                        .into(),
+                        "Trailer".into(),
+                        false,
+                    ),
+                };
+                // Playing is the main action, so it's named; the rest are icons.
+                let label = match action {
+                    ItemAction::Resume(_) => Some("Resume"),
+                    ItemAction::Play => Some("Play"),
+                    ItemAction::PlayAll => Some("Play all"),
+                    _ => None,
+                };
+                let button = Button::new(id)
+                    .map(|b| if primary { b.primary() } else { b.outline() })
+                    .h(dp(ACTION_SIZE))
+                    .child(icon.size(dp(ACTION_ICON)))
+                    .map(|b| match label {
+                        Some(label) => b
+                            .px(dp(ACTION_SIZE / 2.))
+                            .gap_2()
+                            .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(label)),
+                        None => b.w(dp(ACTION_SIZE)),
+                    })
+                    .tooltip(tooltip)
+                    .on_click(cx.listener(move |this, _, window, cx| this.run_action(action, window, cx)));
+                ring(i, button.into_any_element())
+            })
+            .collect();
         h_flex()
             .flex_none()
             // The rings' room is outside the column's right edge.
@@ -639,8 +677,47 @@ impl ItemPage {
             .children(buttons)
     }
 
+    /// Opens the More menu: adding to a playlist, and editing or deleting a playlist.
+    fn open_more(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Load::Loaded(data) = &self.data else { return };
+        let actions = more_actions(&data.item);
+        let page = cx.entity().downgrade();
+        let menu = PopupMenu::build(window, cx, move |mut menu, _, _| {
+            for &action in &actions {
+                let (label, icon) = match action {
+                    ItemAction::AddToPlaylist => ("Add to playlist…", Lucide::ListPlus),
+                    ItemAction::EditPlaylist => ("Edit…", Lucide::Pencil),
+                    _ => ("Delete playlist…", Lucide::Trash),
+                };
+                if matches!(action, ItemAction::DeletePlaylist) {
+                    menu = menu.separator();
+                }
+                let page = page.clone();
+                menu = menu.item(PopupMenuItem::new(label).icon(icon).on_click(move |_, window, cx| {
+                    // After the menu has closed and handed focus back, so the dialog keeps it.
+                    let page = page.clone();
+                    window.defer(cx, move |window, cx| {
+                        page.update(cx, |this, cx| this.run_action(action, window, cx)).ok();
+                    });
+                }));
+            }
+            menu
+        });
+        menu.focus_handle(cx).focus(window, cx);
+        let dismissed = cx.subscribe_in(&menu, window, |this, menu, _: &DismissEvent, window, cx| {
+            if menu_left_focus(menu, window, cx) {
+                this.focus_handle.focus(window, cx);
+            }
+            this.more_menu = None;
+            cx.notify();
+        });
+        self.more_menu = Some((menu, dismissed));
+        cx.notify();
+    }
+
     fn run_action(&mut self, action: ItemAction, window: &mut Window, cx: &mut Context<Self>) {
         match action {
+            ItemAction::More => self.open_more(window, cx),
             ItemAction::Resume(position) => self.play(Some(position), cx),
             ItemAction::PlayFromStart | ItemAction::Play => self.play(None, cx),
             ItemAction::TogglePlayed => {
@@ -1390,6 +1467,8 @@ enum ItemAction {
     EditPlaylist,
     /// Only offered when the server says the user may delete it.
     DeletePlaylist,
+    /// Opens a menu of the item's less frequent actions ([`more_actions`]).
+    More,
 }
 
 /// The buttons under an item's title, in order.
@@ -1416,6 +1495,15 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
     }
     actions.push(ItemAction::TogglePlayed);
     actions.push(ItemAction::ToggleFavorite);
+    if !more_actions(item).is_empty() {
+        actions.push(ItemAction::More);
+    }
+    actions
+}
+
+/// What the More menu offers, in order.
+fn more_actions(item: &BaseItemDto) -> Vec<ItemAction> {
+    let mut actions = Vec::new();
     if matches!(
         item.kind,
         BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video | BaseItemKind::Series | BaseItemKind::Season
