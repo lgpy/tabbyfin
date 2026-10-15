@@ -6,7 +6,7 @@
 //! group requests like the player's own buttons; playing items goes through the
 //! [`PlaybackManager`], which hands them to the group's queue there.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use gpui_kit::*;
 use jellyfin::models::BaseItemDto;
@@ -14,7 +14,11 @@ use jellyfin::{Client, GeneralCommand, ItemsQuery, PlayCommand, PlayRequest, Pla
 
 use crate::playback::{NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::runtime;
+use crate::views::item::shuffle;
 use crate::views::player::{SEEK_STEP, VOLUME_STEP};
+
+/// A remote "previous" goes back to the start of the item unless it's this close to it.
+const RESTART_WITHIN: Duration = Duration::from_secs(5);
 
 pub enum RemoteEvent {
     /// A message sent from another client, to show as a notification.
@@ -101,7 +105,7 @@ impl Remote {
                 PlaybackManager::global(cx).update(cx, |playback, cx| match placement {
                     Placement::Now => playback.play_all_with(items, options, cx),
                     Placement::Shuffled => {
-                        shuffle(&mut items, seed());
+                        shuffle(&mut items);
                         playback.play_all(items, cx);
                     }
                     Placement::Next => playback.enqueue(items, true, cx),
@@ -137,9 +141,16 @@ impl Remote {
                 now_playing.update(cx, |state, cx| state.play_next(cx));
                 return;
             }
-            // There's no previous item to go back to yet, so back to the start, as players
-            // do when not near the start.
-            PlaystateCommand::PreviousTrack => UiCommand::SeekTo(Duration::ZERO),
+            // Like a music player: back to the start, unless already near it and there's an
+            // item before this one.
+            PlaystateCommand::PreviousTrack => {
+                let state = now_playing.read(cx);
+                if state.position <= RESTART_WITHIN && state.previous.is_some() {
+                    now_playing.update(cx, |state, cx| state.play_previous(cx));
+                    return;
+                }
+                UiCommand::SeekTo(Duration::ZERO)
+            }
             PlaystateCommand::Other => return,
         };
         control(&now_playing, command, cx);
@@ -209,29 +220,11 @@ fn in_order(ids: &[String], items: Vec<BaseItemDto>) -> Vec<BaseItemDto> {
         .collect()
 }
 
-fn seed() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_nanos() as u64)
-        .unwrap_or(1)
-}
-
-/// Fisher–Yates with xorshift: a shuffled play order needs no better randomness than that.
-fn shuffle<T>(items: &mut [T], seed: u64) {
-    let mut state = seed | 1;
-    for i in (1..items.len()).rev() {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        items.swap(i, (state % (i as u64 + 1)) as usize);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use jellyfin::models::BaseItemDto;
 
-    use super::{in_order, shuffle};
+    use super::in_order;
 
     fn item(id: &str) -> BaseItemDto {
         serde_json::from_value(serde_json::json!({ "Id": id, "Name": id })).expect("item")
@@ -243,14 +236,5 @@ mod tests {
         let items = in_order(&ids, vec![item("a"), item("b"), item("c")]);
         let order: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(order, ["c", "a", "b"]);
-    }
-
-    #[test]
-    fn shuffling_keeps_every_item() {
-        let mut items: Vec<u32> = (0..20).collect();
-        shuffle(&mut items, 12345);
-        assert_ne!(items, (0..20).collect::<Vec<_>>());
-        items.sort();
-        assert_eq!(items, (0..20).collect::<Vec<_>>());
     }
 }

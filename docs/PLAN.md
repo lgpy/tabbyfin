@@ -301,7 +301,7 @@ Not yet: track changes that need a new transcode, and version switches, don't st
     - Each page keeps its cursor while it's on the stack, so Back returns to the same card.
     - In search, Enter in the box moves to the first result, and Up from the top row returns to the box.
     - Version and track pickers aren't on the cursor yet.
-  - In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N plays the next episode, PgUp/PgDn go to the previous/next chapter, Enter or S skips the intro (or plays the next episode from the up-next card), [ and ] change the speed, Z and X the subtitle delay, F toggles fullscreen, and Esc leaves fullscreen, then dismisses the up-next card, then leaves the player.
+  - In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N / Shift+P play the next / previous episode (or movie of its collection), PgUp/PgDn go to the previous/next chapter, Enter or S skips the intro (or plays the next episode from the up-next card), [ and ] change the speed, Z and X the subtitle delay, F toggles fullscreen, and Esc leaves fullscreen, then dismisses the up-next card, then leaves the player.
 - **Theme:**
   - GPUI Kit's theme system, defaulting to dark.
 

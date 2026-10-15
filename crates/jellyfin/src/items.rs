@@ -2,7 +2,7 @@ use crate::client::Query;
 use crate::models::{
     BaseItemDto, BaseItemKind, ItemField, ItemFilter, ItemSortBy, MediaSegmentDto, QueryResult, wire_list,
 };
-use crate::{Client, Result};
+use crate::{Client, Error, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
@@ -136,6 +136,19 @@ impl Client {
             // The start item itself is missing (e.g. removed): don't guess.
             _ => None,
         })
+    }
+
+    /// The collections (box sets) that contain the item. Jellyfin 12.0 added this; older
+    /// servers answer 404, which comes back as no collections.
+    pub async fn item_collections(&self, item_id: &str) -> Result<Vec<BaseItemDto>> {
+        match self
+            .get::<QueryResult<BaseItemDto>>(&format!("/Items/{item_id}/Collections"), &Query::new())
+            .await
+        {
+            Ok(result) => Ok(result.items),
+            Err(Error::NotFound) => Ok(Vec::new()),
+            Err(err) => Err(err),
+        }
     }
 
     /// A playlist's entries, in playlist order.
