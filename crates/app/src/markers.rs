@@ -11,6 +11,9 @@ use jellyfin::models::{ChapterInfo, MediaSegmentDto, MediaSegmentType};
 pub struct Chapter {
     pub start: Duration,
     pub name: Option<String>,
+    /// The chapter's image, fetched by its position in the server's list (`index`).
+    pub image_tag: Option<String>,
+    pub index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,9 +49,12 @@ pub struct Segment {
 pub fn chapters(chapters: &[ChapterInfo]) -> Vec<Chapter> {
     let mut chapters: Vec<Chapter> = chapters
         .iter()
-        .map(|c| Chapter {
+        .enumerate()
+        .map(|(index, c)| Chapter {
             start: c.start_position_ticks.into(),
             name: c.name.clone().filter(|n| !n.trim().is_empty()),
+            image_tag: c.image_tag.clone(),
+            index,
         })
         .collect();
     chapters.sort_by_key(|c| c.start);
@@ -155,6 +161,8 @@ mod tests {
         Chapter {
             start: secs(start),
             name: Some(name.into()),
+            image_tag: None,
+            index: 0,
         }
     }
 

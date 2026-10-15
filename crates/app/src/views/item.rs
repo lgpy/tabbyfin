@@ -11,15 +11,15 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme, Disableable, IconName, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ItemField, ItemSortBy};
+use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ChapterInfo, ItemField, ItemSortBy};
 use jellyfin::{Client, ItemsQuery, Ticks};
 
 use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
-    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, centered_spinner, episode_label, error_state,
-    landscape_card, landscape_image, person_card, poster_card, remote_image, runtime_text, selection_ring, shelf,
-    timestamp,
+    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, centered_spinner, chapter_card, episode_label,
+    error_state, landscape_card, landscape_image, person_card, poster_card, remote_image, runtime_text, selection_ring,
+    shelf, timestamp,
 };
 use crate::images::ImageCache;
 use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
@@ -63,6 +63,7 @@ pub struct ItemPage {
     pickers: Option<Pickers>,
     scroll: ScrollHandle,
     people_scroll: ScrollHandle,
+    chapters_scroll: ScrollHandle,
     extras_scroll: ScrollHandle,
     similar_scroll: ScrollHandle,
     cursor: Cursor,
@@ -103,6 +104,7 @@ impl ItemPage {
             pickers: None,
             scroll: ScrollHandle::new(),
             people_scroll: ScrollHandle::new(),
+            chapters_scroll: ScrollHandle::new(),
             extras_scroll: ScrollHandle::new(),
             similar_scroll: ScrollHandle::new(),
             cursor: Cursor::default(),
@@ -437,6 +439,7 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
                 ItemField::Tags,
                 ItemField::RemoteTrailers,
                 ItemField::CanDelete,
+                ItemField::Chapters,
             ],
         )
         .await?;
@@ -541,6 +544,19 @@ fn meta_line(item: &BaseItemDto) -> String {
         parts.push(format!("★ {score:.1}"));
     }
     parts.join(" · ")
+}
+
+/// The chapters worth a shelf: a playable item's, when it has more than one.
+fn chapters(item: &BaseItemDto) -> &[ChapterInfo] {
+    let playable = matches!(
+        item.kind,
+        BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video
+    );
+    if playable && item.chapters.len() > 1 {
+        &item.chapters
+    } else {
+        &[]
+    }
 }
 
 fn is_played(item: &BaseItemDto) -> bool {
@@ -970,7 +986,7 @@ impl ItemPage {
 
     /// Scroll-container child index of the children's title.
     fn children_title_index(&self, data: &ItemData) -> usize {
-        1 + usize::from(self.pickers.is_some()) + usize::from(!data.item.people.is_empty())
+        self.people_index(data) + usize::from(!data.item.people.is_empty())
     }
 
     /// Scroll-container child index of the extras shelf: after the children's title and rows.
@@ -1033,9 +1049,40 @@ impl ItemPage {
             .into_any_element()
     }
 
-    /// Scroll-container child index of the cast shelf.
-    fn people_index(&self) -> usize {
+    /// Scroll-container child index of the chapters shelf, after the header and pickers.
+    fn chapters_index(&self) -> usize {
         1 + usize::from(self.pickers.is_some())
+    }
+
+    /// Scroll-container child index of the cast shelf.
+    fn people_index(&self, data: &ItemData) -> usize {
+        self.chapters_index() + usize::from(!chapters(&data.item).is_empty())
+    }
+
+    /// Chapters to jump into: their image, name and start. Chosen, the item plays from there
+    /// (with the version and tracks picked above).
+    fn render_chapters(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> AnyElement {
+        let cards = chapters(item)
+            .iter()
+            .enumerate()
+            .map(|(i, chapter)| {
+                let start = chapter.start_position_ticks;
+                chapter_card(
+                    ("chapter", i),
+                    &item.id,
+                    i,
+                    chapter,
+                    self.cursor.is_selected(CHAPTERS, i),
+                    cx.listener(move |this, _, _, cx| this.play(Some(start), cx)),
+                    cx,
+                )
+                .into_any_element()
+            })
+            .collect();
+        div()
+            .pt_6()
+            .child(shelf("chapters", "Chapters", cards, &self.chapters_scroll, cx))
+            .into_any_element()
     }
 
     fn render_people(&self, people: &[BaseItemPerson], cx: &mut Context<Self>) -> AnyElement {
@@ -1100,6 +1147,9 @@ impl ItemPage {
             .pb_8()
             .child(self.render_header(item, cx))
             .children(self.render_pickers(cx).map(|pickers| div().pt_6().child(pickers)))
+            .when(!chapters(item).is_empty(), |el| {
+                el.child(self.render_chapters(item, cx))
+            })
             .when(!item.people.is_empty(), |el| {
                 el.child(self.render_people(&item.people, cx))
             })
@@ -1213,10 +1263,11 @@ const DELETE_PLAYLIST_NOTE: &str =
 const ACTIONS: usize = 0;
 /// Version, audio and subtitle pickers, one per row; Left and Right change them.
 const PICKERS: usize = 1;
-const PEOPLE: usize = 2;
-const CHILDREN: usize = 3;
-const EXTRAS: usize = 4;
-const SIMILAR: usize = 5;
+const CHAPTERS: usize = 2;
+const PEOPLE: usize = 3;
+const CHILDREN: usize = 4;
+const EXTRAS: usize = 5;
+const SIMILAR: usize = 6;
 /// Scroll-container child index of the pickers, after the header.
 const PICKERS_INDEX: usize = 1;
 /// Padding around each action button, where the cursor's ring goes.
@@ -1234,6 +1285,7 @@ impl Browse for ItemPage {
         vec![
             Section::row(item_actions(&data.item).len()),
             Section::grid(self.picker_selects().len(), 1),
+            Section::row(chapters(&data.item).len()),
             Section::row(data.item.people.len()),
             self.children_section(data, window),
             Section::row(data.extras.len()),
@@ -1251,8 +1303,13 @@ impl Browse for ItemPage {
             browse::reveal(&self.scroll, PICKERS_INDEX, px(CARD_GAP));
             return;
         }
+        if position.section == CHAPTERS {
+            browse::reveal(&self.scroll, self.chapters_index(), px(CARD_GAP));
+            browse::reveal(&self.chapters_scroll, position.index, px(24.));
+            return;
+        }
         if position.section == PEOPLE {
-            browse::reveal(&self.scroll, self.people_index(), px(CARD_GAP));
+            browse::reveal(&self.scroll, self.people_index(data), px(CARD_GAP));
             browse::reveal(&self.people_scroll, position.index, px(24.));
             return;
         }
@@ -1294,6 +1351,11 @@ impl Browse for ItemPage {
         } else if position.section == PICKERS {
             if let Some(select) = self.picker_selects().get(position.index) {
                 cycle_choice(select, window, cx);
+            }
+        } else if position.section == CHAPTERS {
+            if let Some(chapter) = chapters(&data.item).get(position.index) {
+                let start = chapter.start_position_ticks;
+                self.play(Some(start), cx);
             }
         } else if position.section == PEOPLE {
             if let Some(person) = data.item.people.get(position.index) {

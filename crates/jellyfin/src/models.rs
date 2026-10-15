@@ -232,6 +232,9 @@ pub struct ChapterInfo {
     #[serde(default, deserialize_with = "nullable")]
     pub start_position_ticks: Ticks,
     pub name: Option<String>,
+    /// Set once the server extracted the chapter's image (a library option, off by default);
+    /// fetched as `ImageType::Chapter` with the chapter's index.
+    pub image_tag: Option<String>,
 }
 
 /// A stretch of an item marked by a segment provider plugin (e.g. Intro Skipper).

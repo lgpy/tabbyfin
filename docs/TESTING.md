@@ -43,6 +43,10 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ A library with **real metadata** (TMDb): sorting by rating, release date and runtime gives sensible orders; cast **photos** show.
 - ⬜ A person page for someone in **many** movies and shows.
 - ⬜ Favoriting from another device shows up in the Home shelf (via the live connection).
+- ⬜ The player's chapter list with the mouse: a click seeks to the chapter (the list was only seen opened, with the current chapter highlighted).
+
+✅ The *Chapters* shelf on 12.2: images on both versions' servers, and the second chapter by keyboard started playback at 0:10.
+
 ✅ Playlist editing on 12.2 with the keyboard: Alt+Down then Delete on the first entry (the server's order matched), *Add to playlist* to an existing playlist, again (says it's already there), to a new one, and *Delete playlist*. The API round trip is in the `smoke` example (both versions).
 
 ✅ *Edit* on a playlist by keyboard: renamed, shared with everyone (the server's `OpenAccess`), and the `smoke` example checks private creation, rename and sharing on both versions.
