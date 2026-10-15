@@ -1147,15 +1147,12 @@ impl ItemPage {
                     )
                     .children(entry_buttons)
                     .child(
-                        Button::new(("toggle-played", i))
-                            .ghost()
+                        // Pressed while watched, like the page's own Watched.
+                        Toggle::new(("toggle-played", i))
                             .icon(if played { IconName::CircleCheck } else { IconName::Check })
-                            .tooltip(if played {
-                                "Mark unwatched (W)"
-                            } else {
-                                "Mark watched (W)"
-                            })
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                            .checked(played)
+                            .tooltip("Watched (W)")
+                            .on_click(cx.listener(move |this, _: &bool, window, cx| {
                                 // Don't open the episode underneath.
                                 cx.stop_propagation();
                                 this.set_played(episode_id.clone(), !played, window, cx);

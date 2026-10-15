@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::actions::Confirm;
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonVariants, Toggle};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::popover::Popover;
@@ -809,7 +809,8 @@ impl ShellView {
                     .ghost()
                     .h(dp(TOP_BAR_BUTTON))
                     .child(bar_icon(Lucide::Users))
-                    .when(in_group, |b| b.primary())
+                    // Pressed while in a group.
+                    .selected(in_group)
                     .tooltip("Watch together (SyncPlay)"),
             )
             .content(move |_, _, cx| {
@@ -834,40 +835,52 @@ fn group_queue(syncplay: &Entity<SyncPlay>, highlight: Option<usize>, cx: &App) 
     let state = syncplay.read(cx);
     let queue = state.queue.as_ref().filter(|q| !q.playlist.is_empty())?;
     let muted = cx.theme().muted_foreground;
-    let action = |syncplay: &Entity<SyncPlay>, run: fn(&mut SyncPlay, &mut Context<SyncPlay>)| {
-        let syncplay = syncplay.clone();
-        move |_: &ClickEvent, _: &mut Window, cx: &mut App| syncplay.update(cx, run)
-    };
     let shuffled = queue.shuffle_mode == ShuffleMode::Shuffle;
     let repeat_label = match queue.repeat_mode {
-        RepeatMode::RepeatNone => "Repeat: off",
-        RepeatMode::RepeatAll => "Repeat: all",
-        RepeatMode::RepeatOne => "Repeat: one",
+        RepeatMode::RepeatNone => "Repeat is off",
+        RepeatMode::RepeatAll => "Repeating the queue",
+        RepeatMode::RepeatOne => "Repeating one",
+    };
+    // Toggles, pressed while on; the keyboard's highlight is a ring around them.
+    let ringed = |index: usize, toggle: Toggle| {
+        div()
+            .relative()
+            .rounded_md()
+            .child(toggle)
+            .when(highlight == Some(index), |el| el.child(selection_ring(cx)))
+    };
+    let toggle_action = |syncplay: &Entity<SyncPlay>, run: fn(&mut SyncPlay, &mut Context<SyncPlay>)| {
+        let syncplay = syncplay.clone();
+        move |_: &bool, _: &mut Window, cx: &mut App| syncplay.update(cx, run)
     };
     let modes = h_flex()
         .gap_1()
-        .child(
-            Button::new("syncplay-shuffle")
+        .child(ringed(
+            0,
+            Toggle::new("syncplay-shuffle")
                 .small()
-                .ghost()
+                .gap_1()
                 .icon(Lucide::Shuffle)
-                .label(if shuffled { "Shuffled" } else { "In order" })
-                .selected(highlight == Some(0))
-                .on_click(action(syncplay, |s, cx| s.toggle_shuffle(cx))),
-        )
-        .child(
-            Button::new("syncplay-repeat")
+                .label("Shuffle")
+                .checked(shuffled)
+                .on_click(toggle_action(syncplay, |s, cx| s.toggle_shuffle(cx))),
+        ))
+        .child(ringed(
+            1,
+            // Off, all, one: each click moves to the next.
+            Toggle::new("syncplay-repeat")
                 .small()
-                .ghost()
+                .gap_1()
                 .icon(if queue.repeat_mode == RepeatMode::RepeatOne {
                     Lucide::Repeat1
                 } else {
                     Lucide::Repeat
                 })
-                .label(repeat_label)
-                .selected(highlight == Some(1))
-                .on_click(action(syncplay, |s, cx| s.cycle_repeat(cx))),
-        );
+                .label("Repeat")
+                .checked(queue.repeat_mode != RepeatMode::RepeatNone)
+                .tooltip(repeat_label)
+                .on_click(toggle_action(syncplay, |s, cx| s.cycle_repeat(cx))),
+        ));
     let last = queue.playlist.len() - 1;
     let rows = queue.playlist.iter().enumerate().map(|(i, entry)| {
         let name = state.names.get(&entry.item_id).cloned().unwrap_or_else(|| "…".into());
@@ -1085,7 +1098,6 @@ fn notify_update(window: &mut Window, cx: &mut Context<ShellView>) {
                 .action(move |_, _, _| {
                     let url = url.clone();
                     Button::new("download-update")
-                        .primary()
                         .label("Download")
                         .on_click(move |_, _, cx| cx.open_url(&url))
                 });

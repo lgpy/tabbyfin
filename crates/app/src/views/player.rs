@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::IndexPath;
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonVariants, Toggle, ToggleGroup, ToggleVariants};
 use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -1050,22 +1050,25 @@ fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
                     .into_any_element(),
             ]
         } else {
-            Adjustments::SPEEDS
-                .into_iter()
-                .enumerate()
-                .map(|(i, speed)| {
-                    let page = page.clone();
-                    Button::new(("speed", i))
-                        .small()
+            let page = page.clone();
+            let current = Adjustments::SPEEDS.iter().position(|&speed| speed == adjustments.speed);
+            // One choice of several: a click checks a speed, and the old one goes.
+            let speeds = ToggleGroup::new("speed")
+                .segmented()
+                .outline()
+                .small()
+                .children(Adjustments::SPEEDS.into_iter().enumerate().map(|(i, speed)| {
+                    Toggle::new(("speed", i))
                         .label(format!("{speed}×"))
-                        .when(speed == adjustments.speed, |b| b.primary())
-                        .when(speed != adjustments.speed, |b| b.ghost())
-                        .on_click(move |_, window, cx| {
-                            page.update(cx, |this, cx| this.adjust(|a| a.speed = speed, window, cx));
-                        })
-                        .into_any_element()
-                })
-                .collect()
+                        .checked(Some(i) == current)
+                }))
+                .on_click(move |checks, window, cx| {
+                    let chosen = checks.iter().enumerate().position(|(i, &on)| on && Some(i) != current);
+                    if let Some(speed) = chosen.map(|i| Adjustments::SPEEDS[i]) {
+                        page.update(cx, |this, cx| this.adjust(|a| a.speed = speed, window, cx));
+                    }
+                });
+            vec![speeds.into_any_element()]
         });
     let tab = page.read(cx).settings_tab;
     // From the playing version every time, so the lists follow a version switch, and the
