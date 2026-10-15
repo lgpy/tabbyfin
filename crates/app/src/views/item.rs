@@ -14,7 +14,8 @@ use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, centered_spinner, episode_label, error_state,
-    landscape_image, person_card, poster_card, remote_image, runtime_text, selection_ring, shelf, timestamp,
+    landscape_card, landscape_image, person_card, poster_card, remote_image, runtime_text, selection_ring, shelf,
+    timestamp,
 };
 use crate::images::ImageCache;
 use crate::playback::{PlayOptions, PlaybackManager, SubtitleChoice};
@@ -31,7 +32,14 @@ struct ItemData {
     item: BaseItemDto,
     /// Seasons of a series, or episodes of a season.
     children: Vec<BaseItemDto>,
+    /// Local trailers, then featurettes and other special features.
+    extras: Vec<BaseItemDto>,
+    /// "More like this".
+    similar: Vec<BaseItemDto>,
 }
+
+/// How many items "More like this" shows.
+const SIMILAR_LIMIT: u32 = 12;
 
 /// Version and track choices for a playable item. Defaults come from the server, which
 /// applies the user's language preferences.
@@ -50,6 +58,8 @@ pub struct ItemPage {
     pickers: Option<Pickers>,
     scroll: ScrollHandle,
     people_scroll: ScrollHandle,
+    extras_scroll: ScrollHandle,
+    similar_scroll: ScrollHandle,
     cursor: Cursor,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -70,6 +80,8 @@ impl ItemPage {
             pickers: None,
             scroll: ScrollHandle::new(),
             people_scroll: ScrollHandle::new(),
+            extras_scroll: ScrollHandle::new(),
+            similar_scroll: ScrollHandle::new(),
             cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
             _subscriptions,
@@ -218,6 +230,9 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
                 ItemField::Genres,
                 ItemField::MediaSources,
                 ItemField::People,
+                ItemField::Studios,
+                ItemField::Tags,
+                ItemField::RemoteTrailers,
             ],
         )
         .await?;
@@ -234,7 +249,54 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
         BaseItemKind::Playlist => client.playlist_items(&item.id, &[ItemField::Overview]).await?.items,
         _ => Vec::new(),
     };
-    Ok(ItemData { item, children })
+    let (extras, similar) = tokio::join!(extras(&client, &item), similar(&client, &item));
+    Ok(ItemData {
+        item,
+        children,
+        extras,
+        similar,
+    })
+}
+
+/// Trailers first, then the other extras. They're secondary, so a failure leaves them out.
+async fn extras(client: &Client, item: &BaseItemDto) -> Vec<BaseItemDto> {
+    let count = |count: Option<u32>| count.unwrap_or(0) > 0;
+    let (trailers, features) = tokio::join!(
+        async {
+            match count(item.local_trailer_count) {
+                true => client.local_trailers(&item.id).await,
+                false => Ok(Vec::new()),
+            }
+        },
+        async {
+            match count(item.special_feature_count) {
+                true => client.special_features(&item.id).await,
+                false => Ok(Vec::new()),
+            }
+        },
+    );
+    let mut extras = trailers
+        .inspect_err(|err| tracing::warn!("couldn't load trailers: {err}"))
+        .unwrap_or_default();
+    extras.extend(
+        features
+            .inspect_err(|err| tracing::warn!("couldn't load extras: {err}"))
+            .unwrap_or_default(),
+    );
+    extras
+}
+
+/// "More like this" for movies and shows.
+async fn similar(client: &Client, item: &BaseItemDto) -> Vec<BaseItemDto> {
+    if !matches!(item.kind, BaseItemKind::Movie | BaseItemKind::Series) {
+        return Vec::new();
+    }
+    client
+        .similar(&item.id, SIMILAR_LIMIT, &[ItemField::PrimaryImageAspectRatio])
+        .await
+        .map(|result| result.items)
+        .inspect_err(|err| tracing::warn!("couldn't load similar items: {err}"))
+        .unwrap_or_default()
 }
 
 /// A collection's movies (and shows) by release date, as its page lists them. Playback's
@@ -303,6 +365,14 @@ impl ItemPage {
                     .label(if played { "Watched" } else { "Mark watched" }),
                 ItemAction::PlayAll => Button::new("play-all").primary().icon(IconName::Play).label("Play all"),
                 ItemAction::Shuffle => Button::new("shuffle").outline().icon(Lucide::Shuffle).label("Shuffle"),
+                ItemAction::Trailer => Button::new("trailer")
+                    .outline()
+                    .icon(if item.local_trailer_count.unwrap_or(0) > 0 {
+                        Lucide::Clapperboard
+                    } else {
+                        Lucide::ExternalLink
+                    })
+                    .label("Trailer"),
                 ItemAction::ToggleFavorite => Button::new("toggle-favorite")
                     .outline()
                     .icon(if favorite { Lucide::HeartOff } else { Lucide::Heart })
@@ -362,6 +432,15 @@ impl ItemPage {
                 let (id, favorite) = (data.item.id.clone(), is_favorite(&data.item));
                 self.mark(id, Mark::Favorite(!favorite), window, cx);
             }
+            // A trailer file plays here; a trailer on the web opens in the browser.
+            ItemAction::Trailer => {
+                let Load::Loaded(data) = &self.data else { return };
+                if let Some(trailer) = data.extras.iter().find(|extra| extra.kind == BaseItemKind::Trailer) {
+                    play_extra(trailer, cx);
+                } else if let Some(trailer) = data.item.remote_trailers.first() {
+                    cx.open_url(&trailer.url);
+                }
+            }
         }
     }
 
@@ -401,6 +480,26 @@ impl ItemPage {
                         .text_color(cx.theme().muted_foreground)
                         .child(item.genres.join(", ")),
                 )
+            })
+            .when(!item.studios.is_empty(), |el| {
+                let studios: Vec<&str> = item.studios.iter().map(|studio| studio.name.as_str()).collect();
+                el.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(studios.join(", ")),
+                )
+            })
+            .when(!item.tags.is_empty(), |el| {
+                el.child(h_flex().flex_wrap().gap_1().children(item.tags.iter().map(|tag| {
+                    div()
+                        .px_2()
+                        .rounded_md()
+                        .bg(cx.theme().muted)
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tag.clone())
+                })))
             })
             .child(self.render_actions(item, cx))
             .when_some(item.overview.clone(), |el, overview| {
@@ -601,6 +700,66 @@ impl ItemPage {
         1 + usize::from(self.pickers.is_some()) + usize::from(!data.item.people.is_empty())
     }
 
+    /// Scroll-container child index of the extras shelf: after the children's title and rows.
+    fn extras_index(&self, data: &ItemData, window: &Window) -> usize {
+        let children = self.children_section(data, window);
+        let block = match children.len {
+            0 => 0,
+            len => 1 + len.div_ceil(children.columns),
+        };
+        self.children_title_index(data) + block
+    }
+
+    /// Scroll-container child index of the "More like this" shelf.
+    fn similar_index(&self, data: &ItemData, window: &Window) -> usize {
+        self.extras_index(data, window) + usize::from(!data.extras.is_empty())
+    }
+
+    /// Trailers and extras, played from the start when chosen.
+    fn render_extras(&self, extras: &[BaseItemDto], cx: &mut Context<Self>) -> AnyElement {
+        let cards = extras
+            .iter()
+            .enumerate()
+            .map(|(i, extra)| {
+                let target = extra.clone();
+                landscape_card(
+                    ("extra", i),
+                    extra,
+                    self.cursor.is_selected(EXTRAS, i),
+                    move |_, _, cx| play_extra(&target, cx),
+                    cx,
+                )
+                .into_any_element()
+            })
+            .collect();
+        div()
+            .pt_6()
+            .child(shelf("extras", "Extras", cards, &self.extras_scroll, cx))
+            .into_any_element()
+    }
+
+    fn render_similar(&self, similar: &[BaseItemDto], cx: &mut Context<Self>) -> AnyElement {
+        let cards = similar
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let (nav, target) = (self.nav.clone(), item.clone());
+                poster_card(
+                    ("similar", i),
+                    item,
+                    self.cursor.is_selected(SIMILAR, i),
+                    move |_, window, cx| nav.open(&target, window, cx),
+                    cx,
+                )
+                .into_any_element()
+            })
+            .collect();
+        div()
+            .pt_6()
+            .child(shelf("similar", "More like this", cards, &self.similar_scroll, cx))
+            .into_any_element()
+    }
+
     /// Scroll-container child index of the cast shelf.
     fn people_index(&self) -> usize {
         1 + usize::from(self.pickers.is_some())
@@ -683,6 +842,12 @@ impl ItemPage {
                 )
             })
             .children(rows)
+            .when(!data.extras.is_empty(), |el| {
+                el.child(self.render_extras(&data.extras, cx))
+            })
+            .when(!data.similar.is_empty(), |el| {
+                el.child(self.render_similar(&data.similar, cx))
+            })
             .into_any_element()
     }
 }
@@ -710,6 +875,7 @@ enum ItemAction {
     Resume(Ticks),
     PlayFromStart,
     Play,
+    Trailer,
     TogglePlayed,
     ToggleFavorite,
     /// Collections and playlists: everything in order, or shuffled.
@@ -736,15 +902,26 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
         (true, Some(position)) => vec![ItemAction::Resume(position), ItemAction::PlayFromStart],
         (true, None) => vec![ItemAction::Play],
     };
+    if item.local_trailer_count.unwrap_or(0) > 0 || !item.remote_trailers.is_empty() {
+        actions.push(ItemAction::Trailer);
+    }
     actions.push(ItemAction::TogglePlayed);
     actions.push(ItemAction::ToggleFavorite);
     actions
 }
 
-/// Cursor sections: the action buttons, then the seasons or episodes.
+/// Plays a trailer or other extra from the start, as a session of its own.
+fn play_extra(extra: &BaseItemDto, cx: &mut App) {
+    let extra = extra.clone();
+    PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&extra, PlayOptions::default(), cx));
+}
+
+/// Cursor sections, top to bottom.
 const ACTIONS: usize = 0;
 const PEOPLE: usize = 1;
 const CHILDREN: usize = 2;
+const EXTRAS: usize = 3;
+const SIMILAR: usize = 4;
 /// Padding around each action button, where the cursor's ring goes.
 const ACTION_RING_GAP: f32 = 3.;
 
@@ -761,6 +938,8 @@ impl Browse for ItemPage {
             Section::row(item_actions(&data.item).len()),
             Section::row(data.item.people.len()),
             self.children_section(data, window),
+            Section::row(data.extras.len()),
+            Section::row(data.similar.len()),
         ]
     }
 
@@ -773,6 +952,16 @@ impl Browse for ItemPage {
         if position.section == PEOPLE {
             browse::reveal(&self.scroll, self.people_index(), px(CARD_GAP));
             browse::reveal(&self.people_scroll, position.index, px(24.));
+            return;
+        }
+        if position.section == EXTRAS || position.section == SIMILAR {
+            let (index, shelf) = if position.section == EXTRAS {
+                (self.extras_index(data, window), &self.extras_scroll)
+            } else {
+                (self.similar_index(data, window), &self.similar_scroll)
+            };
+            browse::reveal(&self.scroll, index, px(CARD_GAP));
+            browse::reveal(shelf, position.index, px(24.));
             return;
         }
         let title = self.children_title_index(data);
@@ -796,6 +985,14 @@ impl Browse for ItemPage {
                     name: person.name.clone(),
                 };
                 self.nav.push(route, window, cx);
+            }
+        } else if position.section == EXTRAS {
+            if let Some(extra) = data.extras.get(position.index) {
+                play_extra(extra, cx);
+            }
+        } else if position.section == SIMILAR {
+            if let Some(item) = data.similar.get(position.index) {
+                self.nav.open(item, window, cx);
             }
         } else if let Some(child) = data.children.get(position.index) {
             self.nav.open(child, window, cx);

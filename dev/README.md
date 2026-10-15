@@ -19,7 +19,7 @@ docker compose -f dev/compose.yaml up -d     # start the server on http://localh
 Login: `dev` / `dev`. Legacy authorization is disabled, which is the 12.x default.
 
 **Library contents**
-- `Test Movie (2024)`: three versions (1080p and 720p H.264, and 4K HEVC 10-bit for hardware decoding).
+- `Test Movie (2024)`: three versions (1080p and 720p H.264, and 4K HEVC 10-bit for hardware decoding), a local trailer and a featurette (20 s each, without chapters). Both movies get a genre, a studio and a tag from the setup script (locked), for the item page and "More like this".
 - `Second Movie (2025)`: has an external `.en.srt` subtitle.
 - `Test Show`: Season 1 with three episodes, Season 2 with two.
 

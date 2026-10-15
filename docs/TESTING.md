@@ -225,3 +225,10 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 - ⬜ Changing **Settings → Home** in the web client, then reloading Home here (a restart, or anything that refreshes Home).
 - ⬜ **10.11**: the same preferences.
+
+## 22. Item page extras (3.7)
+
+✅ Against 12.2: Test Movie's page shows its genres, studio and tag, a Trailer button, Extras (Trailer, Making of Test Movie) and, with Second Movie unwatched, More like this (Second Movie). Selecting the featurette with the keyboard played it. The setup's metadata step works on 10.11 too.
+
+- ⬜ A **remote trailer** (a library with real metadata): the button opens it in the browser.
+- ⬜ A series' extras and similar shows; extras with their own images.
