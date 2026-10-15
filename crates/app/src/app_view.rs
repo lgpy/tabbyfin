@@ -367,7 +367,7 @@ impl AppView {
 
 /// Dev aid: `JELLY_GPUI_KEYS="down right enter wait escape"` presses keys after startup, for
 /// testing keyboard navigation without touching the desktop, on any screen (sign-in too). `wait`
-/// pauses for a second.
+/// pauses for a second; `down*40` presses a key 40 times, 30 ms apart (a held key, roughly).
 #[cfg(debug_assertions)]
 fn replay_debug_keys(window: &mut Window, cx: &mut Context<AppView>) {
     use std::time::Duration;
@@ -382,10 +382,20 @@ fn replay_debug_keys(window: &mut Window, cx: &mut Context<AppView>) {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 continue;
             }
+            let (key, times) = match key.split_once('*') {
+                Some((key, times)) => (key, times.parse().unwrap_or(1)),
+                None => (key, 1),
+            };
             match Keystroke::parse(key) {
                 Ok(keystroke) => {
-                    tracing::info!("debug key: {key}");
-                    cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx)).ok();
+                    tracing::info!("debug key: {key} x{times}");
+                    for i in 0..times {
+                        if i > 0 {
+                            cx.background_executor().timer(Duration::from_millis(30)).await;
+                        }
+                        cx.update(|window, cx| window.dispatch_keystroke(keystroke.clone(), cx))
+                            .ok();
+                    }
                 }
                 Err(err) => tracing::warn!("bad debug key {key:?}: {err}"),
             }

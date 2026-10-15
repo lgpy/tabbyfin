@@ -122,6 +122,34 @@ pub struct LibraryView {
     pub sort: String,
     pub descending: bool,
     pub filter: String,
+    /// Genre names: items with any of them show (and with any of the tags and ratings, when
+    /// those are set too). Empty shows everything.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Official ratings (PG-13…).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ratings: Vec<String>,
+    /// The one genre earlier versions saved; [`LibraryView::upgrade`] moves it to `genres`.
+    #[serde(default, skip_serializing)]
+    pub genre: Option<String>,
+    /// A year ("2024") or a decade ("2020s"); `None` shows every year.
+    #[serde(default)]
+    pub year: Option<String>,
+    #[serde(default)]
+    pub resolution: Option<String>,
+}
+
+impl LibraryView {
+    /// Moves what older versions saved into the current fields.
+    pub fn upgrade(&mut self) {
+        if let Some(genre) = self.genre.take()
+            && !self.genres.contains(&genre)
+        {
+            self.genres.push(genre);
+        }
+    }
 }
 
 /// A sign-in: a user on a server.
@@ -182,7 +210,12 @@ pub fn log_dir() -> PathBuf {
 }
 
 /// Platform cache dir, for data that can be deleted at any time (e.g. images).
+/// The image cache. Under the config folder when `JELLY_GPUI_CONFIG_DIR` is set, so test runs
+/// don't fill the real cache.
 pub fn cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("JELLY_GPUI_CONFIG_DIR") {
+        return PathBuf::from(dir).join("cache");
+    }
     project_dirs()
         .map(|d| d.cache_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".jelly-gpui/cache"))
@@ -197,7 +230,19 @@ impl Config {
     pub fn load() -> Self {
         let mut config = match std::fs::read_to_string(path()) {
             Ok(text) => toml::from_str(&text).unwrap_or_else(|err| {
-                tracing::warn!("ignoring unreadable config {}: {err}", path().display());
+                // The defaults get saved over it soon (a new device id at once), so keep a copy:
+                // the saved accounts are in there.
+                let backup = path().with_extension("toml.unreadable");
+                let kept = std::fs::write(&backup, &text).is_ok();
+                tracing::warn!(
+                    "ignoring unreadable config {}{}: {err}",
+                    path().display(),
+                    if kept {
+                        format!(" (kept as {})", backup.display())
+                    } else {
+                        String::new()
+                    }
+                );
                 Config::default()
             }),
             Err(_) => Config::default(),
@@ -244,13 +289,29 @@ impl Config {
         let path = path();
         std::fs::create_dir_all(dir()).context("creating config dir")?;
         let text = toml::to_string_pretty(self)?;
-        std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
+        // Written aside and renamed over the config, so a crash mid-write can't leave half a
+        // file (which would read as unreadable and lose the saved accounts).
+        let temp = path.with_extension("toml.tmp");
+        std::fs::write(&temp, text).with_context(|| format!("writing {}", temp.display()))?;
+        std::fs::rename(&temp, &path).with_context(|| format!("replacing {}", path.display()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, SavedServer};
+    use super::{Config, LibraryView, SavedServer};
+
+    #[test]
+    fn a_library_view_with_one_genre_upgrades_to_the_list() {
+        let mut view: LibraryView =
+            toml::from_str("sort = \"name\"\ndescending = false\nfilter = \"all\"\ngenre = \"Comedy\"\n")
+                .expect("parses");
+        view.upgrade();
+        assert_eq!(view.genres, ["Comedy"]);
+        assert_eq!(view.genre, None);
+        let saved = toml::to_string(&view).expect("serializes");
+        assert!(saved.contains("genres") && !saved.contains("genre ="), "{saved}");
+    }
 
     fn account(server: &str, user: &str) -> SavedServer {
         SavedServer {

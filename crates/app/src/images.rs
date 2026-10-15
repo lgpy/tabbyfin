@@ -10,6 +10,10 @@
 //! Images are decoded here rather than by GPUI, whose asset cache and texture atlas keep every
 //! image ever shown. Memory is bounded by [`MEMORY_BUDGET`]: past it, the images used longest
 //! ago are dropped from memory and from the atlas, and reload from disk when shown again.
+//!
+//! Loads wait in a queue, [`MAX_LOADS`] at a time, the most recently asked for first. Scrolling
+//! fast through a big library asks for every card that passes; the ones no longer asked for by
+//! the time a slot frees up have scrolled away and are dropped instead of loaded.
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -31,7 +35,22 @@ pub struct ImageCache {
     placeholders: Lru<String, Option<Arc<RenderImage>>>,
     /// A trim waiting for recently used images to age, while over the budget.
     trim: Option<Task<()>>,
+    /// Images waiting to load, with when each was last asked for.
+    queue: HashMap<ImageRequest, Instant>,
+    /// When any image was last asked for: queued ones asked for well before it are stale.
+    newest_want: Instant,
+    /// Loads in progress.
+    running: usize,
+    /// A look at the queue is due once the current frame has rendered.
+    pump_scheduled: bool,
 }
+
+/// Downloads and decodes at once.
+const MAX_LOADS: usize = 6;
+/// A queued image not asked for within this of the newest request has scrolled out of view:
+/// views ask for what they show on every frame, and the queue is looked at after a frame
+/// (see `schedule_pump`), so this only has to cover one frame's own rendering.
+const STALE: Duration = Duration::from_millis(50);
 
 /// Decoded images kept in memory, in bytes (a 300×450 poster is about 0.5 MB).
 const MEMORY_BUDGET: usize = 256 << 20;
@@ -71,6 +90,10 @@ impl ImageCache {
             entries: Lru::new(MEMORY_BUDGET),
             placeholders: Lru::new(PLACEHOLDER_BUDGET),
             trim: None,
+            queue: HashMap::new(),
+            newest_want: Instant::now(),
+            running: 0,
+            pump_scheduled: false,
         });
         cx.set_global(GlobalImageCache(cache));
     }
@@ -97,23 +120,68 @@ impl ImageCache {
         preview
     }
 
-    /// Returns the image if it's loaded, otherwise starts loading it and returns `None`.
+    /// Returns the image if it's loaded, otherwise queues it (or keeps it near the front of the
+    /// queue) and returns `None`.
     pub fn get(&mut self, req: &ImageRequest, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        let now = Instant::now();
+        self.newest_want = now;
         match self.entries.get(req) {
             Some(Entry::Ready(image)) => return Some(image.clone()),
-            Some(Entry::Loading | Entry::Failed) => return None,
+            Some(Entry::Loading) => {
+                if let Some(wanted) = self.queue.get_mut(req) {
+                    *wanted = now;
+                }
+                return None;
+            }
+            Some(Entry::Failed) => return None,
             None => {}
         }
         let evicted = self.entries.insert(req.clone(), Entry::Loading, 0);
         release(evicted.iter().filter_map(|entry| entry.image().cloned()), cx);
+        self.queue.insert(req.clone(), now);
+        self.schedule_pump(cx);
+        None
+    }
 
+    /// Looks at the queue after the current frame, once every image on screen was asked for
+    /// in it, so anything older is known to be off screen.
+    fn schedule_pump(&mut self, cx: &mut Context<Self>) {
+        if std::mem::replace(&mut self.pump_scheduled, true) {
+            return;
+        }
+        // Deferred work runs once the current update, and so the frame being drawn, is done.
+        let this = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            this.update(cx, |this, cx| {
+                this.pump_scheduled = false;
+                this.pump(cx);
+            })
+            .ok();
+        });
+    }
+
+    /// Starts queued loads while there are free slots, the most recently wanted first, and
+    /// drops the stale ones (their entry goes too, so they queue again if shown again).
+    fn pump(&mut self, cx: &mut Context<Self>) {
+        while self.running < MAX_LOADS {
+            let (next, stale) = next_load(&mut self.queue, self.newest_want);
+            for req in stale {
+                self.entries.remove(&req);
+            }
+            let Some(req) = next else { break };
+            self.start_load(req, cx);
+        }
+    }
+
+    fn start_load(&mut self, req: ImageRequest, cx: &mut Context<Self>) {
+        self.running += 1;
         let client = self.client.clone();
-        let path = cache_path(&self.dir, req);
-        let req = req.clone();
+        let path = cache_path(&self.dir, &req);
         cx.spawn(async move |this, cx| {
             let fetch = req.clone();
             let result = runtime::spawn(async move { load(&client, &fetch, &path).await }).await;
             this.update(cx, |this, cx| {
+                this.running -= 1;
                 let (entry, size) = match result {
                     Ok(image) => {
                         let size = image_size(&image);
@@ -127,13 +195,30 @@ impl ImageCache {
                 let evicted = this.entries.insert(req, entry, size);
                 release(evicted.iter().filter_map(|entry| entry.image().cloned()), cx);
                 this.trim_later(cx);
+                this.pump(cx);
                 cx.notify();
             })
             .ok();
         })
         .detach();
-        None
     }
+}
+
+/// Takes the most recently wanted entry off the queue, unless it's stale: then it and the rest
+/// (older still) come off as stale instead.
+fn next_load<K: Hash + Eq + Clone>(queue: &mut HashMap<K, Instant>, newest: Instant) -> (Option<K>, Vec<K>) {
+    let Some((key, wanted)) = queue
+        .iter()
+        .max_by_key(|(_, wanted)| **wanted)
+        .map(|(k, w)| (k.clone(), *w))
+    else {
+        return (None, Vec::new());
+    };
+    if newest.checked_sub(STALE).is_some_and(|before| wanted < before) {
+        return (None, std::mem::take(queue).into_keys().collect());
+    }
+    queue.remove(&key);
+    (Some(key), Vec::new())
 }
 
 /// Frees dropped images from the windows' texture atlases. Deferred, because the cache is
@@ -289,6 +374,16 @@ impl<K: Hash + Eq + Clone, V> Lru<K, V> {
         evicted
     }
 
+    fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let (value, size, _) = self.entries.remove(key)?;
+        self.total -= size;
+        Some(value)
+    }
+
     /// Removes the entries matching `drop` and returns them.
     fn take_where(&mut self, drop: impl Fn(&V) -> bool) -> Vec<V> {
         let keys: Vec<K> = self
@@ -337,7 +432,29 @@ fn sniff_format(bytes: &[u8]) -> Option<ImageFormat> {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::{KEEP_RECENT, Lru};
+    use std::collections::HashMap;
+
+    use super::{KEEP_RECENT, Lru, STALE, next_load};
+
+    #[test]
+    fn the_most_recently_wanted_image_loads_first() {
+        let now = Instant::now();
+        let mut queue = HashMap::from([("old", now - Duration::from_millis(10)), ("new", now)]);
+        assert_eq!(next_load(&mut queue, now), (Some("new"), vec![]));
+        assert_eq!(next_load(&mut queue, now), (Some("old"), vec![]));
+        assert_eq!(next_load(&mut queue, now), (None, vec![]));
+    }
+
+    #[test]
+    fn images_scrolled_past_are_dropped_unloaded() {
+        let now = Instant::now();
+        let long_ago = now - STALE * 4;
+        let mut queue = HashMap::from([("a", long_ago), ("b", long_ago - STALE)]);
+        let (next, mut stale) = next_load(&mut queue, now);
+        stale.sort();
+        assert_eq!((next, stale), (None, vec!["a", "b"]));
+        assert!(queue.is_empty());
+    }
 
     #[test]
     fn the_least_recently_used_go_first() {

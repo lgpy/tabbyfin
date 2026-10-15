@@ -19,15 +19,16 @@ docker compose -f dev/compose.yaml up -d     # start the server on http://localh
 Login: `dev` / `dev` (an administrator), and `dev2` / `dev2` for testing several users. Legacy authorization is disabled, which is the 12.x default.
 
 **Library contents**
-- `Test Movie (2024)`: three versions (1080p and 720p H.264, and 4K HEVC 10-bit for hardware decoding), a local trailer and a featurette (20 s each, without chapters). Both movies get a genre, a studio and a tag from the setup script (locked), for the item page and "More like this".
-- `Second Movie (2025)`: has an external `.en.srt` subtitle.
+- `Test Movie (2024)`: three versions (1080p and 720p H.264, and 4K HEVC 10-bit for hardware decoding), a local trailer and a featurette (20 s each, without chapters). Science Fiction and Documentary, tags `test pattern` and `multi-version`, rated PG.
+- `Second Movie (2025)`: has an external `.en.srt` subtitle. Comedy, tag `test pattern`, rated PG-13.
+- The setup script sets the movies' genres, studio, tags and ratings (locked, re-applied when they differ), for the item page, "More like this" and the library filters.
 - `Test Show`: Season 1 with three episodes, Season 2 with two.
 
 Every video is 60 s long and has:
 - English and Japanese audio tracks.
 - An embedded English subtitle track.
 - Chapters: Intro (0–10 s), Episode, and Credits (the last 15 s), for skip intro and the up-next card. `make-media.sh` adds them to videos made before it did; rescan the library afterwards.
-- Trickplay tiles (a 320 px thumbnail every 10 s) for the seek-bar preview. The setup script turns them on and starts the server's generation task without waiting; they appear a minute or two later.
+- Trickplay tiles (a 320 px thumbnail every 10 s) for the seek-bar preview, and chapter images. The setup script turns both on and starts the server's tasks without waiting; they appear a minute or two later.
 
 Remote metadata and image fetchers are turned off, so the fake titles never match real TMDb or TVDb entries.
 
@@ -44,5 +45,7 @@ Remote metadata and image fetchers are turned off, so the fake titles never matc
 **SyncPlay:** `cargo run -p jellyfin --example syncplay` is a scripted group member. It joins (or creates) `SYNCPLAY_GROUP` (default `dev group`), plays along with `Buffering`/`Ready`, prints every update and command, and runs `SYNCPLAY_SCRIPT`, e.g. `"wait:12 queue:<item id> wait:6 pause wait:3 unpause wait:5 seek:30 wait:5 stop leave"`. Debug builds of the app join a group at startup with `JELLY_GPUI_SYNCPLAY=<group name>`, so the app and the example can be run together. `JELLY_GPUI_SYNCPLAY_SKEW_MS=800` makes the app start playback that late, to watch drift correction catch up (`RUST_LOG=jelly_gpui::syncplay=debug` logs the drift every second).
 
 **Reset everything:** `docker compose -f dev/compose.yaml down && rm -rf dev/.data/config dev/.data/cache`, then run the start and setup steps again. The container runs as your user, so no `sudo` is needed.
+
+**Big library:** `dev/fake-library.py` is a proxy in front of the dev server that adds a 10,000-movie library with generated posters (see its header). With a copy of the config pointing at it and `JELLY_GPUI_KEYS="wait wait wait down*150 wait"` (a key with `*N` repeats it N times, 30 ms apart), it shows how many posters a fast scroll loads, how many at once, and how long the last ones take; sample the app's `/proc/<pid>/stat` and `VmRSS` for CPU and memory. With `JELLY_GPUI_CONFIG_DIR` set, the image cache goes under it too (`<dir>/cache`), so these runs don't fill the real one.
 
 **Update notice:** debug builds check `JELLY_GPUI_UPDATE_URL` instead of GitHub's latest release, on every launch rather than once a day. Serve a JSON like `{"tag_name": "v9.9.9", "html_url": "https://…"}` (e.g. `python3 -m http.server`) to see the notification.

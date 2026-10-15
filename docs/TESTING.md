@@ -21,7 +21,13 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ Home shelves, library grid, search (Enter into results, Up back to the box), item page buttons, seasons and episodes, Back keeping the cursor; Enter on Resume plays and Esc returns focus to the item page.
 
+✅ Item page pickers by keyboard (Test Movie: version to 720p rebuilt the track pickers, then audio and subtitles stepped), W on a season's first episode (watched off and on again on the server), and Settings (theme to Light, autoplay off, subtitle colour to Yellow, saved to the config; the page scrolls with the cursor).
+
 - ⬜ With a **real keyboard**: the ring appears on the first arrow key, a mouse click hides it.
+✅ Top bar and library toolbar by keyboard: Up from Home's first row into the top bar and back down (the cursor returns to its card), the account menu's highlight, a SyncPlay group created and the menu reopened with Leave highlighted, Esc closing the menu then the top bar; the library's Show stepped to Unwatched and *Clear filters*, the cursor staying in the toolbar.
+
+- ⬜ With a real keyboard: the top bar after mouse use (a click elsewhere hides its ring), and the account menu switching to another saved account.
+- ⬜ Changing a picker by keyboard and then by mouse (or the other way) keeps them in step, and playing after a keyboard change uses the chosen version and tracks.
 - ⬜ A **large library** (hundreds of items): the grid scrolls to keep the selection visible, including rows that are still loading.
 - ⬜ **Window resize** while the cursor is in the library grid or search results (the column count changes).
 - ⬜ Clicking a picker or the search box and then pressing arrow keys doesn't move the cursor unexpectedly.
@@ -31,9 +37,21 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 ✅ Saved sort and filter views (date added + favorites, name + all), the Favorite button by keyboard and the Home shelf, the cast shelf with initials and roles, a person page.
 
 - ⬜ **Picking a sort or filter with the mouse** reloads the grid from the top and is remembered when the library is opened again; the order button flips it (and reshuffles for Random).
+✅ The genres, tags and ratings dialog by keyboard: Comedy, then Documentary too, then the multi-version tag (Second Movie; both; Test Movie only), remembered per library. The dev setup gives the two movies different genres, tags and ratings.
+
+- ⬜ **Genre, year and resolution menus** picked with the mouse: each narrows the grid, they combine with Show and the letter bar, *Clear filters* resets them, and they're remembered per library. (Checked with values set in the config: Documentary + 2020s + 4K on 12.2.)
 - ⬜ A library with **real metadata** (TMDb): sorting by rating, release date and runtime gives sensible orders; cast **photos** show.
 - ⬜ A person page for someone in **many** movies and shows.
 - ⬜ Favoriting from another device shows up in the Home shelf (via the live connection).
+- ⬜ The player's chapter list with the mouse: a click seeks to the chapter (the list was only seen opened, with the current chapter highlighted).
+
+✅ The *Chapters* shelf on 12.2: images on both versions' servers, and the second chapter by keyboard started playback at 0:10.
+
+✅ Playlist editing on 12.2 with the keyboard: Alt+Down then Delete on the first entry (the server's order matched), *Add to playlist* to an existing playlist, again (says it's already there), to a new one, and *Delete playlist*. The API round trip is in the `smoke` example (both versions).
+
+✅ *Edit* on a playlist by keyboard: renamed, shared with everyone (the server's `OpenAccess`), and the `smoke` example checks private creation, rename and sharing on both versions.
+
+- ⬜ **Playlist editing with the mouse**: the entry buttons, clicking a playlist in the *Add to playlist* dialog, and quick repeated moves landing in the server's order. As a second user (dev2), adding to dev's playlist or deleting it gives the "belongs to someone else" message.
 - ⬜ **Collections and playlists** from a real library (TMDb collections, a long playlist): *Play all* and *Shuffle* go through the whole list, the up-next card names the next entry, and playing something else ends the queue.
 - ⬜ *Play all* while in a SyncPlay group plays the list for the whole group.
 

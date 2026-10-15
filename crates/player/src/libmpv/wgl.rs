@@ -184,6 +184,7 @@ impl GpuRenderer {
             if !super::video::hardware_renderer(&renderer) {
                 return Err(fail(failed(format!("{renderer} is a software OpenGL renderer"))));
             }
+            super::video::adapt_to_renderer(core, &renderer);
 
             let extensions: unsafe extern "system" fn(HDC) -> *const c_char =
                 gl_proc("wglGetExtensionsStringARB").map_err(fail)?;

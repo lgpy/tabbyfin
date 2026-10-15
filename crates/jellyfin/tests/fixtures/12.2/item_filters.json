@@ -1,0 +1,19 @@
+{
+  "Genres": [
+    "Comedy",
+    "Documentary",
+    "Science Fiction"
+  ],
+  "OfficialRatings": [
+    "PG",
+    "PG-13"
+  ],
+  "Tags": [
+    "multi-version",
+    "test pattern"
+  ],
+  "Years": [
+    2024,
+    2025
+  ]
+}

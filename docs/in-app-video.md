@@ -90,7 +90,7 @@ GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI contr
      - A ring of 3 images, each exported twice: one fd stays open for GPUI, the other is imported into GL.
      - mpv renders with `FLIP_Y=0`, then `glFinish` runs.
    - **GPUI patch:** `gpui-pre-wgpu` imports the fd (see `third_party/gpui/PATCHES.md`).
-   - **Software OpenGL:** the GPU path is skipped on CPU-emulated OpenGL (llvmpipe, softpipe, SwiftShader, Windows' "GDI Generic"). There it costs far more than the software renderer: about 11 cores against 2.8 on this WSL box for 1080p. `JELLY_GPUI_VIDEO=gpu` forces it anyway; `=software` forces software.
+   - **Software OpenGL:** the GPU path is skipped on CPU-emulated OpenGL (llvmpipe, softpipe, SwiftShader, Windows' "GDI Generic"). There it costs far more than the software renderer: about 11 cores against 2.8 on this WSL box for 1080p. `JELLY_GPUI_VIDEO=gpu` forces it anyway; `=software` forces software. Forced onto a software rasterizer, mpv's scalers are set to bilinear: mpv 0.37's defaults draw black frames on llvmpipe whenever the video is scaled (always with `hwdec=no`, otherwise depending on start-up timing). The memory sharing itself was fine; the frames were black in GL already.
    - **Not tested yet:** real Mesa GPUs (AMD/Intel) and NVIDIA's proprietary driver. The extensions are standard there, but driver quirks with linear tiling are possible.
 4. **Packaging libmpv.**
    - Windows: `libmpv-2.dll`.

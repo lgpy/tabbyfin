@@ -84,6 +84,14 @@ pub struct Cursor {
 }
 
 impl Cursor {
+    /// A hidden cursor that shows at `position` on the first key.
+    pub fn starting_at(position: Position) -> Self {
+        Self {
+            position,
+            visible: false,
+        }
+    }
+
     /// The highlighted card, if the cursor is showing.
     pub fn selected(&self) -> Option<Position> {
         self.visible.then_some(self.position)
@@ -225,10 +233,30 @@ pub trait Browse: Sized + 'static {
     /// Enter on a card.
     fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>);
 
-    /// A key that would move the cursor past the first or last section.
-    fn at_edge(&mut self, _mv: Move, _window: &mut Window, _cx: &mut Context<Self>) {}
+    /// A key that would move the cursor past the first or last section. By default Up goes on
+    /// to the shell, which moves into the top bar; the cursor hides meanwhile, and the next
+    /// key on the page shows it where it was.
+    fn at_edge(&mut self, mv: Move, _window: &mut Window, cx: &mut Context<Self>) {
+        if mv == Move::Up {
+            self.cursor().hide();
+            cx.notify();
+            cx.propagate();
+        }
+    }
+
+    /// Left or Right on a control that takes them itself (a picker or a switch), instead of
+    /// moving the cursor. Returns whether it did.
+    fn adjust(&mut self, _position: Position, _forward: bool, _window: &mut Window, _cx: &mut Context<Self>) -> bool {
+        false
+    }
 
     fn navigate(&mut self, mv: Move, window: &mut Window, cx: &mut Context<Self>) {
+        if let (Some(position), Move::Left | Move::Right) = (self.cursor().selected(), mv)
+            && self.adjust(position, mv == Move::Right, window, cx)
+        {
+            cx.notify();
+            return;
+        }
         let sections = self.sections(window, cx);
         match self.cursor().apply(mv, &sections) {
             Some(position) => {

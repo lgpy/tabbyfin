@@ -37,7 +37,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 | Widgets | `gpui_kit::component` | More than 75 components, including text input, virtual lists, scroll areas, theming, dialogs, and sidebar. `gpui_kit::base` is there if we later want our own look on top of its unstyled behavior. |
 | HTTP | `reqwest` (rustls) + `serde`/`serde_json` | Runs on our own tokio runtime on a background thread. GPUI's executor isn't tokio (§6). |
 | Player | **libmpv, embedded**, loaded at runtime | Video renders inside the GPUI window (§5, `docs/in-app-video.md`). |
-| Persistence | `directories` + TOML config. `keyring` (v4) holds the access token. | `keyring` uses the OS keychain on all three platforms. Where no credential store exists (WSL, or Linux without a Secret Service daemon), the token goes in a file only the user can read (`<config>/tokens/`, 0600), and a warning is logged. |
+| Persistence | `directories` + TOML config. `keyring` (v4) holds the access token. | `keyring` uses the OS keychain on all three platforms. Where no credential store exists (WSL, or Linux without a Secret Service daemon), the token goes in a file only the user can read (`<config>/tokens/`, 0600), and a warning is logged. The config is saved to a temporary file and renamed into place, so a crash mid-save can't truncate it; one that doesn't parse is kept as `config.toml.unreadable` before the defaults replace it. |
 | Image cache | On-disk cache in the platform cache dir, keyed by `(item id, image type, tag, width)`; in memory, up to 256 MB of decoded images, least recently used dropped first (also from GPUI's texture atlas) | Jellyfin's `ImageTags` act as cache busters. The app decodes images itself: GPUI's own image loading caches every image for good. |
 | Errors / logs | `thiserror` in the library crates, `anyhow` in the app, plus `tracing` | |
 
@@ -135,6 +135,8 @@ We use the user-scoped routes without a userId, such as `/UserViews` and `/Items
 
 ### 4.3 Other 12.x behavior changes to handle
 
+- **Playlist entries (10.11 and 12.2):** an entry's `PlaylistItemId` is the item's own id, and 12.2 adds an item already in a playlist a second time (10.11 skips it), so the copies can't be removed separately. *Add to playlist* checks for the item first. Other users' shared playlists report `CanDelete: true` but answer 403 to added items and 404 to renames. `POST /Playlists` without `IsPublic` makes the playlist visible to every user, so the app sends `false`; *Edit* shares it.
+- **Resolution filters (10.11 and 12.2):** `GET /Items` with `is4K=false` matches nothing on either version, and 12.2's `isHd=true` also returns the hidden items of a movie's alternate versions. The library filters use `minWidth` / `maxWidth` instead, which 12.2 applies to an item's widest version and 10.11 to its first. Found while building the library filters.
 - **Direct play needs subtitle profiles (12.2):** a `PlaybackInfo` device profile without `SubtitleProfiles` gets `SupportsDirectPlay: false` on every source in 12.2 (10.11 still allows direct play). The app's profile always lists them. Found while capturing test fixtures.
 
 Source: the 12.0 release notes, plus 12.1 and 12.2, which only contained bug fixes.
@@ -207,7 +209,7 @@ libmpv doesn't run inside the app. `Player::spawn` starts this same executable a
 - **Lifetime:** the host exits when its stdin closes, which happens when the app drops the player or exits. It's also killed when the app drops it.
 - **`JELLY_GPUI_PLAYER=embedded`** runs libmpv inside the app as before, for debugging.
 
-Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) through the host. Killing the host mid-play on both resumes playback in a new one. Linux GPU frames through the host aren't visually confirmed: the forced GPU path draws black on WSL's llvmpipe even in-process, where it used to work.
+Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) through the host. Killing the host mid-play on both resumes playback in a new one. Linux GPU frames through the host are confirmed on WSL's llvmpipe (forced GPU path), in-process too.
 
 ### 5.2 Threading and reporting
 
@@ -300,7 +302,11 @@ Not yet: track changes that need a new transcode, and version switches, don't st
     - It's hidden until a key is pressed and hides again on a click, so mouse users never see it.
     - Each page keeps its cursor while it's on the stack, so Back returns to the same card.
     - In search, Enter in the box moves to the first result, and Up from the top row returns to the box.
-    - Version and track pickers aren't on the cursor yet.
+    - An item's version and track pickers are a column of the cursor: Up/Down move between them, Left/Right step through the choices and Enter moves to the next one, wrapping. gpui-kit's Select only opens its menu with a click, so the keys set it directly and send the same `Confirm` a menu pick would (`tracks::step_choice`).
+    - Settings is a cursor over its controls: pickers as above, switches (Left off, Right on, Enter flips) and buttons (Enter).
+    - On an item page, W toggles watched on the highlighted episode, season or entry; in a playlist, Alt+Up/Alt+Down move the entry and Delete removes it.
+    - The library toolbar (sort, order, show, genre, year, resolution, clear) is the row above the grid; Enter steps a picker to its next choice or presses a button.
+    - Up past a page's first row lets the action through to the shell, which moves into the top bar (the page's cursor hides until the page has the keys again). Left/Right move along it, Enter presses, Down or Esc go back. The account and SyncPlay menus are controlled popovers: opened from the keyboard they highlight an entry, which Up/Down move and Enter chooses. Their content renders in an overlay outside the shell, so it takes the popover's focus itself, forwards keys to the shell, and handles `Confirm` (the popover binds Enter to it) before the popover dismisses.
   - In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N / Shift+P play the next / previous episode (or movie of its collection), PgUp/PgDn go to the previous/next chapter, Enter or S skips the intro (or plays the next episode from the up-next card, or starts over after an automatic resume), [ and ] change the speed, Z and X the subtitle delay, F toggles fullscreen, and Esc leaves fullscreen, then dismisses the up-next card, then leaves the player.
 - **Theme:**
   - GPUI Kit's theme system, defaulting to dark.
