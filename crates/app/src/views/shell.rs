@@ -628,9 +628,11 @@ impl ShellView {
                 Button::new("account-button")
                     .ghost()
                     .h(dp(TOP_BAR_BUTTON))
-                    .child(bar_icon(IconName::ChevronDown))
-                    .child(self.session.user.name.clone())
-                    .tooltip(self.session.server.server_name.clone().unwrap_or_default()),
+                    .child(avatar(&self.session.user.name, cx))
+                    .tooltip(match &self.session.server.server_name {
+                        Some(server) => format!("{} on {server}", self.session.user.name),
+                        None => self.session.user.name.clone(),
+                    }),
             )
             .content({
                 let shell = shell.clone();
@@ -686,6 +688,27 @@ fn menu_keys(shell: &Entity<ShellView>, content: AnyElement, cx: &App) -> AnyEle
         .on_key_down(move |event, window, cx| shell.update(cx, |this, cx| this.on_key_down(event, window, cx)))
         .child(content)
         .into_any_element()
+}
+
+/// A round badge with the first letter of `name`, standing in for the user's picture.
+fn avatar(name: &str, cx: &App) -> impl IntoElement {
+    let initial = name
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect::<String>())
+        .unwrap_or_else(|| "?".into());
+    div()
+        .size(dp(32.))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(cx.theme().muted)
+        .text_color(cx.theme().foreground)
+        .text_base()
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(initial)
 }
 
 fn new_group_name(session: &Session) -> String {
