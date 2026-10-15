@@ -16,6 +16,8 @@ anyhow.workspace = true
 directories.workspace = true
 gethostname.workspace = true
 keyring.workspace = true
+# The update check (`update.rs`).
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

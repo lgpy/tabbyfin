@@ -23,6 +23,12 @@ pub struct Config {
     /// The player's clock shows the time left instead of the time played. `None` means no.
     #[serde(default)]
     pub show_remaining_time: Option<bool>,
+    /// Look for a newer release on launch. `None` means yes.
+    #[serde(default)]
+    pub check_for_updates: Option<bool>,
+    /// When the update check last ran, in seconds since the Unix epoch.
+    #[serde(default)]
+    pub update_checked_at: Option<u64>,
     /// Text subtitle colour. `None` means white.
     #[serde(default)]
     pub subtitle_color: Option<SubtitleColor>,

@@ -3409,6 +3409,7 @@ dependencies = [
  "jellyfin",
  "keyring",
  "player",
+ "reqwest",
  "rust-embed",
  "serde",
  "serde_json",

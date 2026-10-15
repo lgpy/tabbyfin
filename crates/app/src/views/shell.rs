@@ -87,6 +87,7 @@ impl ShellView {
             },
         );
         Remote::init(session.client.clone(), cx);
+        notify_update(window, cx);
         let _remote = cx.subscribe_in(&Remote::global(cx), window, |_, _, event, window, cx| match event {
             RemoteEvent::Message(text) => window.push_notification(Notification::info(text.clone()), cx),
             RemoteEvent::ToggleFullscreen => window.toggle_fullscreen(),
@@ -464,6 +465,35 @@ impl Render for ShellView {
 
 /// Looks up a page's focus handle when it comes back on top (it can change, e.g. search).
 type Focuser = Rc<dyn Fn(&App) -> FocusHandle>;
+
+/// Runs the update check and, if there's a newer release, says so with a link to it.
+fn notify_update(window: &mut Window, cx: &mut Context<ShellView>) {
+    cx.spawn_in(window, async move |_, cx| {
+        let Some(update) = crate::runtime::spawn(crate::update::check()).await else {
+            return;
+        };
+        cx.update(|window, cx| {
+            let message = format!(
+                "Version {} is out (this is {}).",
+                update.version,
+                env!("CARGO_PKG_VERSION")
+            );
+            let url = update.url;
+            let notification = Notification::info(message)
+                .title("Update available")
+                .action(move |_, _, _| {
+                    let url = url.clone();
+                    Button::new("download-update")
+                        .primary()
+                        .label("Download")
+                        .on_click(move |_, _, cx| cx.open_url(&url))
+                });
+            window.push_notification(notification, cx);
+        })
+        .ok();
+    })
+    .detach();
+}
 
 fn focuser<T: Focusable>(page: &Entity<T>) -> Focuser {
     let page = page.clone();
