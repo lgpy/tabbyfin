@@ -19,15 +19,16 @@ docker compose -f dev/compose.yaml up -d     # start the server on http://localh
 Login: `dev` / `dev` (an administrator), and `dev2` / `dev2` for testing several users. Legacy authorization is disabled, which is the 12.x default.
 
 **Library contents**
-- `Test Movie (2024)`: three versions (1080p and 720p H.264, and 4K HEVC 10-bit for hardware decoding), a local trailer and a featurette (20 s each, without chapters). Both movies get a genre, a studio and a tag from the setup script (locked), for the item page and "More like this".
-- `Second Movie (2025)`: has an external `.en.srt` subtitle.
+- `Test Movie (2024)`: three versions (1080p and 720p H.264, and 4K HEVC 10-bit for hardware decoding), a local trailer and a featurette (20 s each, without chapters). Science Fiction and Documentary, tags `test pattern` and `multi-version`, rated PG.
+- `Second Movie (2025)`: has an external `.en.srt` subtitle. Comedy, tag `test pattern`, rated PG-13.
+- The setup script sets the movies' genres, studio, tags and ratings (locked, re-applied when they differ), for the item page, "More like this" and the library filters.
 - `Test Show`: Season 1 with three episodes, Season 2 with two.
 
 Every video is 60 s long and has:
 - English and Japanese audio tracks.
 - An embedded English subtitle track.
 - Chapters: Intro (0–10 s), Episode, and Credits (the last 15 s), for skip intro and the up-next card. `make-media.sh` adds them to videos made before it did; rescan the library afterwards.
-- Trickplay tiles (a 320 px thumbnail every 10 s) for the seek-bar preview. The setup script turns them on and starts the server's generation task without waiting; they appear a minute or two later.
+- Trickplay tiles (a 320 px thumbnail every 10 s) for the seek-bar preview, and chapter images. The setup script turns both on and starts the server's tasks without waiting; they appear a minute or two later.
 
 Remote metadata and image fetchers are turned off, so the fake titles never match real TMDb or TVDb entries.
 

@@ -6,7 +6,7 @@ use std::time::Duration;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::popover::Popover;
+use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::spinner::Spinner;
@@ -14,10 +14,11 @@ use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use jellyfin::models::{BaseItemDto, BaseItemKind};
+use jellyfin::ImageRequest;
+use jellyfin::models::{BaseItemDto, BaseItemKind, ImageType};
 use player::libmpv::Frame;
 
-use crate::components::timestamp;
+use crate::components::{remote_image, timestamp};
 use crate::markers::{self, SegmentKind};
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::tracks::{Choice, ChoiceSelect, SUBTITLES_OFF, track_pickers};
@@ -796,6 +797,7 @@ impl PlayerPage {
                     .children(self.version.as_ref().map(|s| picker(s, 140., 240.)))
                     .children(self.audio.as_ref().map(|s| picker(s, 200., 320.)))
                     .children(self.subtitle.as_ref().map(|s| picker(s, 200., 320.)))
+                    .children(self.render_chapters(cx))
                     .child(self.render_settings(cx))
                     .child(Button::new("fullscreen").ghost().label("Fullscreen").on_click(
                         cx.listener(|this, _, window, cx| this.toggle_fullscreen(&ToggleFullscreen, window, cx)),
@@ -803,6 +805,36 @@ impl PlayerPage {
             );
 
         div().absolute().inset_0().child(top).child(bottom)
+    }
+
+    /// The chapter list: each chapter's image (when the server extracted them), name and start,
+    /// the current one highlighted. A click seeks there. (PgUp and PgDn step through them.)
+    fn render_chapters(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        if self.now_playing.read(cx).chapters.len() < 2 {
+            return None;
+        }
+        let page = cx.entity();
+        Some(
+            Popover::new("player-chapters")
+                .anchor(Anchor::BottomRight)
+                .on_open_change({
+                    let page = page.clone();
+                    move |open, window, cx| {
+                        let open = *open;
+                        page.update(cx, |this, cx| {
+                            this.menu_open = open;
+                            this.show_controls(window, cx);
+                        });
+                    }
+                })
+                .trigger(
+                    Button::new("chapters")
+                        .ghost()
+                        .icon(Lucide::ListVideo)
+                        .tooltip("Chapters"),
+                )
+                .content(move |_, _, cx| chapters_panel(&page, cx)),
+        )
     }
 
     /// The settings menu: speed, subtitle and audio delay, subtitle size.
@@ -924,6 +956,70 @@ fn kind_word(item: &BaseItemDto) -> &'static str {
 }
 
 /// The settings menu's rows. Each button changes one adjustment through the page.
+const CHAPTER_THUMB_W: f32 = 128.;
+const CHAPTER_THUMB_H: f32 = 72.;
+
+fn chapters_panel(page: &Entity<PlayerPage>, cx: &mut Context<PopoverState>) -> AnyElement {
+    let popover = cx.entity();
+    let state = page.read(cx).now_playing.read(cx);
+    let item_id = state.item.id.clone();
+    let current = markers::current_chapter(&state.chapters, state.position).map(|c| c.index);
+    let chapters = state.chapters.clone();
+    let rows: Vec<AnyElement> = chapters
+        .iter()
+        .map(|chapter| {
+            let image = chapter.image_tag.clone().map(|tag| ImageRequest {
+                index: Some(chapter.index as u32),
+                ..ImageRequest::new(&item_id, ImageType::Chapter, Some(tag)).fill_width((CHAPTER_THUMB_W * 2.) as u32)
+            });
+            let name = chapter
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("Chapter {}", chapter.index + 1));
+            let (page, popover, start) = (page.clone(), popover.clone(), chapter.start);
+            h_flex()
+                .id(("chapter", chapter.index))
+                .gap_3()
+                .p_1()
+                .rounded_md()
+                .cursor_pointer()
+                .when(current == Some(chapter.index), |el| el.bg(cx.theme().accent))
+                .hover(|style| style.bg(cx.theme().muted))
+                .on_click(move |_, window, cx| {
+                    popover.update(cx, |popover, cx| popover.dismiss(window, cx));
+                    page.update(cx, |this, cx| this.send(UiCommand::SeekTo(start), cx));
+                })
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(CHAPTER_THUMB_W))
+                        .h(px(CHAPTER_THUMB_H))
+                        .rounded_sm()
+                        .overflow_hidden()
+                        .bg(cx.theme().muted)
+                        .child(remote_image(image, None, cx)),
+                )
+                .child(
+                    v_flex().min_w_0().child(div().text_sm().truncate().child(name)).child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(timestamp(chapter.start)),
+                    ),
+                )
+                .into_any_element()
+        })
+        .collect();
+    v_flex()
+        .id("chapter-list")
+        .w(px(340.))
+        .max_h(px(420.))
+        .overflow_y_scroll()
+        .gap_1()
+        .children(rows)
+        .into_any_element()
+}
+
 fn settings_panel(page: &Entity<PlayerPage>, cx: &mut App) -> AnyElement {
     let state = page.read(cx).now_playing.read(cx);
     let adjustments = state.adjustments;
