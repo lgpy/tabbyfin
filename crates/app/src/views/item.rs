@@ -25,6 +25,9 @@ use crate::components::{
     timestamp,
 };
 use crate::images::ImageCache;
+use crate::item_menu::{
+    self, Mark, can_add_to_playlist, is_favorite, is_playable, is_played, resume_point, with_item_menu,
+};
 use crate::motion;
 use crate::playback::{PlayOptions, PlaybackManager};
 use crate::rail_drag::RailDrag;
@@ -184,32 +187,14 @@ impl ItemPage {
     }
 
     fn set_played(&mut self, item_id: String, played: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.mark(item_id, Mark::Played(played), window, cx);
-    }
-
-    /// Sets watched or favorite state on the server, then refreshes the pages showing it.
-    fn mark(&mut self, item_id: String, mark: Mark, window: &mut Window, cx: &mut Context<Self>) {
-        let client = self.client.clone();
-        cx.spawn_in(window, async move |this, cx| {
-            let result = runtime::spawn(async move {
-                match mark {
-                    Mark::Played(true) => client.mark_played(&item_id).await,
-                    Mark::Played(false) => client.mark_unplayed(&item_id).await,
-                    Mark::Favorite(true) => client.mark_favorite(&item_id).await,
-                    Mark::Favorite(false) => client.unmark_favorite(&item_id).await,
-                }
-            })
-            .await;
-            this.update_in(cx, |this, window, cx| match result {
-                Ok(()) => Changes::notify_user_data(cx),
-                Err(err) => {
-                    let message = this.nav.handle_error(&err, cx);
-                    window.push_notification(Notification::error(message), cx);
-                }
-            })
-            .ok();
-        })
-        .detach();
+        item_menu::mark(
+            self.client.clone(),
+            self.nav.clone(),
+            item_id,
+            Mark::Played(played),
+            window,
+            cx,
+        );
     }
 
     /// Moves or removes a playlist entry: on screen right away, then on the server.
@@ -542,14 +527,6 @@ fn chapters(item: &BaseItemDto) -> &[ChapterInfo] {
     }
 }
 
-fn is_played(item: &BaseItemDto) -> bool {
-    item.user_data.as_ref().is_some_and(|d| d.played)
-}
-
-fn is_favorite(item: &BaseItemDto) -> bool {
-    item.user_data.as_ref().is_some_and(|d| d.is_favorite)
-}
-
 impl ItemPage {
     /// The actions on the title's line: playing it, named, then icon buttons. Watched and
     /// Favorite are toggles, pressed while on; the less frequent actions are under More.
@@ -750,7 +727,14 @@ impl ItemPage {
             ItemAction::ToggleFavorite => {
                 let Load::Loaded(data) = &self.data else { return };
                 let (id, favorite) = (data.item.id.clone(), is_favorite(&data.item));
-                self.mark(id, Mark::Favorite(!favorite), window, cx);
+                item_menu::mark(
+                    self.client.clone(),
+                    self.nav.clone(),
+                    id,
+                    Mark::Favorite(!favorite),
+                    window,
+                    cx,
+                );
             }
             ItemAction::AddToPlaylist => {
                 let Load::Loaded(data) = &self.data else { return };
@@ -989,15 +973,15 @@ impl ItemPage {
                     .map(|(i, episode)| {
                         let nav = self.nav.clone();
                         let target = episode.clone();
-                        episode_card(
+                        let card = episode_card(
                             ("episode", i),
                             episode,
                             BIG_CARD_SCALE,
                             self.cursor.is_selected(EPISODES, i),
                             self.rail_drag.guard(move |_, window, cx| nav.open(&target, window, cx)),
                             cx,
-                        )
-                        .into_any_element()
+                        );
+                        with_item_menu(card, episode, &self.client, &self.nav)
                     })
                     .collect();
                 shelf_with_rail(
@@ -1040,7 +1024,7 @@ impl ItemPage {
                         let is_season = season.kind == BaseItemKind::Season;
                         let open = self.open_season.as_ref().is_some_and(|open| open.id == season.id);
                         let page = cx.entity();
-                        poster_card_scaled(
+                        let card = poster_card_scaled(
                             ("season", i),
                             season,
                             BIG_CARD_SCALE,
@@ -1053,8 +1037,8 @@ impl ItemPage {
                                 }
                             },
                             cx,
-                        )
-                        .into_any_element()
+                        );
+                        with_item_menu(card, season, &self.client, &self.nav)
                     })
                     .collect();
                 h_flex()
@@ -1178,7 +1162,11 @@ impl ItemPage {
                             })),
                     )
                     .when(selected, |el| el.child(selection_ring(cx)));
-                div().px_4().pb_1().child(row).into_any_element()
+                div()
+                    .px_4()
+                    .pb_1()
+                    .child(with_item_menu(row, episode, &self.client, &self.nav))
+                    .into_any_element()
             })
             .collect()
     }
@@ -1265,15 +1253,15 @@ impl ItemPage {
             .enumerate()
             .map(|(i, item)| {
                 let (nav, target) = (self.nav.clone(), item.clone());
-                poster_card_scaled(
+                let card = poster_card_scaled(
                     ("similar", i),
                     item,
                     BIG_CARD_SCALE,
                     self.cursor.is_selected(SIMILAR, i),
                     self.rail_drag.guard(move |_, window, cx| nav.open(&target, window, cx)),
                     cx,
-                )
-                .into_any_element()
+                );
+                with_item_menu(card, item, &self.client, &self.nav)
             })
             .collect();
         div()
@@ -1446,12 +1434,6 @@ pub(crate) fn shuffle<T>(items: &mut [T]) {
 }
 
 #[derive(Clone, Copy)]
-enum Mark {
-    Played(bool),
-    Favorite(bool),
-}
-
-#[derive(Clone, Copy)]
 enum ItemAction {
     Resume(Ticks),
     PlayFromStart,
@@ -1473,15 +1455,7 @@ enum ItemAction {
 
 /// The buttons under an item's title, in order.
 fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
-    let playable = matches!(
-        item.kind,
-        BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video
-    );
-    let resume_at = item
-        .user_data
-        .as_ref()
-        .map(|d| d.playback_position_ticks)
-        .filter(|t| t.0 > 0);
+    let (playable, resume_at) = (is_playable(item), resume_point(item));
     let mut actions = match (playable, resume_at) {
         _ if matches!(item.kind, BaseItemKind::BoxSet | BaseItemKind::Playlist) => {
             vec![ItemAction::PlayAll, ItemAction::Shuffle]
@@ -1504,10 +1478,7 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
 /// What the More menu offers, in order.
 fn more_actions(item: &BaseItemDto) -> Vec<ItemAction> {
     let mut actions = Vec::new();
-    if matches!(
-        item.kind,
-        BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video | BaseItemKind::Series | BaseItemKind::Season
-    ) {
+    if can_add_to_playlist(item) {
         actions.push(ItemAction::AddToPlaylist);
     }
     if item.kind == BaseItemKind::Playlist {

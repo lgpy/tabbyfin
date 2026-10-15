@@ -309,7 +309,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
   - Show a placeholder from `ImageBlurHashes` while the real image loads.
 - **Keyboard:**
   - Define GPUI `actions!` with a keymap: Backspace, Esc or Alt+← to go back, Ctrl+F (⌘F) to search.
-  - Browsing pages (`browse.rs`) share one keyboard cursor over sections of cards: Home shelves, the library grid, search result groups, and an item page's buttons followed by its seasons or episodes.
+  - Browsing pages (`browse.rs`) share one keyboard cursor over sections of cards: Home shelves, the library grid, search result groups, and an item page's buttons followed by its seasons or episodes. Cards and episode rows also get a right-click menu (`item_menu.rs`) with the item page's commands; menus the keyboard opens are `PopupMenu`s in a controlled popover (`components::menu_popover`), since gpui-kit's `DropdownMenu` only opens on a click.
     - The arrow keys move it, Tab and Shift+Tab jump between sections, and Enter opens the card or presses the button.
     - It's hidden until a key is pressed and hides again on a click, so mouse users never see it.
     - Each page keeps its cursor while it's on the stack, so Back returns to the same card.

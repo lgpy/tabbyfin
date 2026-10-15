@@ -15,6 +15,7 @@ use crate::components::{
     Load, centered_message, centered_spinner, error_state, landscape_card_scaled, poster_card_scaled, shelf_with_rail,
 };
 use crate::images::ImageCache;
+use crate::item_menu::with_item_menu;
 use crate::motion;
 use crate::rail_drag::RailDrag;
 use crate::router::Navigator;
@@ -251,11 +252,12 @@ impl HomePage {
                     .rail_drag
                     .guard(move |_: &ClickEvent, window: &mut Window, cx: &mut App| nav.open(&target, window, cx));
                 let selected = self.cursor.is_selected(section, i);
-                if shelf.landscape {
-                    landscape_card_scaled(i, item, CARD_SCALE, selected, on_click, cx).into_any_element()
+                let card = if shelf.landscape {
+                    landscape_card_scaled(i, item, CARD_SCALE, selected, on_click, cx)
                 } else {
-                    poster_card_scaled(i, item, CARD_SCALE, selected, on_click, cx).into_any_element()
-                }
+                    poster_card_scaled(i, item, CARD_SCALE, selected, on_click, cx)
+                };
+                with_item_menu(card, item, &self.client, &self.nav)
             })
             .collect()
     }
