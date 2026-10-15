@@ -99,7 +99,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ The **Flatpak** on a real desktop with a GPU: GPU video and hardware decoding through `--device=dri`, sign-in kept in the keychain across restarts (Secret Service from the sandbox), audio through PulseAudio/PipeWire, and the menu entry and icon.
 - ⬜ The **Windows installer from CI** (a release build inside): install, the Start-menu entry, the app running from it, upgrade from an older version while it's running, uninstall.
 
-- ⬜ **Text size following the system** on Windows (Settings → Accessibility → Text size) and GNOME (Large Text), after a restart; only fixed sizes were tried (130% and 150% in WSL, light theme).
+- ⬜ **Text size following the system** on Windows (Settings → Accessibility → Text size), GNOME (Large Text) and KDE (System Settings → Fonts), both at launch and when changed while the app runs (it applies on switching back to the app). Tried in WSL: fixed sizes (130%, 150%), and KDE's font size from a stand-in `kdeglobals`, at launch and changed after launch.
 
 ## 6. SyncPlay (2.4.3–2.4.6)
 
