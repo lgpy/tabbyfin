@@ -8,6 +8,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme, IndexPath, Sizable, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemSortBy};
 use jellyfin::{Client, ItemsQuery, SortOrder};
@@ -27,6 +28,9 @@ use crate::tracks::{Choice, ChoiceSelect};
 const PAGE_SIZE: usize = 100;
 const GRID_PADDING: f32 = 24.;
 const ROW_H: f32 = POSTER_H + CARD_TEXT_H + CARD_GAP;
+/// The jump bar's letters; `#` is the top (names starting with digits or symbols).
+const LETTERS: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const LETTER_BAR_W: f32 = 28.;
 
 /// What the grid lists.
 pub enum Source {
@@ -216,6 +220,105 @@ impl LibraryPage {
         cx.notify();
     }
 
+    /// The letter bar shows while sorted by name, where names starting with a letter are
+    /// together.
+    fn letters_shown(&self) -> bool {
+        self.view.sort == SORTS[0].0 && self.total.is_some_and(|total| total > 0)
+    }
+
+    /// Cards per row at the window's width, next to the letter bar when it shows.
+    fn columns(&self, window: &Window) -> usize {
+        let bar = if self.letters_shown() { LETTER_BAR_W } else { 0. };
+        let available = window.viewport_size().width - px(GRID_PADDING * 2. + bar);
+        ((available + px(CARD_GAP)) / px(POSTER_W + CARD_GAP)).floor().max(1.) as usize
+    }
+
+    /// Scrolls to the first name starting with `letter`. Its index is the number of names
+    /// before it (after it, descending), which the server counts with the grid's filters.
+    /// From the keyboard, the highlight moves there too.
+    fn jump_to(&mut self, letter: char, highlight: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let columns = self.columns(window);
+        let (descending, total) = (self.view.descending, self.total.unwrap_or(0));
+        let bound = match jump_target(letter, descending) {
+            Jump::Top => return self.land(0, highlight, columns, cx),
+            Jump::Bottom => return self.land(total.saturating_sub(1), highlight, columns, cx),
+            Jump::After(bound) => bound,
+        };
+        let query = ItemsQuery {
+            name_less_than: Some(bound.to_string()),
+            start_index: None,
+            limit: Some(0),
+            ..self.base_query.clone()
+        };
+        let (client, generation) = (self.client.clone(), self.generation);
+        cx.spawn(async move |this, cx| {
+            let result = runtime::spawn(async move { client.items(&query).await }).await;
+            this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(result) => {
+                        let before = result.total_record_count as usize;
+                        let index = if descending {
+                            total.saturating_sub(before)
+                        } else {
+                            before
+                        };
+                        this.land(index.min(total.saturating_sub(1)), highlight, columns, cx);
+                    }
+                    Err(err) => tracing::warn!("couldn't find where {letter} starts: {err}"),
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn land(&mut self, index: usize, highlight: bool, columns: usize, cx: &mut Context<Self>) {
+        self.scroll.scroll_to_item(index / columns, ScrollStrategy::Top);
+        if highlight {
+            self.cursor.show_at(Position { section: 0, index });
+        }
+        cx.notify();
+    }
+
+    /// A letter typed on the grid jumps like the letter bar, while sorted by name.
+    fn type_letter(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        let mut chars = keystroke.key.chars();
+        if let (Some(letter), None) = (chars.next(), chars.next())
+            && letter.is_ascii_alphabetic()
+            && !keystroke.modifiers.modified()
+            && self.letters_shown()
+        {
+            self.jump_to(letter.to_ascii_uppercase(), true, window, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    fn render_letters(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .flex_none()
+            .w(px(LETTER_BAR_W))
+            .h_full()
+            .py_2()
+            .justify_between()
+            .items_center()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .children(LETTERS.chars().map(|letter| {
+                div()
+                    .id(("letter", letter as usize))
+                    .px_1()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(cx.theme().accent).text_color(cx.theme().accent_foreground))
+                    .on_click(cx.listener(move |this, _, window, cx| this.jump_to(letter, false, window, cx)))
+                    .child(letter.to_string())
+            }))
+    }
+
     fn toggle_order(&mut self, cx: &mut Context<Self>) {
         self.view.descending = !self.view.descending;
         self.change_view(cx);
@@ -316,10 +419,24 @@ impl LibraryPage {
     }
 }
 
-/// Cards per row at the window's current width.
-fn columns(window: &Window) -> usize {
-    let available = window.viewport_size().width - px(GRID_PADDING * 2.);
-    ((available + px(CARD_GAP)) / px(POSTER_W + CARD_GAP)).floor().max(1.) as usize
+/// Where a letter of the jump bar scrolls to.
+#[derive(Debug, PartialEq)]
+enum Jump {
+    Top,
+    Bottom,
+    /// Past the names that sort before this letter (counted by the server).
+    After(char),
+}
+
+/// `#` is the first row ascending and the last descending. A letter starts where the names
+/// before it end; descending, that's after every name from the next letter on.
+fn jump_target(letter: char, descending: bool) -> Jump {
+    match (letter, descending) {
+        ('#', false) | ('Z', true) => Jump::Top,
+        ('#', true) => Jump::Bottom,
+        (letter, false) => Jump::After(letter),
+        (letter, true) => Jump::After(char::from(letter as u8 + 1)),
+    }
 }
 
 impl Browse for LibraryPage {
@@ -328,12 +445,12 @@ impl Browse for LibraryPage {
     }
 
     fn sections(&self, window: &Window, _cx: &App) -> Vec<Section> {
-        vec![Section::grid(self.total.unwrap_or(0), columns(window))]
+        vec![Section::grid(self.total.unwrap_or(0), self.columns(window))]
     }
 
     fn reveal(&mut self, position: Position, window: &mut Window, _cx: &mut Context<Self>) {
         self.scroll
-            .scroll_to_item(position.index / columns(window), ScrollStrategy::Nearest);
+            .scroll_to_item(position.index / self.columns(window), ScrollStrategy::Nearest);
     }
 
     fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
@@ -388,6 +505,7 @@ impl Render for LibraryPage {
                     .map(|total| div().text_color(cx.theme().muted_foreground).child(item_count(total))),
             );
         on_browse_actions(v_flex().size_full().track_focus(&self.focus_handle), cx)
+            .on_key_down(cx.listener(Self::type_letter))
             .child(toolbar)
             .child(div().flex_1().min_h_0().child(content))
     }
@@ -419,17 +537,36 @@ impl LibraryPage {
             return centered_message(message, cx).into_any_element();
         }
 
-        let columns = columns(window);
+        let columns = self.columns(window);
         let rows = total.div_ceil(columns);
 
-        uniform_list(
+        let grid = uniform_list(
             "library-grid",
             rows,
             cx.processor(move |this, rows: Range<usize>, _window, cx| this.render_rows(rows, columns, cx)),
         )
         .track_scroll(&self.scroll)
-        .size_full()
-        .pt_4()
-        .into_any_element()
+        .flex_1()
+        .h_full()
+        .pt_4();
+        h_flex()
+            .size_full()
+            .child(grid)
+            .when(self.letters_shown(), |el| el.child(self.render_letters(cx)))
+            .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Jump, jump_target};
+
+    #[test]
+    fn letters_jump_past_the_names_before_them() {
+        assert_eq!(jump_target('#', false), Jump::Top);
+        assert_eq!(jump_target('M', false), Jump::After('M'));
+        assert_eq!(jump_target('#', true), Jump::Bottom);
+        assert_eq!(jump_target('M', true), Jump::After('N'));
+        assert_eq!(jump_target('Z', true), Jump::Top);
     }
 }

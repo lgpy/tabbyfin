@@ -28,7 +28,7 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
 - **Watch together** with Jellyfin's SyncPlay: create or join a group from the top bar, and play, pause and seek in sync with the other members.
 - **Isolation:** your own mpv configuration, scripts and key bindings are never loaded, so they can't change how the embedded player looks.
 
-**Keys:** in the browsing pages, the arrow keys move a highlight over the cards, Tab and Shift+Tab jump between rows, and Enter opens. Esc or Backspace goes back, and Ctrl+F (⌘F on macOS) searches. In search, Enter in the box jumps to the results.
+**Keys:** in the browsing pages, the arrow keys move a highlight over the cards, Tab and Shift+Tab jump between rows, and Enter opens. Esc or Backspace goes back, and Ctrl+F (⌘F on macOS) searches. In a library sorted by name, typing a letter jumps to it (or use the letter bar). In search, Enter in the box jumps to the results.
 
 **Player keys:**
 

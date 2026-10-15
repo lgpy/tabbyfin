@@ -120,7 +120,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 | 3.6 | **Image placeholders** | P2 | S | ✅ Done: cards, posters, backdrops and episode stills show their blurhash (decoded at 32×32 and scaled up) while the image loads. |
 | 3.7 | **Item page extras** | P3 | M | Trailers (local and `RemoteTrailers`), "More like this" (`/Items/{id}/Similar`), special features, studio and tags. |
 | 3.8 | **Home customisation** | P3 | S | Respect the user's Home screen settings from the server (section order, hidden libraries), or offer our own toggles. |
-| 3.9 | **Alphabet jump in long libraries** | P3 | S | A side bar of letters using `NameStartsWith`. |
+| 3.9 | **Alphabet jump in long libraries** | P3 | S | ✅ Done: while a library is sorted by name, a bar of letters runs down the right of the grid, and typing a letter does the same (moving the highlight there). Instead of filtering with `NameStartsWith`, the server counts the names before the letter (`nameLessThan`, with the grid's filters; case-insensitive on 10.11 and 12.2) and the grid scrolls to that index, so the whole library stays browsable. Works descending too. |
 | 3.10 | **Other media types** | P3 | L | Music, Live TV, books and photos are out of v1 scope. Music would be the first candidate, since mpv already plays audio. |
 
 ## 4. Accounts and settings
