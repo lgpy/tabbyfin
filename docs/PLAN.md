@@ -245,6 +245,13 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
 | Windows | `libmpv-2.dll` next to `jelly-gpui.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. The zip also carries ANGLE (`libEGL.dll`, `libGLESv2.dll`) and its MinGW runtime DLLs, MSYS2 builds pinned in `packaging/angle.lock` and fetched by `packaging/fetch-angle.sh`, for zero-copy video. |
 | macOS | Not bundled yet. The app looks in Homebrew's folders, so `brew install mpv` makes playback work. Bundling `libmpv.dylib` is still to do. The app is ad-hoc signed, not notarized. |
 
+**App icon:** `packaging/jelly-gpui.svg` (a placeholder) is the source. Linux uses it as is; Windows uses `packaging/jelly-gpui.ico`, embedded in `jelly-gpui.exe` as icon resource 1 by `crates/app/build.rs` (GPUI gives its windows that icon) and used by the installer's shortcuts. After changing the SVG, remake the `.ico`:
+
+```sh
+for z in 256 128 64 48 32 16; do rsvg-convert -w $z -h $z packaging/jelly-gpui.svg -o /tmp/icon-$z.png; done
+convert /tmp/icon-{256,128,64,48,32,16}.png packaging/jelly-gpui.ico
+```
+
 `packaging/THIRD_PARTY.md` holds mpv's license (GPL-2.0-or-later) and source information, and ships in the packages.
 
 **Builds:** `.github/workflows/ci.yml` runs clippy and the tests on all three OSes. On a `v*` tag, or when started by hand, it also packages all four targets:

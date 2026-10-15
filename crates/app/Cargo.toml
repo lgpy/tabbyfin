@@ -39,6 +39,9 @@ blurhash = { version = "0.2", default-features = false }
 [target.'cfg(windows)'.dependencies]
 rust-embed = { version = "8", features = ["debug-embed"] }
 
+[build-dependencies]
+winresource = "0.1.34"
+
 
 [package.metadata.deb]
 maintainer = "lgpy <lgpy17@gmail.com>"
