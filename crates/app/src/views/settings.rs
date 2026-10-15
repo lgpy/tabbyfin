@@ -105,7 +105,7 @@ impl SettingsPage {
     }
 
     fn clear_image_cache(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        ImageCache::global(cx).update(cx, |cache, _| cache.clear_memory());
+        ImageCache::global(cx).update(cx, |cache, cx| cache.clear_memory(cx));
         let dir = config::cache_dir().join("images");
         cx.spawn_in(window, async move |_, cx| {
             let result = cx

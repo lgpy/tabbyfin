@@ -38,7 +38,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 | HTTP | `reqwest` (rustls) + `serde`/`serde_json` | Runs on our own tokio runtime on a background thread. GPUI's executor isn't tokio (§6). |
 | Player | **libmpv, embedded**, loaded at runtime | Video renders inside the GPUI window (§5, `docs/in-app-video.md`). |
 | Persistence | `directories` + TOML config. `keyring` (v4) holds the access token. | `keyring` uses the OS keychain on all three platforms. Where no credential store exists (WSL, or Linux without a Secret Service daemon), the token goes in a file only the user can read (`<config>/tokens/`, 0600), and a warning is logged. |
-| Image cache | On-disk cache in the platform cache dir, keyed by `(item id, image type, tag, width)` | Jellyfin's `ImageTags` act as cache busters. |
+| Image cache | On-disk cache in the platform cache dir, keyed by `(item id, image type, tag, width)`; in memory, up to 256 MB of decoded images, least recently used dropped first (also from GPUI's texture atlas) | Jellyfin's `ImageTags` act as cache busters. The app decodes images itself: GPUI's own image loading caches every image for good. |
 | Errors / logs | `thiserror` in the library crates, `anyhow` in the app, plus `tracing` | |
 
 **GPUI churn:** GPUI Kit warns that any GPUI snapshot can change its API. We upgrade `gpui-kit` on purpose, in its own commit, and only after reading its changelog. All GPUI code lives in the `app` crate.

@@ -25,8 +25,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 uuid.workspace = true
-# Video frames are handed to GPUI as RenderImages.
-image = { version = "0.25", default-features = false }
+# Video frames and server images (`images.rs`) are handed to GPUI as RenderImages; the
+# features are the formats Jellyfin serves.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 smallvec = "1"
 # Placeholders for images still loading (`ImageBlurHashes`).
 blurhash = { version = "0.2", default-features = false }
