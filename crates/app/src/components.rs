@@ -337,6 +337,18 @@ pub fn shelf(
     scroll: &ScrollHandle,
     cx: &App,
 ) -> impl IntoElement {
+    shelf_with_rail(id, title, cards, scroll, |rail| rail, cx)
+}
+
+/// [`shelf`], with `rail` adding listeners or styles to the scrolling row of cards.
+pub fn shelf_with_rail(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    cards: Vec<AnyElement>,
+    scroll: &ScrollHandle,
+    rail: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
+    cx: &App,
+) -> impl IntoElement {
     v_flex()
         .gap_2()
         .child(
@@ -347,7 +359,7 @@ pub fn shelf(
                 .text_color(cx.theme().foreground)
                 .child(title.into()),
         )
-        .child(
+        .child(rail(
             div()
                 .id(id)
                 .flex()
@@ -357,7 +369,7 @@ pub fn shelf(
                 .overflow_x_scroll()
                 .track_scroll(scroll)
                 .children(cards),
-        )
+        ))
 }
 
 pub fn centered_spinner() -> impl IntoElement {

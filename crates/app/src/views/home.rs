@@ -1,22 +1,29 @@
 //! Home: libraries, Continue Watching, Next Up, Favorites, and Latest per library, in the order
 //! and with the libraries the user set in the web client's Settings → Home.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemSortBy};
 use jellyfin::{Client, ItemsQuery};
 
 use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
-use crate::components::{Load, centered_message, centered_spinner, error_state, landscape_card, poster_card};
+use crate::components::{
+    Load, centered_message, centered_spinner, error_state, landscape_card, poster_card, shelf_with_rail,
+};
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
 
 const SHELF_LIMIT: u32 = 24;
 const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
+/// How far the mouse moves with the button down before a press on a shelf becomes a drag.
+const DRAG_THRESHOLD: Pixels = px(4.);
 
 /// The Home sections of the web client's Settings → Home that this app has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +87,10 @@ pub struct HomePage {
     scroll: ScrollHandle,
     /// One per shelf, in display order.
     shelf_scrolls: Vec<ScrollHandle>,
+    /// The shelf being dragged sideways with the mouse, while the button is down.
+    drag: Option<ShelfDrag>,
+    /// Whether the last press on a shelf became a drag, so its release doesn't open a card.
+    dragged: Rc<Cell<bool>>,
     cursor: Cursor,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -98,6 +109,8 @@ impl HomePage {
             data: Load::Loading,
             scroll: ScrollHandle::new(),
             shelf_scrolls: Vec::new(),
+            drag: None,
+            dragged: Rc::default(),
             cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
             _subscriptions,
@@ -182,6 +195,13 @@ async fn load(client: Client) -> jellyfin::Result<HomeData> {
     })
 }
 
+/// A press on a shelf: which shelf, and where the mouse and the shelf's scroll were then.
+struct ShelfDrag {
+    shelf: usize,
+    start_x: Pixels,
+    start_offset: Pixels,
+}
+
 /// One row of cards on the page, in display order.
 struct Shelf<'a> {
     id: ElementId,
@@ -233,7 +253,12 @@ impl HomePage {
             .map(|(i, item)| {
                 let nav = self.nav.clone();
                 let target = item.clone();
-                let on_click = move |_: &ClickEvent, window: &mut Window, cx: &mut App| nav.open(&target, window, cx);
+                let dragged = self.dragged.clone();
+                let on_click = move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    if !dragged.get() {
+                        nav.open(&target, window, cx);
+                    }
+                };
                 let selected = self.cursor.is_selected(section, i);
                 if shelf.landscape {
                     landscape_card(i, item, selected, on_click, cx).into_any_element()
@@ -269,8 +294,30 @@ impl HomePage {
             .enumerate()
             .map(|(s, shelf)| {
                 let cards = self.cards(s, shelf, cx);
-                crate::components::shelf(shelf.id.clone(), shelf.title.clone(), cards, &self.shelf_scrolls[s], cx)
-                    .into_any_element()
+                let scroll = self.shelf_scrolls[s].clone();
+                let rail = |rail: Stateful<Div>| {
+                    rail.on_scroll_wheel(move |event, window, _| undo_wheel_scroll(&scroll, event, window))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _, _| {
+                                this.dragged.set(false);
+                                this.drag = Some(ShelfDrag {
+                                    shelf: s,
+                                    start_x: event.position.x,
+                                    start_offset: this.shelf_scrolls[s].offset().x,
+                                });
+                            }),
+                        )
+                };
+                shelf_with_rail(
+                    shelf.id.clone(),
+                    shelf.title.clone(),
+                    cards,
+                    &self.shelf_scrolls[s],
+                    rail,
+                    cx,
+                )
+                .into_any_element()
             })
             .collect();
         if sections.is_empty() {
@@ -286,9 +333,55 @@ impl HomePage {
             .py_6()
             .gap_8()
             .text_color(cx.theme().foreground)
+            .when(self.dragged.get() && self.drag.is_some(), |el| {
+                el.cursor(CursorStyle::ClosedHand)
+            })
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| this.drag_shelf(event, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.end_drag(cx)))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.end_drag(cx)))
             .children(sections)
             .into_any_element()
     }
+
+    /// Scrolls the pressed shelf with the mouse once it has moved far enough to be a drag.
+    fn drag_shelf(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(drag) = &self.drag else { return };
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.end_drag(cx);
+            return;
+        }
+        let dx = event.position.x - drag.start_x;
+        if !self.dragged.get() && dx.abs() < DRAG_THRESHOLD {
+            return;
+        }
+        self.dragged.set(true);
+        let Some(scroll) = self.shelf_scrolls.get(drag.shelf) else {
+            return;
+        };
+        let mut offset = scroll.offset();
+        offset.x = (drag.start_offset + dx).clamp(-scroll.max_offset().x, px(0.));
+        scroll.set_offset(offset);
+        cx.notify();
+    }
+
+    fn end_drag(&mut self, cx: &mut Context<Self>) {
+        if self.drag.take().is_some() {
+            cx.notify();
+        }
+    }
+}
+
+/// Takes back the sideways scroll GPUI's own wheel handler just gave `scroll`: shelves move
+/// only by dragging, so the wheel keeps scrolling the page. GPUI runs the element's own
+/// handler first (bubble listeners run last-registered first, and an element's scroll handler
+/// is registered after its `on_scroll_wheel` listeners), and it turns a vertical wheel into a
+/// sideways scroll on a row that only scrolls sideways.
+fn undo_wheel_scroll(scroll: &ScrollHandle, event: &ScrollWheelEvent, window: &Window) {
+    let delta = event.delta.pixel_delta(window.line_height());
+    let applied = if delta.x.is_zero() { delta.y } else { delta.x };
+    let mut offset = scroll.offset();
+    offset.x -= applied;
+    scroll.set_offset(offset);
 }
 
 impl Browse for HomePage {

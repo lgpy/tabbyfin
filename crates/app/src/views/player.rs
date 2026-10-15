@@ -568,7 +568,7 @@ impl PlayerPage {
         Some((offset, duration.mul_f32(offset / width)))
     }
 
-    fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_controls(&self, fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let hover = self.seek_hover(cx);
         let preview = match (hover, &self.trickplay) {
             (Some((_, time)), Some(trickplay)) => trickplay
@@ -639,6 +639,7 @@ impl PlayerPage {
                 Button::new("exit-player")
                     .ghost()
                     .icon(IconName::ArrowLeft)
+                    .tooltip("Back (Esc)")
                     .on_click(cx.listener(|this, _, window, cx| this.exit_player(&ExitPlayer, window, cx))),
             )
             .child(div().flex_1().text_lg().text_color(white()).truncate().child(title))
@@ -733,43 +734,49 @@ impl PlayerPage {
             }))
             .child(
                 h_flex()
-                    .gap_2()
+                    .gap_1()
                     .text_color(white())
+                    .child(
+                        Button::new("play-pause")
+                            .ghost()
+                            .large()
+                            .icon(if paused { Lucide::Play } else { Lucide::Pause })
+                            .tooltip(if paused { "Play (Space)" } else { "Pause (Space)" })
+                            .on_click(cx.listener(|this, _, window, cx| this.toggle_pause(&TogglePause, window, cx))),
+                    )
                     .child(
                         Button::new("back-10")
                             .ghost()
-                            .label("-10s")
+                            .icon(Lucide::Rewind)
+                            .tooltip("Back 10 s (←)")
                             .on_click(cx.listener(|this, _, window, cx| this.seek_backward(&SeekBackward, window, cx))),
-                    )
-                    .child(
-                        Button::new("play-pause")
-                            .primary()
-                            .icon(if paused { Lucide::Play } else { Lucide::Pause })
-                            .label(if paused { "Play" } else { "Pause" })
-                            .on_click(cx.listener(|this, _, window, cx| this.toggle_pause(&TogglePause, window, cx))),
                     )
                     .child(
                         Button::new("forward-10")
                             .ghost()
-                            .label("+10s")
+                            .icon(Lucide::FastForward)
+                            .tooltip("Forward 10 s (→)")
                             .on_click(cx.listener(|this, _, window, cx| this.seek_forward(&SeekForward, window, cx))),
                     )
                     .child(
+                        Button::new("mute")
+                            .ghost()
+                            .icon(if muted { Lucide::VolumeX } else { Lucide::Volume2 })
+                            .tooltip(if muted { "Unmute (M)" } else { "Mute (M)" })
+                            .on_click(cx.listener(|this, _, window, cx| this.toggle_mute(&ToggleMute, window, cx))),
+                    )
+                    .child(div().flex_none().w(px(96.)).child(Slider::new(&self.volume).w_full()))
+                    .child(
                         div()
                             .id("time")
+                            .ml_3()
                             .text_sm()
+                            .text_color(white().opacity(0.9))
                             .cursor_pointer()
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_remaining(cx)))
                             .child(time),
                     )
                     .when(speed != 1., |el| el.child(badge(format!("{speed}×"))))
-                    .child(
-                        Button::new("mute")
-                            .ghost()
-                            .icon(if muted { Lucide::VolumeX } else { Lucide::Volume2 })
-                            .on_click(cx.listener(|this, _, window, cx| this.toggle_mute(&ToggleMute, window, cx))),
-                    )
-                    .child(div().flex_none().w(px(96.)).child(Slider::new(&self.volume).w_full()))
                     .child(div().flex_1())
                     .when_some(previous_tip, |el, tip| {
                         el.child(
@@ -797,9 +804,21 @@ impl PlayerPage {
                     .children(self.audio.as_ref().map(|s| picker(s, 200., 320.)))
                     .children(self.subtitle.as_ref().map(|s| picker(s, 200., 320.)))
                     .child(self.render_settings(cx))
-                    .child(Button::new("fullscreen").ghost().label("Fullscreen").on_click(
-                        cx.listener(|this, _, window, cx| this.toggle_fullscreen(&ToggleFullscreen, window, cx)),
-                    )),
+                    .child(
+                        Button::new("fullscreen")
+                            .ghost()
+                            .icon(if fullscreen { Lucide::Minimize } else { Lucide::Maximize })
+                            .tooltip(if fullscreen {
+                                "Exit fullscreen (F)"
+                            } else {
+                                "Fullscreen (F)"
+                            })
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.toggle_fullscreen(&ToggleFullscreen, window, cx)
+                                }),
+                            ),
+                    ),
             );
 
         div().absolute().inset_0().child(top).child(bottom)
@@ -1072,6 +1091,7 @@ impl Render for PlayerPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Render frames at the size they're shown, in device pixels.
         let viewport = window.viewport_size();
+        let fullscreen = window.is_fullscreen();
         let scale = window.scale_factor();
         self.now_playing.read(cx).video.set_target_size(
             (f32::from(viewport.width) * scale) as u32,
@@ -1137,7 +1157,9 @@ impl Render for PlayerPage {
                         .child(Spinner::new().large()),
                 )
             })
-            .when(self.controls_visible, |el| el.child(self.render_controls(cx)))
+            .when(self.controls_visible, |el| {
+                el.child(self.render_controls(fullscreen, cx))
+            })
             .children(self.render_prompt(cx))
     }
 }
