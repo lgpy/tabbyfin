@@ -9,6 +9,8 @@ mod angle;
 #[cfg(target_os = "linux")]
 mod egl;
 mod embedded;
+#[cfg(any(windows, target_os = "linux"))]
+mod opengl;
 mod video;
 #[cfg(windows)]
 mod wgl;
