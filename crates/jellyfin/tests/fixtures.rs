@@ -43,6 +43,8 @@ fn every_fixture_parses() {
         let filters: ItemFilterValues = load(version, "item_filters");
         assert!(filters.genres.contains(&"Science Fiction".to_owned()), "{version}");
         assert!(filters.years.contains(&2024), "{version}");
+        assert!(filters.tags.contains(&"multi-version".to_owned()), "{version}");
+        assert!(filters.official_ratings.contains(&"PG-13".to_owned()), "{version}");
         let _: QueryResult<MediaSegmentDto> = load(version, "media_segments");
         let _: Vec<GroupInfo> = load(version, "syncplay_list");
         let _: PlaybackInfoResponse = load(version, "playback_info_direct");
