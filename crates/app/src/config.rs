@@ -17,6 +17,13 @@ pub struct Config {
     /// Player volume in percent, remembered between sessions.
     #[serde(default)]
     pub volume: Option<f64>,
+    /// The player's clock shows the time left instead of the time played. `None` means no.
+    #[serde(default)]
+    pub show_remaining_time: Option<bool>,
+    /// Subtitle size from the player's settings menu, 1.0 being the subtitles' own. `None`
+    /// means 1.0.
+    #[serde(default)]
+    pub subtitle_scale: Option<f64>,
     /// Bits per second; the server transcodes anything above it. `None` means no limit.
     #[serde(default)]
     pub max_streaming_bitrate: Option<u64>,

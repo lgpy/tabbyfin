@@ -60,6 +60,76 @@ pub enum SubtitleChoice {
     Stream(i32),
 }
 
+/// Tweaks from the player's settings menu. Speed and subtitle size carry over to the next
+/// item; the delays belong to one item's files and reset when another item starts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Adjustments {
+    /// 1.0 is normal.
+    pub speed: f64,
+    /// Seconds; positive shows subtitles later.
+    pub subtitle_delay: f64,
+    /// Seconds; positive plays the audio later.
+    pub audio_delay: f64,
+    /// 1.0 is the subtitles' own size.
+    pub subtitle_scale: f64,
+}
+
+impl Default for Adjustments {
+    fn default() -> Self {
+        Self {
+            speed: 1.,
+            subtitle_delay: 0.,
+            audio_delay: 0.,
+            subtitle_scale: 1.,
+        }
+    }
+}
+
+impl Adjustments {
+    pub const SPEEDS: [f64; 7] = [0.5, 0.75, 1., 1.25, 1.5, 1.75, 2.];
+    pub const DELAY_STEP: f64 = 0.1;
+    pub const SCALE_STEP: f64 = 0.1;
+    const MAX_DELAY: f64 = 30.;
+    const SCALE_RANGE: (f64, f64) = (0.5, 3.);
+
+    /// The next speed in [`Self::SPEEDS`] above (`up`) or below the current one.
+    pub fn step_speed(self, up: bool) -> f64 {
+        let (first, last) = (Self::SPEEDS[0], Self::SPEEDS[Self::SPEEDS.len() - 1]);
+        if up {
+            Self::SPEEDS
+                .into_iter()
+                .find(|&speed| speed > self.speed + 1e-6)
+                .unwrap_or(last)
+        } else {
+            Self::SPEEDS
+                .into_iter()
+                .rev()
+                .find(|&speed| speed < self.speed - 1e-6)
+                .unwrap_or(first)
+        }
+    }
+
+    /// Within the ranges the menu offers, rounded to its steps.
+    fn clamped(self) -> Self {
+        let tenths = |value: f64| (value * 10.).round() / 10.;
+        Self {
+            speed: self.speed.clamp(Self::SPEEDS[0], Self::SPEEDS[Self::SPEEDS.len() - 1]),
+            subtitle_delay: tenths(self.subtitle_delay.clamp(-Self::MAX_DELAY, Self::MAX_DELAY)),
+            audio_delay: tenths(self.audio_delay.clamp(-Self::MAX_DELAY, Self::MAX_DELAY)),
+            subtitle_scale: tenths(self.subtitle_scale.clamp(Self::SCALE_RANGE.0, Self::SCALE_RANGE.1)),
+        }
+    }
+
+    /// For the next item: the same speed and subtitle size, no delays.
+    fn for_next_item(self) -> Self {
+        Self {
+            speed: self.speed,
+            subtitle_scale: self.subtitle_scale,
+            ..Self::default()
+        }
+    }
+}
+
 /// Requests from the player UI to the running session.
 #[derive(Debug, Clone)]
 pub enum UiCommand {
@@ -72,6 +142,11 @@ pub enum UiCommand {
     /// Percent, 0 to 100.
     SetVolume(f64),
     SetMute(bool),
+    /// Seconds.
+    SetSubtitleDelay(f64),
+    /// Seconds.
+    SetAudioDelay(f64),
+    SetSubtitleScale(f64),
     ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
@@ -137,6 +212,7 @@ pub struct NowPlaying {
     pub subtitle: SubtitleChoice,
     pub volume: f64,
     pub muted: bool,
+    pub adjustments: Adjustments,
     /// All versions of the item, once known; empty or one entry means there's nothing to
     /// switch to.
     pub versions: Vec<Version>,
@@ -255,6 +331,31 @@ impl NowPlaying {
         }
     }
 
+    /// Applies changes from the settings menu. Speed stays at normal in a SyncPlay group,
+    /// whose drift correction uses it.
+    pub fn adjust(&mut self, adjustments: Adjustments, cx: &mut Context<Self>) {
+        let mut new = adjustments.clamped();
+        if self.group_item.is_some() {
+            new.speed = 1.;
+        }
+        let old = self.adjustments;
+        if new == old {
+            return;
+        }
+        self.adjustments = new;
+        let changes = [
+            (new.speed != old.speed).then_some(UiCommand::SetSpeed(new.speed)),
+            (new.subtitle_delay != old.subtitle_delay).then_some(UiCommand::SetSubtitleDelay(new.subtitle_delay)),
+            (new.audio_delay != old.audio_delay).then_some(UiCommand::SetAudioDelay(new.audio_delay)),
+            (new.subtitle_scale != old.subtitle_scale).then_some(UiCommand::SetSubtitleScale(new.subtitle_scale)),
+        ];
+        for command in changes.into_iter().flatten() {
+            self.send(command);
+        }
+        PlaybackManager::global(cx).update(cx, |playback, _| playback.adjustments = new);
+        cx.notify();
+    }
+
     /// Plays the same version again from the current position with the current tracks.
     fn restart(&self, cx: &mut App) {
         let options = PlayOptions {
@@ -303,6 +404,9 @@ pub struct PlaybackManager {
     now_playing: Option<Entity<NowPlaying>>,
     volume: f64,
     muted: bool,
+    adjustments: Adjustments,
+    /// The item `adjustments` were made for; another one starts without the delays.
+    adjusted_item: Option<String>,
 }
 
 struct GlobalPlayback(Entity<PlaybackManager>);
@@ -314,7 +418,13 @@ impl EventEmitter<PlaybackEvent> for PlaybackManager {}
 impl PlaybackManager {
     /// Installs the manager for a signed-in session, replacing (and stopping) any previous one.
     pub fn init(client: Client, cx: &mut App) {
-        let volume = Config::load().volume.unwrap_or(DEFAULT_VOLUME);
+        let config = Config::load();
+        let volume = config.volume.unwrap_or(DEFAULT_VOLUME);
+        let adjustments = Adjustments {
+            subtitle_scale: config.subtitle_scale.unwrap_or(1.),
+            ..Adjustments::default()
+        }
+        .clamped();
         let manager = cx.new(|_| PlaybackManager {
             client,
             stop: None,
@@ -325,6 +435,8 @@ impl PlaybackManager {
             now_playing: None,
             volume,
             muted: false,
+            adjustments,
+            adjusted_item: None,
         });
         cx.set_global(GlobalPlayback(manager));
     }
@@ -448,6 +560,14 @@ impl PlaybackManager {
         self.active = true;
         let generation = self.generation;
         let (volume, muted) = (self.volume, self.muted);
+        if self.adjusted_item.as_ref() != Some(&item.id) {
+            self.adjustments = self.adjustments.for_next_item();
+            self.adjusted_item = Some(item.id.clone());
+        }
+        let mut adjustments = self.adjustments;
+        if options.group_item.is_some() {
+            adjustments.speed = 1.;
+        }
         let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
         let group_item = options.group_item.clone();
         let retry_options = options.clone();
@@ -463,7 +583,7 @@ impl PlaybackManager {
                     updates: updates_tx,
                     commands: commands_rx,
                 };
-                run_session(client, item, options, (volume, muted), channels).await
+                run_session(client, item, options, (volume, muted), adjustments, channels).await
             })
         };
 
@@ -494,6 +614,7 @@ impl PlaybackManager {
                             subtitle,
                             volume,
                             muted,
+                            adjustments,
                             versions: Vec::new(),
                             next: queued.clone(),
                             next_cancelled: false,
@@ -554,7 +675,7 @@ impl PlaybackManager {
             let result = session.await;
             let next = now_playing.and_then(|entity| entity.read_with(cx, |state, _| state.autoplay_next()));
             this.update(cx, |this, cx| {
-                this.save_volume();
+                this.save_preferences();
                 Changes::notify_user_data(cx);
                 // A newer session took over (another item, version or episode); its player is
                 // already showing.
@@ -624,10 +745,13 @@ impl PlaybackManager {
         .detach();
     }
 
-    fn save_volume(&self) {
+    /// Remembers the volume and subtitle size for the next launch.
+    fn save_preferences(&self) {
         let mut config = Config::load();
-        if config.volume != Some(self.volume) {
+        let scale = Some(self.adjustments.subtitle_scale).filter(|&scale| scale != 1.);
+        if config.volume != Some(self.volume) || config.subtitle_scale != scale {
             config.volume = Some(self.volume);
+            config.subtitle_scale = scale;
             if let Err(err) = config.save() {
                 tracing::warn!("failed to save config: {err:#}");
             }
@@ -834,6 +958,7 @@ async fn run_session(
     item: BaseItemDto,
     options: PlayOptions,
     (volume, muted): (f64, bool),
+    adjustments: Adjustments,
     mut channels: Channels,
 ) -> Result<Ended, String> {
     let info = client
@@ -933,6 +1058,14 @@ async fn run_session(
         .set_property("mute", muted)
         .await
         .map_err(|err| err.to_string())?;
+    for (name, value) in [
+        ("speed", adjustments.speed),
+        ("sub-delay", adjustments.subtitle_delay),
+        ("audio-delay", adjustments.audio_delay),
+        ("sub-scale", adjustments.subtitle_scale),
+    ] {
+        player.set_property(name, value).await.map_err(|err| err.to_string())?;
+    }
 
     player
         .load(LoadRequest {
@@ -1029,8 +1162,17 @@ async fn run_session(
             }
             Some(command) = channels.commands.recv() => {
                 tracing::debug!(?command, "player command");
-                // Volume and mute are reported from mpv's events instead, batched.
-                let reports = !matches!(command, UiCommand::SetVolume(_) | UiCommand::SetMute(_) | UiCommand::ToggleMute);
+                // Commands that change what the reports carry. Volume and mute are reported from
+                // mpv's events instead, batched.
+                let reports = matches!(
+                    command,
+                    UiCommand::TogglePause
+                        | UiCommand::SetPause(_)
+                        | UiCommand::SeekBy(_)
+                        | UiCommand::SeekTo(_)
+                        | UiCommand::Audio(_)
+                        | UiCommand::Subtitle(_)
+                );
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
@@ -1116,6 +1258,9 @@ async fn apply_command(
         }
         UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., 100.)).await,
         UiCommand::SetMute(muted) => player.set_property("mute", muted).await,
+        UiCommand::SetSubtitleDelay(seconds) => player.set_property("sub-delay", seconds).await,
+        UiCommand::SetAudioDelay(seconds) => player.set_property("audio-delay", seconds).await,
+        UiCommand::SetSubtitleScale(scale) => player.set_property("sub-scale", scale).await,
         UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
         // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
         UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),
@@ -1195,7 +1340,7 @@ mod tests {
     // Not `super::*`: that glob brings in GPUI's `test` attribute, which shadows the std one.
     use jellyfin::models::{MediaSourceInfo, MediaStream, MediaStreamType};
 
-    use super::{mpv_subtitle_id, mpv_track_id, volume_level};
+    use super::{Adjustments, mpv_subtitle_id, mpv_track_id, volume_level};
 
     fn stream(index: i32, kind: MediaStreamType, is_external: bool) -> MediaStream {
         serde_json::from_value(serde_json::json!({
@@ -1246,5 +1391,48 @@ mod tests {
         assert_eq!(volume_level(100.4), 100);
         assert_eq!(volume_level(-3.), 0);
         assert_eq!(volume_level(150.), 100);
+    }
+
+    #[test]
+    fn speed_steps_through_the_menu() {
+        let at = |speed| Adjustments {
+            speed,
+            ..Adjustments::default()
+        };
+        assert_eq!(at(1.).step_speed(true), 1.25);
+        assert_eq!(at(1.).step_speed(false), 0.75);
+        assert_eq!(at(2.).step_speed(true), 2.);
+        assert_eq!(at(0.5).step_speed(false), 0.5);
+        // From a speed between two steps (set some other way), to the neighbouring ones.
+        assert_eq!(at(1.1).step_speed(true), 1.25);
+        assert_eq!(at(1.1).step_speed(false), 1.);
+    }
+
+    #[test]
+    fn adjustments_stay_in_range_and_on_their_steps() {
+        let wild = Adjustments {
+            speed: 9.,
+            subtitle_delay: 0.1 + 0.2,
+            audio_delay: -100.,
+            subtitle_scale: 0.1,
+        }
+        .clamped();
+        assert_eq!(wild.speed, 2.);
+        assert_eq!(wild.subtitle_delay, 0.3);
+        assert_eq!(wild.audio_delay, -30.);
+        assert_eq!(wild.subtitle_scale, 0.5);
+    }
+
+    #[test]
+    fn the_next_item_keeps_speed_and_size_but_not_delays() {
+        let next = Adjustments {
+            speed: 1.5,
+            subtitle_delay: 1.2,
+            audio_delay: -0.3,
+            subtitle_scale: 1.4,
+        }
+        .for_next_item();
+        assert_eq!((next.speed, next.subtitle_scale), (1.5, 1.4));
+        assert_eq!((next.subtitle_delay, next.audio_delay), (0., 0.));
     }
 }

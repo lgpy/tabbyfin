@@ -28,8 +28,8 @@ use crate::app_view::AppView;
 use crate::changes::Changes;
 use crate::config::Config;
 use crate::views::player::{
-    self, ExitPlayer, NextChapter, NextEpisode, PrevChapter, SeekBackward, SeekForward, Skip, ToggleFullscreen,
-    ToggleMute, TogglePause, VolumeDown, VolumeUp,
+    self, ExitPlayer, NextChapter, NextEpisode, PrevChapter, SeekBackward, SeekForward, Skip, SpeedDown, SpeedUp,
+    SubtitleDelayDown, SubtitleDelayUp, ToggleFullscreen, ToggleMute, TogglePause, VolumeDown, VolumeUp,
 };
 use crate::views::shell::{self, Back, OpenSearch};
 
@@ -138,6 +138,10 @@ fn main() {
                 KeyBinding::new("s", Skip, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("f", ToggleFullscreen, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("escape", ExitPlayer, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("]", SpeedUp, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("[", SpeedDown, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("x", SubtitleDelayUp, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("z", SubtitleDelayDown, Some(player::KEY_CONTEXT)),
             ]);
             cx.bind_keys(browse::key_bindings());
 

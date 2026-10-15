@@ -21,8 +21,10 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
   - Hardware decoding. On Windows, frames go from the decoder to the screen without a copy.
   - Audio, subtitle and version pickers, including external subtitles from Jellyfin.
   - Volume, chapters (marked on the seek bar), next episode, and an up-next card that plays the next episode at the end (or not: it's a setting).
+  - Playback speed, subtitle and audio delay and subtitle size from the player's settings menu; the time under the mouse on the seek bar, and a clock that can show the time left.
   - Skip intro, recap and similar, from the server's media segments (with a segment plugin such as Intro Skipper) or from chapter names like "Intro", "Opening" or "OP".
   - Resume points and watched state stay in sync with the server, including changes made on other devices.
+- **Remote control** from the Jellyfin web dashboard or a phone app: play items here, pause, seek, skip to the next item, change the volume and tracks, or send a message.
 - **Watch together** with Jellyfin's SyncPlay: create or join a group from the top bar, and play, pause and seek in sync with the other members.
 - **Isolation:** your own mpv configuration, scripts and key bindings are never loaded, so they can't change how the embedded player looks.
 
@@ -39,6 +41,8 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
 | Shift+N | Next episode |
 | PgUp / PgDn | Previous / next chapter |
 | Enter or S | Skip the intro, or play the next episode from the up-next card |
+| [ / ] | Slower / faster |
+| Z / X | Subtitle delay −0.1 s / +0.1 s |
 | F | Fullscreen |
 | Esc | Leave fullscreen, then dismiss the up-next card, then leave the player |
 
