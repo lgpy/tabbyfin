@@ -1,4 +1,5 @@
-//! Root view: restores the saved session on launch and switches between sign-in and the app.
+//! Root view: restores the saved session on launch and switches between sign-in and the app,
+//! and between saved accounts (servers and users).
 
 use std::time::Duration;
 
@@ -25,8 +26,11 @@ enum Screen {
 
 pub struct AppView {
     device_id: String,
+    /// The current account: signed in, being restored, or the one the sign-in form is for.
     saved: Option<SavedServer>,
     screen: Screen,
+    /// The signed-in session kept while another account is being added, to go back to.
+    parked: Option<(Entity<ShellView>, Session)>,
     _screen_subscription: Option<Subscription>,
     /// The placement last seen. `placement_save` is the pending write; replacing it restarts the
     /// timer, so only the last change of a drag is saved.
@@ -50,6 +54,7 @@ impl AppView {
             device_id: config.device_id,
             saved: config.server.clone(),
             screen: Screen::Restoring,
+            parked: None,
             _screen_subscription: None,
             last_placement: placement,
             placement_save: None,
@@ -60,6 +65,8 @@ impl AppView {
             Some(saved) => this.restore(saved, true, window, cx),
             None => this.show_login(None, window, cx),
         }
+        #[cfg(debug_assertions)]
+        replay_debug_keys(window, cx);
         this
     }
 
@@ -95,6 +102,7 @@ impl AppView {
     /// With `allow_reconnect`, an unreachable server leaves the token in place and the sign-in
     /// screen tries the saved session again once the server answers.
     fn restore(&mut self, saved: SavedServer, allow_reconnect: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.saved = Some(saved.clone());
         self.screen = Screen::Restoring;
         cx.notify();
         let device_id = self.device_id.clone();
@@ -125,6 +133,7 @@ impl AppView {
             this.update_in(cx, |this, window, cx| match result {
                 Ok(session) => {
                     tracing::info!(user = %session.user.name, "restored session");
+                    this.remember(&session);
                     this.show_home(session, window, cx);
                 }
                 Err(err) => {
@@ -152,15 +161,37 @@ impl AppView {
         .detach();
     }
 
+    /// The sign-in screen, listing the saved accounts. With a parked session (adding an
+    /// account), it can be cancelled back to it.
     fn show_login(&mut self, prefill: Option<Prefill>, window: &mut Window, cx: &mut Context<Self>) {
         let device_id = self.device_id.clone();
-        let login = cx.new(|cx| LoginView::new(device_id, prefill, window, cx));
-        self._screen_subscription = Some(cx.subscribe_in(&login, window, |this, _, ev, window, cx| match ev {
-            LoginEvent::LoggedIn(session) => this.on_logged_in((**session).clone(), window, cx),
-            LoginEvent::ServerReachable => {
-                if let Some(saved) = this.saved.clone() {
-                    this.restore(saved, false, window, cx);
+        let accounts = Config::load().accounts;
+        let can_cancel = self.parked.is_some();
+        let login = cx.new(|cx| LoginView::new(device_id, prefill, accounts, can_cancel, window, cx));
+        self._screen_subscription = Some(cx.subscribe_in(&login, window, |this, login, ev, window, cx| {
+            match ev {
+                LoginEvent::LoggedIn(session) => this.on_logged_in((**session).clone(), window, cx),
+                LoginEvent::ServerReachable => {
+                    if let Some(saved) = this.saved.clone() {
+                        this.restore(saved, false, window, cx);
+                    }
                 }
+                // The account signed in before "Add account" just goes back to that session.
+                LoginEvent::UseAccount(account)
+                    if this
+                        .parked
+                        .as_ref()
+                        .is_some_and(|(_, session)| session.account_key() == account.credential_account()) =>
+                {
+                    this.unpark(window, cx)
+                }
+                LoginEvent::UseAccount(account) => this.switch_account(account.clone(), window, cx),
+                LoginEvent::ForgetAccount(account) => {
+                    this.forget_account(account);
+                    let accounts = Config::load().accounts;
+                    login.update(cx, |login, cx| login.set_accounts(accounts, cx));
+                }
+                LoginEvent::Cancel => this.unpark(window, cx),
             }
         }));
         self.screen = Screen::Login(login);
@@ -169,24 +200,60 @@ impl AppView {
 
     fn show_home(&mut self, session: Session, window: &mut Window, cx: &mut Context<Self>) {
         let home = cx.new(|cx| ShellView::new(session.clone(), window, cx));
-        self._screen_subscription = Some(cx.subscribe_in(&home, window, move |this, _, ev, window, cx| match ev {
-            ShellEvent::SignOut => this.sign_out(&session, window, cx),
-            ShellEvent::SessionExpired => this.session_expired(window, cx),
-        }));
+        self.attach_home(home, session, window, cx);
+    }
+
+    fn attach_home(&mut self, home: Entity<ShellView>, session: Session, window: &mut Window, cx: &mut Context<Self>) {
+        self._screen_subscription = Some(
+            cx.subscribe_in(&home, window, move |this, home, ev, window, cx| match ev {
+                ShellEvent::SignOut => this.sign_out(&session, window, cx),
+                ShellEvent::SessionExpired => this.session_expired(window, cx),
+                ShellEvent::SwitchAccount(account) => this.switch_account(account.clone(), window, cx),
+                ShellEvent::AddAccount => {
+                    tracing::info!("adding an account");
+                    this.parked = Some((home.clone(), session.clone()));
+                    this.show_login(None, window, cx);
+                }
+            }),
+        );
         self.screen = Screen::Home(home);
         cx.notify();
     }
 
+    /// Back to the session that was signed in before "Add account".
+    fn unpark(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((home, session)) = self.parked.take() {
+            tracing::info!(user = %session.user.name, "back to the signed-in account");
+            self.saved = Config::load()
+                .accounts
+                .into_iter()
+                .find(|account| account.credential_account() == session.account_key());
+            self.attach_home(home, session, window, cx);
+        }
+    }
+
+    /// Ends the current session (and a parked one) and signs in to `account` with its saved
+    /// token.
+    fn switch_account(&mut self, account: SavedServer, window: &mut Window, cx: &mut Context<Self>) {
+        tracing::info!(account = %account.label(), "switching account");
+        self.end_session(cx);
+        self.restore(account, false, window, cx);
+    }
+
+    /// Stops playback, leaves a SyncPlay group and drops the signed-in pages, before another
+    /// account takes over.
+    fn end_session(&mut self, cx: &mut Context<Self>) {
+        stop_activity(cx);
+        self.parked = None;
+    }
+
     fn on_logged_in(&mut self, session: Session, window: &mut Window, cx: &mut Context<Self>) {
         tracing::info!(user = %session.user.name, "signed in");
-        let saved = SavedServer {
-            url: session.client.base_url().to_string(),
-            server_id: session.server.id.clone().unwrap_or_default(),
-            user_id: session.user.id.clone(),
-            username: session.user.name.clone(),
-        };
+        if self.parked.is_some() {
+            self.end_session(cx);
+        }
         if let Some(token) = session.client.token().map(str::to_owned) {
-            let account = saved.credential_account();
+            let account = session.account_key();
             cx.background_executor()
                 .spawn(async move {
                     if let Err(err) = credentials::store(&account, &token) {
@@ -195,18 +262,32 @@ impl AppView {
                 })
                 .detach();
         }
+        self.remember(&session);
+        self.show_home(session, window, cx);
+    }
+
+    /// Makes the session's account the current one in the config, first in the list.
+    fn remember(&mut self, session: &Session) {
+        let saved = SavedServer {
+            url: session.client.base_url().to_string(),
+            server_id: session.server.id.clone().unwrap_or_default(),
+            user_id: session.user.id.clone(),
+            username: session.user.name.clone(),
+            server_name: session.server.server_name.clone(),
+        };
         // Re-read the file so settings changed elsewhere aren't overwritten.
         let mut config = Config::load();
-        config.server = Some(saved.clone());
+        config.use_account(saved.clone());
         if let Err(err) = config.save() {
             tracing::error!("failed to save config: {err:#}");
         }
         self.saved = Some(saved);
-        self.show_home(session, window, cx);
     }
 
+    /// Signs the current account out for good: revokes its token and drops it from the saved
+    /// accounts. The sign-in screen then lists the others.
     fn sign_out(&mut self, session: &Session, window: &mut Window, cx: &mut Context<Self>) {
-        crate::playback::PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
+        stop_activity(cx);
         // Revoke the token server-side; nothing to do if that fails, we forget it either way.
         let client = session.client.clone();
         runtime::detach(async move {
@@ -214,7 +295,46 @@ impl AppView {
                 tracing::warn!("logout request failed: {err}");
             }
         });
-        self.forget_session(None, window, cx);
+        let Some(saved) = self.saved.take() else {
+            return self.show_login(None, window, cx);
+        };
+        self.forget_account(&saved);
+        // With no other account, offer the same server and user again.
+        let prefill = Config::load().accounts.is_empty().then(|| Prefill {
+            url: saved.url.clone(),
+            username: saved.username.clone(),
+            error: None,
+            resume_saved_session: false,
+        });
+        self.show_login(prefill, window, cx);
+    }
+
+    /// Deletes an account's token and drops it from the saved accounts. A token that's still
+    /// stored is revoked on the server too (best effort).
+    fn forget_account(&mut self, account: &SavedServer) {
+        let key = account.credential_account();
+        let mut config = Config::load();
+        config.forget_account(&key);
+        if let Err(err) = config.save() {
+            tracing::error!("failed to save config: {err:#}");
+        }
+        let (url, device_id) = (account.url.clone(), self.device_id.clone());
+        runtime::detach(async move {
+            let token = tokio::task::spawn_blocking(move || {
+                let token = credentials::load(&key);
+                credentials::delete(&key);
+                token
+            })
+            .await
+            .ok()
+            .flatten();
+            let Some(token) = token else { return };
+            if let Ok(client) = Client::new(&url, client_info(&device_id))
+                && let Err(err) = client.with_token(token).logout().await
+            {
+                tracing::debug!("couldn't revoke a forgotten account's token: {err}");
+            }
+        });
     }
 
     fn session_expired(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -223,11 +343,12 @@ impl AppView {
         }
         tracing::warn!("session expired");
         crate::playback::PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
-        self.forget_session(Some(describe_error(&jellyfin::Error::Unauthorized)), window, cx);
+        self.forget_token(Some(describe_error(&jellyfin::Error::Unauthorized)), window, cx);
     }
 
-    /// Deletes the stored token and shows sign-in for the same server and user.
-    fn forget_session(&mut self, error: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Deletes the current account's stored token, keeping the account in the list, and shows
+    /// sign-in for it.
+    fn forget_token(&mut self, error: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         let prefill = self.saved.as_ref().map(|saved| {
             let account = saved.credential_account();
             cx.background_executor()
@@ -241,6 +362,44 @@ impl AppView {
             }
         });
         self.show_login(prefill, window, cx);
+    }
+}
+
+/// Dev aid: `JELLY_GPUI_KEYS="down right enter wait escape"` presses keys after startup, for
+/// testing keyboard navigation without touching the desktop, on any screen (sign-in too). `wait`
+/// pauses for a second.
+#[cfg(debug_assertions)]
+fn replay_debug_keys(window: &mut Window, cx: &mut Context<AppView>) {
+    use std::time::Duration;
+
+    let Ok(keys) = std::env::var("JELLY_GPUI_KEYS") else {
+        return;
+    };
+    cx.spawn_in(window, async move |_, cx| {
+        cx.background_executor().timer(Duration::from_secs(3)).await;
+        for key in keys.split_whitespace() {
+            if key == "wait" {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                continue;
+            }
+            match Keystroke::parse(key) {
+                Ok(keystroke) => {
+                    tracing::info!("debug key: {key}");
+                    cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx)).ok();
+                }
+                Err(err) => tracing::warn!("bad debug key {key:?}: {err}"),
+            }
+            cx.background_executor().timer(Duration::from_millis(250)).await;
+        }
+    })
+    .detach();
+}
+
+/// Stops what the signed-in session is doing on the server: playback, and a SyncPlay group.
+fn stop_activity(cx: &mut App) {
+    crate::playback::PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
+    if let Some(syncplay) = crate::syncplay::SyncPlay::try_global(cx).filter(|s| s.read(cx).group.is_some()) {
+        syncplay.update(cx, |syncplay, cx| syncplay.leave(cx));
     }
 }
 

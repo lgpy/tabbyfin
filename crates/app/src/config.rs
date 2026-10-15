@@ -12,8 +12,11 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     /// Generated once per install. Jellyfin ties sessions to it.
     pub device_id: String,
-    /// The server and user of the last successful sign-in.
+    /// The account restored at launch: the one used last, until it signs out.
     pub server: Option<SavedServer>,
+    /// Saved sign-ins, most recently used first. Their tokens are in the credential store.
+    #[serde(default)]
+    pub accounts: Vec<SavedServer>,
     /// Player volume in percent, remembered between sessions.
     #[serde(default)]
     pub volume: Option<f64>,
@@ -103,6 +106,10 @@ pub struct WindowGeometry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnfinishedPlayback {
+    /// The account that was playing ([`SavedServer::credential_account`]); only that one
+    /// reports the stop. Missing in configs from before multiple accounts.
+    #[serde(default)]
+    pub account: Option<String>,
     pub item_id: String,
     pub media_source_id: String,
     pub play_session_id: Option<String>,
@@ -117,19 +124,35 @@ pub struct LibraryView {
     pub filter: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A sign-in: a user on a server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedServer {
     pub url: String,
     pub server_id: String,
     pub user_id: String,
     pub username: String,
+    /// The server's name, to tell accounts apart. Missing in configs from before multiple
+    /// accounts.
+    #[serde(default)]
+    pub server_name: Option<String>,
 }
 
 impl SavedServer {
-    /// Key for this sign-in's token in the credential store.
+    /// Key for this sign-in's token in the credential store, and its identity.
     pub fn credential_account(&self) -> String {
-        format!("{}/{}", self.server_id, self.user_id)
+        account_key(&self.server_id, &self.user_id)
     }
+
+    /// "dev on jelly-gpui dev", or the address without a server name.
+    pub fn label(&self) -> String {
+        let server = self.server_name.clone().unwrap_or_else(|| self.url.clone());
+        format!("{} on {server}", self.username)
+    }
+}
+
+/// The identity of a user on a server, as [`SavedServer::credential_account`].
+pub fn account_key(server_id: &str, user_id: &str) -> String {
+    format!("{server_id}/{user_id}")
 }
 
 fn project_dirs() -> Option<ProjectDirs> {
@@ -179,6 +202,7 @@ impl Config {
             }),
             Err(_) => Config::default(),
         };
+        config.list_current_account();
         if config.device_id.is_empty() {
             config.device_id = uuid::Uuid::new_v4().simple().to_string();
             if let Err(err) = config.save() {
@@ -188,10 +212,88 @@ impl Config {
         config
     }
 
+    /// Configs from before multiple accounts have only the current one; it joins the list.
+    fn list_current_account(&mut self) {
+        if let Some(current) = self.server.clone()
+            && !self
+                .accounts
+                .iter()
+                .any(|a| a.credential_account() == current.credential_account())
+        {
+            self.accounts.insert(0, current);
+        }
+    }
+
+    /// Makes `account` the current one and the first in the list.
+    pub fn use_account(&mut self, account: SavedServer) {
+        self.accounts
+            .retain(|a| a.credential_account() != account.credential_account());
+        self.accounts.insert(0, account.clone());
+        self.server = Some(account);
+    }
+
+    /// Drops an account from the list, and as the current one.
+    pub fn forget_account(&mut self, key: &str) {
+        self.accounts.retain(|a| a.credential_account() != key);
+        if self.server.as_ref().is_some_and(|s| s.credential_account() == key) {
+            self.server = None;
+        }
+    }
+
     pub fn save(&self) -> anyhow::Result<()> {
         let path = path();
         std::fs::create_dir_all(dir()).context("creating config dir")?;
         let text = toml::to_string_pretty(self)?;
         std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Config, SavedServer};
+
+    fn account(server: &str, user: &str) -> SavedServer {
+        SavedServer {
+            url: format!("http://{server}"),
+            server_id: server.into(),
+            user_id: user.into(),
+            username: user.into(),
+            server_name: None,
+        }
+    }
+
+    #[test]
+    fn an_old_config_lists_its_account() {
+        let mut config = Config {
+            server: Some(account("s1", "u1")),
+            ..Default::default()
+        };
+        config.list_current_account();
+        config.list_current_account();
+        assert_eq!(config.accounts, [account("s1", "u1")]);
+    }
+
+    #[test]
+    fn the_account_used_last_comes_first() {
+        let mut config = Config::default();
+        config.use_account(account("s1", "u1"));
+        config.use_account(account("s2", "u2"));
+        config.use_account(account("s1", "u1"));
+        assert_eq!(config.accounts, [account("s1", "u1"), account("s2", "u2")]);
+        assert_eq!(config.server, Some(account("s1", "u1")));
+    }
+
+    #[test]
+    fn forgetting_the_current_account_leaves_none_current() {
+        let mut config = Config::default();
+        config.use_account(account("s2", "u2"));
+        config.use_account(account("s1", "u1"));
+        config.forget_account(&account("s1", "u1").credential_account());
+        assert_eq!(config.accounts, [account("s2", "u2")]);
+        assert_eq!(config.server, None);
+        // Forgetting another account keeps the current one.
+        config.use_account(account("s1", "u1"));
+        config.forget_account(&account("s2", "u2").credential_account());
+        assert_eq!(config.server, Some(account("s1", "u1")));
     }
 }

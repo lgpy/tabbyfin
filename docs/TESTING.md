@@ -238,3 +238,11 @@ Code-level and startup checks only so far: the development harness cannot send m
 ✅ With `JELLY_GPUI_UPDATE_URL` pointing at a local fake `v9.9.9` release: the notification showed "Version 9.9.9 is out (this is 0.1.0)" with Download, and the check time was saved.
 
 - ⬜ After the **first published release**: an older build shows the notice once a day; the current one doesn't; *Download* opens the release page; the setting turns it off.
+
+## 24. Several accounts (4.5)
+
+✅ With `dev` on 12.2 and `dev2` on 10.11 saved (tokens from a scratch config): the sign-in screen lists both; launching with `dev2` current restores it on 10.11; the account menu shows the current account, *Switch to*, *Add account…* and *Sign out*; switching restores the other account with a new websocket; *Add account* shows sign-in with *Back to your account*, which returns to the same session without reconnecting; signing out deletes and revokes the token and leaves `dev2` listed; an unfinished playback recorded for `dev` isn't reported by `dev2`. The menu, switch, add/cancel and sign-out were triggered through temporary test code, since the harness can't click and gpui-kit buttons don't take Enter or Space.
+
+- ⬜ **Clicking** through it all, including *Remove* on the sign-in screen and signing in to a new server while another account waits.
+- ⬜ **Windows and macOS keychains** with two accounts.
+- ⬜ Switching **during playback** and **in a SyncPlay group** (the group is left first).
