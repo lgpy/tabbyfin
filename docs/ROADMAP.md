@@ -1,6 +1,6 @@
 # jelly-gpui: Roadmap
 
-What's missing and what still needs work, as of 2026-10-14. Done items are marked ✅ and kept for context.
+What's missing and what still needs work, as of 2026-10-15. Done items are marked ✅ and kept for context.
 
 - `docs/PLAN.md` describes the architecture, and `docs/in-app-video.md` the video pipeline. This document only lists gaps.
 - **Priority:**
@@ -113,7 +113,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
 | 3.1 | **Keyboard navigation in grids and shelves** | P1 | M | ✅ Done: a shared cursor (`browse.rs`) on Home, libraries, search and item pages. Arrow keys move it, Tab jumps between sections and Enter opens. It's hidden until a key is pressed. Left: version and track pickers, the episode rows' watched toggle and Settings still need the mouse. |
-| 3.2 | **Sorting and filters in libraries** | P2 | M | ✅ Done: sort by name, date added, release date, rating, runtime or random (ascending/descending), show all, unwatched, watched, favorites or in progress; remembered per library. Not yet: genre, year and resolution filters. |
+| 3.2 | **Sorting and filters in libraries** | P2 | M | ✅ Done: sort by name, date added, release date, rating, runtime or random (ascending/descending), show all, unwatched, watched, favorites or in progress; remembered per library. Movie and show libraries also filter by genre and year (a single year, or a decade when the library has several years from it), from the values the server finds in the library (`/Items/Filters`), and movie libraries by resolution (4K, HD, SD, by video width). *Clear filters* resets them all. A remembered genre or year the library no longer has stays in its menu. Not yet: several genres at once, tags, official ratings. |
 | 3.3 | **Favorites** | P2 | S | ✅ Done: a Favorite button on item pages (also on the keyboard cursor), a Favorites shelf on Home, and a Favorites filter in libraries. |
 | 3.4 | **Cast and crew** | P2 | M | ✅ Done: a "Cast & crew" shelf on item pages (photo or initials, role or job) and person pages listing their movies and shows, with the library sort and filter. |
 | 3.5 | **Collections and playlists** | P2 | M | ✅ Done: item pages for both (collections list their movies by release date, playlists their entries in order), with *Play all* and *Shuffle* through a local play queue that the up-next card and autoplay follow (in a SyncPlay group it becomes the group's queue). Not yet: editing playlists (add, remove, reorder) and creating them. |

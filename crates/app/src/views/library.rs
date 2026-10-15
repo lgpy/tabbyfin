@@ -63,6 +63,24 @@ const FILTERS: [(&str, &str, Option<ItemFilter>); 5] = [
     ("in-progress", "In progress", Some(ItemFilter::IsResumable)),
 ];
 
+/// Resolution choices: config key, label, and video width bounds (4K from 3800 wide, HD from
+/// 1200, which 720p's 1280 clears). 12.2 goes by an item's widest version, 10.11 by its first.
+const RESOLUTIONS: [(&str, &str, Option<u32>, Option<u32>); 4] = [
+    ("any", "Any resolution", None, None),
+    ("4k", "4K", Some(3800), None),
+    ("hd", "HD", Some(1200), Some(3799)),
+    ("sd", "SD", None, Some(1199)),
+];
+
+/// Where the genre, year and resolution filters apply: movie and show libraries, whose items
+/// the server can list those values for.
+struct FilterScope {
+    parent_id: String,
+    item_types: Vec<BaseItemKind>,
+    /// Shows have no resolution of their own, so only movie libraries filter by it.
+    resolution: bool,
+}
+
 pub struct LibraryPage {
     client: Client,
     nav: Navigator,
@@ -82,25 +100,37 @@ pub struct LibraryPage {
     focus_handle: FocusHandle,
     sort: ChoiceSelect,
     filter: ChoiceSelect,
+    filter_scope: Option<FilterScope>,
+    /// The library's genre names and year keys, offered after the "any" choice at index 0.
+    genres: Vec<String>,
+    years: Vec<String>,
+    genre: ChoiceSelect,
+    year: ChoiceSelect,
+    resolution: ChoiceSelect,
     _subscriptions: Vec<Subscription>,
 }
 
 impl LibraryPage {
     pub fn new(client: Client, nav: Navigator, source: Source, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (view_key, base_query) = match source {
+        let (view_key, base_query, filter_scope) = match source {
             Source::Folder { id, collection_type } => {
                 let (include_item_types, recursive) = match collection_type {
                     Some(CollectionType::Movies) => (vec![BaseItemKind::Movie], true),
                     Some(CollectionType::TvShows) => (vec![BaseItemKind::Series], true),
                     _ => (Vec::new(), false),
                 };
+                let scope = recursive.then(|| FilterScope {
+                    parent_id: id.clone(),
+                    item_types: include_item_types.clone(),
+                    resolution: collection_type == Some(CollectionType::Movies),
+                });
                 let query = ItemsQuery {
                     parent_id: Some(id.clone()),
                     include_item_types,
                     recursive,
                     ..Default::default()
                 };
-                (id, query)
+                (id, query, scope)
             }
             Source::Person { id } => {
                 let query = ItemsQuery {
@@ -109,7 +139,7 @@ impl LibraryPage {
                     recursive: true,
                     ..Default::default()
                 };
-                ("person".to_owned(), query)
+                ("person".to_owned(), query, None)
             }
         };
         let base_query = ItemsQuery {
@@ -125,21 +155,25 @@ impl LibraryPage {
                 sort: SORTS[0].0.into(),
                 descending: SORTS[0].3,
                 filter: FILTERS[0].0.into(),
+                ..Default::default()
             });
         let select = |choices: Vec<(&str, &str)>, current: &str, window: &mut Window, cx: &mut Context<Self>| {
             let selected = choices.iter().position(|(key, _)| *key == current).unwrap_or(0);
-            let choices: Vec<Choice> = choices
-                .iter()
-                .enumerate()
-                .map(|(i, (_, label))| Choice {
-                    label: (*label).into(),
-                    value: i as i32,
-                })
-                .collect();
-            cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
+            choice_select(choices.iter().map(|(_, label)| *label), selected, window, cx)
         };
         let sort = select(SORTS.iter().map(|s| (s.0, s.1)).collect(), &view.sort, window, cx);
         let filter = select(FILTERS.iter().map(|f| (f.0, f.1)).collect(), &view.filter, window, cx);
+        let resolution = select(
+            RESOLUTIONS.iter().map(|r| (r.0, r.1)).collect(),
+            view.resolution.as_deref().unwrap_or_default(),
+            window,
+            cx,
+        );
+        // Until the library's own values arrive, the remembered ones are the only choices.
+        let genres: Vec<String> = view.genre.iter().cloned().collect();
+        let years: Vec<String> = view.year.iter().cloned().collect();
+        let genre = any_select("All genres", &genres, view.genre.as_ref(), window, cx);
+        let year = any_select("Any year", &years, view.year.as_ref(), window, cx);
         let mut this = Self {
             client,
             nav,
@@ -178,13 +212,105 @@ impl LibraryPage {
                         this.change_view(cx);
                     }
                 }),
+                cx.subscribe(&genre, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
+                    if let SelectEvent::Confirm(Some(i)) = event {
+                        let genre = chosen(&this.genres, *i);
+                        if this.view.genre != genre {
+                            this.view.genre = genre;
+                            this.change_view(cx);
+                        }
+                    }
+                }),
+                cx.subscribe(&year, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
+                    if let SelectEvent::Confirm(Some(i)) = event {
+                        let year = chosen(&this.years, *i);
+                        if this.view.year != year {
+                            this.view.year = year;
+                            this.change_view(cx);
+                        }
+                    }
+                }),
+                cx.subscribe(&resolution, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
+                    if let SelectEvent::Confirm(Some(i)) = event {
+                        let resolution = (*i > 0).then(|| RESOLUTIONS.get(*i as usize)).flatten();
+                        let resolution = resolution.map(|r| r.0.to_owned());
+                        if this.view.resolution != resolution {
+                            this.view.resolution = resolution;
+                            this.change_view(cx);
+                        }
+                    }
+                }),
             ],
             sort,
             filter,
+            filter_scope,
+            genres,
+            years,
+            genre,
+            year,
+            resolution,
         };
         this.apply_view();
         this.request_page(0, cx);
+        this.load_filter_values(window, cx);
         this
+    }
+
+    /// Fills the genre and year menus with the values found in the library. A remembered
+    /// choice the library no longer has stays in its menu, so what's applied is still shown.
+    fn load_filter_values(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(scope) = &self.filter_scope else {
+            return;
+        };
+        let (client, parent_id, item_types) = (self.client.clone(), scope.parent_id.clone(), scope.item_types.clone());
+        cx.spawn_in(window, async move |this, cx| {
+            let result = runtime::spawn(async move { client.item_filter_values(&parent_id, &item_types).await }).await;
+            let values = match result {
+                Ok(values) => values,
+                Err(err) => return tracing::warn!("couldn't load the library's genres and years: {err}"),
+            };
+            this.update_in(cx, |this, window, cx| {
+                let mut genres = values.genres;
+                if let Some(genre) = &this.view.genre
+                    && !genres.contains(genre)
+                {
+                    genres.push(genre.clone());
+                    genres.sort_by_key(|genre| genre.to_lowercase());
+                }
+                let mut years = year_choices(&values.years);
+                if let Some(year) = &this.view.year
+                    && !years.contains(year)
+                {
+                    years.push(year.clone());
+                }
+                let labels = |any: &'static str, values: &[String]| {
+                    choices(std::iter::once(any.into()).chain(values.iter().map(|v| v.clone().into())))
+                };
+                let selected = |values: &[String], current: Option<&String>| {
+                    let index = current.and_then(|c| values.iter().position(|v| v == c));
+                    Some(IndexPath::default().row(index.map_or(0, |i| i + 1)))
+                };
+                let (genre_choices, genre_index) = (
+                    labels("All genres", &genres),
+                    selected(&genres, this.view.genre.as_ref()),
+                );
+                this.genre.update(cx, |select, cx| {
+                    select.set_items(genre_choices, window, cx);
+                    select.set_selected_index(genre_index, window, cx);
+                });
+                let (year_choices, year_index) =
+                    (labels("Any year", &years), selected(&years, this.view.year.as_ref()));
+                this.year.update(cx, |select, cx| {
+                    select.set_items(year_choices, window, cx);
+                    select.set_selected_index(year_index, window, cx);
+                });
+                this.genres = genres;
+                this.years = years;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Puts the sort and filter into the query.
@@ -199,6 +325,35 @@ impl LibraryPage {
         });
         let filter = FILTERS.iter().find(|f| f.0 == self.view.filter).unwrap_or(&FILTERS[0]);
         self.base_query.filters = filter.2.into_iter().collect();
+        let Some(scope) = &self.filter_scope else {
+            return;
+        };
+        self.base_query.genres = self.view.genre.iter().cloned().collect();
+        self.base_query.years = self.view.year.as_deref().map(years_of).unwrap_or_default();
+        let resolution = RESOLUTIONS
+            .iter()
+            .find(|r| scope.resolution && self.view.resolution.as_deref() == Some(r.0))
+            .unwrap_or(&RESOLUTIONS[0]);
+        (self.base_query.min_width, self.base_query.max_width) = (resolution.2, resolution.3);
+    }
+
+    /// Whether anything is filtered out (the sort aside).
+    fn filtered(&self) -> bool {
+        self.view.filter != FILTERS[0].0
+            || self.view.genre.is_some()
+            || self.view.year.is_some()
+            || self.view.resolution.is_some()
+    }
+
+    fn clear_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.view.filter = FILTERS[0].0.into();
+        (self.view.genre, self.view.year, self.view.resolution) = (None, None, None);
+        for select in [&self.filter, &self.genre, &self.year, &self.resolution] {
+            select.update(cx, |select, cx| {
+                select.set_selected_index(Some(IndexPath::default()), window, cx)
+            });
+        }
+        self.change_view(cx);
     }
 
     /// The sort or filter changed: remember it and load the grid again from the top.
@@ -419,6 +574,70 @@ impl LibraryPage {
     }
 }
 
+fn choices(labels: impl IntoIterator<Item = SharedString>) -> Vec<Choice> {
+    labels
+        .into_iter()
+        .enumerate()
+        .map(|(i, label)| Choice { label, value: i as i32 })
+        .collect()
+}
+
+fn choice_select(
+    labels: impl IntoIterator<Item = impl Into<SharedString>>,
+    selected: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> ChoiceSelect {
+    let choices = choices(labels.into_iter().map(Into::into));
+    cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
+}
+
+/// A menu of "any" followed by `values`, with `current` selected.
+fn any_select(
+    any: &'static str,
+    values: &[String],
+    current: Option<&String>,
+    window: &mut Window,
+    cx: &mut App,
+) -> ChoiceSelect {
+    let selected = current
+        .and_then(|c| values.iter().position(|v| v == c))
+        .map_or(0, |i| i + 1);
+    let labels = std::iter::once(SharedString::from(any)).chain(values.iter().map(|v| v.clone().into()));
+    choice_select(labels, selected, window, cx)
+}
+
+/// The value picked from an "any, then `values`" menu; `None` for "any".
+fn chosen(values: &[String], index: i32) -> Option<String> {
+    usize::try_from(index - 1).ok().and_then(|i| values.get(i)).cloned()
+}
+
+/// Year menu keys, newest first: each year, preceded by its decade ("2020s") when the library
+/// has more than one year from it.
+fn year_choices(years: &[i32]) -> Vec<String> {
+    let mut years = years.to_vec();
+    years.sort_unstable_by(|a, b| b.cmp(a));
+    years.dedup();
+    let decade = |year: i32| year - year.rem_euclid(10);
+    let mut keys = Vec::new();
+    for (i, &year) in years.iter().enumerate() {
+        let starts_decade = i == 0 || decade(years[i - 1]) != decade(year);
+        if starts_decade && years.iter().filter(|&&y| decade(y) == decade(year)).count() > 1 {
+            keys.push(format!("{}s", decade(year)));
+        }
+        keys.push(year.to_string());
+    }
+    keys
+}
+
+/// The years a year menu key covers.
+fn years_of(key: &str) -> Vec<i32> {
+    match key.strip_suffix('s').and_then(|decade| decade.parse::<i32>().ok()) {
+        Some(decade) => (decade..decade + 10).collect(),
+        None => key.parse().ok().into_iter().collect(),
+    }
+}
+
 /// Where a letter of the jump bar scrolls to.
 #[derive(Debug, PartialEq)]
 enum Jump {
@@ -475,6 +694,7 @@ impl Render for LibraryPage {
             .px(px(GRID_PADDING))
             .pt_4()
             .gap_2()
+            .flex_wrap()
             .text_sm()
             .child(div().text_color(cx.theme().muted_foreground).child("Sort"))
             .child(div().w(px(160.)).child(Select::new(&self.sort).small()))
@@ -499,6 +719,26 @@ impl Render for LibraryPage {
             .child(div().w_4())
             .child(div().text_color(cx.theme().muted_foreground).child("Show"))
             .child(div().w(px(140.)).child(Select::new(&self.filter).small()))
+            .when_some(self.filter_scope.as_ref(), |el, scope| {
+                el.when(!self.genres.is_empty(), |el| {
+                    el.child(div().w(px(160.)).child(Select::new(&self.genre).small()))
+                })
+                .when(!self.years.is_empty(), |el| {
+                    el.child(div().w(px(120.)).child(Select::new(&self.year).small()))
+                })
+                .when(scope.resolution, |el| {
+                    el.child(div().w(px(150.)).child(Select::new(&self.resolution).small()))
+                })
+            })
+            .when(self.filtered(), |el| {
+                el.child(
+                    Button::new("clear-filters")
+                        .ghost()
+                        .small()
+                        .label("Clear filters")
+                        .on_click(cx.listener(|this, _, window, cx| this.clear_filters(window, cx))),
+                )
+            })
             .child(div().flex_1())
             .children(
                 self.total
@@ -529,10 +769,10 @@ impl LibraryPage {
             };
         };
         if total == 0 {
-            let message = if self.view.filter == FILTERS[0].0 {
-                "Nothing here yet."
+            let message = if self.filtered() {
+                "Nothing matches these filters."
             } else {
-                "Nothing matches this filter."
+                "Nothing here yet."
             };
             return centered_message(message, cx).into_any_element();
         }
@@ -559,7 +799,7 @@ impl LibraryPage {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jump, jump_target};
+    use super::{Jump, chosen, jump_target, year_choices, years_of};
 
     #[test]
     fn letters_jump_past_the_names_before_them() {
@@ -568,5 +808,25 @@ mod tests {
         assert_eq!(jump_target('#', true), Jump::Bottom);
         assert_eq!(jump_target('M', true), Jump::After('N'));
         assert_eq!(jump_target('Z', true), Jump::Top);
+    }
+
+    #[test]
+    fn years_are_grouped_under_decades_with_more_than_one() {
+        assert_eq!(
+            year_choices(&[2024, 1999, 2025, 2024]),
+            ["2020s", "2025", "2024", "1999"]
+        );
+        assert_eq!(year_choices(&[]), Vec::<String>::new());
+        assert_eq!(years_of("2020s"), (2020..2030).collect::<Vec<_>>());
+        assert_eq!(years_of("1999"), [1999]);
+        assert_eq!(years_of("nonsense"), Vec::<i32>::new());
+    }
+
+    #[test]
+    fn the_first_choice_is_any() {
+        let values = ["Comedy".to_owned(), "Drama".to_owned()];
+        assert_eq!(chosen(&values, 0), None);
+        assert_eq!(chosen(&values, 2).as_deref(), Some("Drama"));
+        assert_eq!(chosen(&values, 3), None);
     }
 }

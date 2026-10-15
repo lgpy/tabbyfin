@@ -122,6 +122,14 @@ pub struct LibraryView {
     pub sort: String,
     pub descending: bool,
     pub filter: String,
+    /// A genre name; `None` shows every genre.
+    #[serde(default)]
+    pub genre: Option<String>,
+    /// A year ("2024") or a decade ("2020s"); `None` shows every year.
+    #[serde(default)]
+    pub year: Option<String>,
+    #[serde(default)]
+    pub resolution: Option<String>,
 }
 
 /// A sign-in: a user on a server.

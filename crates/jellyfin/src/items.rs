@@ -1,6 +1,7 @@
 use crate::client::Query;
 use crate::models::{
-    BaseItemDto, BaseItemKind, ItemField, ItemFilter, ItemSortBy, MediaSegmentDto, QueryResult, wire_list,
+    BaseItemDto, BaseItemKind, ItemField, ItemFilter, ItemFilterValues, ItemSortBy, MediaSegmentDto, QueryResult,
+    wire_list,
 };
 use crate::{Client, Error, Result};
 
@@ -32,6 +33,15 @@ pub struct ItemsQuery {
     /// Items a person appears in.
     pub person_ids: Vec<String>,
     pub filters: Vec<ItemFilter>,
+    /// Items with any of these genres (by name).
+    pub genres: Vec<String>,
+    /// Items released in any of these years.
+    pub years: Vec<i32>,
+    /// Video width bounds, for resolution filters. The server's own `isHd` and `is4K` filters
+    /// aren't usable: `is4K=false` matches nothing on 10.11 and 12.2, and 12.2's `isHd` returns
+    /// the hidden items of alternate versions too.
+    pub min_width: Option<u32>,
+    pub max_width: Option<u32>,
     pub search_term: Option<String>,
     /// Items whose sort name comes before this, ignoring case (used to count them).
     pub name_less_than: Option<String>,
@@ -58,6 +68,9 @@ impl ItemsQuery {
             .list("ids", &self.ids)
             .list("personIds", &self.person_ids)
             .list("filters", &wire_list(&self.filters, ItemFilter::as_str))
+            .list("years", &self.years.iter().map(i32::to_string).collect::<Vec<_>>())
+            .opt("minWidth", self.min_width)
+            .opt("maxWidth", self.max_width)
             .opt("searchTerm", self.search_term.as_ref())
             .opt("nameLessThan", self.name_less_than.as_ref())
             .list("sortBy", &wire_list(&self.sort_by, ItemSortBy::as_str))
@@ -65,6 +78,10 @@ impl ItemsQuery {
             .list("fields", &wire_list(&self.fields, ItemField::as_str))
             .opt("startIndex", self.start_index)
             .opt("limit", self.limit);
+        // Genre names may contain commas, so this list is the one the server splits on `|`.
+        if !self.genres.is_empty() {
+            q.push("genres", self.genres.join("|"));
+        }
         q
     }
 }
@@ -83,6 +100,18 @@ impl Client {
 
     pub async fn items(&self, query: &ItemsQuery) -> Result<QueryResult<BaseItemDto>> {
         self.get("/Items", &query.to_query()).await
+    }
+
+    /// The genres and years among the items of a library (or folder) of the given types.
+    pub async fn item_filter_values(
+        &self,
+        parent_id: &str,
+        include_item_types: &[BaseItemKind],
+    ) -> Result<ItemFilterValues> {
+        let mut q = Query::new();
+        q.push("parentId", parent_id)
+            .list("includeItemTypes", &wire_list(include_item_types, BaseItemKind::as_str));
+        self.get("/Items/Filters", &q).await
     }
 
     /// One item with the user's data. Request [`ItemField::MediaSources`] for versions/tracks.
@@ -204,5 +233,26 @@ impl Client {
 
     pub async fn unmark_favorite(&self, item_id: &str) -> Result<()> {
         self.delete(&format!("/UserFavoriteItems/{item_id}")).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ItemsQuery;
+
+    #[test]
+    fn genres_are_split_on_pipes_and_years_on_commas() {
+        let query = ItemsQuery {
+            genres: vec!["Action, Adventure".into(), "Drama".into()],
+            years: vec![2024, 2025],
+            max_width: Some(1199),
+            ..Default::default()
+        };
+        let params = query.to_query().0;
+        let get = |key| params.iter().find(|(k, _)| *k == key).map(|(_, v)| v.as_str());
+        assert_eq!(get("genres"), Some("Action, Adventure|Drama"));
+        assert_eq!(get("years"), Some("2024,2025"));
+        assert_eq!(get("maxWidth"), Some("1199"));
+        assert_eq!(get("minWidth"), None);
     }
 }
