@@ -275,6 +275,11 @@ impl Render for SettingsPage {
                                 cx,
                             )),
                     )
+                    .child(section("Home", cx).child(hint(
+                        "The order of the sections and which libraries show follow your Jellyfin settings \
+                         (Settings → Home in the web client).",
+                        cx,
+                    )))
                     .child(
                         section("Subtitles", cx)
                             .child(labeled("Colour", &self.subtitle_color))

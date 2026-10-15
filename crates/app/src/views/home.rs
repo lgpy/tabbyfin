@@ -1,4 +1,7 @@
-//! Home: libraries, Continue Watching, Next Up, Favorites, and Latest per library.
+//! Home: libraries, Continue Watching, Next Up, Favorites, and Latest per library, in the order
+//! and with the libraries the user set in the web client's Settings → Home.
+
+use std::collections::HashMap;
 
 use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::*;
@@ -15,7 +18,53 @@ use crate::runtime;
 const SHELF_LIMIT: u32 = 24;
 const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
 
+/// The Home sections of the web client's Settings → Home that this app has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HomeSection {
+    MyMedia,
+    Resume,
+    NextUp,
+    Latest,
+}
+
+/// The web client's section for each of its ten Home slots when the user hasn't picked one.
+const DEFAULT_SECTIONS: [&str; 10] = [
+    "smalllibrarytiles",
+    "resume",
+    "resumeaudio",
+    "resumebook",
+    "livetv",
+    "nextup",
+    "latestmedia",
+    "none",
+    "none",
+    "none",
+];
+
+/// The sections in the user's order, from the web client's `homesection0`…`homesection9`
+/// preferences. Sections this app doesn't have (music, books, live TV) are skipped.
+fn home_sections(prefs: &HashMap<String, String>) -> Vec<HomeSection> {
+    let mut sections = Vec::new();
+    for (slot, default) in DEFAULT_SECTIONS.iter().enumerate() {
+        let value = prefs
+            .get(&format!("homesection{slot}"))
+            .map_or(*default, String::as_str);
+        let section = match value {
+            "smalllibrarytiles" | "librarybuttons" => HomeSection::MyMedia,
+            "resume" => HomeSection::Resume,
+            "nextup" => HomeSection::NextUp,
+            "latestmedia" => HomeSection::Latest,
+            _ => continue,
+        };
+        if !sections.contains(&section) {
+            sections.push(section);
+        }
+    }
+    sections
+}
+
 struct HomeData {
+    sections: Vec<HomeSection>,
     views: Vec<BaseItemDto>,
     resume: Vec<BaseItemDto>,
     next_up: Vec<BaseItemDto>,
@@ -85,18 +134,38 @@ async fn load(client: Client) -> jellyfin::Result<HomeData> {
         limit: Some(SHELF_LIMIT),
         ..Default::default()
     };
-    let (views, resume, next_up, favorites) = tokio::try_join!(
+    // The user's Home settings are a nicety: without them, Home uses the defaults.
+    let settings = async {
+        let (user, prefs) = tokio::join!(
+            client.current_user(),
+            client.display_preferences("usersettings", "emby")
+        );
+        let latest_excludes = user
+            .inspect_err(|err| tracing::warn!("couldn't read the user's settings: {err}"))
+            .ok()
+            .and_then(|user| user.configuration)
+            .unwrap_or_default()
+            .latest_items_excludes;
+        let prefs = prefs
+            .inspect_err(|err| tracing::warn!("couldn't read the Home settings: {err}"))
+            .unwrap_or_default()
+            .custom_prefs;
+        Ok((home_sections(&prefs), latest_excludes))
+    };
+    let (views, resume, next_up, favorites, (sections, latest_excludes)) = tokio::try_join!(
         client.user_views(),
         client.resume(SHELF_LIMIT, FIELDS),
         client.next_up(SHELF_LIMIT, FIELDS),
         client.items(&favorites),
+        settings,
     )?;
     let mut latest = Vec::new();
     for view in &views.items {
         if matches!(
             view.collection_type,
             Some(CollectionType::Movies | CollectionType::TvShows)
-        ) {
+        ) && !latest_excludes.contains(&view.id)
+        {
             let items = client.latest(&view.id, SHELF_LIMIT, FIELDS).await?;
             if !items.is_empty() {
                 latest.push((view.clone(), items));
@@ -104,6 +173,7 @@ async fn load(client: Client) -> jellyfin::Result<HomeData> {
         }
     }
     Ok(HomeData {
+        sections,
         views: views.items,
         resume: resume.items,
         next_up: next_up.items,
@@ -120,35 +190,38 @@ struct Shelf<'a> {
     landscape: bool,
 }
 
+/// The shelves in the user's section order. Favorites, which the web client has no section
+/// for, comes just before the Latest shelves, or last without them.
 fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
-    let fixed = [
-        ("views", "My Media", &data.views),
-        ("resume", "Continue Watching", &data.resume),
-        ("next-up", "Next Up", &data.next_up),
-    ];
-    let fixed = fixed.into_iter().map(|(id, title, items)| Shelf {
+    let row = |id: &'static str, title: &'static str, items, landscape| Shelf {
         id: id.into(),
         title: title.into(),
         items,
-        landscape: true,
-    });
-    let favorites = std::iter::once(Shelf {
-        id: "favorites".into(),
-        title: "Favorites".into(),
-        items: &data.favorites,
-        landscape: false,
-    });
-    let latest = data.latest.iter().enumerate().map(|(i, (view, items))| Shelf {
-        id: ("latest", i).into(),
-        title: format!("Latest {}", view.name).into(),
-        items,
-        landscape: false,
-    });
-    fixed
-        .chain(favorites)
-        .chain(latest)
-        .filter(|shelf| !shelf.items.is_empty())
-        .collect()
+        landscape,
+    };
+    let favorites = || row("favorites", "Favorites", &data.favorites, false);
+    let mut shelves = Vec::new();
+    for section in &data.sections {
+        match section {
+            HomeSection::MyMedia => shelves.push(row("views", "My Media", &data.views, true)),
+            HomeSection::Resume => shelves.push(row("resume", "Continue Watching", &data.resume, true)),
+            HomeSection::NextUp => shelves.push(row("next-up", "Next Up", &data.next_up, true)),
+            HomeSection::Latest => {
+                shelves.push(favorites());
+                shelves.extend(data.latest.iter().enumerate().map(|(i, (view, items))| Shelf {
+                    id: ("latest", i).into(),
+                    title: format!("Latest {}", view.name).into(),
+                    items,
+                    landscape: false,
+                }));
+            }
+        }
+    }
+    if !data.sections.contains(&HomeSection::Latest) {
+        shelves.push(favorites());
+    }
+    shelves.retain(|shelf| !shelf.items.is_empty());
+    shelves
 }
 
 impl HomePage {
@@ -258,5 +331,44 @@ impl Render for HomePage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = self.render_content(cx);
         on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(content)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{HomeSection, home_sections};
+
+    #[test]
+    fn default_home_sections() {
+        let sections = home_sections(&HashMap::new());
+        assert_eq!(
+            sections,
+            [
+                HomeSection::MyMedia,
+                HomeSection::Resume,
+                HomeSection::NextUp,
+                HomeSection::Latest
+            ]
+        );
+    }
+
+    #[test]
+    fn the_users_order_with_hidden_and_unknown_sections() {
+        let prefs: HashMap<String, String> = [
+            ("homesection0", "nextup"),
+            ("homesection1", "livetv"),
+            ("homesection2", "librarybuttons"),
+            ("homesection3", "none"),
+            ("homesection4", "nextup"),
+            ("homesection5", "none"),
+            ("homesection6", "none"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        // Slots 7–9 default to none: no Continue Watching and no Latest.
+        assert_eq!(home_sections(&prefs), [HomeSection::NextUp, HomeSection::MyMedia]);
     }
 }

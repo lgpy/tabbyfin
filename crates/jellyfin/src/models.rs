@@ -34,6 +34,28 @@ pub struct UserDto {
     pub name: String,
     pub server_id: Option<String>,
     pub primary_image_tag: Option<String>,
+    #[serde(default)]
+    pub configuration: Option<UserConfiguration>,
+}
+
+/// The user's preferences kept by the server (the web client's Settings → Home and Display).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UserConfiguration {
+    /// Library ids left out of "My Media". `/UserViews` already leaves them out.
+    #[serde(default, deserialize_with = "nullable")]
+    pub my_media_excludes: Vec<String>,
+    /// Library ids without a "Latest" row on Home.
+    #[serde(default, deserialize_with = "nullable")]
+    pub latest_items_excludes: Vec<String>,
+}
+
+/// A client's stored display preferences. Only the free-form `CustomPrefs` are used.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DisplayPreferences {
+    #[serde(default, deserialize_with = "map_skip_nulls")]
+    pub custom_prefs: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

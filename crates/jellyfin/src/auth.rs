@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 use crate::client::Query;
-use crate::models::{AuthenticationResult, QuickConnectResult, UserDto};
+use crate::models::{AuthenticationResult, DisplayPreferences, QuickConnectResult, UserDto};
 use crate::{Client, Result};
 
 impl Client {
@@ -51,6 +51,14 @@ impl Client {
 
     pub async fn current_user(&self) -> Result<UserDto> {
         self.get("/Users/Me", &Query::new()).await
+    }
+
+    /// Display preferences another client stored on the server, e.g. `("usersettings",
+    /// "emby")` for the web client's Settings → Home.
+    pub async fn display_preferences(&self, id: &str, client: &str) -> Result<DisplayPreferences> {
+        let mut q = Query::new();
+        q.push("client", client);
+        self.get(&format!("/DisplayPreferences/{id}"), &q).await
     }
 
     /// Ends the session and revokes this client's token.

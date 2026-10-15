@@ -218,3 +218,10 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 - ⬜ A **large library**: clicking letters lands on the first item with that letter, ascending and descending, and with a filter (Unwatched…).
 - ⬜ Names with **articles** ("The …"), accents and digits land where the grid sorts them (the server's sort name).
+
+## 21. Home settings (3.8)
+
+✅ Against 12.2, with Next Up, Continue Watching, My Media and Latest set in that order, Collections hidden from My Media and Shows left out of Latest (stored through the API the way the web client does): Home showed Continue Watching (Next Up was empty), My Media without Collections, Favorites, then Latest Movies and no Latest Shows.
+
+- ⬜ Changing **Settings → Home** in the web client, then reloading Home here (a restart, or anything that refreshes Home).
+- ⬜ **10.11**: the same preferences.
