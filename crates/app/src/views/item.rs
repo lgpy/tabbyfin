@@ -1120,7 +1120,6 @@ impl ItemPage {
                     .gap_4()
                     .p_2()
                     .rounded_lg()
-                    .cursor_pointer()
                     .hover(|style| style.bg(cx.theme().muted))
                     .when(selected, |el| el.bg(cx.theme().muted))
                     .on_click(move |_, window, cx| nav.open(&target, window, cx))

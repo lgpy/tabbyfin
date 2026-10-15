@@ -210,3 +210,56 @@ mod tests {
         assert_eq!(parse_kde_font_size("[General]\nfont=Inter,10.5,-1,5\n"), Some(10.5));
     }
 }
+
+/// Colours over the video. The player stays dark whatever the theme, since its controls sit on
+/// the picture; these are its tokens, so views don't scatter black and white literals.
+pub mod over_video {
+    use gpui_kit::{Hsla, black, white};
+
+    /// Behind the picture, and its letterbox bars.
+    pub fn backdrop() -> Hsla {
+        black()
+    }
+
+    /// Where the top bar's gradient starts (it fades to [`clear`]).
+    pub fn scrim() -> Hsla {
+        black().opacity(0.7)
+    }
+
+    /// Where the control bar's gradient starts, a little darker for the seek bar's sake.
+    pub fn scrim_strong() -> Hsla {
+        black().opacity(0.8)
+    }
+
+    pub fn clear() -> Hsla {
+        black().opacity(0.)
+    }
+
+    /// Cards and labels floating on the picture: the up-next card, the seek preview's time.
+    pub fn surface() -> Hsla {
+        black().opacity(0.8)
+    }
+
+    /// Small labels in the bars (Transcoding, the speed).
+    pub fn surface_subtle() -> Hsla {
+        black().opacity(0.5)
+    }
+
+    pub fn foreground() -> Hsla {
+        white()
+    }
+
+    pub fn muted_foreground() -> Hsla {
+        white().opacity(0.7)
+    }
+
+    /// Chapter marks on the seek bar and the preview's outline.
+    pub fn mark() -> Hsla {
+        white().opacity(0.6)
+    }
+
+    /// Behind a card's progress bar, over its image.
+    pub fn track() -> Hsla {
+        black().opacity(0.6)
+    }
+}
