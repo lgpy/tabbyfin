@@ -1,4 +1,4 @@
-//! Settings: appearance, playback, image cache, logs and account info.
+//! Settings: appearance, playback, subtitles, image cache, logs and account info.
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::notification::Notification;
@@ -7,8 +7,9 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::*;
 
-use crate::config::{self, Config, ThemePreference};
+use crate::config::{self, Config, SubtitleColor, SubtitleStyle, ThemePreference};
 use crate::images::ImageCache;
+use crate::playback::PlaybackManager;
 use crate::session::Session;
 use crate::theme;
 use crate::tracks::{Choice, ChoiceSelect};
@@ -20,6 +21,15 @@ const THEMES: [(ThemePreference, &str); 3] = [
     (ThemePreference::Dark, "Dark"),
 ];
 
+const SUBTITLE_COLORS: [(SubtitleColor, &str); 2] =
+    [(SubtitleColor::White, "White"), (SubtitleColor::Yellow, "Yellow")];
+
+const SUBTITLE_STYLES: [(SubtitleStyle, &str); 2] =
+    [(SubtitleStyle::Outline, "Outline"), (SubtitleStyle::Box, "Dark box")];
+
+/// Subtitle sizes offered here; the player's menu sets any size in 10 % steps.
+const SUBTITLE_SCALES: [f64; 6] = [0.75, 1., 1.25, 1.5, 1.75, 2.];
+
 /// Max streaming bitrate choices in Mbit/s; 0 is no limit.
 const BITRATES_MBPS: [i32; 10] = [0, 120, 60, 40, 20, 10, 8, 4, 2, 1];
 
@@ -27,6 +37,9 @@ pub struct SettingsPage {
     session: Session,
     scroll: ScrollHandle,
     theme: ChoiceSelect,
+    subtitle_color: ChoiceSelect,
+    subtitle_style: ChoiceSelect,
+    subtitle_size: ChoiceSelect,
     bitrate: ChoiceSelect,
     autoplay: bool,
     auto_skip: bool,
@@ -38,57 +51,63 @@ impl SettingsPage {
         let config = Config::load();
         let autoplay = config.autoplay_next_episode.unwrap_or(true);
         let auto_skip = config.auto_skip_intro.unwrap_or(false);
-        let current = config.max_streaming_bitrate.map_or(0, |bps| (bps / 1_000_000) as i32);
-        let choices: Vec<Choice> = BITRATES_MBPS
+        let mut subscriptions = Vec::new();
+
+        let theme = options_select(&THEMES, &config.theme, window, cx);
+        subscriptions.push(on_pick(&theme, &THEMES, window, cx, |preference, window, cx| {
+            save(|config| config.theme = preference);
+            theme::apply(preference, Some(window), cx);
+        }));
+
+        let subtitle_color = options_select(&SUBTITLE_COLORS, &config.subtitle_color.unwrap_or_default(), window, cx);
+        subscriptions.push(on_pick(&subtitle_color, &SUBTITLE_COLORS, window, cx, |color, _, _| {
+            save(|config| config.subtitle_color = Some(color));
+        }));
+        let subtitle_style = options_select(&SUBTITLE_STYLES, &config.subtitle_style.unwrap_or_default(), window, cx);
+        subscriptions.push(on_pick(&subtitle_style, &SUBTITLE_STYLES, window, cx, |style, _, _| {
+            save(|config| config.subtitle_style = Some(style));
+        }));
+        // A size set in the player that isn't one of the steps here is listed too.
+        let current_scale = config.subtitle_scale.unwrap_or(1.);
+        let mut scales = SUBTITLE_SCALES.to_vec();
+        if !scales.contains(&current_scale) {
+            scales.push(current_scale);
+            scales.sort_by(f64::total_cmp);
+        }
+        let scales: Vec<(f64, String)> = scales
+            .into_iter()
+            .map(|scale| (scale, format!("{:.0} %", scale * 100.)))
+            .collect();
+        let subtitle_size = options_select(&scales, &current_scale, window, cx);
+        subscriptions.push(on_pick(&subtitle_size, &scales, window, cx, |scale, _, cx| {
+            save(|config| config.subtitle_scale = Some(scale).filter(|&scale| scale != 1.));
+            PlaybackManager::global(cx).update(cx, |playback, _| playback.set_subtitle_scale(scale));
+        }));
+
+        let bitrates: Vec<(i32, String)> = BITRATES_MBPS
             .iter()
-            .map(|&mbps| Choice {
-                label: match mbps {
-                    0 => "No limit".into(),
-                    mbps => format!("{mbps} Mbit/s").into(),
-                },
-                value: mbps,
+            .map(|&mbps| match mbps {
+                0 => (mbps, "No limit".to_string()),
+                mbps => (mbps, format!("{mbps} Mbit/s")),
             })
             .collect();
-        let selected = BITRATES_MBPS.iter().position(|&m| m == current).unwrap_or(0);
-        let bitrate = cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx));
-        let themes: Vec<Choice> = THEMES
-            .iter()
-            .enumerate()
-            .map(|(i, (_, label))| Choice {
-                label: (*label).into(),
-                value: i as i32,
-            })
-            .collect();
-        let current_theme = THEMES.iter().position(|(t, _)| *t == config.theme).unwrap_or(0);
-        let theme = cx.new(|cx| SelectState::new(themes, Some(IndexPath::default().row(current_theme)), window, cx));
-        let theme_changed = cx.subscribe_in(&theme, window, |_, _, event: &SelectEvent<Vec<Choice>>, window, cx| {
-            if let SelectEvent::Confirm(Some(i)) = event
-                && let Some((preference, _)) = THEMES.get(*i as usize)
-            {
-                save(|config| config.theme = *preference);
-                theme::apply(*preference, Some(window), cx);
-            }
-        });
-        let _subscriptions = vec![
-            theme_changed,
-            cx.subscribe(&bitrate, |_, _, event: &SelectEvent<Vec<Choice>>, _| {
-                if let SelectEvent::Confirm(Some(mbps)) = event {
-                    let mut config = Config::load();
-                    config.max_streaming_bitrate = (*mbps > 0).then(|| *mbps as u64 * 1_000_000);
-                    if let Err(err) = config.save() {
-                        tracing::warn!("failed to save config: {err:#}");
-                    }
-                }
-            }),
-        ];
+        let current_bitrate = config.max_streaming_bitrate.map_or(0, |bps| (bps / 1_000_000) as i32);
+        let bitrate = options_select(&bitrates, &current_bitrate, window, cx);
+        subscriptions.push(on_pick(&bitrate, &bitrates, window, cx, |mbps, _, _| {
+            save(|config| config.max_streaming_bitrate = (mbps > 0).then(|| mbps as u64 * 1_000_000));
+        }));
+
         Self {
             session,
             scroll: ScrollHandle::new(),
             theme,
+            subtitle_color,
+            subtitle_style,
+            subtitle_size,
             bitrate,
             autoplay,
             auto_skip,
-            _subscriptions,
+            _subscriptions: subscriptions,
         }
     }
 
@@ -129,6 +148,48 @@ impl SettingsPage {
     }
 }
 
+/// A picker over `options`, starting at `current` (or the first). Its values are indexes
+/// into `options`.
+fn options_select<T: PartialEq>(
+    options: &[(T, impl AsRef<str>)],
+    current: &T,
+    window: &mut Window,
+    cx: &mut App,
+) -> ChoiceSelect {
+    let choices: Vec<Choice> = options
+        .iter()
+        .enumerate()
+        .map(|(i, (_, label))| Choice {
+            label: label.as_ref().to_owned().into(),
+            value: i as i32,
+        })
+        .collect();
+    let selected = options.iter().position(|(value, _)| value == current).unwrap_or(0);
+    cx.new(|cx| SelectState::new(choices, Some(IndexPath::default().row(selected)), window, cx))
+}
+
+/// Calls `picked` with the option chosen in a picker made by [`options_select`].
+fn on_pick<T: Copy + 'static>(
+    select: &ChoiceSelect,
+    options: &[(T, impl AsRef<str>)],
+    window: &mut Window,
+    cx: &mut Context<SettingsPage>,
+    picked: impl Fn(T, &mut Window, &mut App) + 'static,
+) -> Subscription {
+    let values: Vec<T> = options.iter().map(|(value, _)| *value).collect();
+    cx.subscribe_in(
+        select,
+        window,
+        move |_, _, event: &SelectEvent<Vec<Choice>>, window, cx| {
+            if let SelectEvent::Confirm(Some(i)) = event
+                && let Some(value) = values.get(*i as usize)
+            {
+                picked(*value, window, cx);
+            }
+        },
+    )
+}
+
 fn save(change: impl FnOnce(&mut Config)) {
     let mut config = Config::load();
     change(&mut config);
@@ -145,6 +206,14 @@ fn section(title: &'static str, cx: &App) -> Div {
             .text_color(cx.theme().foreground)
             .child(title),
     )
+}
+
+/// A picker with its label, in a settings row.
+fn labeled(label: &'static str, select: &ChoiceSelect) -> Div {
+    h_flex()
+        .gap_4()
+        .child(div().w(px(170.)).flex_none().text_sm().child(label))
+        .child(Select::new(select).w(px(180.)))
 }
 
 fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
@@ -175,14 +244,7 @@ impl Render for SettingsPage {
                     .p_6()
                     .gap_8()
                     .max_w(px(720.))
-                    .child(
-                        section("Appearance", cx).child(
-                            h_flex()
-                                .gap_4()
-                                .child(div().text_sm().child("Theme"))
-                                .child(Select::new(&self.theme).w(px(180.))),
-                        ),
-                    )
+                    .child(section("Appearance", cx).child(labeled("Theme", &self.theme)))
                     .child(
                         section("Playback", cx)
                             .child(
@@ -206,15 +268,22 @@ impl Render for SettingsPage {
                                  the web client), as does whether subtitles show by default.",
                                 cx,
                             ))
-                            .child(
-                                h_flex()
-                                    .gap_4()
-                                    .child(div().text_sm().child("Max streaming bitrate"))
-                                    .child(Select::new(&self.bitrate).w(px(180.))),
-                            )
+                            .child(labeled("Max streaming bitrate", &self.bitrate))
                             .child(hint(
                                 "Videos above this bitrate are transcoded by the server, which uses its CPU or GPU. \
                                  Lower it for slow connections; other videos play the original file.",
+                                cx,
+                            )),
+                    )
+                    .child(
+                        section("Subtitles", cx)
+                            .child(labeled("Colour", &self.subtitle_color))
+                            .child(labeled("Style", &self.subtitle_style))
+                            .child(labeled("Size", &self.subtitle_size))
+                            .child(hint(
+                                "For text subtitles such as SRT; styled (ASS) subtitles keep their own look and \
+                                 only change size. The player's settings menu also changes the size while \
+                                 watching.",
                                 cx,
                             )),
                     )

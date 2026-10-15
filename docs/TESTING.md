@@ -203,3 +203,11 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 - ⬜ **Autoplay** into an episode with a resume point shows the card, and it goes away by itself after 10 s.
 - ⬜ Clicking **Start over**; in a **SyncPlay** group it's a group seek.
+
+## 19. Subtitle appearance (4.2)
+
+✅ Linux, libmpv 0.37, with a config set to yellow and a dark box: the embedded SRT showed yellow on a translucent box. The settings page shows the three pickers.
+
+- ⬜ **Windows** (the bundled 0.38+ libmpv, which takes `sub-border-style`): box and outline both look right.
+- ⬜ Changing the **size** in Settings, then in the player's menu: both agree afterwards.
+- ⬜ An **ASS** subtitle keeps its own colours and style.

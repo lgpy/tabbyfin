@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use url::Url;
 
 use crate::changes::Changes;
-use crate::config::{Config, UnfinishedPlayback};
+use crate::config::{Config, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::session::describe_error;
@@ -492,6 +492,16 @@ impl PlaybackManager {
 
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    /// Sets the subtitle size for the next items (the settings page; the player's menu goes
+    /// through [`NowPlaying::adjust`]).
+    pub fn set_subtitle_scale(&mut self, scale: f64) {
+        self.adjustments = Adjustments {
+            subtitle_scale: scale,
+            ..self.adjustments
+        }
+        .clamped();
     }
 
     /// The signed-in session's client.
@@ -1165,6 +1175,17 @@ async fn run_session(
         .set_property("mute", muted)
         .await
         .map_err(|err| err.to_string())?;
+    // Cosmetic, so a property this mpv doesn't have is skipped: before 0.38 there's no
+    // `sub-border-style`, and a visible `sub-back-color` draws the box on its own.
+    let config = Config::load();
+    for (name, value) in subtitle_look(
+        config.subtitle_color.unwrap_or_default(),
+        config.subtitle_style.unwrap_or_default(),
+    ) {
+        if let Err(err) = player.set_property(name, value).await {
+            tracing::debug!("mpv didn't take {name}={value}: {err}");
+        }
+    }
     for (name, value) in [
         ("speed", adjustments.speed),
         ("sub-delay", adjustments.subtitle_delay),
@@ -1339,6 +1360,24 @@ fn schedule_volume_report(due: &mut Option<tokio::time::Instant>, started: bool)
     if started {
         due.get_or_insert_with(|| tokio::time::Instant::now() + VOLUME_REPORT_AFTER);
     }
+}
+
+/// mpv options for the text subtitle appearance from the settings. ASS subtitles keep their own
+/// styling (mpv only scales them).
+fn subtitle_look(color: SubtitleColor, style: SubtitleStyle) -> [(&'static str, &'static str); 3] {
+    let color = match color {
+        SubtitleColor::White => "#FFFFFFFF",
+        SubtitleColor::Yellow => "#FFFFE14D",
+    };
+    let (border_style, back_color) = match style {
+        SubtitleStyle::Outline => ("outline-and-shadow", "#00000000"),
+        SubtitleStyle::Box => ("background-box", "#B0000000"),
+    };
+    [
+        ("sub-color", color),
+        ("sub-border-style", border_style),
+        ("sub-back-color", back_color),
+    ]
 }
 
 /// mpv's volume in percent as the whole number the server's reports expect.
