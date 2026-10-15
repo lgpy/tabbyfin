@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Generates a small synthetic media library under dev/.data/media.
-# Covers: a movie with three versions (one 4K HEVC 10-bit, for hardware decoding), a series with two seasons, multiple audio
+# Covers: a movie with three versions (one 4K HEVC 10-bit, for hardware decoding) and extras (a trailer, a featurette),
+# a series with two seasons, multiple audio
 # languages, embedded and external subtitles, chapters (Intro, Episode, Credits), and local artwork.
 set -euo pipefail
 
@@ -38,7 +39,7 @@ video() {
   local out="$1" title="$2" size="$3" sub
   local codec=(-c:v libx264 -preset ultrafast -crf 32 -pix_fmt yuv420p)
   [[ "${4:-}" == hevc10 ]] && codec=(-c:v libx265 -preset ultrafast -crf 32 -pix_fmt yuv420p10le -x265-params log-level=error)
-  [[ -f "$out" ]] && { add_chapters "$out"; return; }
+  [[ -f "$out" ]] && { (( dur >= 30 )) && add_chapters "$out"; return 0; }
   mkdir -p "$(dirname "$out")"
   sub="$(mktemp --suffix=.srt)"
   srt "$title" > "$sub"
@@ -57,7 +58,9 @@ video() {
     -metadata:s:s:0 language=eng \
     "$out"
   rm -f "$sub"
-  add_chapters "$out"
+  # Intro and Credits need room; short clips (extras) go without chapters.
+  (( dur >= 30 )) && add_chapters "$out"
+  return 0
 }
 
 # image <out.jpg> <label> <size> <color>
@@ -73,6 +76,9 @@ movie="$root/Movies/Test Movie (2024)"
 video "$movie/Test Movie (2024) - 1080p.mkv" "Test Movie 1080p" 1920x1080
 video "$movie/Test Movie (2024) - 720p.mkv" "Test Movie 720p" 1280x720
 video "$movie/Test Movie (2024) - 4K HEVC.mkv" "Test Movie 4K HEVC 10-bit" 3840x2160 hevc10
+# Extras: a local trailer and a featurette, short ones.
+dur=20 video "$movie/Test Movie (2024)-trailer.mkv" "Test Movie trailer" 1280x720
+dur=20 video "$movie/featurettes/Making of Test Movie.mkv" "Making of Test Movie" 1280x720
 image "$movie/poster.jpg" "Test Movie" 600x900 navy
 image "$movie/backdrop.jpg" "Test Movie" 1920x1080 darkslateblue
 

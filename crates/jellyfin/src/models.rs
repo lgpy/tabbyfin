@@ -143,10 +143,38 @@ pub struct BaseItemDto {
     /// Only present when requested with [`crate::models::ItemField::Chapters`].
     #[serde(default, deserialize_with = "nullable")]
     pub chapters: Vec<ChapterInfo>,
+    /// Only present when requested with [`crate::models::ItemField::Studios`].
+    #[serde(default, deserialize_with = "nullable")]
+    pub studios: Vec<NameGuidPair>,
+    /// Only present when requested with [`crate::models::ItemField::Tags`].
+    #[serde(default, deserialize_with = "nullable")]
+    pub tags: Vec<String>,
+    /// Trailers on the web (usually YouTube). Only present when requested with
+    /// [`crate::models::ItemField::RemoteTrailers`].
+    #[serde(default, deserialize_with = "nullable")]
+    pub remote_trailers: Vec<MediaUrl>,
+    /// Trailer files next to the item (`GET /Items/{id}/LocalTrailers`).
+    pub local_trailer_count: Option<u32>,
+    /// Extras such as featurettes and deleted scenes (`GET /Items/{id}/SpecialFeatures`).
+    pub special_feature_count: Option<u32>,
     /// Seek-bar preview tiles, by media source id and then thumbnail width. Only present when
     /// requested with [`crate::models::ItemField::Trickplay`], and generated.
     #[serde(default, deserialize_with = "nullable")]
     pub trickplay: HashMap<String, HashMap<String, TrickplayInfo>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct NameGuidPair {
+    pub name: String,
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct MediaUrl {
+    pub url: String,
+    pub name: Option<String>,
 }
 
 /// One set of trickplay tiles: JPEG sheets of `tile_width` × `tile_height` thumbnails, each
@@ -366,6 +394,8 @@ wire_enum!(
         SortName = "SortName",
         Chapters = "Chapters",
         Trickplay = "Trickplay",
+        Tags = "Tags",
+        RemoteTrailers = "RemoteTrailers",
     }
 );
 

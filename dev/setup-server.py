@@ -122,9 +122,38 @@ def main():
     if any(config.get(k) != v for k, v in wanted.items()):
         config.update(wanted)
         request("/System/Configuration", "POST", config, token)
+    set_metadata(token)
     start_trickplay(token)
     legacy = config.get("EnableLegacyAuthorization")
     print(f"server ready: {BASE}  user={USER} pass={PASS}  items={last}  EnableLegacyAuthorization={legacy}")
+
+
+# No metadata fetchers run, so the item page's genres, studios, tags and "More like this"
+# (which matches on these) get something to show. Locked, so scans keep it. (The server
+# ignores RemoteTrailers in updates, so there's no remote trailer to test with.)
+METADATA = {
+    "Movie": {
+        "Genres": ["Science Fiction", "Documentary"],
+        "Studios": [{"Name": "Jelly Studios"}],
+        "Tags": ["test pattern"],
+    },
+}
+
+
+def set_metadata(token):
+    for kind, fields in METADATA.items():
+        for item in request(f"/Items?Recursive=true&IncludeItemTypes={kind}", token=token)["Items"]:
+            full = request(f"/Items/{item['Id']}", token=token)
+            if all(full.get(k) for k in fields):
+                continue
+            # Posting back the whole item fails on 12.2 (a database constraint), so only the
+            # identity and the fields to set; the rest of these items is empty anyway. 10.11
+            # needs every list it copies to be present, even empty.
+            body = {k: full[k] for k in ("Id", "Name", "Type", "ProductionYear") if k in full}
+            body.update(Genres=[], Tags=[], Studios=[], People=[], Taglines=[], ProviderIds={}, LockedFields=[])
+            body.update(fields, LockData=True)
+            request(f"/Items/{item['Id']}", "POST", body, token)
+            print(f"set metadata on {item['Name']}")
 
 
 def start_trickplay(token):

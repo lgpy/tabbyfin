@@ -154,6 +154,25 @@ impl Client {
         }
     }
 
+    /// Trailer files that belong to the item.
+    pub async fn local_trailers(&self, item_id: &str) -> Result<Vec<BaseItemDto>> {
+        self.get(&format!("/Items/{item_id}/LocalTrailers"), &Query::new())
+            .await
+    }
+
+    /// Featurettes, deleted scenes, interviews and other extras of the item.
+    pub async fn special_features(&self, item_id: &str) -> Result<Vec<BaseItemDto>> {
+        self.get(&format!("/Items/{item_id}/SpecialFeatures"), &Query::new())
+            .await
+    }
+
+    /// Items like this one (by genre, studio, tags…). The server leaves out watched ones.
+    pub async fn similar(&self, item_id: &str, limit: u32, fields: &[ItemField]) -> Result<QueryResult<BaseItemDto>> {
+        let mut q = fields_query(fields);
+        q.push("limit", limit);
+        self.get(&format!("/Items/{item_id}/Similar"), &q).await
+    }
+
     /// A playlist's entries, in playlist order.
     pub async fn playlist_items(&self, playlist_id: &str, fields: &[ItemField]) -> Result<QueryResult<BaseItemDto>> {
         self.get(&format!("/Playlists/{playlist_id}/Items"), &fields_query(fields))
