@@ -99,6 +99,14 @@ run = [
 description = "Build the Linux AppImage in an Ubuntu 22.04 container, so it runs on older distributions too"
 run = "packaging/appimage-docker.sh dist"
 
+[tasks."package:flatpak"]
+description = "Build the Flatpak bundle (needs flatpak and flatpak-builder)"
+run = "packaging/flatpak/build.sh dist"
+
+[tasks."flatpak:sources"]
+description = "Regenerate the Flatpak's cargo-sources.json after Cargo.lock changes"
+run = "packaging/flatpak/update-cargo-sources.sh"
+
 # CI (GitHub Actions)
 
 [tasks."ci:build"]

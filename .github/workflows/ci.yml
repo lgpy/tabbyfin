@@ -147,9 +147,26 @@ jobs:
           path: dist/*.AppImage
           if-no-files-found: error
 
+  flatpak:
+    name: Package (Flatpak)
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flatpak-builder
+        run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - name: Build
+        run: packaging/flatpak/build.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jelly-gpui-flatpak
+          path: dist/*.flatpak
+          if-no-files-found: error
+
   release:
     name: Release
-    needs: [package, appimage]
+    needs: [package, appimage, flatpak]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
