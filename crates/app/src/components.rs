@@ -2,9 +2,9 @@
 
 use std::hash::{Hash, Hasher};
 
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ChapterInfo, ImageType};
@@ -12,13 +12,16 @@ use jellyfin::{ImageRequest, Ticks};
 
 use crate::images::ImageCache;
 use crate::motion;
-use crate::zoom::dp;
+use crate::smooth_scroll::glide_by;
+use crate::zoom::{dp, dp_px};
 
 pub const POSTER_W: f32 = 150.;
 pub const POSTER_H: f32 = 225.;
 pub const LANDSCAPE_W: f32 = 260.;
 pub const LANDSCAPE_H: f32 = 146.;
 pub const CARD_GAP: f32 = 16.;
+/// A shelf's side padding (`px_6`).
+const SHELF_PADDING: f32 = 24.;
 /// Height of the text block under a card (title + subtitle lines).
 pub const CARD_TEXT_H: f32 = 44.;
 
@@ -405,15 +408,59 @@ pub fn shelf_with_rail(
     rail: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
     cx: &App,
 ) -> impl IntoElement {
+    let id = id.into();
+    // From the cards' bounds in the last layout: none before the first one, so the arrows
+    // show from the next frame. Child bounds don't include the scroll offset.
+    let offset = scroll.offset().x;
+    let viewport = scroll.bounds();
+    let content_end = cards
+        .len()
+        .checked_sub(1)
+        .and_then(|last| scroll.bounds_for_item(last))
+        .map(|last| last.right() - viewport.left());
+    // Hidden when the cards fit; greyed out at either end.
+    let scrolls = content_end.is_some_and(|end| end > viewport.size.width + px(0.5));
+    let at_start = offset >= px(-0.5);
+    let at_end = content_end.is_none_or(|end| -offset + viewport.size.width >= end - px(0.5));
+    let arrow = |name: &'static str, icon: IconName, tooltip: &'static str, disabled: bool, forward: bool| {
+        let scroll = scroll.clone();
+        let key = id.clone();
+        Button::new((id.clone(), name))
+            .ghost()
+            .small()
+            .icon(icon)
+            .tooltip(tooltip)
+            .disabled(disabled)
+            .on_click(move |_, window, cx| {
+                // A page: what shows between the row's side paddings.
+                let page = (scroll.bounds().size.width - dp_px(SHELF_PADDING * 2., window)).max(px(0.));
+                let distance = if forward { -page } else { page };
+                glide_by(key.clone(), &scroll, Axis::Horizontal, distance, window, cx);
+            })
+    };
     v_flex()
         .gap_2()
         .child(
-            div()
+            h_flex()
                 .px_6()
-                .text_lg()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(cx.theme().foreground)
-                .child(title.into()),
+                .justify_between()
+                // As tall as the arrows, so the row keeps its height when they hide.
+                .min_h_6()
+                .child(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child(title.into()),
+                )
+                .when(scrolls, |el| {
+                    el.child(
+                        h_flex()
+                            .gap_1()
+                            .child(arrow("previous", IconName::ChevronLeft, "Scroll left", at_start, false))
+                            .child(arrow("next", IconName::ChevronRight, "Scroll right", at_end, true)),
+                    )
+                }),
         )
         .child(rail(
             div()
