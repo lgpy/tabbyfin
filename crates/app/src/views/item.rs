@@ -1081,8 +1081,11 @@ impl ItemPage {
                 let played = is_played(episode);
                 let episode_id = episode.id.clone();
                 let selected = self.cursor.is_selected(CHILDREN, i);
+                // Keyed by the entry, not its place: a playlist's rows move.
+                let key = episode.playlist_item_id.as_deref().unwrap_or(&episode.id);
+                let element_id = |name: &str| SharedString::from(format!("{name}-{key}"));
                 let entry_button = |id: &'static str, icon: Lucide, tooltip: &'static str, action: EntryAction| {
-                    Button::new((id, i))
+                    Button::new(element_id(id))
                         .ghost()
                         .icon(icon)
                         .tooltip(tooltip)
@@ -1114,7 +1117,7 @@ impl ItemPage {
                         ))
                 });
                 let row = h_flex()
-                    .id(("episode", i))
+                    .id(element_id("episode"))
                     .relative()
                     .items_start()
                     .gap_4()
@@ -1147,7 +1150,7 @@ impl ItemPage {
                     .children(entry_buttons)
                     .child(
                         // Pressed while watched, like the page's own Watched.
-                        Toggle::new(("toggle-played", i))
+                        Toggle::new(element_id("toggle-played"))
                             .icon(if played { IconName::CircleCheck } else { IconName::Check })
                             .checked(played)
                             .tooltip("Watched (W)")
