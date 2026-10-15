@@ -6,14 +6,17 @@
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::popover::{Popover, PopoverState};
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, IconName, Selectable, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::GroupState;
 
+use crate::browse::{MoveDown, MoveUp};
+use crate::components::selection_ring;
 use crate::config::{Config, SavedServer};
 use crate::images::ImageCache;
 use crate::playback::{PlaybackEvent, PlaybackManager};
@@ -31,6 +34,45 @@ use crate::views::settings::SettingsPage;
 actions!(jelly, [Back, OpenSearch]);
 
 pub const KEY_CONTEXT: &str = "Shell";
+
+/// The top bar's buttons, in order, for the keyboard: Up past a page's first row reaches
+/// them, Left and Right move along, Enter presses, Down or Esc returns to the page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TopBarItem {
+    Back,
+    Home,
+    Search,
+    SyncPlay,
+    Settings,
+    Account,
+}
+
+const TOP_BAR: [TopBarItem; 6] = [
+    TopBarItem::Back,
+    TopBarItem::Home,
+    TopBarItem::Search,
+    TopBarItem::SyncPlay,
+    TopBarItem::Settings,
+    TopBarItem::Account,
+];
+
+/// The top bar's menus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Menu {
+    SyncPlay,
+    Account,
+}
+
+/// A choice in a top-bar menu, in the order the menu lists them. The keyboard highlight is an
+/// index into these.
+enum MenuEntry {
+    SwitchAccount(SavedServer),
+    AddAccount,
+    SignOut,
+    JoinGroup(String),
+    NewGroup,
+    LeaveGroup,
+}
 
 pub enum ShellEvent {
     SignOut,
@@ -62,6 +104,14 @@ pub struct ShellView {
     accounts: Vec<SavedServer>,
     /// The session websocket; dropped (disconnecting) with the shell on sign-out.
     _live: Task<()>,
+    /// The top-bar button the keyboard is on (shown while the shell itself has focus).
+    top_bar: Option<TopBarItem>,
+    /// The open top-bar menu, and the entry the keyboard highlights (none when opened with a
+    /// click).
+    menu: Option<(Menu, Option<usize>)>,
+    /// What an open menu focuses. Menus render in an overlay outside the shell, so their
+    /// content forwards keys to `on_key_down` (see `menu_keys`).
+    menu_focus: FocusHandle,
 }
 
 impl EventEmitter<ShellEvent> for ShellView {}
@@ -109,6 +159,9 @@ impl ShellView {
             _remote,
             accounts: Config::load().accounts,
             _live,
+            top_bar: None,
+            menu: None,
+            menu_focus: cx.focus_handle(),
         };
         this.push(Route::Home, window, cx);
         #[cfg(debug_assertions)]
@@ -150,7 +203,7 @@ impl ShellView {
     pub fn push(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
         let nav = Navigator::new(cx.entity().downgrade());
         let client = self.session.client.clone();
-        let mut focus = None;
+        let focus;
         let page = match route {
             Route::Home => Page {
                 title: "Home".into(),
@@ -210,7 +263,11 @@ impl ShellView {
             },
             Route::Settings => Page {
                 title: "Settings".into(),
-                view: cx.new(|cx| SettingsPage::new(self.session.clone(), window, cx)).into(),
+                view: {
+                    let page = cx.new(|cx| SettingsPage::new(self.session.clone(), window, cx));
+                    focus = Some(focuser(&page));
+                    page.into()
+                },
                 focus: None,
                 is_player: false,
             },
@@ -259,7 +316,172 @@ impl ShellView {
         }
     }
 
+    /// Esc and Backspace close a top-bar menu, then leave the top bar, before going back.
     fn back(&mut self, _: &Back, window: &mut Window, cx: &mut Context<Self>) {
+        if self.menu.take().is_some() {
+            // Back to the top bar, if the keyboard came from there.
+            if self.top_bar.is_some() {
+                self.focus_handle.focus(window, cx);
+            }
+            cx.notify();
+        } else if self.top_bar.is_some() && self.focus_handle.is_focused(window) {
+            self.leave_top_bar(window, cx);
+        } else {
+            self.go_back(window, cx);
+        }
+    }
+
+    /// Up past a page's first row (the page lets the action through): into the top bar.
+    fn enter_top_bar(&mut self, _: &MoveUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_top_bar(window, cx);
+    }
+
+    /// Moves the keyboard into the top bar (also for Up in the search box).
+    pub fn focus_top_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.stack.last().is_some_and(|page| page.is_player) {
+            return;
+        }
+        let first = if self.stack.len() > 1 {
+            TopBarItem::Back
+        } else {
+            TopBarItem::Home
+        };
+        self.top_bar = Some(self.top_bar.unwrap_or(first));
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    fn leave_top_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.top_bar = None;
+        self.menu = None;
+        self.focus_top(window, cx);
+        // The page's cursor hid when Up left it; a move while it's hidden shows it in place.
+        window.dispatch_action(MoveDown.boxed_clone(), cx);
+        cx.notify();
+    }
+
+    /// Keys in the top bar and its menus. (Esc arrives as `Back`, bound before this runs.)
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.modifiers.modified() {
+            return;
+        }
+        let key = event.keystroke.key.as_str();
+        if let Some((menu, Some(highlight))) = self.menu {
+            let count = self.menu_entries(menu, cx).len();
+            match key {
+                "down" if highlight + 1 < count => self.menu = Some((menu, Some(highlight + 1))),
+                "up" if highlight > 0 => self.menu = Some((menu, Some(highlight - 1))),
+                "enter" => self.choose_menu_entry(menu, highlight, window, cx),
+                "up" | "down" => {}
+                _ => return,
+            }
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        let Some(item) = self.top_bar.filter(|_| self.focus_handle.is_focused(window)) else {
+            return;
+        };
+        let position = TOP_BAR.iter().position(|i| *i == item).unwrap_or(0);
+        let can_go_back = self.stack.len() > 1;
+        match key {
+            "left" => {
+                let min = if can_go_back { 0 } else { 1 };
+                self.top_bar = Some(TOP_BAR[position.saturating_sub(1).max(min)]);
+            }
+            "right" => self.top_bar = Some(TOP_BAR[(position + 1).min(TOP_BAR.len() - 1)]),
+            "down" => self.leave_top_bar(window, cx),
+            "enter" => self.press_top_bar(item, window, cx),
+            _ => return,
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn press_top_bar(&mut self, item: TopBarItem, window: &mut Window, cx: &mut Context<Self>) {
+        match item {
+            TopBarItem::Back => {
+                self.top_bar = None;
+                self.go_back(window, cx);
+            }
+            TopBarItem::Home => {
+                self.top_bar = None;
+                self.home(window, cx);
+            }
+            TopBarItem::Search => {
+                self.top_bar = None;
+                self.push(Route::Search, window, cx);
+            }
+            TopBarItem::Settings => {
+                self.top_bar = None;
+                self.push(Route::Settings, window, cx);
+            }
+            TopBarItem::SyncPlay => self.open_menu(Menu::SyncPlay, Some(0), cx),
+            TopBarItem::Account => self.open_menu(Menu::Account, Some(0), cx),
+        }
+    }
+
+    /// Opens a top-bar menu, with fresh contents.
+    fn open_menu(&mut self, menu: Menu, highlight: Option<usize>, cx: &mut Context<Self>) {
+        match menu {
+            Menu::Account => self.accounts = Config::load().accounts,
+            Menu::SyncPlay => SyncPlay::global(cx).update(cx, |syncplay, cx| syncplay.refresh_groups(cx)),
+        }
+        self.menu = Some((menu, highlight));
+        cx.notify();
+    }
+
+    fn menu_entries(&self, menu: Menu, cx: &App) -> Vec<MenuEntry> {
+        match menu {
+            Menu::Account => {
+                let current = self.session.account_key();
+                let mut entries: Vec<MenuEntry> = self
+                    .accounts
+                    .iter()
+                    .filter(|account| account.credential_account() != current)
+                    .cloned()
+                    .map(MenuEntry::SwitchAccount)
+                    .collect();
+                entries.extend([MenuEntry::AddAccount, MenuEntry::SignOut]);
+                entries
+            }
+            Menu::SyncPlay => {
+                let syncplay = SyncPlay::global(cx).read(cx);
+                if syncplay.group.is_some() {
+                    return vec![MenuEntry::LeaveGroup];
+                }
+                let mut entries: Vec<MenuEntry> = syncplay
+                    .groups
+                    .iter()
+                    .map(|group| MenuEntry::JoinGroup(group.group_id.clone()))
+                    .collect();
+                entries.push(MenuEntry::NewGroup);
+                entries
+            }
+        }
+    }
+
+    /// Does what a menu entry's button does, and closes the menu.
+    fn choose_menu_entry(&mut self, menu: Menu, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(entry) = self.menu_entries(menu, cx).into_iter().nth(index) else {
+            return;
+        };
+        self.leave_top_bar(window, cx);
+        let syncplay = SyncPlay::global(cx);
+        match entry {
+            MenuEntry::SwitchAccount(account) => cx.emit(ShellEvent::SwitchAccount(account)),
+            MenuEntry::AddAccount => cx.emit(ShellEvent::AddAccount),
+            MenuEntry::SignOut => cx.emit(ShellEvent::SignOut),
+            MenuEntry::JoinGroup(id) => syncplay.update(cx, |syncplay, cx| syncplay.join(id, cx)),
+            MenuEntry::NewGroup => {
+                let name = new_group_name(&self.session);
+                syncplay.update(cx, |syncplay, cx| syncplay.create(name, cx));
+            }
+            MenuEntry::LeaveGroup => syncplay.update(cx, |syncplay, cx| syncplay.leave(cx)),
+        }
+    }
+
+    pub fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Leaving the player stops playback; the page closes when the session ends.
         if self.stack.last().is_some_and(|page| page.is_player) {
             PlaybackManager::global(cx).update(cx, |playback, cx| playback.stop(cx));
@@ -282,8 +504,19 @@ impl ShellView {
         cx.notify();
     }
 
-    fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_top_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let can_go_back = self.stack.len() > 1;
+        // The keyboard's ring, while the shell itself has focus (a click elsewhere takes it).
+        let keyboard = self.top_bar.filter(|_| self.focus_handle.is_focused(window));
+        let syncplay = self.render_syncplay(cx).into_any_element();
+        let account = self.render_account(cx).into_any_element();
+        let ring = |item: TopBarItem, element: AnyElement| {
+            div()
+                .relative()
+                .rounded_md()
+                .child(element)
+                .when(keyboard == Some(item), |el| el.child(selection_ring(cx)))
+        };
         let title = self.stack.last().map(|p| p.title.clone()).unwrap_or_default();
         h_flex()
             .h(px(52.))
@@ -292,37 +525,45 @@ impl ShellView {
             .gap_2()
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(
+            .child(ring(
+                TopBarItem::Back,
                 Button::new("back")
                     .ghost()
                     .icon(IconName::ArrowLeft)
                     .disabled(!can_go_back)
-                    .on_click(cx.listener(|this, _, window, cx| this.back(&Back, window, cx))),
-            )
-            .child(
+                    .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx)))
+                    .into_any_element(),
+            ))
+            .child(ring(
+                TopBarItem::Home,
                 Button::new("home")
                     .ghost()
                     .icon(Lucide::House)
                     .tooltip("Home")
-                    .on_click(cx.listener(|this, _, window, cx| this.home(window, cx))),
-            )
+                    .on_click(cx.listener(|this, _, window, cx| this.home(window, cx)))
+                    .into_any_element(),
+            ))
             .child(div().flex_1().truncate().font_weight(FontWeight::SEMIBOLD).child(title))
-            .child(
+            .child(ring(
+                TopBarItem::Search,
                 Button::new("search")
                     .ghost()
                     .icon(IconName::Search)
                     .tooltip("Search")
-                    .on_click(cx.listener(|this, _, window, cx| this.open_search(&OpenSearch, window, cx))),
-            )
-            .child(self.render_syncplay(cx))
-            .child(
+                    .on_click(cx.listener(|this, _, window, cx| this.open_search(&OpenSearch, window, cx)))
+                    .into_any_element(),
+            ))
+            .child(ring(TopBarItem::SyncPlay, syncplay))
+            .child(ring(
+                TopBarItem::Settings,
                 Button::new("settings")
                     .ghost()
                     .icon(IconName::Settings)
                     .tooltip("Settings")
-                    .on_click(cx.listener(|this, _, window, cx| this.push(Route::Settings, window, cx))),
-            )
-            .child(self.render_account(cx))
+                    .on_click(cx.listener(|this, _, window, cx| this.push(Route::Settings, window, cx)))
+                    .into_any_element(),
+            ))
+            .child(ring(TopBarItem::Account, account))
     }
 
     /// The user button and its menu: the saved accounts to switch to, adding one, signing out.
@@ -331,16 +572,11 @@ impl ShellView {
         let current = self.session.account_key();
         Popover::new("account")
             .anchor(Anchor::TopRight)
+            .open(matches!(self.menu, Some((Menu::Account, _))))
+            .track_focus(&self.menu_focus)
             .on_open_change({
                 let shell = shell.clone();
-                move |open, _, cx| {
-                    if *open {
-                        shell.update(cx, |this, cx| {
-                            this.accounts = Config::load().accounts;
-                            cx.notify();
-                        });
-                    }
-                }
+                move |open, window, cx| shell.update(cx, |this, cx| this.menu_toggled(Menu::Account, *open, window, cx))
             })
             .trigger(
                 Button::new("account-button")
@@ -349,8 +585,64 @@ impl ShellView {
                     .icon(IconName::ChevronDown)
                     .tooltip(self.session.server.server_name.clone().unwrap_or_default()),
             )
-            .content(move |_, window, cx| account_panel(&shell, &current, window, cx))
+            .content({
+                let shell = shell.clone();
+                move |_, window, cx| {
+                    let panel = account_panel(&shell, &current, window, cx);
+                    menu_keys(&shell, panel, cx)
+                }
+            })
     }
+
+    /// A menu opened with the mouse, or closed (a click outside, Esc, or a choice in it).
+    fn menu_toggled(&mut self, menu: Menu, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if open {
+            self.open_menu(menu, None, cx);
+        } else if self.menu.is_some_and(|(m, _)| m == menu) {
+            self.menu = None;
+            // Back to the top bar, if the keyboard came from there.
+            if self.top_bar.is_some() {
+                self.focus_handle.focus(window, cx);
+            }
+            cx.notify();
+        }
+    }
+
+    /// The keyboard's highlight in `menu`, if it's open from the keyboard.
+    fn menu_highlight(&self, menu: Menu) -> Option<usize> {
+        self.menu
+            .filter(|(m, _)| *m == menu)
+            .and_then(|(_, highlight)| highlight)
+    }
+}
+
+/// A menu's content, passing its keys to the shell's top-bar handling. It takes the focus the
+/// popover moves to on opening, so it's where keys start.
+fn menu_keys(shell: &Entity<ShellView>, content: AnyElement, cx: &App) -> AnyElement {
+    let focus = shell.read(cx).menu_focus.clone();
+    let shell = shell.clone();
+    div()
+        .track_focus(&focus)
+        // The popover binds Enter to `Confirm` (which dismisses it); bindings come before key
+        // listeners, so the highlighted entry is chosen here.
+        .on_action({
+            let shell = shell.clone();
+            move |_: &Confirm, window, cx| {
+                shell.update(cx, |this, cx| {
+                    if let Some((menu, Some(highlight))) = this.menu {
+                        cx.stop_propagation();
+                        this.choose_menu_entry(menu, highlight, window, cx);
+                    }
+                })
+            }
+        })
+        .on_key_down(move |event, window, cx| shell.update(cx, |this, cx| this.on_key_down(event, window, cx)))
+        .child(content)
+        .into_any_element()
+}
+
+fn new_group_name(session: &Session) -> String {
+    format!("{}'s group", session.user.name)
 }
 
 /// The account menu: other saved accounts first, then adding one and signing out. Each choice
@@ -369,6 +661,7 @@ fn account_panel(
             shell.update(cx, |_, cx| cx.emit(event()));
         }
     };
+    let highlight = shell.read(cx).menu_highlight(Menu::Account);
     let accounts = &shell.read(cx).accounts;
     let current_label = accounts
         .iter()
@@ -385,6 +678,7 @@ fn account_panel(
                 .w_full()
                 .justify_start()
                 .label(account.label())
+                .selected(highlight == Some(i))
                 .on_click(move |_, window, cx| {
                     popover.update(cx, |popover, cx| popover.dismiss(window, cx));
                     let account = account.clone();
@@ -393,6 +687,7 @@ fn account_panel(
                 .into_any_element()
         })
         .collect();
+    let others_count = others.len();
     let muted = cx.theme().muted_foreground;
     v_flex()
         .w(px(280.))
@@ -409,6 +704,7 @@ fn account_panel(
                 .justify_start()
                 .icon(IconName::Plus)
                 .label("Add account…")
+                .selected(highlight == Some(others_count))
                 .on_click(choose(|| ShellEvent::AddAccount)),
         )
         .child(
@@ -417,6 +713,7 @@ fn account_panel(
                 .w_full()
                 .justify_start()
                 .label("Sign out")
+                .selected(highlight == Some(others_count + 1))
                 .on_click(choose(|| ShellEvent::SignOut)),
         )
         .into_any_element()
@@ -427,16 +724,16 @@ impl ShellView {
     fn render_syncplay(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let syncplay = SyncPlay::global(cx);
         let in_group = syncplay.read(cx).group.is_some();
-        let new_name = format!("{}'s group", self.session.user.name);
+        let new_name = new_group_name(&self.session);
+        let shell = cx.entity();
+        let highlight = self.menu_highlight(Menu::SyncPlay);
+        let keys = shell.clone();
         Popover::new("syncplay")
             .anchor(Anchor::TopRight)
-            .on_open_change({
-                let syncplay = syncplay.clone();
-                move |open, _, cx| {
-                    if *open {
-                        syncplay.update(cx, |syncplay, cx| syncplay.refresh_groups(cx));
-                    }
-                }
+            .open(matches!(self.menu, Some((Menu::SyncPlay, _))))
+            .track_focus(&self.menu_focus)
+            .on_open_change(move |open, window, cx| {
+                shell.update(cx, |this, cx| this.menu_toggled(Menu::SyncPlay, *open, window, cx))
             })
             .trigger(
                 Button::new("syncplay-button")
@@ -445,11 +742,15 @@ impl ShellView {
                     .when(in_group, |b| b.primary())
                     .tooltip("Watch together (SyncPlay)"),
             )
-            .content(move |_, _, cx| syncplay_panel(&syncplay, &new_name, cx))
+            .content(move |_, _, cx| {
+                let panel = syncplay_panel(&syncplay, &new_name, highlight, cx);
+                menu_keys(&keys, panel, cx)
+            })
     }
 }
 
-fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, cx: &mut App) -> AnyElement {
+/// `highlight` is the keyboard's entry, as `ShellView::menu_entries` lists them.
+fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, highlight: Option<usize>, cx: &mut App) -> AnyElement {
     let state = syncplay.read(cx);
     let muted = cx.theme().muted_foreground;
     let body = match &state.group {
@@ -475,14 +776,20 @@ fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, cx: &mut App) -> 
                         .text_color(muted)
                         .child("Anything you play now plays for everyone in the group."),
                 )
-                .child(Button::new("syncplay-leave").outline().label("Leave group").on_click({
-                    let syncplay = syncplay.clone();
-                    move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.leave(cx))
-                }))
+                .child(
+                    Button::new("syncplay-leave")
+                        .outline()
+                        .label("Leave group")
+                        .selected(highlight == Some(0))
+                        .on_click({
+                            let syncplay = syncplay.clone();
+                            move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.leave(cx))
+                        }),
+                )
                 .into_any_element()
         }
         None => {
-            let groups = state.groups.iter().map(|group| {
+            let groups = state.groups.iter().enumerate().map(|(i, group)| {
                 let id = group.group_id.clone();
                 h_flex()
                     .gap_2()
@@ -503,6 +810,7 @@ fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, cx: &mut App) -> 
                         Button::new(SharedString::from(format!("join-{id}")))
                             .small()
                             .label("Join")
+                            .selected(highlight == Some(i))
                             .on_click({
                                 let syncplay = syncplay.clone();
                                 move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.join(id.clone(), cx))
@@ -523,10 +831,16 @@ fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, cx: &mut App) -> 
                     el.child(div().text_sm().text_color(muted).child("No groups yet."))
                 })
                 .children(groups)
-                .child(Button::new("syncplay-new").primary().label("New group").on_click({
-                    let syncplay = syncplay.clone();
-                    move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.create(new_name.clone(), cx))
-                }))
+                .child(
+                    Button::new("syncplay-new")
+                        .primary()
+                        .label("New group")
+                        .selected(highlight == Some(state.groups.len()))
+                        .on_click({
+                            let syncplay = syncplay.clone();
+                            move |_, _, cx| syncplay.update(cx, |syncplay, cx| syncplay.create(new_name.clone(), cx))
+                        }),
+                )
                 .into_any_element()
         }
     };
@@ -540,7 +854,7 @@ impl Focusable for ShellView {
 }
 
 impl Render for ShellView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = self.stack.last().map(|p| p.view.clone());
         let show_top_bar = !self.stack.last().is_some_and(|p| p.is_player);
         v_flex()
@@ -549,8 +863,10 @@ impl Render for ShellView {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::back))
             .on_action(cx.listener(Self::open_search))
+            .on_action(cx.listener(Self::enter_top_bar))
+            .on_key_down(cx.listener(Self::on_key_down))
             .bg(cx.theme().background)
-            .when(show_top_bar, |el| el.child(self.render_top_bar(cx)))
+            .when(show_top_bar, |el| el.child(self.render_top_bar(window, cx)))
             .child(div().flex_1().min_h_0().children(page))
     }
 }

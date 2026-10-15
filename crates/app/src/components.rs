@@ -5,7 +5,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ImageType};
+use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ChapterInfo, ImageType};
 use jellyfin::{ImageRequest, Ticks};
 
 use crate::images::ImageCache;
@@ -236,6 +236,50 @@ pub fn landscape_card(
         on_click,
         cx,
     )
+}
+
+/// A chapter of `item_id`: its image when the server extracted one, its name and start.
+pub fn chapter_card(
+    id: impl Into<ElementId>,
+    item_id: &str,
+    index: usize,
+    chapter: &ChapterInfo,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let image = chapter.image_tag.clone().map(|tag| ImageRequest {
+        index: Some(index as u32),
+        ..ImageRequest::new(item_id, ImageType::Chapter, Some(tag)).fill_width((LANDSCAPE_W * 2.) as u32)
+    });
+    let image = remote_image(image, None, cx);
+    let name = chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1));
+    v_flex()
+        .id(id)
+        .w(px(LANDSCAPE_W))
+        .flex_none()
+        .gap_1()
+        .cursor_pointer()
+        .on_click(on_click)
+        .child(
+            div()
+                .relative()
+                .w(px(LANDSCAPE_W))
+                .h(px(LANDSCAPE_H))
+                .rounded_md()
+                .overflow_hidden()
+                .bg(cx.theme().muted)
+                .hover(|style| style.opacity(0.8))
+                .child(image)
+                .when(selected, |el| el.child(selection_ring(cx))),
+        )
+        .child(div().text_sm().truncate().child(name))
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(timestamp(chapter.start_position_ticks.into())),
+        )
 }
 
 pub const PERSON_W: f32 = 120.;

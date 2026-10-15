@@ -358,6 +358,7 @@ impl GpuRenderer {
             if !super::video::hardware_renderer(&renderer) {
                 return Err(fail(&egl, failed(format!("{renderer} is a software OpenGL renderer"))));
             }
+            super::video::adapt_to_renderer(core, &renderer);
             let mut count = 0;
             (gl.glGetIntegerv)(GL_NUM_EXTENSIONS, &mut count);
             let has_memory_object = (0..count as u32).any(|i| {

@@ -1236,15 +1236,13 @@ async fn run_session(
         is_muted: muted,
         ..Default::default()
     };
-    let mut started = false;
+    let mut reporting = Reporting::default();
     let mut stopping = false;
     let mut finished = false;
     let mut error = None;
     let mut duration = None;
     let mut ticker = tokio::time::interval(PROGRESS_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // When the pending volume or mute report is due.
-    let mut volume_report: Option<tokio::time::Instant> = None;
 
     loop {
         tokio::select! {
@@ -1252,7 +1250,8 @@ async fn run_session(
                 let Some(event) = event else { break };
                 tracing::trace!(?event, "player event");
                 let _ = channels.updates.send(SessionUpdate::Player(event.clone()));
-                match event {
+                match &event {
+                    // External subtitles go in before the start report.
                     PlayerEvent::FileLoaded => {
                         for (stream, url) in &subtitle_files {
                             let title = stream.display_title.as_deref().unwrap_or("External");
@@ -1261,29 +1260,8 @@ async fn run_session(
                                 tracing::warn!("couldn't add subtitle: {err}");
                             }
                         }
-                        report_or_log(client.report_playback_start(&report).await, "start");
-                        save_unfinished(Some(&report), &account);
-                        started = true;
                     }
-                    PlayerEvent::Position(position) => report.position = Ticks::from(position),
-                    PlayerEvent::Duration(length) => duration = Some(length),
-                    PlayerEvent::Volume(volume) => {
-                        report.volume_level = volume_level(volume);
-                        schedule_volume_report(&mut volume_report, started);
-                    }
-                    PlayerEvent::Muted(muted) => {
-                        report.is_muted = muted;
-                        schedule_volume_report(&mut volume_report, started);
-                    }
-                    PlayerEvent::Paused(paused) => {
-                        report.is_paused = paused;
-                        if started {
-                            report_or_log(client.report_playback_progress(&report).await, "progress");
-                        }
-                    }
-                    PlayerEvent::Seeked if started => {
-                        report_or_log(client.report_playback_progress(&report).await, "progress");
-                    }
+                    PlayerEvent::Duration(length) => duration = Some(*length),
                     PlayerEvent::EndFile(EndReason::Eof) if !stopping => finished = true,
                     PlayerEvent::EndFile(EndReason::Error(message)) => {
                         error = Some(format!("mpv couldn't play this file: {message}"));
@@ -1291,33 +1269,31 @@ async fn run_session(
                     PlayerEvent::Exited => break,
                     _ => {}
                 }
+                match reporting.on_event(&event, &mut report, tokio::time::Instant::now()) {
+                    Outgoing::Start => {
+                        report_or_log(client.report_playback_start(&report).await, "start");
+                        save_unfinished(Some(&report), &account);
+                    }
+                    Outgoing::Progress => report_or_log(client.report_playback_progress(&report).await, "progress"),
+                    Outgoing::Nothing => {}
+                }
             }
             Some(command) = channels.commands.recv() => {
                 tracing::debug!(?command, "player command");
-                // Commands that change what the reports carry. Volume and mute are reported from
-                // mpv's events instead, batched.
-                let reports = matches!(
-                    command,
-                    UiCommand::TogglePause
-                        | UiCommand::SetPause(_)
-                        | UiCommand::SeekBy(_)
-                        | UiCommand::SeekTo(_)
-                        | UiCommand::Audio(_)
-                        | UiCommand::Subtitle(_)
-                );
+                let send = reporting.on_command(&command);
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
-                if started && reports {
+                if send == Outgoing::Progress {
                     report_or_log(client.report_playback_progress(&report).await, "progress");
                 }
             }
-            _ = tokio::time::sleep_until(volume_report.unwrap_or_else(tokio::time::Instant::now)), if volume_report.is_some() => {
-                volume_report = None;
+            _ = tokio::time::sleep_until(reporting.volume_due.unwrap_or_else(tokio::time::Instant::now)), if reporting.volume_due.is_some() => {
+                reporting.volume_reported();
                 report_or_log(client.report_playback_progress(&report).await, "progress");
             }
-            _ = ticker.tick(), if started => {
-                volume_report = None;
+            _ = ticker.tick(), if reporting.started => {
+                reporting.volume_reported();
                 report_or_log(client.report_playback_progress(&report).await, "progress");
                 save_unfinished(Some(&report), &account);
             }
@@ -1331,6 +1307,7 @@ async fn run_session(
     }
 
     details_task.abort();
+    let started = reporting.started;
     if started {
         report_or_log(client.report_playback_stopped(&report).await, "stop");
         save_unfinished(None, &account);
@@ -1358,11 +1335,84 @@ async fn run_session(
     }
 }
 
-/// Arms the batched volume and mute report, unless one is already pending. Before the start
-/// report there's nothing to update: the start report carries the state itself.
-fn schedule_volume_report(due: &mut Option<tokio::time::Instant>, started: bool) {
-    if started {
-        due.get_or_insert_with(|| tokio::time::Instant::now() + VOLUME_REPORT_AFTER);
+/// A report to send to the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outgoing {
+    Nothing,
+    Start,
+    Progress,
+}
+
+/// When a session reports to the server, from the player's events and the user's commands.
+/// `run_session` sends what this decides; the stop report goes out at the end if it started.
+#[derive(Debug, Default)]
+struct Reporting {
+    /// The start report went out (mpv loaded the file). Nothing is reported before it, since
+    /// the start report carries the state itself.
+    started: bool,
+    /// When the batched volume and mute report is due: a wheel spin or a held key sends one
+    /// report, a second after the first change.
+    volume_due: Option<tokio::time::Instant>,
+}
+
+impl Reporting {
+    /// Updates `report` from a player event and says what to send.
+    fn on_event(&mut self, event: &PlayerEvent, report: &mut PlaybackReport, now: tokio::time::Instant) -> Outgoing {
+        match event {
+            PlayerEvent::FileLoaded => {
+                self.started = true;
+                return Outgoing::Start;
+            }
+            PlayerEvent::Position(position) => report.position = Ticks::from(*position),
+            PlayerEvent::Volume(volume) => {
+                report.volume_level = volume_level(*volume);
+                self.schedule_volume(now);
+            }
+            PlayerEvent::Muted(muted) => {
+                report.is_muted = *muted;
+                self.schedule_volume(now);
+            }
+            PlayerEvent::Paused(paused) => {
+                report.is_paused = *paused;
+                return self.progress();
+            }
+            PlayerEvent::Seeked => return self.progress(),
+            _ => {}
+        }
+        Outgoing::Nothing
+    }
+
+    /// Commands that change what the reports carry are reported once applied. Volume and mute
+    /// are reported from mpv's events instead, batched.
+    fn on_command(&self, command: &UiCommand) -> Outgoing {
+        match command {
+            UiCommand::TogglePause
+            | UiCommand::SetPause(_)
+            | UiCommand::SeekBy(_)
+            | UiCommand::SeekTo(_)
+            | UiCommand::Audio(_)
+            | UiCommand::Subtitle(_) => self.progress(),
+            _ => Outgoing::Nothing,
+        }
+    }
+
+    /// A progress report went out, which carries the volume too.
+    fn volume_reported(&mut self) {
+        self.volume_due = None;
+    }
+
+    fn schedule_volume(&mut self, now: tokio::time::Instant) {
+        if self.started {
+            self.volume_due.get_or_insert(now + VOLUME_REPORT_AFTER);
+        }
+    }
+
+    fn progress(&self) -> Outgoing {
+        if self.started {
+            Outgoing::Progress
+        } else {
+            Outgoing::Nothing
+        }
     }
 }
 
@@ -1495,7 +1545,70 @@ mod tests {
     // Not `super::*`: that glob brings in GPUI's `test` attribute, which shadows the std one.
     use jellyfin::models::{MediaSourceInfo, MediaStream, MediaStreamType};
 
-    use super::{Adjustments, adjacent, mpv_subtitle_id, mpv_track_id, volume_level};
+    use std::time::Duration;
+
+    use jellyfin::PlaybackReport;
+    use player::PlayerEvent;
+
+    use super::{
+        Adjustments, Outgoing, Reporting, UiCommand, VOLUME_REPORT_AFTER, adjacent, mpv_subtitle_id, mpv_track_id,
+        volume_level,
+    };
+
+    #[test]
+    fn nothing_is_reported_before_the_start() {
+        let (mut reporting, mut report) = (Reporting::default(), PlaybackReport::default());
+        let now = tokio::time::Instant::now();
+        for event in [PlayerEvent::Paused(true), PlayerEvent::Seeked, PlayerEvent::Volume(40.)] {
+            assert_eq!(reporting.on_event(&event, &mut report, now), Outgoing::Nothing);
+        }
+        assert_eq!(reporting.on_command(&UiCommand::SeekBy(10.)), Outgoing::Nothing);
+        // The start report carries what changed meanwhile, so no volume report is pending.
+        assert!(report.is_paused && report.volume_level == 40);
+        assert_eq!(reporting.volume_due, None);
+        assert_eq!(
+            reporting.on_event(&PlayerEvent::FileLoaded, &mut report, now),
+            Outgoing::Start
+        );
+    }
+
+    #[test]
+    fn pauses_seeks_and_track_changes_report_progress() {
+        let (mut reporting, mut report) = (Reporting::default(), PlaybackReport::default());
+        let now = tokio::time::Instant::now();
+        reporting.on_event(&PlayerEvent::FileLoaded, &mut report, now);
+        assert_eq!(
+            reporting.on_event(&PlayerEvent::Paused(true), &mut report, now),
+            Outgoing::Progress
+        );
+        assert!(report.is_paused);
+        assert_eq!(
+            reporting.on_event(&PlayerEvent::Seeked, &mut report, now),
+            Outgoing::Progress
+        );
+        let position = PlayerEvent::Position(Duration::from_secs(5));
+        assert_eq!(reporting.on_event(&position, &mut report, now), Outgoing::Nothing);
+        assert_eq!(Duration::from(report.position), Duration::from_secs(5));
+        assert_eq!(reporting.on_command(&UiCommand::Audio(2)), Outgoing::Progress);
+        assert_eq!(reporting.on_command(&UiCommand::SetSpeed(1.5)), Outgoing::Nothing);
+        assert_eq!(reporting.on_command(&UiCommand::SetVolume(50.)), Outgoing::Nothing);
+    }
+
+    #[test]
+    fn volume_changes_are_batched_into_one_report() {
+        let (mut reporting, mut report) = (Reporting::default(), PlaybackReport::default());
+        let now = tokio::time::Instant::now();
+        reporting.on_event(&PlayerEvent::FileLoaded, &mut report, now);
+        reporting.on_event(&PlayerEvent::Volume(60.), &mut report, now);
+        let later = now + Duration::from_millis(300);
+        reporting.on_event(&PlayerEvent::Volume(65.), &mut report, later);
+        reporting.on_event(&PlayerEvent::Muted(true), &mut report, later);
+        // Due a second after the first change, carrying the last state.
+        assert_eq!(reporting.volume_due, Some(now + VOLUME_REPORT_AFTER));
+        assert!(report.volume_level == 65 && report.is_muted);
+        reporting.volume_reported();
+        assert_eq!(reporting.volume_due, None);
+    }
 
     fn stream(index: i32, kind: MediaStreamType, is_external: bool) -> MediaStream {
         serde_json::from_value(serde_json::json!({

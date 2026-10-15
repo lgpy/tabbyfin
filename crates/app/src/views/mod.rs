@@ -1,3 +1,5 @@
+pub mod add_to_playlist;
+pub mod edit_playlist;
 pub mod home;
 pub mod item;
 pub mod library;
@@ -6,3 +8,4 @@ pub mod player;
 pub mod search;
 pub mod settings;
 pub mod shell;
+pub mod value_filters;

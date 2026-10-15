@@ -1,6 +1,7 @@
 use crate::client::Query;
 use crate::models::{
-    BaseItemDto, BaseItemKind, ItemField, ItemFilter, ItemSortBy, MediaSegmentDto, QueryResult, wire_list,
+    BaseItemDto, BaseItemKind, ItemField, ItemFilter, ItemFilterValues, ItemSortBy, MediaSegmentDto, QueryResult,
+    wire_list,
 };
 use crate::{Client, Error, Result};
 
@@ -32,6 +33,20 @@ pub struct ItemsQuery {
     /// Items a person appears in.
     pub person_ids: Vec<String>,
     pub filters: Vec<ItemFilter>,
+    /// Items with any of these genres (by name). Different kinds of values (genres, tags,
+    /// ratings) must all match.
+    pub genres: Vec<String>,
+    /// Items with any of these tags.
+    pub tags: Vec<String>,
+    /// Items with any of these official ratings (PG-13…).
+    pub official_ratings: Vec<String>,
+    /// Items released in any of these years.
+    pub years: Vec<i32>,
+    /// Video width bounds, for resolution filters. The server's own `isHd` and `is4K` filters
+    /// aren't usable: `is4K=false` matches nothing on 10.11 and 12.2, and 12.2's `isHd` returns
+    /// the hidden items of alternate versions too.
+    pub min_width: Option<u32>,
+    pub max_width: Option<u32>,
     pub search_term: Option<String>,
     /// Items whose sort name comes before this, ignoring case (used to count them).
     pub name_less_than: Option<String>,
@@ -58,6 +73,9 @@ impl ItemsQuery {
             .list("ids", &self.ids)
             .list("personIds", &self.person_ids)
             .list("filters", &wire_list(&self.filters, ItemFilter::as_str))
+            .list("years", &self.years.iter().map(i32::to_string).collect::<Vec<_>>())
+            .opt("minWidth", self.min_width)
+            .opt("maxWidth", self.max_width)
             .opt("searchTerm", self.search_term.as_ref())
             .opt("nameLessThan", self.name_less_than.as_ref())
             .list("sortBy", &wire_list(&self.sort_by, ItemSortBy::as_str))
@@ -65,6 +83,16 @@ impl ItemsQuery {
             .list("fields", &wire_list(&self.fields, ItemField::as_str))
             .opt("startIndex", self.start_index)
             .opt("limit", self.limit);
+        // Names may contain commas, so these lists are the ones the server splits on `|`.
+        for (key, values) in [
+            ("genres", &self.genres),
+            ("tags", &self.tags),
+            ("officialRatings", &self.official_ratings),
+        ] {
+            if !values.is_empty() {
+                q.push(key, values.join("|"));
+            }
+        }
         q
     }
 }
@@ -83,6 +111,18 @@ impl Client {
 
     pub async fn items(&self, query: &ItemsQuery) -> Result<QueryResult<BaseItemDto>> {
         self.get("/Items", &query.to_query()).await
+    }
+
+    /// The genres and years among the items of a library (or folder) of the given types.
+    pub async fn item_filter_values(
+        &self,
+        parent_id: &str,
+        include_item_types: &[BaseItemKind],
+    ) -> Result<ItemFilterValues> {
+        let mut q = Query::new();
+        q.push("parentId", parent_id)
+            .list("includeItemTypes", &wire_list(include_item_types, BaseItemKind::as_str));
+        self.get("/Items/Filters", &q).await
     }
 
     /// One item with the user's data. Request [`ItemField::MediaSources`] for versions/tracks.
@@ -179,6 +219,92 @@ impl Client {
             .await
     }
 
+    /// Creates a private playlist of videos owned by the signed-in user, with `ids` in it, and
+    /// returns its id. (Left out, `IsPublic` defaults to shared with everyone on 10.11 and 12.2.)
+    pub async fn create_playlist(&self, name: &str, ids: &[String]) -> Result<String> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Body<'a> {
+            name: &'a str,
+            ids: &'a [String],
+            media_type: &'a str,
+            is_public: bool,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Created {
+            id: String,
+        }
+        let body = Body {
+            name,
+            ids,
+            media_type: "Video",
+            is_public: false,
+        };
+        let created: Created = self.post("/Playlists", &Query::new(), Some(&body)).await?;
+        Ok(created.id)
+    }
+
+    /// Whether a playlist is shared with everyone on the server.
+    pub async fn playlist_is_public(&self, playlist_id: &str) -> Result<bool> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Playlist {
+            #[serde(default)]
+            open_access: bool,
+        }
+        let playlist: Playlist = self.get(&format!("/Playlists/{playlist_id}"), &Query::new()).await?;
+        Ok(playlist.open_access)
+    }
+
+    /// Renames a playlist and/or shares it with everyone; `None` leaves that as it is. Other
+    /// users' playlists answer 404.
+    pub async fn update_playlist(&self, playlist_id: &str, name: Option<&str>, is_public: Option<bool>) -> Result<()> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Body<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            name: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            is_public: Option<bool>,
+        }
+        let body = Body { name, is_public };
+        self.post_no_content(&format!("/Playlists/{playlist_id}"), &Query::new(), Some(&body))
+            .await
+    }
+
+    /// Appends items to a playlist. A series or season adds its episodes. 12.2 adds an item
+    /// that's already there a second time; 10.11 skips it.
+    pub async fn add_to_playlist(&self, playlist_id: &str, ids: &[String]) -> Result<()> {
+        let mut q = Query::new();
+        q.list("ids", ids);
+        self.post_no_content::<()>(&format!("/Playlists/{playlist_id}/Items"), &q, None)
+            .await
+    }
+
+    /// Removes entries (by [`BaseItemDto::playlist_item_id`]) from a playlist.
+    pub async fn remove_from_playlist(&self, playlist_id: &str, entry_ids: &[String]) -> Result<()> {
+        let mut q = Query::new();
+        q.list("entryIds", entry_ids);
+        self.delete_with_query(&format!("/Playlists/{playlist_id}/Items"), &q)
+            .await
+    }
+
+    /// Moves an entry (by [`BaseItemDto::playlist_item_id`]) to `index` in the playlist.
+    pub async fn move_playlist_entry(&self, playlist_id: &str, entry_id: &str, index: usize) -> Result<()> {
+        self.post_no_content::<()>(
+            &format!("/Playlists/{playlist_id}/Items/{entry_id}/Move/{index}"),
+            &Query::new(),
+            None,
+        )
+        .await
+    }
+
+    /// Deletes an item from the server (and its files, for media). Used for playlists.
+    pub async fn delete_item(&self, item_id: &str) -> Result<()> {
+        self.delete(&format!("/Items/{item_id}")).await
+    }
+
     /// Intro, outro and similar segments, from the server's segment provider plugins. Empty
     /// when none are installed.
     pub async fn media_segments(&self, item_id: &str) -> Result<Vec<MediaSegmentDto>> {
@@ -204,5 +330,30 @@ impl Client {
 
     pub async fn unmark_favorite(&self, item_id: &str) -> Result<()> {
         self.delete(&format!("/UserFavoriteItems/{item_id}")).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ItemsQuery;
+
+    #[test]
+    fn names_are_split_on_pipes_and_years_on_commas() {
+        let query = ItemsQuery {
+            genres: vec!["Action, Adventure".into(), "Drama".into()],
+            tags: vec!["4k".into()],
+            official_ratings: vec!["PG".into(), "PG-13".into()],
+            years: vec![2024, 2025],
+            max_width: Some(1199),
+            ..Default::default()
+        };
+        let params = query.to_query().0;
+        let get = |key| params.iter().find(|(k, _)| *k == key).map(|(_, v)| v.as_str());
+        assert_eq!(get("genres"), Some("Action, Adventure|Drama"));
+        assert_eq!(get("tags"), Some("4k"));
+        assert_eq!(get("officialRatings"), Some("PG|PG-13"));
+        assert_eq!(get("years"), Some("2024,2025"));
+        assert_eq!(get("maxWidth"), Some("1199"));
+        assert_eq!(get("minWidth"), None);
     }
 }

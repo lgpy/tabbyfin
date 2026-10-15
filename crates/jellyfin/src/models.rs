@@ -113,6 +113,12 @@ pub struct BaseItemDto {
     pub parent_index_number: Option<i32>,
     pub child_count: Option<u32>,
     pub recursive_item_count: Option<u32>,
+    /// A playlist entry's id, for moving or removing it. Present on playlist items; on 10.11
+    /// and 12.2 it's the item's own id, so duplicate entries can't be told apart.
+    pub playlist_item_id: Option<String>,
+    /// Only present when requested with [`crate::models::ItemField::CanDelete`]. Not a
+    /// permission check for playlists: other users' shared playlists report `true` too.
+    pub can_delete: Option<bool>,
 
     pub user_data: Option<UserItemDataDto>,
 
@@ -163,6 +169,21 @@ pub struct BaseItemDto {
     pub trickplay: HashMap<String, HashMap<String, TrickplayInfo>>,
 }
 
+/// The genres, tags, official ratings and years found among a library's items
+/// (`GET /Items/Filters`), to filter by.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ItemFilterValues {
+    #[serde(default, deserialize_with = "nullable")]
+    pub genres: Vec<String>,
+    #[serde(default, deserialize_with = "nullable")]
+    pub tags: Vec<String>,
+    #[serde(default, deserialize_with = "nullable")]
+    pub official_ratings: Vec<String>,
+    #[serde(default, deserialize_with = "nullable")]
+    pub years: Vec<i32>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct NameGuidPair {
@@ -211,6 +232,9 @@ pub struct ChapterInfo {
     #[serde(default, deserialize_with = "nullable")]
     pub start_position_ticks: Ticks,
     pub name: Option<String>,
+    /// Set once the server extracted the chapter's image (a library option, off by default);
+    /// fetched as `ImageType::Chapter` with the chapter's index.
+    pub image_tag: Option<String>,
 }
 
 /// A stretch of an item marked by a segment provider plugin (e.g. Intro Skipper).
@@ -396,6 +420,7 @@ wire_enum!(
         Trickplay = "Trickplay",
         Tags = "Tags",
         RemoteTrailers = "RemoteTrailers",
+        CanDelete = "CanDelete",
     }
 );
 
