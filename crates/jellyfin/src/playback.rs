@@ -15,6 +15,10 @@ pub struct PlaybackInfoRequest {
     pub subtitle_stream_index: Option<i32>,
     /// Bits per second. Sources above it are transcoded down; `None` means no limit.
     pub max_streaming_bitrate: Option<u64>,
+    /// Transcode to HEVC rather than H.264 (in fragmented MP4 segments), for about half the
+    /// bandwidth. Only used when the server allows HEVC encoding, which is off by default
+    /// because it costs the server much more.
+    pub prefer_hevc: bool,
 }
 
 /// No limit: high enough that the server never transcodes for bitrate.
@@ -119,7 +123,7 @@ impl PlaybackReport {
 /// codec. The server only transcodes (to H.264/AAC over HLS) when it won't direct play, e.g.
 /// above `max_bitrate`. External text subtitles are delivered as files; anything else stays
 /// embedded (or is burned into a transcode).
-fn device_profile(max_bitrate: u64) -> serde_json::Value {
+fn device_profile(max_bitrate: u64, prefer_hevc: bool) -> serde_json::Value {
     let external = ["srt", "subrip", "ass", "ssa", "vtt", "webvtt", "sub", "smi", "ttml"];
     let mut subtitle_profiles: Vec<serde_json::Value> = external
         .iter()
@@ -145,8 +149,10 @@ fn device_profile(max_bitrate: u64) -> serde_json::Value {
                 "Type": "Video",
                 "Context": "Streaming",
                 "Protocol": "hls",
-                "Container": "ts",
-                "VideoCodec": "h264",
+                // HEVC in HLS needs fragmented MP4 segments; the server falls back to H.264
+                // (listed second) when it isn't allowed to encode HEVC.
+                "Container": if prefer_hevc { "mp4" } else { "ts" },
+                "VideoCodec": if prefer_hevc { "hevc,h264" } else { "h264" },
                 "AudioCodec": "aac,mp3,ac3",
                 "MaxAudioChannels": "6",
                 "BreakOnNonKeyFrames": true,
@@ -187,7 +193,7 @@ impl Client {
             enable_direct_play: true,
             enable_direct_stream: true,
             enable_transcoding: true,
-            device_profile: device_profile(max_bitrate),
+            device_profile: device_profile(max_bitrate, req.prefer_hevc),
         };
         self.post(&format!("/Items/{item_id}/PlaybackInfo"), &Query::new(), Some(&body))
             .await
@@ -248,6 +254,17 @@ impl Client {
         ))
     }
 
+    /// Measures the connection to the server by downloading `bytes` of test data
+    /// (`/Playback/BitrateTest`), in bits per second.
+    pub async fn bitrate_test(&self, bytes: u32) -> Result<u64> {
+        let mut url = self.url("/Playback/BitrateTest");
+        url.query_pairs_mut().append_pair("size", &bytes.to_string());
+        let started = std::time::Instant::now();
+        let data = self.get_bytes(url).await?;
+        let seconds = started.elapsed().as_secs_f64().max(0.001);
+        Ok((data.len() as f64 * 8. / seconds) as u64)
+    }
+
     pub async fn report_playback_start(&self, report: &PlaybackReport) -> Result<()> {
         self.post_no_content("/Sessions/Playing", &Query::new(), Some(&report.progress_body()))
             .await
@@ -278,7 +295,17 @@ impl Client {
 mod tests {
     use serde_json::json;
 
-    use super::{PlayMethod, PlaybackReport};
+    use super::{PlayMethod, PlaybackReport, device_profile};
+
+    #[test]
+    fn hevc_transcodes_use_fragmented_mp4() {
+        let profile = &device_profile(8_000_000, true)["TranscodingProfiles"][0];
+        assert_eq!(profile["VideoCodec"], "hevc,h264");
+        assert_eq!(profile["Container"], "mp4");
+        let profile = &device_profile(8_000_000, false)["TranscodingProfiles"][0];
+        assert_eq!(profile["VideoCodec"], "h264");
+        assert_eq!(profile["Container"], "ts");
+    }
 
     /// The bodies the server actually receives, as JSON. `PlaybackStartInfo` and
     /// `PlaybackProgressInfo` both take `VolumeLevel` (int32) and `IsMuted` (bool);

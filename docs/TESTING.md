@@ -92,6 +92,9 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ A **transcoded** stream (HLS) through an outage.
 - ⬜ Esc while "Reconnecting…" closes the player and doesn't start again.
 
+- ⬜ **Automatic bitrate** over a real slow link (Wi-Fi, a phone hotspot, or a remote server): the measurement in the log is plausible and playback transcodes to fit. Only a mocked 4 Mbit/s and the local 1.1 Gbit/s were tried.
+- ⬜ **HEVC transcodes** on a server with hardware HEVC encoding (only software x265 on the dev server).
+
 ## 6. SyncPlay (2.4.3–2.4.6)
 
 ✅ Against the scripted member (`cargo run -p jellyfin --example syncplay`): following the group (load, Ready, Unpause, Pause, Unpause, Seek, Stop) and leading it (Play on an item page, Space, →, Esc); the popover in and out of a group; drift correction catching up 0.8 s.
