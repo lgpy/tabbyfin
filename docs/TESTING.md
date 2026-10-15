@@ -211,3 +211,10 @@ Code-level and startup checks only so far: the development harness cannot send m
 - ⬜ **Windows** (the bundled 0.38+ libmpv, which takes `sub-border-style`): box and outline both look right.
 - ⬜ Changing the **size** in Settings, then in the player's menu: both agree afterwards.
 - ⬜ An **ASS** subtitle keeps its own colours and style.
+
+## 20. Alphabet jump (3.9)
+
+✅ In the dev Movies library, typing `t` moved the highlight to Test Movie; the letter bar shows while sorted by name. `nameLessThan` counts the same, case-insensitively, on 10.11 and 12.2.
+
+- ⬜ A **large library**: clicking letters lands on the first item with that letter, ascending and descending, and with a filter (Unwatched…).
+- ⬜ Names with **articles** ("The …"), accents and digits land where the grid sorts them (the server's sort name).

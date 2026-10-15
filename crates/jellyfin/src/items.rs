@@ -33,6 +33,8 @@ pub struct ItemsQuery {
     pub person_ids: Vec<String>,
     pub filters: Vec<ItemFilter>,
     pub search_term: Option<String>,
+    /// Items whose sort name comes before this, ignoring case (used to count them).
+    pub name_less_than: Option<String>,
     pub sort_by: Vec<ItemSortBy>,
     pub sort_order: Option<SortOrder>,
     pub fields: Vec<ItemField>,
@@ -57,6 +59,7 @@ impl ItemsQuery {
             .list("personIds", &self.person_ids)
             .list("filters", &wire_list(&self.filters, ItemFilter::as_str))
             .opt("searchTerm", self.search_term.as_ref())
+            .opt("nameLessThan", self.name_less_than.as_ref())
             .list("sortBy", &wire_list(&self.sort_by, ItemSortBy::as_str))
             .opt("sortOrder", self.sort_order.map(SortOrder::as_str))
             .list("fields", &wire_list(&self.fields, ItemField::as_str))
