@@ -24,6 +24,9 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 ✅ Item page pickers by keyboard (Test Movie: version to 720p rebuilt the track pickers, then audio and subtitles stepped), W on a season's first episode (watched off and on again on the server), and Settings (theme to Light, autoplay off, subtitle colour to Yellow, saved to the config; the page scrolls with the cursor).
 
 - ⬜ With a **real keyboard**: the ring appears on the first arrow key, a mouse click hides it.
+✅ Top bar and library toolbar by keyboard: Up from Home's first row into the top bar and back down (the cursor returns to its card), the account menu's highlight, a SyncPlay group created and the menu reopened with Leave highlighted, Esc closing the menu then the top bar; the library's Show stepped to Unwatched and *Clear filters*, the cursor staying in the toolbar.
+
+- ⬜ With a real keyboard: the top bar after mouse use (a click elsewhere hides its ring), and the account menu switching to another saved account.
 - ⬜ Changing a picker by keyboard and then by mouse (or the other way) keeps them in step, and playing after a keyboard change uses the chosen version and tracks.
 - ⬜ A **large library** (hundreds of items): the grid scrolls to keep the selection visible, including rows that are still loading.
 - ⬜ **Window resize** while the cursor is in the library grid or search results (the column count changes).
