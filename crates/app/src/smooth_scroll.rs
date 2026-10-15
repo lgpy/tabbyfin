@@ -1,7 +1,8 @@
-//! Smooth mouse-wheel scrolling. GPUI moves a scroll container by a whole wheel step at once;
-//! [`smooth_wheel`] takes that jump back and glides to the same place over a few frames.
-//! Trackpads send pixel deltas that are already smooth, and are left alone, as is everything
-//! when the system asks for reduced motion.
+//! Smooth scrolling. GPUI moves a scroll container by a whole wheel step at once;
+//! [`smooth_wheel`] takes that jump back and glides to the same place over a few frames, and
+//! [`glide_by`] glides a container by a given distance (a shelf's arrow buttons). Trackpads
+//! send pixel deltas that are already smooth, and are left alone; with reduced motion, glides
+//! jump.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ const SETTLE: Pixels = px(0.5);
 
 /// A glide in progress.
 struct Glide {
+    axis: Axis,
     target: Pixels,
     /// The offset the glide set last, to notice when something else scrolls the container
     /// (the keyboard cursor, a drag), which ends the glide.
@@ -26,7 +28,21 @@ struct Glide {
 thread_local! {
     /// Glides in progress, by container. The app has one window, and a container's key is
     /// unique within it.
-    static GLIDES: RefCell<HashMap<&'static str, Glide>> = RefCell::new(HashMap::new());
+    static GLIDES: RefCell<HashMap<ElementId, Glide>> = RefCell::new(HashMap::new());
+}
+
+fn along(point: Point<Pixels>, axis: Axis) -> Pixels {
+    match axis {
+        Axis::Vertical => point.y,
+        Axis::Horizontal => point.x,
+    }
+}
+
+fn set_along(point: &mut Point<Pixels>, axis: Axis, value: Pixels) {
+    match axis {
+        Axis::Vertical => point.y = value,
+        Axis::Horizontal => point.x = value,
+    }
 }
 
 /// A scroll-wheel listener for a vertically scrolling container that tracks `handle`. `key`
@@ -36,9 +52,10 @@ thread_local! {
 /// listeners run last-registered first, and an element's scroll handler is registered after
 /// its `on_scroll_wheel` listeners), so the jump is already applied and can be taken back.
 pub fn smooth_wheel(
-    key: &'static str,
+    key: impl Into<ElementId>,
     handle: &ScrollHandle,
 ) -> impl Fn(&ScrollWheelEvent, &mut Window, &mut App) + 'static {
+    let key = key.into();
     let handle = handle.clone();
     move |event, window, cx| {
         if event.delta.precise() || cx.reduce_motion() {
@@ -53,46 +70,76 @@ pub fn smooth_wheel(
         let mut offset = handle.offset();
         offset.y -= applied;
         handle.set_offset(offset);
+        // Scrolling down is a negative offset; the wheel's delta is already signed that way.
+        start(key.clone(), &handle, Axis::Vertical, applied, window);
+    }
+}
 
-        let max = handle.max_offset().y;
-        let start = GLIDES.with(|glides| {
-            let mut glides = glides.borrow_mut();
-            match glides.get_mut(key) {
-                // Another step while gliding: aim further.
-                Some(glide) if glide.last_set == offset.y => {
-                    glide.target = (glide.target + applied).clamp(-max, px(0.));
-                    false
-                }
-                _ => {
-                    glides.insert(
-                        key,
-                        Glide {
-                            target: (offset.y + applied).clamp(-max, px(0.)),
-                            last_set: offset.y,
-                            last_tick: Instant::now(),
-                        },
-                    );
-                    true
-                }
+/// Glides the container that tracks `handle` by `distance` along `axis` (negative is towards
+/// the end, as offsets go), from where a glide already under way is heading. Jumps with reduced
+/// motion.
+pub fn glide_by(
+    key: impl Into<ElementId>,
+    handle: &ScrollHandle,
+    axis: Axis,
+    distance: Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if cx.reduce_motion() {
+        let max = along(handle.max_offset(), axis);
+        let mut offset = handle.offset();
+        let target = (along(offset, axis) + distance).clamp(-max, px(0.));
+        set_along(&mut offset, axis, target);
+        handle.set_offset(offset);
+        window.refresh();
+        return;
+    }
+    start(key.into(), handle, axis, distance, window);
+}
+
+/// Aims the container's glide `distance` further, starting one if none is under way.
+fn start(key: ElementId, handle: &ScrollHandle, axis: Axis, distance: Pixels, window: &mut Window) {
+    let offset = along(handle.offset(), axis);
+    let max = along(handle.max_offset(), axis);
+    let new = GLIDES.with(|glides| {
+        let mut glides = glides.borrow_mut();
+        match glides.get_mut(&key) {
+            // Another step while gliding: aim further.
+            Some(glide) if glide.axis == axis && glide.last_set == offset => {
+                glide.target = (glide.target + distance).clamp(-max, px(0.));
+                false
             }
-        });
-        if start {
-            let handle = handle.clone();
-            window.on_next_frame(move |window, cx| tick(key, handle, window, cx));
+            _ => {
+                glides.insert(
+                    key.clone(),
+                    Glide {
+                        axis,
+                        target: (offset + distance).clamp(-max, px(0.)),
+                        last_set: offset,
+                        last_tick: Instant::now(),
+                    },
+                );
+                true
+            }
         }
+    });
+    if new {
+        let handle = handle.clone();
+        window.on_next_frame(move |window, cx| tick(key, handle, window, cx));
     }
 }
 
 /// Moves the glide one frame closer to its target, and asks for another frame until it's there.
-fn tick(key: &'static str, handle: ScrollHandle, window: &mut Window, cx: &mut App) {
+fn tick(key: ElementId, handle: ScrollHandle, window: &mut Window, cx: &mut App) {
     let mut offset = handle.offset();
     let more = GLIDES.with(|glides| {
         let mut glides = glides.borrow_mut();
-        let Some(glide) = glides.get_mut(key) else {
+        let Some(glide) = glides.get_mut(&key) else {
             return false;
         };
-        if offset.y != glide.last_set || cx.reduce_motion() {
-            glides.remove(key);
+        if along(offset, glide.axis) != glide.last_set || cx.reduce_motion() {
+            glides.remove(&key);
             return false;
         }
         let now = Instant::now();
@@ -102,11 +149,11 @@ fn tick(key: &'static str, handle: ScrollHandle, window: &mut Window, cx: &mut A
         if done {
             next = glide.target;
         }
-        offset.y = next;
+        set_along(&mut offset, glide.axis, next);
         glide.last_set = next;
         glide.last_tick = now;
         if done {
-            glides.remove(key);
+            glides.remove(&key);
         }
         !done
     });
