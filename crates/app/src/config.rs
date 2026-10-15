@@ -17,6 +17,9 @@ pub struct Config {
     /// Player volume in percent, remembered between sessions.
     #[serde(default)]
     pub volume: Option<f64>,
+    /// Light, dark, or following the system.
+    #[serde(default)]
+    pub theme: ThemePreference,
     /// The player's clock shows the time left instead of the time played. `None` means no.
     #[serde(default)]
     pub show_remaining_time: Option<bool>,
@@ -47,6 +50,16 @@ pub struct Config {
     /// Whether the main window was maximized; restored on top of `window_bounds`.
     #[serde(default)]
     pub window_maximized: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    /// Follows the system's light or dark appearance, also when it changes.
+    System,
+    Light,
+    #[default]
+    Dark,
 }
 
 /// The main window's position and size in the global screen space, in logical pixels.
