@@ -866,12 +866,13 @@ impl LibraryPage {
                 } else {
                     Lucide::ArrowUpNarrowWide
                 })
+                // What a click does; the icon shows the current order.
                 .tooltip(if random {
                     "Shuffle again"
                 } else if self.view.descending {
-                    "Descending"
+                    "Sort ascending"
                 } else {
-                    "Ascending"
+                    "Sort descending"
                 })
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_order(cx)))
                 .into_any_element(),
