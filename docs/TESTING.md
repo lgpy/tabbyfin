@@ -128,13 +128,13 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Mixed DPI** (e.g. a 125% monitor next to a 100% one): the saved spot and size survive.
 - ⬜ **Unplug the second monitor** the window was on: the next launch opens centred at the default size instead of off-screen.
 - ⬜ **Fullscreen playback**, then quit: the next launch opens windowed at the last normal bounds.
-- ⬜ A move or resize followed by a **quit within half a second**: the previous bounds are kept (the save waits for the change to settle).
+- ⬜ A move or resize followed by **closing the window within half a second**: the new bounds are saved (closing flushes the pending save).
 
 ## 10. Player mouse niceties (2.1.8)
 
 Code-level and startup checks only so far: the development harness cannot send mouse input. The cursor hiding uses `App::hide_cursor_until_mouse_moves` (the gpui-pre patch), which the platforms restore on the next mouse move.
 
-- ⬜ **Single click** on the video pauses; a **double click** toggles fullscreen and leaves the video playing (the first click's pause is undone).
+- ⬜ **Single click** on the video pauses; a **double click** toggles fullscreen and leaves the video playing (the first click's pause is undone), also in a SyncPlay group, where the group must not end up paused.
 - ⬜ **Wheel over the video**: one notch is 5% volume, scrolling down takes it away, and a fast spin follows the wheel rather than the event count.
 - ⬜ **Trackpad** (macOS, or a Windows precision touchpad): small deltas add up instead of being ignored, and one flick does not slam the volume to 0 or 100.
 - ⬜ **Cursor and controls**: after 3 s without movement both disappear while playing; any movement brings both back; neither happens while paused.
@@ -144,4 +144,5 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 ✅ Against the 12.2 dev server: three volume-down presses and `m` inside the app left `VolumeLevel = 85` and `IsMuted = true` in the session's `PlayState` (`GET /Sessions`). The 10.11 spec carries the same fields on `PlaybackProgressInfo` (checked), not run at runtime.
 
-- ⬜ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app.
+- ⬜ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app (about a second later; the report is batched).
+- ⬜ Re-run the `/Sessions` check above since the batching change.

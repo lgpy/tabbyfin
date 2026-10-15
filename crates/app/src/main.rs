@@ -25,6 +25,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::app_view::AppView;
 use crate::changes::Changes;
+use crate::config::Config;
 use crate::views::player::{
     self, ExitPlayer, NextChapter, NextEpisode, PrevChapter, SeekBackward, SeekForward, Skip, ToggleFullscreen,
     ToggleMute, TogglePause, VolumeDown, VolumeUp,
@@ -139,14 +140,11 @@ fn main() {
             ]);
             cx.bind_keys(browse::key_bindings());
 
-            let window::Launch {
-                display_id,
-                bounds,
-                maximized,
-            } = window::launch_placement(cx);
+            let config = Config::load();
+            let launch = window::launch_placement(&config, cx);
             let options = WindowOptions {
-                window_bounds: Some(bounds),
-                display_id,
+                window_bounds: Some(launch.window_bounds()),
+                display_id: launch.display_id,
                 titlebar: Some(TitlebarOptions {
                     title: Some("jelly-gpui".into()),
                     ..Default::default()
@@ -154,12 +152,7 @@ fn main() {
                 ..Default::default()
             };
             gpui_kit::open_window(options, cx, |window, cx| {
-                if maximized {
-                    // GPUI keeps only the rect of `window_bounds`, so the maximized state is
-                    // re-applied here.
-                    window.zoom_window();
-                }
-                cx.new(|cx| AppView::new(window, cx))
+                cx.new(|cx| AppView::new(config, launch.placement, window, cx))
             })
             .expect("failed to open window");
         });

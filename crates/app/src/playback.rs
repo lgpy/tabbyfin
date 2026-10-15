@@ -23,6 +23,9 @@ use crate::session::describe_error;
 use crate::syncplay::{GroupRequest, SyncPlay};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+/// How long after a volume or mute change its progress report goes out. A wheel spin or held
+/// key changes the volume many times a second; one report covers them all.
+const VOLUME_REPORT_AFTER: Duration = Duration::from_secs(1);
 const DEFAULT_VOLUME: f64 = 100.;
 
 pub enum PlaybackEvent {
@@ -924,6 +927,8 @@ async fn run_session(
     let mut duration = None;
     let mut ticker = tokio::time::interval(PROGRESS_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // When the pending volume or mute report is due.
+    let mut volume_report: Option<tokio::time::Instant> = None;
 
     loop {
         tokio::select! {
@@ -946,8 +951,14 @@ async fn run_session(
                     }
                     PlayerEvent::Position(position) => report.position = Ticks::from(position),
                     PlayerEvent::Duration(length) => duration = Some(length),
-                    PlayerEvent::Volume(volume) => report.volume_level = volume_level(volume),
-                    PlayerEvent::Muted(muted) => report.is_muted = muted,
+                    PlayerEvent::Volume(volume) => {
+                        report.volume_level = volume_level(volume);
+                        schedule_volume_report(&mut volume_report, started);
+                    }
+                    PlayerEvent::Muted(muted) => {
+                        report.is_muted = muted;
+                        schedule_volume_report(&mut volume_report, started);
+                    }
                     PlayerEvent::Paused(paused) => {
                         report.is_paused = paused;
                         if started {
@@ -967,14 +978,21 @@ async fn run_session(
             }
             Some(command) = channels.commands.recv() => {
                 tracing::debug!(?command, "player command");
+                // Volume and mute are reported from mpv's events instead, batched.
+                let reports = !matches!(command, UiCommand::SetVolume(_) | UiCommand::ToggleMute);
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
-                if started {
+                if started && reports {
                     report_or_log(client.report_playback_progress(&report).await, "progress");
                 }
             }
+            _ = tokio::time::sleep_until(volume_report.unwrap_or_else(tokio::time::Instant::now)), if volume_report.is_some() => {
+                volume_report = None;
+                report_or_log(client.report_playback_progress(&report).await, "progress");
+            }
             _ = ticker.tick(), if started => {
+                volume_report = None;
                 report_or_log(client.report_playback_progress(&report).await, "progress");
                 save_unfinished(Some(&report));
             }
@@ -1015,6 +1033,14 @@ async fn run_session(
     }
 }
 
+/// Arms the batched volume and mute report, unless one is already pending. Before the start
+/// report there's nothing to update: the start report carries the state itself.
+fn schedule_volume_report(due: &mut Option<tokio::time::Instant>, started: bool) {
+    if started {
+        due.get_or_insert_with(|| tokio::time::Instant::now() + VOLUME_REPORT_AFTER);
+    }
+}
+
 /// mpv's volume in percent as the whole number the server's reports expect.
 fn volume_level(volume: f64) -> i32 {
     volume.clamp(0., 100.).round() as i32
@@ -1037,17 +1063,8 @@ async fn apply_command(
                 .command(json!(["seek", position.as_secs_f64(), "absolute"]))
                 .await
         }
-        UiCommand::SetVolume(volume) => {
-            // mpv's event confirms this right after, but the report the command triggers goes
-            // out before it arrives.
-            report.volume_level = volume_level(volume);
-            player.set_property("volume", volume.clamp(0., 100.)).await
-        }
-        UiCommand::ToggleMute => {
-            // Mirrors mpv's `cycle mute`; the event that follows confirms it.
-            report.is_muted = !report.is_muted;
-            player.command(json!(["cycle", "mute"])).await
-        }
+        UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., 100.)).await,
+        UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
         // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
         UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),
         UiCommand::Audio(index) => {
