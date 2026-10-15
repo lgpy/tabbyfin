@@ -11,9 +11,10 @@ const DEFAULT_WIDTH: f32 = 1280.0;
 const DEFAULT_HEIGHT: f32 = 800.0;
 /// A saved side shorter than this is treated as a corrupt config, not a window.
 const MIN_SIDE: f32 = 100.0;
-/// The smallest window the layout works in: below it the player's control bar no longer fits.
+/// The smallest window the layout works in: below it the player's control bar and an item
+/// page's title line no longer fit.
 /// Restored bounds are grown to it too, since the platform only applies it to resizing.
-pub const MIN_WIDTH: f32 = 900.0;
+pub const MIN_WIDTH: f32 = 800.0;
 pub const MIN_HEIGHT: f32 = 500.0;
 
 pub fn min_size() -> Size<Pixels> {
@@ -270,7 +271,7 @@ mod tests {
     fn a_window_smaller_than_the_minimum_grows_to_it() {
         let displays = [rect(0., 0., 1920., 1080.)];
         let (bounds, _) = placed_bounds(saved(100., 100., 700., 400.), &displays).expect("kept");
-        assert_eq!(bounds.size.width.as_f32(), 900.);
+        assert_eq!(bounds.size.width.as_f32(), 800.);
         assert_eq!(bounds.size.height.as_f32(), 500.);
         assert_eq!(bounds.origin.x.as_f32(), 100.);
     }
