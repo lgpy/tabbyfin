@@ -574,7 +574,9 @@ impl LibraryPage {
             .py_2()
             .justify_between()
             .items_center()
-            .text_xs()
+            // A fixed size, so all 27 fit the window at any text size (typing a letter does
+            // the same).
+            .text_size(px(11.))
             .text_color(cx.theme().muted_foreground)
             .children(LETTERS.chars().map(|letter| {
                 div()
@@ -889,7 +891,11 @@ impl LibraryPage {
                     _ => 150.,
                 };
                 let select = self.tool_select(tool).expect("a picker");
-                div().w(px(width)).child(Select::new(select).small()).into_any_element()
+                // In rems, so the menus grow with the text size.
+                div()
+                    .w(rems(width / 16.))
+                    .child(Select::new(select).small())
+                    .into_any_element()
             }
         }
     }

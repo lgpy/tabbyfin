@@ -23,6 +23,9 @@ pub struct Config {
     /// Light, dark, or following the system.
     #[serde(default)]
     pub theme: ThemePreference,
+    /// Text size in percent of the normal size. `None` follows the system's setting.
+    #[serde(default)]
+    pub text_size: Option<u16>,
     /// The player's clock shows the time left instead of the time played. `None` means no.
     #[serde(default)]
     pub show_remaining_time: Option<bool>,
