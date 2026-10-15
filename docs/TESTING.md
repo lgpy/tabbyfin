@@ -55,6 +55,9 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ The item page's *More* menu by keyboard: Enter on *More* opens it (a `PopupMenu` in a controlled popover, since `DropdownMenu` only opens on a click); on a playlist it holds *Edit…* and, past a separator, *Delete playlist…*; on a movie *Add to playlist…*, whose dialog opens with the keyboard in its list. *Watched* and *Favorite* are `Toggle`s, pressed while on (a favorite movie shows *Favorite* filled).
 
+✅ The context menu's contents and commands, built in place of the *More* menu by temporary code (the harness can't right-click): on a resumable movie *Resume from 0:29*, *Play from beginning*, *Watched*, *Favorite* (checked) and *Add to playlist…*; Enter on *Watched* marked it on the server and the page's toggle turned on. Home, the library grid and search lay out as before with the menus attached.
+- ⬜ **Context menus with a real mouse**: right-click on a Home card, a library poster, a search result, a season and an episode row; *Add to playlist…* opens its dialog with the keyboard in it; a library or person card has no menu.
+
 - ⬜ **Playlist editing with the mouse**: the entry buttons, clicking a playlist in the *Add to playlist* dialog, and quick repeated moves landing in the server's order. As a second user (dev2), adding to dev's playlist or deleting it gives the "belongs to someone else" message.
 - ⬜ **Collections and playlists** from a real library (TMDb collections, a long playlist): *Play all* and *Shuffle* go through the whole list, the up-next card names the next entry, and playing something else ends the queue.
 - ⬜ *Play all* while in a SyncPlay group plays the list for the whole group.

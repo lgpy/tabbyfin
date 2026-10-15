@@ -8,6 +8,7 @@ mod components;
 mod config;
 mod credentials;
 mod images;
+mod item_menu;
 mod live;
 mod markers;
 mod motion;

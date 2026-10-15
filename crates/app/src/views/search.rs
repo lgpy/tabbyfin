@@ -14,6 +14,7 @@ use crate::components::{
     CARD_GAP, LANDSCAPE_W, POSTER_W, centered_message, centered_spinner, landscape_card, poster_card,
 };
 use crate::images::ImageCache;
+use crate::item_menu::with_item_menu;
 use crate::router::Navigator;
 use crate::runtime;
 use crate::smooth_scroll::smooth_wheel;
@@ -193,11 +194,12 @@ impl SearchPage {
                         move |_: &ClickEvent, window: &mut Window, cx: &mut App| nav.open(&target, window, cx);
                     let id = (SharedString::from(group.title), index);
                     let selected = self.cursor.is_selected(g, index);
-                    if group.landscape {
-                        landscape_card(id, item, selected, on_click, cx).into_any_element()
+                    let card = if group.landscape {
+                        landscape_card(id, item, selected, on_click, cx)
                     } else {
-                        poster_card(id, item, selected, on_click, cx).into_any_element()
-                    }
+                        poster_card(id, item, selected, on_click, cx)
+                    };
+                    with_item_menu(card, item, &self.client, &self.nav)
                 });
                 children.push(
                     h_flex()

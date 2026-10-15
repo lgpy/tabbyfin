@@ -21,6 +21,7 @@ use crate::components::{
 };
 use crate::config::{Config, LibraryView};
 use crate::images::ImageCache;
+use crate::item_menu::with_item_menu;
 use crate::router::Navigator;
 use crate::runtime;
 use crate::smooth_scroll::smooth_wheel;
@@ -670,14 +671,14 @@ impl LibraryPage {
                     Some(item) => {
                         let nav = self.nav.clone();
                         let target = item.clone();
-                        poster_card(
+                        let card = poster_card(
                             ("item", index),
                             item,
                             self.cursor.is_selected(GRID, index),
                             move |_, window, cx| nav.open(&target, window, cx),
                             cx,
-                        )
-                        .into_any_element()
+                        );
+                        with_item_menu(card, item, &self.client, &self.nav)
                     }
                     None => placeholder_card(cx).into_any_element(),
                 })
