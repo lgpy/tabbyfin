@@ -7,11 +7,15 @@
 //! local time. Local pause, seek and stop become requests ([`GroupRequest`]) instead of acting
 //! directly. See `docs/ROADMAP.md` §2.4.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
 
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind};
-use jellyfin::{BufferReport, Client, Command, CommandKind, GroupInfo, GroupUpdate, PlayQueue, ServerClock, Ticks};
+use jellyfin::{
+    BufferReport, Client, Command, CommandKind, GroupInfo, GroupUpdate, ItemsQuery, PlayQueue, RepeatMode, ServerClock,
+    ShuffleMode, Ticks,
+};
 
 use crate::playback::{NowPlaying, PlayOptions, PlaybackEvent, PlaybackManager, UiCommand};
 use crate::runtime;
@@ -41,7 +45,10 @@ pub struct SyncPlay {
     /// Groups on the server, as last listed.
     pub groups: Vec<GroupInfo>,
     clock: ServerClock,
-    queue: Option<PlayQueue>,
+    /// The group's queue, as last updated.
+    pub queue: Option<PlayQueue>,
+    /// Names of the queue's items, by item id (fetched as they're queued).
+    pub names: HashMap<String, String>,
     /// The queue entry the local player has loaded (or is loading).
     loaded: Option<String>,
     /// The group session's player state, and the restart count when a `Ready` was last due.
@@ -87,6 +94,7 @@ impl SyncPlay {
             groups: Vec::new(),
             clock: ServerClock::default(),
             queue: None,
+            names: HashMap::new(),
             loaded: None,
             now_playing: None,
             ready_due: false,
@@ -184,6 +192,28 @@ impl SyncPlay {
         self.call(cx, move |client| async move { client.syncplay_queue(&ids, next).await });
     }
 
+    /// Loads the group's current item again here only (another version, or a transcode
+    /// restarted for other tracks). Reports `Buffering`, so the server pauses the others and
+    /// remembers the group's position; loads paused; and reports `Ready` once loaded, so the
+    /// server resumes everyone (or has this member seek first, if it landed elsewhere).
+    pub fn reload(&mut self, item: &BaseItemDto, mut options: PlayOptions, cx: &mut Context<Self>) {
+        let Some(group_item) = self.loaded.clone() else {
+            return;
+        };
+        options.group_item = Some(group_item);
+        options.start_paused = true;
+        self.scheduled = None;
+        // The session being replaced counts as loaded; `Ready` is the new one's to report,
+        // once it starts (`on_playback`).
+        self.player_watch = None;
+        self.now_playing = None;
+        self.drift_task = None;
+        self.ready_due = true;
+        self.report(false, options.start.unwrap_or_default(), false, cx);
+        let item = item.clone();
+        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
+    }
+
     /// The group's item ended here: move the group on to the next one (the server ignores
     /// the duplicate reports from other members).
     pub fn item_ended(&mut self, playlist_item_id: &str, cx: &mut Context<Self>) {
@@ -269,8 +299,100 @@ impl SyncPlay {
         cx.notify();
     }
 
+    /// Plays another entry of the group's queue (for everyone).
+    pub fn play_entry(&mut self, playlist_item_id: String, cx: &mut Context<Self>) {
+        self.call(cx, move |client| async move {
+            client.syncplay_set_playlist_item(&playlist_item_id).await
+        });
+    }
+
+    pub fn remove_entry(&mut self, playlist_item_id: String, cx: &mut Context<Self>) {
+        self.call(cx, move |client| async move {
+            client.syncplay_remove(&[playlist_item_id]).await
+        });
+    }
+
+    /// Moves an entry up (`-1`) or down (`1`) the queue.
+    pub fn move_entry(&mut self, playlist_item_id: String, by: isize, cx: &mut Context<Self>) {
+        let Some(queue) = &self.queue else { return };
+        let Some(index) = queue
+            .playlist
+            .iter()
+            .position(|e| e.playlist_item_id == playlist_item_id)
+        else {
+            return;
+        };
+        let Some(to) = index.checked_add_signed(by).filter(|to| *to < queue.playlist.len()) else {
+            return;
+        };
+        self.call(cx, move |client| async move {
+            client.syncplay_move(&playlist_item_id, to).await
+        });
+    }
+
+    pub fn toggle_shuffle(&mut self, cx: &mut Context<Self>) {
+        let mode = match self.queue.as_ref().map(|q| q.shuffle_mode) {
+            Some(ShuffleMode::Shuffle) => ShuffleMode::Sorted,
+            _ => ShuffleMode::Shuffle,
+        };
+        self.call(cx, move |client| async move { client.syncplay_set_shuffle(mode).await });
+    }
+
+    /// None, all, one.
+    pub fn cycle_repeat(&mut self, cx: &mut Context<Self>) {
+        let mode = self
+            .queue
+            .as_ref()
+            .map_or(RepeatMode::RepeatNone, |q| q.repeat_mode)
+            .next();
+        self.call(cx, move |client| async move { client.syncplay_set_repeat(mode).await });
+    }
+
+    /// Fetches the names of queued items not seen yet, for the queue list.
+    fn fetch_names(&mut self, queue: &PlayQueue, cx: &mut Context<Self>) {
+        let mut ids: Vec<String> = queue
+            .playlist
+            .iter()
+            .map(|entry| entry.item_id.clone())
+            .filter(|id| !self.names.contains_key(id))
+            .collect();
+        ids.sort();
+        ids.dedup();
+        if ids.is_empty() {
+            return;
+        }
+        let client = self.client.clone();
+        cx.spawn(async move |this, cx| {
+            let query = ItemsQuery {
+                ids,
+                ..Default::default()
+            };
+            let result = runtime::spawn(async move { client.items(&query).await }).await;
+            match result {
+                Ok(result) => {
+                    this.update(cx, |this, cx| {
+                        for item in result.items {
+                            // Episodes read "Series · S1:E2 · Name".
+                            let (title, detail) = crate::components::card_text(&item);
+                            let name = match item.kind {
+                                BaseItemKind::Episode => format!("{title} · {detail}"),
+                                _ => title,
+                            };
+                            this.names.insert(item.id, name);
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Err(err) => tracing::warn!("couldn't name the group's queue: {err}"),
+            }
+        })
+        .detach();
+    }
+
     /// Loads the queue's current item when it changes (paused, at the group's position).
     fn on_queue(&mut self, queue: PlayQueue, cx: &mut Context<Self>) {
+        self.fetch_names(&queue, cx);
         let current = queue.current().cloned();
         let start = queue.start_position_ticks;
         self.queue = Some(queue);

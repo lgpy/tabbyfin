@@ -23,6 +23,9 @@ pub struct Config {
     /// Light, dark, or following the system.
     #[serde(default)]
     pub theme: ThemePreference,
+    /// Text size in percent of the normal size. `None` follows the system's setting.
+    #[serde(default)]
+    pub text_size: Option<u16>,
     /// The player's clock shows the time left instead of the time played. `None` means no.
     #[serde(default)]
     pub show_remaining_time: Option<bool>,
@@ -45,6 +48,14 @@ pub struct Config {
     /// Bits per second; the server transcodes anything above it. `None` means no limit.
     #[serde(default)]
     pub max_streaming_bitrate: Option<u64>,
+    /// Measure the connection before playing and cap the bitrate to it, instead of
+    /// `max_streaming_bitrate`. `None` means no.
+    #[serde(default)]
+    pub automatic_bitrate: Option<bool>,
+    /// Ask for HEVC rather than H.264 when the server transcodes (if it allows HEVC encoding).
+    /// `None` means no.
+    #[serde(default)]
+    pub prefer_hevc: Option<bool>,
     /// Play the next episode when one ends. `None` means yes.
     #[serde(default)]
     pub autoplay_next_episode: Option<bool>,

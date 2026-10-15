@@ -230,15 +230,21 @@ fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Op
     #[cfg(any(windows, target_os = "linux"))]
     if std::env::var("JELLY_GPUI_VIDEO").as_deref() != Ok("software") {
         // On Windows, ANGLE first: it also gives zero-copy hardware decoding. Then plain WGL.
+        use super::opengl::GlRenderer;
         #[cfg(windows)]
-        let gpu = super::angle::GpuRenderer::new(core, control)
+        let gpu = super::angle::Angle::new(core)
+            .and_then(|angle| GlRenderer::new(core, control, angle))
             .map(|gpu| (GpuRenderer::Angle(gpu), "ANGLE/D3D11"))
             .or_else(|err| {
                 tracing::info!("ANGLE video output unavailable: {err}");
-                super::wgl::GpuRenderer::new(core, control).map(|gpu| (GpuRenderer::Wgl(gpu), "OpenGL/D3D11 interop"))
+                super::wgl::Wgl::new(core)
+                    .and_then(|wgl| GlRenderer::new(core, control, wgl))
+                    .map(|gpu| (GpuRenderer::Wgl(gpu), "OpenGL/D3D11 interop"))
             });
         #[cfg(target_os = "linux")]
-        let gpu = super::egl::GpuRenderer::new(core, control).map(|gpu| (gpu, "OpenGL/Vulkan interop"));
+        let gpu = super::egl::EglVulkan::new(core)
+            .and_then(|egl| GlRenderer::new(core, control, egl))
+            .map(|gpu| (gpu, "OpenGL/Vulkan interop"));
         match gpu {
             Ok((mut gpu, kind)) => {
                 tracing::info!("video output: GPU ({kind})");
@@ -268,8 +274,8 @@ fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Op
 
 #[cfg(windows)]
 enum GpuRenderer {
-    Angle(super::angle::GpuRenderer),
-    Wgl(super::wgl::GpuRenderer),
+    Angle(super::opengl::GlRenderer<super::angle::Angle>),
+    Wgl(super::opengl::GlRenderer<super::wgl::Wgl>),
 }
 
 #[cfg(windows)]

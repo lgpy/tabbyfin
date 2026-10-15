@@ -38,6 +38,8 @@ const SUBTITLE_SCALES: [f64; 6] = [0.75, 1., 1.25, 1.5, 1.75, 2.];
 
 /// Max streaming bitrate choices in Mbit/s; 0 is no limit.
 const BITRATES_MBPS: [i32; 10] = [0, 120, 60, 40, 20, 10, 8, 4, 2, 1];
+/// The bitrate choice that measures the connection instead.
+const AUTOMATIC: i32 = -1;
 
 /// Space around a control for the keyboard cursor's ring.
 const RING_GAP: f32 = 3.;
@@ -46,6 +48,7 @@ const CONTENT_W: f32 = 720.;
 pub struct SettingsPage {
     session: Session,
     scroll: ScrollHandle,
+    text_size: ChoiceSelect,
     cursor: Cursor,
     focus_handle: FocusHandle,
     theme: ChoiceSelect,
@@ -56,6 +59,7 @@ pub struct SettingsPage {
     animations: bool,
     autoplay: bool,
     auto_skip: bool,
+    prefer_hevc: bool,
     check_updates: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -66,6 +70,7 @@ impl SettingsPage {
         let animations = config.animations.unwrap_or(true);
         let autoplay = config.autoplay_next_episode.unwrap_or(true);
         let auto_skip = config.auto_skip_intro.unwrap_or(false);
+        let prefer_hevc = config.prefer_hevc.unwrap_or(false);
         let check_updates = config.check_for_updates.unwrap_or(true);
         let mut subscriptions = Vec::new();
 
@@ -73,6 +78,21 @@ impl SettingsPage {
         subscriptions.push(on_pick(&theme, &THEMES, window, cx, |preference, window, cx| {
             save(|config| config.theme = preference);
             theme::apply(preference, Some(window), cx);
+        }));
+
+        // `None` follows the system; its size is shown, as it can differ from 100%.
+        let system = format!("Follow the system ({:.0}%)", theme::system_text_scale() * 100.);
+        let text_sizes: Vec<(Option<u16>, String)> = std::iter::once((None, system))
+            .chain(
+                theme::TEXT_SIZES
+                    .iter()
+                    .map(|&percent| (Some(percent), format!("{percent}%"))),
+            )
+            .collect();
+        let text_size = options_select(&text_sizes, &config.text_size, window, cx);
+        subscriptions.push(on_pick(&text_size, &text_sizes, window, cx, |size, _, cx| {
+            save(|config| config.text_size = size);
+            theme::apply_text_size(cx);
         }));
 
         let subtitle_color = options_select(&SUBTITLE_COLORS, &config.subtitle_color.unwrap_or_default(), window, cx);
@@ -100,22 +120,31 @@ impl SettingsPage {
             PlaybackManager::global(cx).update(cx, |playback, _| playback.set_subtitle_scale(scale));
         }));
 
-        let bitrates: Vec<(i32, String)> = BITRATES_MBPS
-            .iter()
-            .map(|&mbps| match mbps {
+        // `AUTOMATIC` measures the connection before playing instead.
+        let bitrates: Vec<(i32, String)> = std::iter::once((AUTOMATIC, "Automatic (measured)".to_string()))
+            .chain(BITRATES_MBPS.iter().map(|&mbps| match mbps {
                 0 => (mbps, "No limit".to_string()),
                 mbps => (mbps, format!("{mbps} Mbit/s")),
-            })
+            }))
             .collect();
-        let current_bitrate = config.max_streaming_bitrate.map_or(0, |bps| (bps / 1_000_000) as i32);
+        let current_bitrate = match config.automatic_bitrate {
+            Some(true) => AUTOMATIC,
+            _ => config.max_streaming_bitrate.map_or(0, |bps| (bps / 1_000_000) as i32),
+        };
         let bitrate = options_select(&bitrates, &current_bitrate, window, cx);
         subscriptions.push(on_pick(&bitrate, &bitrates, window, cx, |mbps, _, _| {
-            save(|config| config.max_streaming_bitrate = (mbps > 0).then(|| mbps as u64 * 1_000_000));
+            save(|config| {
+                config.automatic_bitrate = Some(mbps == AUTOMATIC);
+                if mbps != AUTOMATIC {
+                    config.max_streaming_bitrate = (mbps > 0).then(|| mbps as u64 * 1_000_000);
+                }
+            });
         }));
 
         Self {
             session,
             scroll: ScrollHandle::new(),
+            text_size,
             cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
             theme,
@@ -126,6 +155,7 @@ impl SettingsPage {
             animations,
             autoplay,
             auto_skip,
+            prefer_hevc,
             check_updates,
             _subscriptions: subscriptions,
         }
@@ -147,6 +177,12 @@ impl SettingsPage {
     fn set_auto_skip(&mut self, auto_skip: bool, cx: &mut Context<Self>) {
         self.auto_skip = auto_skip;
         save(|config| config.auto_skip_intro = Some(auto_skip));
+        cx.notify();
+    }
+
+    fn set_prefer_hevc(&mut self, prefer: bool, cx: &mut Context<Self>) {
+        self.prefer_hevc = prefer;
+        save(|config| config.prefer_hevc = Some(prefer));
         cx.notify();
     }
 
@@ -235,10 +271,12 @@ fn save(change: impl FnOnce(&mut Config)) {
 #[derive(Clone, Copy, PartialEq)]
 enum Control {
     Theme,
+    TextSize,
     Animations,
     Autoplay,
     AutoSkip,
     Bitrate,
+    PreferHevc,
     SubtitleColor,
     SubtitleStyle,
     SubtitleSize,
@@ -270,6 +308,7 @@ impl SettingsPage {
         vec![
             Title("Appearance"),
             C(Theme),
+            C(TextSize),
             C(Animations),
             Title("Playback"),
             C(Autoplay),
@@ -282,7 +321,14 @@ impl SettingsPage {
             C(Bitrate),
             Hint(
                 "Videos above this bitrate are transcoded by the server, which uses its CPU or GPU. Lower it for \
-                 slow connections; other videos play the original file."
+                 slow connections; other videos play the original file. Automatic measures the connection \
+                 before playing (every 10 minutes at most) and uses 80% of it."
+                    .into(),
+            ),
+            C(PreferHevc),
+            Hint(
+                "HEVC needs about half the bandwidth of H.264 for the same picture, but is much harder for the \
+                 server to encode. Used only if the server allows it (Dashboard → Playback → Transcoding)."
                     .into(),
             ),
             Title("Home"),
@@ -334,6 +380,7 @@ impl SettingsPage {
     fn select(&self, control: Control) -> Option<&ChoiceSelect> {
         match control {
             Control::Theme => Some(&self.theme),
+            Control::TextSize => Some(&self.text_size),
             Control::Bitrate => Some(&self.bitrate),
             Control::SubtitleColor => Some(&self.subtitle_color),
             Control::SubtitleStyle => Some(&self.subtitle_style),
@@ -349,6 +396,7 @@ impl SettingsPage {
             Control::Autoplay => self.set_autoplay(on.unwrap_or(!self.autoplay), cx),
             Control::AutoSkip => self.set_auto_skip(on.unwrap_or(!self.auto_skip), cx),
             Control::CheckUpdates => self.set_check_updates(on.unwrap_or(!self.check_updates), cx),
+            Control::PreferHevc => self.set_prefer_hevc(on.unwrap_or(!self.prefer_hevc), cx),
             _ => {}
         }
     }
@@ -364,12 +412,13 @@ impl SettingsPage {
             };
         let element = match control {
             Control::Theme
+            | Control::TextSize
             | Control::Bitrate
             | Control::SubtitleColor
             | Control::SubtitleStyle
             | Control::SubtitleSize => {
                 let select = self.select(control).expect("a picker");
-                Select::new(select).w(dp(180.)).into_any_element()
+                Select::new(select).w(rems(220. / 16.)).into_any_element()
             }
             Control::Animations => switch(
                 "animations",
@@ -388,6 +437,12 @@ impl SettingsPage {
                 self.auto_skip,
                 "Skip intros and recaps automatically",
                 Self::set_auto_skip,
+            ),
+            Control::PreferHevc => switch(
+                "prefer-hevc",
+                self.prefer_hevc,
+                "Ask for HEVC when the server transcodes",
+                Self::set_prefer_hevc,
             ),
             Control::CheckUpdates => switch(
                 "check-updates",
@@ -420,7 +475,13 @@ impl SettingsPage {
         match self.select(control) {
             Some(_) => h_flex()
                 .gap(dp(16. - RING_GAP))
-                .child(div().w(dp(170.)).flex_none().text_sm().child(control_label(control)))
+                .child(
+                    div()
+                        .w(rems(170. / 16.))
+                        .flex_none()
+                        .text_sm()
+                        .child(control_label(control)),
+                )
                 .child(ringed(element))
                 .into_any_element(),
             // A ring's width to the left, so the switch or button lines up with the text.
@@ -433,6 +494,7 @@ impl SettingsPage {
 fn control_label(control: Control) -> &'static str {
     match control {
         Control::Theme => "Theme",
+        Control::TextSize => "Text size",
         Control::Bitrate => "Max streaming bitrate",
         Control::SubtitleColor => "Colour",
         Control::SubtitleStyle => "Style",

@@ -131,6 +131,7 @@ async fn playback_info_offers_direct_play_under_the_bitrate_cap() {
         audio_stream_index: Some(2),
         subtitle_stream_index: None,
         max_streaming_bitrate: Some(8_000_000),
+        prefer_hevc: false,
     };
     let info = client.playback_info("item", &request).await.expect("playback info");
     assert!(info.play_session_id.is_some());
@@ -192,4 +193,23 @@ async fn http_failures_map_to_their_errors() {
         }
         other => panic!("expected a status error, got {other:?}"),
     }
+}
+
+/// The connection test downloads test data and times it: 500 kB in about a second is about
+/// 4 Mbit/s.
+#[tokio::test]
+async fn the_bitrate_test_times_the_download() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Playback/BitrateTest"))
+        .and(query_param("size", "500000"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(vec![0u8; 500_000])
+                .set_delay(Duration::from_secs(1)),
+        )
+        .mount(&server)
+        .await;
+    let bits = client(&server).await.bitrate_test(500_000).await.expect("bitrate test");
+    assert!((3_000_000..4_100_000).contains(&bits), "{bits} bit/s");
 }

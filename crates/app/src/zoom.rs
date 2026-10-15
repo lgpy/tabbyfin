@@ -1,6 +1,9 @@
 //! UI zoom, like a web browser's: Ctrl+= and Ctrl+- step through [`LEVELS`], Ctrl+0 resets.
 //! The zoom sets the rem size (the theme's font size), so text and gpui-kit's controls scale;
-//! the app's own fixed sizes use [`dp`] so they scale with it.
+//! the app's own fixed sizes use [`dp`] so they scale with it. The text size setting scales
+//! the rem size too, but not [`dp`]: it makes text bigger, not the layout.
+
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use gpui_kit::component::Theme;
 use gpui_kit::*;
@@ -17,14 +20,21 @@ struct UiZoom(f32);
 
 impl Global for UiZoom {}
 
-/// A length given in pixels at 100% zoom, scaling with the zoom.
+/// The text size factor in the rem size, as an `f32`'s bits, so [`dp`] can take it out.
+static TEXT_SCALE: AtomicU32 = AtomicU32::new(1f32.to_bits());
+
+fn text_scale() -> f32 {
+    f32::from_bits(TEXT_SCALE.load(Ordering::Relaxed))
+}
+
+/// A length given in pixels at 100% zoom, scaling with the zoom (not the text size).
 pub fn dp(pixels: f32) -> Rems {
-    rems(pixels / BASE_REM)
+    rems(pixels / (BASE_REM * text_scale()))
 }
 
 /// [`dp`] in pixels, for layout arithmetic.
 pub fn dp_px(pixels: f32, window: &Window) -> Pixels {
-    window.rem_size() * (pixels / BASE_REM)
+    window.rem_size() * (pixels / (BASE_REM * text_scale()))
 }
 
 pub fn init(config: &Config, cx: &mut App) {
@@ -44,11 +54,13 @@ pub fn init(config: &Config, cx: &mut App) {
     apply(cx);
 }
 
-/// Sets the rem size for the current zoom. Called again after every theme change, which
-/// resets the theme's font size.
+/// Sets the rem size for the current zoom and text size. Called again after every theme
+/// change, which resets the theme's font size, and when the text size changes.
 pub fn apply(cx: &mut App) {
     let zoom = cx.try_global::<UiZoom>().map_or(1., |z| z.0);
-    Theme::global_mut(cx).font_size = px(BASE_REM * zoom);
+    let text = crate::theme::text_scale(Config::load().text_size);
+    TEXT_SCALE.store(text.to_bits(), Ordering::Relaxed);
+    Theme::global_mut(cx).font_size = px(BASE_REM * zoom * text);
 }
 
 fn step(direction: i32, cx: &mut App) {

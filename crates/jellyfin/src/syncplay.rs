@@ -40,6 +40,34 @@ pub struct QueueItem {
     pub playlist_item_id: String,
 }
 
+/// The order a group's queue plays in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+pub enum ShuffleMode {
+    #[default]
+    Sorted,
+    Shuffle,
+}
+
+/// What a group's queue does at its end, or at the end of an entry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+pub enum RepeatMode {
+    #[default]
+    RepeatNone,
+    RepeatAll,
+    RepeatOne,
+}
+
+impl RepeatMode {
+    /// The next mode for a button that cycles them: none, all, one.
+    pub fn next(self) -> Self {
+        match self {
+            RepeatMode::RepeatNone => RepeatMode::RepeatAll,
+            RepeatMode::RepeatAll => RepeatMode::RepeatOne,
+            RepeatMode::RepeatOne => RepeatMode::RepeatNone,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PlayQueue {
@@ -53,6 +81,10 @@ pub struct PlayQueue {
     pub start_position_ticks: Ticks,
     #[serde(default)]
     pub is_playing: bool,
+    #[serde(default)]
+    pub shuffle_mode: ShuffleMode,
+    #[serde(default)]
+    pub repeat_mode: RepeatMode,
 }
 
 impl PlayQueue {
@@ -273,6 +305,43 @@ impl Client {
         self.syncplay_post("Ping", serde_json::json!({ "Ping": ping_ms })).await
     }
 
+    /// Plays another entry of the group's queue.
+    pub async fn syncplay_set_playlist_item(&self, playlist_item_id: &str) -> Result<()> {
+        self.syncplay_post(
+            "SetPlaylistItem",
+            serde_json::json!({ "PlaylistItemId": playlist_item_id }),
+        )
+        .await
+    }
+
+    /// Takes entries out of the group's queue.
+    pub async fn syncplay_remove(&self, playlist_item_ids: &[String]) -> Result<()> {
+        self.syncplay_post(
+            "RemoveFromPlaylist",
+            serde_json::json!({ "PlaylistItemIds": playlist_item_ids, "ClearPlaylist": false, "ClearPlayingItem": false }),
+        )
+        .await
+    }
+
+    /// Moves an entry of the group's queue to `index`.
+    pub async fn syncplay_move(&self, playlist_item_id: &str, index: usize) -> Result<()> {
+        self.syncplay_post(
+            "MovePlaylistItem",
+            serde_json::json!({ "PlaylistItemId": playlist_item_id, "NewIndex": index }),
+        )
+        .await
+    }
+
+    pub async fn syncplay_set_shuffle(&self, mode: ShuffleMode) -> Result<()> {
+        self.syncplay_post("SetShuffleMode", serde_json::json!({ "Mode": mode }))
+            .await
+    }
+
+    pub async fn syncplay_set_repeat(&self, mode: RepeatMode) -> Result<()> {
+        self.syncplay_post("SetRepeatMode", serde_json::json!({ "Mode": mode }))
+            .await
+    }
+
     async fn syncplay_post(&self, endpoint: &str, body: serde_json::Value) -> Result<()> {
         self.post_no_content(&format!("/SyncPlay/{endpoint}"), &Query::new(), Some(&body))
             .await
@@ -283,7 +352,7 @@ impl Client {
 mod tests {
     use serde_json::json;
 
-    use super::{Command, CommandKind, GroupState, GroupUpdate};
+    use super::{Command, CommandKind, GroupState, GroupUpdate, RepeatMode, ShuffleMode};
     use crate::time::parse_utc;
 
     #[test]
@@ -302,11 +371,14 @@ mod tests {
             "Reason": "NewPlaylist", "LastUpdate": "2026-10-14T19:00:00Z",
             "Playlist": [{"ItemId": "a", "PlaylistItemId": "p1"}, {"ItemId": "b", "PlaylistItemId": "p2"}],
             "PlayingItemIndex": 1, "StartPositionTicks": 50, "IsPlaying": true,
-            "ShuffleMode": "Sorted", "RepeatMode": "RepeatNone"}});
+            "ShuffleMode": "Shuffle", "RepeatMode": "RepeatAll"}});
         match GroupUpdate::parse(queue).unwrap() {
             Some(GroupUpdate::PlayQueue(queue)) => {
                 assert_eq!(queue.current().map(|i| i.item_id.as_str()), Some("b"));
                 assert!(queue.is_playing);
+                assert_eq!(queue.shuffle_mode, ShuffleMode::Shuffle);
+                assert_eq!(queue.repeat_mode, RepeatMode::RepeatAll);
+                assert_eq!(queue.repeat_mode.next(), RepeatMode::RepeatOne);
             }
             other => panic!("{other:?}"),
         }

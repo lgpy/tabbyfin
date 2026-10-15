@@ -4,31 +4,23 @@
 //! memory and draws it, so frames never pass through the CPU.
 //! See `docs/in-app-video.md` (phase 3) and `examples/vk_interop_probe.rs`.
 
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ash::{khr, vk};
 use khronos_egl as egl;
-use tokio::sync::watch;
 
-use super::video::{
-    Frame, PARAM_API_TYPE, PARAM_INVALID, RenderControl, SharedFrame, UPDATE_FRAME, Wakeup, fit, on_update,
+use super::Core;
+use super::opengl::{
+    Backend, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER, GL_FRAMEBUFFER_COMPLETE, GL_RENDERER, GL_TEXTURE_2D, GetProcAddress,
+    cast, failed,
 };
-use super::{Core, RenderParam, cstring};
+use super::video::SharedFrame;
 use crate::{Error, Result};
 
-const PARAM_OPENGL_INIT_PARAMS: c_int = 2;
-const PARAM_OPENGL_FBO: c_int = 3;
-const PARAM_FLIP_Y: c_int = 4;
-
-const GL_TEXTURE_2D: u32 = 0x0DE1;
 const GL_RGBA8: u32 = 0x8058;
-const GL_FRAMEBUFFER: u32 = 0x8D40;
-const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
-const GL_FRAMEBUFFER_COMPLETE: u32 = 0x8CD5;
-const GL_RENDERER: u32 = 0x1F01;
 const GL_EXTENSIONS: u32 = 0x1F03;
 const GL_NUM_EXTENSIONS: u32 = 0x821D;
 const GL_HANDLE_TYPE_OPAQUE_FD_EXT: u32 = 0x9586;
@@ -40,25 +32,8 @@ const GL_DEVICE_UUID_EXT: u32 = 0x9597;
 /// The shared image layout; GPUI's importer (`gpui_wgpu::shared_texture`) must match it.
 const FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 
-/// Frames in flight: GPUI draws the latest while mpv renders into the oldest.
-const RING: usize = 3;
-
 /// Ids for shared images, unique across players in this process.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-
-#[repr(C)]
-struct OpenGlInitParams {
-    get_proc_address: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
-    get_proc_address_ctx: *mut c_void,
-}
-
-#[repr(C)]
-struct OpenGlFbo {
-    fbo: c_int,
-    w: c_int,
-    h: c_int,
-    internal_format: c_int,
-}
 
 type Egl = egl::DynamicInstance<egl::EGL1_4>;
 
@@ -85,19 +60,6 @@ struct Gl {
     glFinish: unsafe extern "C" fn(),
 }
 
-/// A GL function pointer from EGL as its declared type.
-///
-/// # Safety
-/// `T` must be the function's actual signature.
-unsafe fn cast<T: Copy>(f: extern "system" fn()) -> T {
-    // SAFETY: function pointers have the same size; the caller guarantees the signature.
-    unsafe { std::mem::transmute_copy(&f) }
-}
-
-fn failed(what: impl std::fmt::Display) -> Error {
-    Error::GpuUnavailable(what.to_string())
-}
-
 /// libmpv's GL loader callback; `ctx` is the `Egl` instance.
 unsafe extern "C" fn get_proc_address(ctx: *mut c_void, name: *const c_char) -> *mut c_void {
     // SAFETY: `ctx` points to the renderer's `Egl`, alive while the mpv context exists.
@@ -109,7 +71,7 @@ unsafe extern "C" fn get_proc_address(ctx: *mut c_void, name: *const c_char) -> 
 }
 
 /// One shared image: Vulkan memory exported to GPUI (`fd`) and imported into GL.
-struct Slot {
+pub(crate) struct Slot {
     id: u64,
     image: vk::Image,
     memory: vk::DeviceMemory,
@@ -282,23 +244,18 @@ impl Drop for Exporter {
     }
 }
 
-pub(crate) struct GpuRenderer {
+pub(crate) struct EglVulkan {
     /// Boxed so its address is stable for libmpv's `get_proc_address` context.
     egl: Box<Egl>,
     display: egl::Display,
     context: egl::Context,
     gl: Gl,
     exporter: Exporter,
-    mpv_context: *mut c_void,
-    ring: Vec<Slot>,
-    size: (u32, u32),
-    next: usize,
 }
 
-impl GpuRenderer {
-    /// Sets up EGL/OpenGL, the exporting Vulkan device and the mpv render context on the
-    /// calling (render) thread.
-    pub fn new(core: &Core, control: &RenderControl) -> Result<Self> {
+impl EglVulkan {
+    /// Sets up EGL/OpenGL and the exporting Vulkan device on the calling (render) thread.
+    pub fn new(core: &Core) -> Result<Self> {
         // SAFETY: EGL/GL setup on this thread; every object is checked and cleaned up.
         unsafe {
             let egl = Box::new(Egl::load_required().map_err(failed)?);
@@ -372,115 +329,35 @@ impl GpuRenderer {
             (gl.glGetUnsignedBytei_vEXT)(GL_DEVICE_UUID_EXT, 0, uuid.as_mut_ptr());
             let exporter = Exporter::new(uuid).map_err(|err| fail(&egl, err))?;
 
-            let api_type = cstring("opengl");
-            let mut init = OpenGlInitParams {
-                get_proc_address,
-                get_proc_address_ctx: &*egl as *const Egl as *mut c_void,
-            };
-            let mut params = [
-                RenderParam {
-                    kind: PARAM_API_TYPE,
-                    data: api_type.as_ptr() as *mut c_void,
-                },
-                RenderParam {
-                    kind: PARAM_OPENGL_INIT_PARAMS,
-                    data: &mut init as *mut _ as *mut c_void,
-                },
-                RenderParam {
-                    kind: PARAM_INVALID,
-                    data: ptr::null_mut(),
-                },
-            ];
-            let mut mpv_context = ptr::null_mut();
-            let code = (core.api.render_create)(&mut mpv_context, core.mpv, params.as_mut_ptr());
-            if let Err(err) = core.api.check("mpv_render_context_create(opengl)", code) {
-                drop(exporter);
-                return Err(fail(&egl, err));
-            }
-            (core.api.render_set_update_callback)(
-                mpv_context,
-                Some(on_update),
-                &control.wakeup as *const Wakeup as *mut c_void,
-            );
-
             Ok(Self {
                 egl,
                 display,
                 context,
                 gl,
                 exporter,
-                mpv_context,
-                ring: Vec::new(),
-                size: (0, 0),
-                next: 0,
             })
         }
     }
+}
 
-    pub fn run(&mut self, core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>) {
-        let mut last_size = None;
-        while control.wait() {
-            // SAFETY: render context calls happen only on this thread.
-            let flags = unsafe { (core.api.render_update)(self.mpv_context) };
-            let Some(size) = fit(core, control) else { continue };
-            if flags & UPDATE_FRAME == 0 && last_size == Some(size) {
-                continue;
-            }
-            last_size = Some(size);
-            match self.render(core, size) {
-                Ok(frame) => {
-                    frames.send_replace(Some(Frame::Shared(frame)));
-                }
-                Err(err) => tracing::warn!("GPU frame failed: {err}"),
-            }
-        }
-        // SAFETY: the GL context is current on this thread; free mpv's context before ours.
-        unsafe {
-            (core.api.render_set_update_callback)(self.mpv_context, None, ptr::null_mut());
-            (core.api.render_free)(self.mpv_context);
-        }
+impl Backend for EglVulkan {
+    type Slot = Slot;
+
+    fn proc_address(&self) -> (GetProcAddress, *mut c_void) {
+        (get_proc_address, &*self.egl as *const Egl as *mut c_void)
     }
 
-    fn render(&mut self, core: &Core, (width, height): (u32, u32)) -> Result<SharedFrame> {
-        if self.size != (width, height) || self.ring.is_empty() {
-            self.release_ring();
-            for _ in 0..RING {
-                let slot = self.create_slot(width, height)?;
-                self.ring.push(slot);
-            }
-            self.size = (width, height);
-            self.next = 0;
-        }
-        let slot = &self.ring[self.next];
-        self.next = (self.next + 1) % RING;
-
-        let mut fbo = OpenGlFbo {
-            fbo: slot.fbo as c_int,
-            w: width as c_int,
-            h: height as c_int,
-            internal_format: 0,
-        };
-        // mpv's FBO output already has the row order Vulkan samples in (verified on Mesa).
-        let mut flip: c_int = 0;
-        let mut params = [
-            RenderParam {
-                kind: PARAM_OPENGL_FBO,
-                data: &mut fbo as *mut _ as *mut c_void,
-            },
-            RenderParam {
-                kind: PARAM_FLIP_Y,
-                data: &mut flip as *mut _ as *mut c_void,
-            },
-            RenderParam {
-                kind: PARAM_INVALID,
-                data: ptr::null_mut(),
-            },
-        ];
-        // SAFETY: render context calls on its thread; the FBO is complete.
-        let code = unsafe { (core.api.render_render)(self.mpv_context, params.as_mut_ptr()) };
+    fn render(
+        &self,
+        slot: &Slot,
+        (width, height): (u32, u32),
+        draw: impl FnOnce(u32) -> Result<()>,
+    ) -> Result<SharedFrame> {
+        let drawn = draw(slot.fbo);
         // Make sure the frame is complete before GPUI's device reads it.
+        // SAFETY: on the thread owning the context.
         unsafe { (self.gl.glFinish)() };
-        core.api.check("mpv_render_context_render", code)?;
+        drawn?;
         Ok(SharedFrame {
             id: slot.id,
             fd: slot.fd.as_raw_fd(),
@@ -554,17 +431,10 @@ impl GpuRenderer {
         self.exporter.free(slot.image, slot.memory);
         drop(slot.fd);
     }
-
-    fn release_ring(&mut self) {
-        for slot in std::mem::take(&mut self.ring) {
-            self.release_slot(slot);
-        }
-    }
 }
 
-impl Drop for GpuRenderer {
+impl Drop for EglVulkan {
     fn drop(&mut self) {
-        self.release_ring();
         let _ = self.egl.make_current(self.display, None, None, None);
         let _ = self.egl.destroy_context(self.display, self.context);
     }

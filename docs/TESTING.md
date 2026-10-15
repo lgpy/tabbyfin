@@ -92,9 +92,22 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ A **transcoded** stream (HLS) through an outage.
 - ⬜ Esc while "Reconnecting…" closes the player and doesn't start again.
 
+- ⬜ **Automatic bitrate** over a real slow link (Wi-Fi, a phone hotspot, or a remote server): the measurement in the log is plausible and playback transcodes to fit. Only a mocked 4 Mbit/s and the local 1.1 Gbit/s were tried.
+- ⬜ **HEVC transcodes** on a server with hardware HEVC encoding (only software x265 on the dev server).
+
+- ⬜ The **AppImage** on a real Linux desktop (GNOME, KDE; Wayland and X11), from the file manager, on a distribution other than Ubuntu, and on a 2022-era one (Ubuntu 22.04, Debian 12) with a real GPU (in a 22.04 container the window was black: old software Vulkan).
+- ⬜ The **Flatpak** on a real desktop with a GPU: GPU video and hardware decoding through `--device=dri`, sign-in kept in the keychain across restarts (Secret Service from the sandbox), audio through PulseAudio/PipeWire, and the menu entry and icon.
+- ⬜ The **Windows installer from CI** (a release build inside): install, the Start-menu entry, the app running from it, upgrade from an older version while it's running, uninstall.
+
+- ⬜ **Text size following the system** on Windows (Settings → Accessibility → Text size), GNOME (Large Text) and KDE (System Settings → Fonts), both at launch and when changed while the app runs (it applies on switching back to the app). Tried in WSL: fixed sizes (130%, 150%), and KDE's font size from a stand-in `kdeglobals`, at launch and changed after launch.
+
 ## 6. SyncPlay (2.4.3–2.4.6)
 
 ✅ Against the scripted member (`cargo run -p jellyfin --example syncplay`): following the group (load, Ready, Unpause, Pause, Unpause, Seek, Stop) and leading it (Play on an item page, Space, →, Esc); the popover in and out of a group; drift correction catching up 0.8 s.
+
+✅ Also against it: an audio change during a transcode (remote command) reported `Buffering`, the member paused, and both resumed at 18.6 s after the reload; shuffle, repeat and moving an entry from the SyncPlay menu by keyboard reached it as queue updates.
+
+- ⬜ A **version switch** in a group, from the player's version menu (the same reload path as the audio change, not clicked yet), and removing a queue entry.
 
 - ⬜ **With the Jellyfin web client** as the other member, in a browser against the same server:
   - ⬜ Create the group in jelly-gpui, join from the web, and the other way round.

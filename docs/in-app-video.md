@@ -40,6 +40,8 @@ GPUI VideoSurface element (PaintSurface with a per-platform source) + GPUI contr
 
 ## Phases
 
+The three GPU renderers (ANGLE, WGL, Linux EGL) share `player::libmpv::opengl`: mpv's `opengl` render context, the ring of 3 shared textures and the render loop. Each is a `Backend` that only sets up its GL context, makes the shared textures and syncs a frame for GPUI's device.
+
 1. ✅ **libmpv backend and in-app player view, on the software path.** Done on 2026-10-14. Verified on Linux (WSL) and on Windows (RX 6600) with `dev/win-run.sh`. The Windows zip now bundles `libmpv-2.dll`, and the `.deb` depends on `libmpv2`.
    - `player::libmpv` (core and event loop) produces `PlayerEvent`s that the session turns into progress reports.
    - A full-window player page: seek bar, play/pause, ±10 s, volume and mute, version, audio and subtitle pickers, next episode (also automatic at the end of an episode), fullscreen, keyboard shortcuts.

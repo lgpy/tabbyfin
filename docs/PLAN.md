@@ -227,6 +227,8 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
    - **Network drops:** mpv's HTTP input reconnects by itself (`stream-lavf-o=reconnect=1,…`), which covers a server restart. If the stream still fails, or mpv hits EOF more than 10 s before the duration, the session ends as *lost* and the manager starts it again from that position after 2, 5 and 10 s ("Reconnecting…"), keeping the player up. Esc during the wait cancels it. Errors in the last 10 s aren't retried.
    - **Transcoding:** the server transcodes only when it won't direct play: above the *Settings → Playback → Max streaming bitrate* (sent as `MaxStreamingBitrate`), or when the user's policy forbids it.
      - The session then plays the HLS `TranscodingUrl` and reports `PlayMethod: Transcode`, and the player shows a "Transcoding" label.
+     - The transcoding profile asks for H.264 in MPEG-TS segments, or with *Ask for HEVC* for `hevc,h264` in fragmented MP4 (HEVC in HLS needs it); servers that don't allow HEVC encoding fall back to H.264.
+     - With the *Automatic* bitrate, the cap comes from timing `/Playback/BitrateTest` downloads before playing (80% of the measurement, none above 200 Mbit/s, reused for 10 minutes; on failure the fixed setting).
      - Subtitles the server delivers as files (`DeliveryMethod: External`, embedded text ones included) are added to mpv; image subtitles are burned in (`Encode`).
      - A transcode carries only the chosen audio track, so changing audio, or changing to or from a burned-in subtitle, restarts the session at the current position. The server picks the default audio by the user's language preference and names it in the URL (`AudioStreamIndex`), which the picker follows.
 2. It reports to the server:
@@ -239,18 +241,27 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
 
 | Platform | libmpv |
 |---|---|
-| Linux | The system's `libmpv2`. The `.deb` depends on it. |
+| Linux | The system's `libmpv2` for the `.deb` (which depends on it) and the tarball. The AppImage bundles it with the libraries it needs (`packaging/appimage.sh`, with linuxdeploy pinned in `packaging/linuxdeploy.lock`), leaving out what has to match the system (glibc, GL, X11/Wayland, the Vulkan loader) and forcing in `libjack` and `libusb`, which linuxdeploy's exclude list skips but plenty of desktops lack. The app looks for libmpv in `../lib` next to its executable (the AppImage's `usr/lib`), any version, before the system's. The AppImage is built in an Ubuntu 22.04 container (`packaging/appimage-docker.sh`, `mise run package:appimage`, a CI job of its own), so it needs glibc 2.35 and carries that release's mpv 0.34 (`libmpv.so.1`). The Flatpak (`packaging/flatpak/`, app id `io.github.lgpy.jelly-gpui`, freedesktop 26.08 runtime) builds mpv 0.41 itself, with libass and libplacebo, on the runtime's FFmpeg; the runtime's codecs-extra extension supplies H.264, HEVC and the rest. Its Rust crates are listed in `packaging/flatpak/cargo-sources.json` because the build is offline: regenerate it with `mise run flatpak:sources` whenever `Cargo.lock` changes. It builds with the SDK's Rust (1.98 for 26.08), so the code must not need anything newer. |
 | Windows | `libmpv-2.dll` next to `jelly-gpui.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. The zip also carries ANGLE (`libEGL.dll`, `libGLESv2.dll`) and its MinGW runtime DLLs, MSYS2 builds pinned in `packaging/angle.lock` and fetched by `packaging/fetch-angle.sh`, for zero-copy video. |
 | macOS | Not bundled yet. The app looks in Homebrew's folders, so `brew install mpv` makes playback work. Bundling `libmpv.dylib` is still to do. The app is ad-hoc signed, not notarized. |
+
+**App icon:** `packaging/jelly-gpui.svg` (a placeholder) is the source. Linux uses it as is; Windows uses `packaging/jelly-gpui.ico`, embedded in `jelly-gpui.exe` as icon resource 1 by `crates/app/build.rs` (GPUI gives its windows that icon) and used by the installer's shortcuts. After changing the SVG, remake the `.ico`:
+
+```sh
+for z in 256 128 64 48 32 16; do rsvg-convert -w $z -h $z packaging/jelly-gpui.svg -o /tmp/icon-$z.png; done
+convert /tmp/icon-{256,128,64,48,32,16}.png packaging/jelly-gpui.ico
+```
+
+**Pinned downloads** (`packaging/mpv.lock`, `angle.lock`, `linuxdeploy.lock`) go through `packaging/download.sh`, which tries our copy first (the repo's `deps` release, one asset per file, named by its SHA256; fetched with `gh` and CI's token while the repo is private), then the original URL, and checks the checksum either way. After changing a lock file, `mise run deps:mirror` uploads the new file. The Flatpak's sources (libass, libplacebo, mpv, crates) aren't mirrored: Flathub-style builds fetch them from their projects.
 
 `packaging/THIRD_PARTY.md` holds mpv's license (GPL-2.0-or-later) and source information, and ships in the packages.
 
 **Builds:** `.github/workflows/ci.yml` runs clippy and the tests on all three OSes. On a `v*` tag, or when started by hand, it also packages all four targets:
-- Linux `.tar.gz` and `.deb`
-- Windows `.zip`
+- Linux `.tar.gz` and `.deb`, the AppImage (built in Ubuntu 22.04), and a Flatpak bundle (`packaging/flatpak/build.sh`)
+- Windows `.zip`, and an installer from the same files (`packaging/jelly-gpui.iss`, Inno Setup 6, built by `packaging/installer.sh`): per-user install without admin rights, Start-menu and optional desktop shortcuts, an uninstaller, upgrades in place
 - macOS arm64 and x86_64 `.zip`
 
-A tag also creates a draft GitHub release with these files. Locally, `mise run package` packages Linux, and `mise run ci:build` builds every OS on CI.
+A tag also creates a draft GitHub release with these files. Locally, `mise run package` packages Linux (`package:appimage` and `package:flatpak` build those two), and `mise run ci:build` builds every OS on CI.
 
 ---
 
@@ -274,7 +285,8 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
    - More: seek to the group's position.
    - In WSL with software rendering, a member drifts up to about 0.4 s while playback warms up, is back within 0.1 s after about 8 s, and stays within ±70 ms after that.
 
-Not yet: track changes that need a new transcode, and version switches, don't stay in sync.
+8. **Local reloads:** another version, or a transcode restarted for other tracks, reloads the item here only (`NowPlaying::reload` → `SyncPlay::reload`): report `Buffering` (the server pauses everyone and keeps the group's position), load paused as the same queue entry, report `Ready` once loaded (the server resumes everyone, or first has this member seek if it landed elsewhere). The old session stops being watched first, or it would answer `Ready` at once.
+9. **The queue:** the SyncPlay menu lists the group's queue (names fetched by id) with the playing entry marked: `SetPlaylistItem` plays an entry, `MovePlaylistItem` and `RemoveFromPlaylist` edit it, `SetShuffleMode` and `SetRepeatMode` set the modes. The changes come back as queue updates to everyone.
 
 ## 6. App architecture (GPUI side)
 

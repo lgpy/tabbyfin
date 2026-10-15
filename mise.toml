@@ -95,6 +95,22 @@ run = [
   "packaging/package.sh {{arg(name='target')}} dist",
 ]
 
+[tasks."package:appimage"]
+description = "Build the Linux AppImage in an Ubuntu 22.04 container, so it runs on older distributions too"
+run = "packaging/appimage-docker.sh dist"
+
+[tasks."package:flatpak"]
+description = "Build the Flatpak bundle (needs flatpak and flatpak-builder)"
+run = "packaging/flatpak/build.sh dist"
+
+[tasks."deps:mirror"]
+description = "Upload the pinned downloads (packaging/*.lock) to the repo's deps release, after changing a lock file"
+run = "packaging/mirror-deps.sh"
+
+[tasks."flatpak:sources"]
+description = "Regenerate the Flatpak's cargo-sources.json after Cargo.lock changes"
+run = "packaging/flatpak/update-cargo-sources.sh"
+
 # CI (GitHub Actions)
 
 [tasks."ci:build"]

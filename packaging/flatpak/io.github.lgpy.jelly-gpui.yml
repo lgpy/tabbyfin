@@ -1,0 +1,92 @@
+# Flatpak build (docs/PLAN.md §5.3):
+#
+#   mise run package:flatpak         # builds dist/jelly-gpui-<version>.flatpak
+#
+# The freedesktop runtime has FFmpeg (with the codecs-extra extension for H.264, HEVC…) but not
+# mpv, so mpv and the two libraries it needs that the runtime lacks (libass, libplacebo) are
+# built here first. The Rust crates come from cargo-sources.json, generated from Cargo.lock by
+# flatpak-builder-tools' flatpak-cargo-generator.py (packaging/flatpak/update-cargo-sources.sh),
+# since the build has no network.
+id: io.github.lgpy.jelly-gpui
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: jelly-gpui
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --socket=pulseaudio
+  # Sign-in tokens live in the Secret Service (the keychain), as outside the Flatpak.
+  - --talk-name=org.freedesktop.secrets
+
+modules:
+  - name: libass
+    config-opts:
+      - --disable-static
+    sources:
+      - type: archive
+        url: https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz
+        sha256: 2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc
+
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      # Meson would pick lib64, where neither pkg-config nor the loader look in a Flatpak.
+      - -Dlibdir=lib
+      # mpv renders through OpenGL here (and its software renderer); no Vulkan or D3D.
+      - -Dvulkan=disabled
+      - -Dd3d11=disabled
+      - -Ddemos=false
+      - -Dtests=false
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+
+  - name: mpv
+    buildsystem: meson
+    config-opts:
+      - -Dlibdir=lib
+      - -Dlibmpv=true
+      - -Dcplayer=false
+      - -Dlua=disabled
+      - -Djavascript=disabled
+      - -Dmanpage-build=disabled
+      - -Dhtml-build=disabled
+      - -Dpdf-build=disabled
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz
+        sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
+
+  - name: jelly-gpui
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/jelly-gpui/cargo
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release --locked -p jelly-gpui
+      - install -Dm755 target/release/jelly-gpui /app/bin/jelly-gpui
+      # The desktop file and icon go by the app id in a Flatpak.
+      - install -Dm644 packaging/jelly-gpui.desktop /app/share/applications/io.github.lgpy.jelly-gpui.desktop
+      - desktop-file-edit --set-icon=io.github.lgpy.jelly-gpui /app/share/applications/io.github.lgpy.jelly-gpui.desktop
+      - install -Dm644 packaging/jelly-gpui.svg /app/share/icons/hicolor/scalable/apps/io.github.lgpy.jelly-gpui.svg
+      - install -Dm644 packaging/flatpak/io.github.lgpy.jelly-gpui.metainfo.xml /app/share/metainfo/io.github.lgpy.jelly-gpui.metainfo.xml
+      - install -Dm644 LICENSE /app/share/licenses/io.github.lgpy.jelly-gpui/LICENSE
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - dist
+          - dev/.data
+          - .flatpak-builder
+      - cargo-sources.json
