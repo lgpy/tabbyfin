@@ -8,32 +8,23 @@
 //! uses the WGL interop in `wgl.rs`, which decodes with a copy back to the CPU.
 //! See `docs/in-app-video.md`.
 
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 
 use khronos_egl as egl;
-use tokio::sync::watch;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::IDXGIResource;
 use windows::core::Interface;
 
-use super::video::{
-    Frame, PARAM_API_TYPE, PARAM_INVALID, RenderControl, SharedFrame, UPDATE_FRAME, Wakeup, fit, on_update,
+use super::Core;
+use super::opengl::{
+    Backend, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER, GL_FRAMEBUFFER_COMPLETE, GL_RENDERER, GL_TEXTURE_2D, GetProcAddress,
+    cast, failed,
 };
-use super::{Core, RenderParam, cstring};
+use super::video::SharedFrame;
 use crate::{Error, Result};
-
-const PARAM_OPENGL_INIT_PARAMS: c_int = 2;
-const PARAM_OPENGL_FBO: c_int = 3;
-const PARAM_FLIP_Y: c_int = 4;
-
-const GL_TEXTURE_2D: u32 = 0x0DE1;
-const GL_FRAMEBUFFER: u32 = 0x8D40;
-const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
-const GL_FRAMEBUFFER_COMPLETE: u32 = 0x8CD5;
-const GL_RENDERER: u32 = 0x1F01;
 
 // EGL_ANGLE_platform_angle(_d3d), EGL_EXT_device_query, EGL_ANGLE_device_d3d,
 // EGL_ANGLE_d3d_texture_client_buffer.
@@ -43,23 +34,6 @@ const EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE: egl::Attrib = 0x3208;
 const EGL_DEVICE_EXT: egl::Int = 0x322C;
 const EGL_D3D11_DEVICE_ANGLE: egl::Int = 0x33A1;
 const EGL_D3D_TEXTURE_ANGLE: egl::Enum = 0x33A3;
-
-/// Frames in flight: GPUI draws the latest while mpv renders into the oldest.
-const RING: usize = 3;
-
-#[repr(C)]
-struct OpenGlInitParams {
-    get_proc_address: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
-    get_proc_address_ctx: *mut c_void,
-}
-
-#[repr(C)]
-struct OpenGlFbo {
-    fbo: c_int,
-    w: c_int,
-    h: c_int,
-    internal_format: c_int,
-}
 
 type Egl = egl::DynamicInstance<egl::EGL1_5>;
 
@@ -81,19 +55,6 @@ struct Gl {
 struct EglExt {
     eglQueryDisplayAttribEXT: unsafe extern "system" fn(*mut c_void, egl::Int, *mut egl::Attrib) -> egl::Boolean,
     eglQueryDeviceAttribEXT: unsafe extern "system" fn(*mut c_void, egl::Int, *mut egl::Attrib) -> egl::Boolean,
-}
-
-/// An EGL function pointer as its declared type.
-///
-/// # Safety
-/// `T` must be the function's actual signature.
-unsafe fn cast<T: Copy>(f: extern "system" fn()) -> T {
-    // SAFETY: function pointers have the same size; the caller guarantees the signature.
-    unsafe { std::mem::transmute_copy(&f) }
-}
-
-fn failed(what: impl std::fmt::Display) -> Error {
-    Error::GpuUnavailable(what.to_string())
 }
 
 /// libmpv's GL loader callback; `ctx` is the `Egl` instance. ANGLE resolves core GLES
@@ -120,7 +81,7 @@ fn load_egl() -> Result<Egl> {
 }
 
 /// One shared texture on ANGLE's device, bound as a GL texture through a pbuffer.
-struct Slot {
+pub(crate) struct Slot {
     _texture: ID3D11Texture2D,
     share: HANDLE,
     surface: egl::Surface,
@@ -128,7 +89,7 @@ struct Slot {
     fbo: u32,
 }
 
-pub(crate) struct GpuRenderer {
+pub(crate) struct Angle {
     /// Boxed so its address is stable for libmpv's `get_proc_address` context.
     egl: Box<Egl>,
     display: egl::Display,
@@ -138,16 +99,11 @@ pub(crate) struct GpuRenderer {
     surface: egl::Surface,
     device: ID3D11Device,
     gl: Gl,
-    mpv_context: *mut c_void,
-    ring: Vec<Slot>,
-    size: (u32, u32),
-    next: usize,
 }
 
-impl GpuRenderer {
-    /// Sets up ANGLE (D3D11), the shared device and the mpv render context on the calling
-    /// (render) thread.
-    pub fn new(core: &Core, control: &RenderControl) -> Result<Self> {
+impl Angle {
+    /// Sets up ANGLE (D3D11) and its D3D11 device on the calling (render) thread.
+    pub fn new(core: &Core) -> Result<Self> {
         let egl = Box::new(load_egl()?);
         // SAFETY: EGL/GL setup on this thread; every object is checked and cleaned up.
         unsafe {
@@ -271,36 +227,6 @@ impl GpuRenderer {
                 return Err(fail(&egl, failed("ANGLE returned no D3D11 device")));
             };
 
-            let api_type = cstring("opengl");
-            let mut init = OpenGlInitParams {
-                get_proc_address,
-                get_proc_address_ctx: &*egl as *const Egl as *mut c_void,
-            };
-            let mut params = [
-                RenderParam {
-                    kind: PARAM_API_TYPE,
-                    data: api_type.as_ptr() as *mut c_void,
-                },
-                RenderParam {
-                    kind: PARAM_OPENGL_INIT_PARAMS,
-                    data: &mut init as *mut _ as *mut c_void,
-                },
-                RenderParam {
-                    kind: PARAM_INVALID,
-                    data: ptr::null_mut(),
-                },
-            ];
-            let mut mpv_context = ptr::null_mut();
-            let code = (core.api.render_create)(&mut mpv_context, core.mpv, params.as_mut_ptr());
-            if let Err(err) = core.api.check("mpv_render_context_create(opengl)", code) {
-                return Err(fail(&egl, err));
-            }
-            (core.api.render_set_update_callback)(
-                mpv_context,
-                Some(on_update),
-                &control.wakeup as *const Wakeup as *mut c_void,
-            );
-
             Ok(Self {
                 egl,
                 display,
@@ -309,80 +235,29 @@ impl GpuRenderer {
                 surface,
                 device,
                 gl,
-                mpv_context,
-                ring: Vec::new(),
-                size: (0, 0),
-                next: 0,
             })
         }
     }
+}
 
-    pub fn run(&mut self, core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>) {
-        let mut last_size = None;
-        while control.wait() {
-            // SAFETY: render context calls happen only on this thread.
-            let flags = unsafe { (core.api.render_update)(self.mpv_context) };
-            let Some(size) = fit(core, control) else { continue };
-            if flags & UPDATE_FRAME == 0 && last_size == Some(size) {
-                continue;
-            }
-            last_size = Some(size);
-            match self.render(core, size) {
-                Ok(frame) => {
-                    frames.send_replace(Some(Frame::Shared(frame)));
-                }
-                Err(err) => tracing::warn!("GPU frame failed: {err}"),
-            }
-        }
-        // SAFETY: the context is current on this thread; free mpv's context (which releases
-        // its hold on the D3D11 device) before ours.
-        unsafe {
-            (core.api.render_set_update_callback)(self.mpv_context, None, ptr::null_mut());
-            (core.api.render_free)(self.mpv_context);
-        }
+impl Backend for Angle {
+    type Slot = Slot;
+
+    fn proc_address(&self) -> (GetProcAddress, *mut c_void) {
+        (get_proc_address, &*self.egl as *const Egl as *mut c_void)
     }
 
-    fn render(&mut self, core: &Core, (width, height): (u32, u32)) -> Result<SharedFrame> {
-        if self.size != (width, height) || self.ring.is_empty() {
-            self.release_ring();
-            for _ in 0..RING {
-                let slot = self.create_slot(width, height)?;
-                self.ring.push(slot);
-            }
-            self.size = (width, height);
-            self.next = 0;
-        }
-        let slot = &self.ring[self.next];
-        self.next = (self.next + 1) % RING;
-
-        let mut fbo = OpenGlFbo {
-            fbo: slot.fbo as c_int,
-            w: width as c_int,
-            h: height as c_int,
-            internal_format: 0,
-        };
-        let mut flip: c_int = 0;
-        let mut params = [
-            RenderParam {
-                kind: PARAM_OPENGL_FBO,
-                data: &mut fbo as *mut _ as *mut c_void,
-            },
-            RenderParam {
-                kind: PARAM_FLIP_Y,
-                data: &mut flip as *mut _ as *mut c_void,
-            },
-            RenderParam {
-                kind: PARAM_INVALID,
-                data: ptr::null_mut(),
-            },
-        ];
-        // SAFETY: GL calls on the thread owning the context; `slot` is complete.
-        unsafe {
-            let code = (core.api.render_render)(self.mpv_context, params.as_mut_ptr());
-            // Make sure the frame is complete before GPUI's device reads it.
-            (self.gl.glFinish)();
-            core.api.check("mpv_render_context_render", code)?;
-        }
+    fn render(
+        &self,
+        slot: &Slot,
+        (width, height): (u32, u32),
+        draw: impl FnOnce(u32) -> Result<()>,
+    ) -> Result<SharedFrame> {
+        let drawn = draw(slot.fbo);
+        // Make sure the frame is complete before GPUI's device reads it.
+        // SAFETY: on the thread owning the context.
+        unsafe { (self.gl.glFinish)() };
+        drawn?;
         Ok(SharedFrame {
             handle: slot.share.0 as usize,
             width,
@@ -453,7 +328,7 @@ impl GpuRenderer {
                 fbo,
             };
             if let Err(err) = bound {
-                self.release_slot(&slot);
+                self.release_slot(slot);
                 return Err(failed(format!("binding the D3D11 texture: {err}")));
             }
             (self.gl.glBindFramebuffer)(GL_FRAMEBUFFER, fbo);
@@ -461,14 +336,14 @@ impl GpuRenderer {
             let status = (self.gl.glCheckFramebufferStatus)(GL_FRAMEBUFFER);
             (self.gl.glBindFramebuffer)(GL_FRAMEBUFFER, 0);
             if status != GL_FRAMEBUFFER_COMPLETE {
-                self.release_slot(&slot);
+                self.release_slot(slot);
                 return Err(failed(format!("framebuffer incomplete: {status:#x}")));
             }
             Ok(slot)
         }
     }
 
-    fn release_slot(&self, slot: &Slot) {
+    fn release_slot(&self, slot: Slot) {
         // SAFETY: objects created by this renderer, on the context's thread.
         unsafe {
             (self.gl.glDeleteFramebuffers)(1, &slot.fbo);
@@ -477,17 +352,10 @@ impl GpuRenderer {
         }
         let _ = self.egl.destroy_surface(self.display, slot.surface);
     }
-
-    fn release_ring(&mut self) {
-        for slot in std::mem::take(&mut self.ring) {
-            self.release_slot(&slot);
-        }
-    }
 }
 
-impl Drop for GpuRenderer {
+impl Drop for Angle {
     fn drop(&mut self) {
-        self.release_ring();
         let _ = self.egl.make_current(self.display, None, None, None);
         let _ = self.egl.destroy_surface(self.display, self.surface);
         let _ = self.egl.destroy_context(self.display, self.context);
