@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
         Ok(Some(SocketEvent::Connected)) => {}
         other => bail!("websocket didn't connect: {other:?}"),
     }
-    client.report_capabilities().await?;
+    client.report_capabilities(&Default::default()).await?;
     let mut clock = ServerClock::default();
     for _ in 0..4 {
         clock.add(client.clock_sample().await?);

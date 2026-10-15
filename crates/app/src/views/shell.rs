@@ -16,6 +16,7 @@ use jellyfin::GroupState;
 
 use crate::images::ImageCache;
 use crate::playback::{PlaybackEvent, PlaybackManager};
+use crate::remote::{Remote, RemoteEvent};
 use crate::router::{Navigator, Route};
 use crate::session::Session;
 use crate::syncplay::{SyncPlay, SyncPlayEvent};
@@ -51,6 +52,7 @@ pub struct ShellView {
     focus_handle: FocusHandle,
     _playback: Subscription,
     _syncplay: Vec<Subscription>,
+    _remote: Subscription,
     /// The session websocket; dropped (disconnecting) with the shell on sign-out.
     _live: Task<()>,
 }
@@ -84,6 +86,11 @@ impl ShellView {
                 }
             },
         );
+        Remote::init(session.client.clone(), cx);
+        let _remote = cx.subscribe_in(&Remote::global(cx), window, |_, _, event, window, cx| match event {
+            RemoteEvent::Message(text) => window.push_notification(Notification::info(text.clone()), cx),
+            RemoteEvent::ToggleFullscreen => window.toggle_fullscreen(),
+        });
         let _live = crate::live::connect(session.client.clone(), cx);
         let mut this = Self {
             session,
@@ -91,6 +98,7 @@ impl ShellView {
             focus_handle: cx.focus_handle(),
             _playback,
             _syncplay,
+            _remote,
             _live,
         };
         this.push(Route::Home, window, cx);

@@ -128,6 +128,7 @@ All of these exist in the 12.2 OpenAPI spec and none are marked obsolete (checke
 | Reporting | `POST /Sessions/Playing`, `/Sessions/Playing/Progress`, `/Sessions/Playing/Stopped` |
 | Watched state | `POST` / `DELETE /UserPlayedItems/{itemId}` |
 | Session websocket | `GET /socket` upgraded to a websocket, with the same `Authorization` header (works on 10.11 and 12.2). Answer `ForceKeepAlive` with a `KeepAlive` every half interval; reconnect with backoff. `POST /Sessions/Capabilities/Full` after each connect. Pushes `UserDataChanged`, `SyncPlay*` and remote-control messages |
+| Remote control | Capabilities with `SupportsMediaControl` and the general commands we handle in `SupportedCommands`. The server then forwards `Play` (item ids, already expanded from series and seasons; `PlayNow`, `PlayNext`, `PlayLast`, `PlayShuffle`), `Playstate` (pause, seek, stop, next…) and `GeneralCommand` (volume, mute, tracks, fullscreen, `DisplayMessage`; every argument a string) messages. Unadvertised general commands still arrive and are ignored. `remote.rs` in both crates |
 | Server clock | `GET /GetUtcTime`: request reception and response transmission times, for an NTP-style offset (`ServerClock`) |
 
 We use the user-scoped routes without a userId, such as `/UserViews` and `/Items`. The old `/Users/{userId}/Items` and `/Users/{userId}/Views` routes are **not in the 12.x spec**.

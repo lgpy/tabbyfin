@@ -1,16 +1,17 @@
 //! The session websocket while signed in: keeps this session's capabilities reported,
-//! refreshes pages when watch data changes elsewhere (another device, the web dashboard), and
-//! hands SyncPlay its updates and commands.
+//! refreshes pages when watch data changes elsewhere (another device, the web dashboard),
+//! hands SyncPlay its updates and commands, and remote control its commands.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::*;
-use jellyfin::{Client, ServerMessage, SocketEvent};
+use jellyfin::{Capabilities, Client, GeneralCommand, ServerMessage, SocketEvent};
 
 use crate::changes::Changes;
 use crate::playback::PlaybackManager;
+use crate::remote::Remote;
 use crate::runtime;
 use crate::syncplay::SyncPlay;
 
@@ -28,7 +29,11 @@ pub fn connect(client: Client, cx: &mut App) -> Task<()> {
         let report_capabilities = |client: &Client| {
             let client = client.clone();
             runtime::detach(async move {
-                if let Err(err) = client.report_capabilities().await {
+                let capabilities = Capabilities {
+                    supports_media_control: true,
+                    supported_commands: GeneralCommand::SUPPORTED.to_vec(),
+                };
+                if let Err(err) = client.report_capabilities(&capabilities).await {
                     tracing::warn!("couldn't report session capabilities: {err}");
                 }
             });
@@ -42,6 +47,15 @@ pub fn connect(client: Client, cx: &mut App) -> Task<()> {
                 }
                 SocketEvent::Message(ServerMessage::SyncPlayCommand(command)) => {
                     cx.update(|cx| SyncPlay::global(cx).update(cx, |s, cx| s.handle_command(command, cx)));
+                }
+                SocketEvent::Message(ServerMessage::Play(request)) => {
+                    cx.update(|cx| Remote::global(cx).update(cx, |r, cx| r.handle_play(request, cx)));
+                }
+                SocketEvent::Message(ServerMessage::Playstate(request)) => {
+                    cx.update(|cx| Remote::global(cx).update(cx, |r, cx| r.handle_playstate(request, cx)));
+                }
+                SocketEvent::Message(ServerMessage::GeneralCommand(command)) => {
+                    cx.update(|cx| Remote::global(cx).update(cx, |r, cx| r.handle_command(command, cx)));
                 }
                 // One refresh per burst. Other messages keep flowing meanwhile (SyncPlay
                 // commands often arrive right after a playback report's UserDataChanged).

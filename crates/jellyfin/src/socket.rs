@@ -1,5 +1,5 @@
 //! The session websocket (`/socket`): what the server pushes to this session, such as watched
-//! state changed elsewhere, SyncPlay updates and (later) remote-control commands.
+//! state changed elsewhere, SyncPlay updates and remote-control commands.
 //!
 //! [`Client::socket`] keeps one connection open in a tokio task, answering the server's
 //! keep-alive and reconnecting with backoff, and hands out typed messages.
@@ -12,7 +12,7 @@ use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use crate::client::Query;
+use crate::remote::{GeneralCommand, PlayRequest, PlaystateRequest};
 use crate::syncplay::{Command, GroupUpdate};
 use crate::{Client, Error, Result};
 
@@ -36,6 +36,12 @@ pub enum ServerMessage {
     SyncPlayGroupUpdate(GroupUpdate),
     /// A scheduled SyncPlay playback command.
     SyncPlayCommand(Command),
+    /// Remote control: play items here.
+    Play(PlayRequest),
+    /// Remote control: pause, seek, stop and the like.
+    Playstate(PlaystateRequest),
+    /// Remote control: volume, tracks, fullscreen, messages.
+    GeneralCommand(GeneralCommand),
     Other {
         message_type: String,
         data: serde_json::Value,
@@ -85,6 +91,18 @@ impl ServerMessage {
             },
             "SyncPlayCommand" => match Command::parse(raw.data) {
                 Ok(command) => ServerMessage::SyncPlayCommand(command),
+                Err(err) => return Some(Err(err)),
+            },
+            "Play" => match serde_json::from_value(raw.data) {
+                Ok(request) => ServerMessage::Play(request),
+                Err(err) => return Some(Err(err)),
+            },
+            "Playstate" => match serde_json::from_value(raw.data) {
+                Ok(request) => ServerMessage::Playstate(request),
+                Err(err) => return Some(Err(err)),
+            },
+            "GeneralCommand" => match GeneralCommand::parse(raw.data) {
+                Ok(command) => ServerMessage::GeneralCommand(command),
                 Err(err) => return Some(Err(err)),
             },
             _ => ServerMessage::Other {
@@ -146,18 +164,6 @@ impl Client {
             .await
             .map_err(socket_error)?;
         response.into_websocket().await.map_err(socket_error)
-    }
-
-    /// Tells the server what this session can do. Resend after reconnecting.
-    pub async fn report_capabilities(&self) -> Result<()> {
-        let body = serde_json::json!({
-            "PlayableMediaTypes": ["Video"],
-            "SupportedCommands": [],
-            "SupportsMediaControl": false,
-            "SupportsPersistentIdentifier": true,
-        });
-        self.post_no_content("/Sessions/Capabilities/Full", &Query::new(), Some(&body))
-            .await
     }
 }
 
@@ -234,8 +240,16 @@ mod tests {
             Some(Ok(ServerMessage::SyncPlayCommand(_)))
         ));
         assert!(matches!(
-            ServerMessage::parse(r#"{"MessageType":"Play","Data":{}}"#),
-            Some(Ok(ServerMessage::Other { message_type, .. })) if message_type == "Play"
+            ServerMessage::parse(r#"{"MessageType":"Playstate","Data":{"Command":"Pause"}}"#),
+            Some(Ok(ServerMessage::Playstate(_)))
+        ));
+        assert!(matches!(
+            ServerMessage::parse(r#"{"MessageType":"GeneralCommand","Data":{"Name":"GoHome","Arguments":{}}}"#),
+            Some(Ok(ServerMessage::GeneralCommand(_)))
+        ));
+        assert!(matches!(
+            ServerMessage::parse(r#"{"MessageType":"RefreshProgress","Data":{}}"#),
+            Some(Ok(ServerMessage::Other { message_type, .. })) if message_type == "RefreshProgress"
         ));
         assert!(matches!(ServerMessage::parse("nope"), Some(Err(_))));
     }

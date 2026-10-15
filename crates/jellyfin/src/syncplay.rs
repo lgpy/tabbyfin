@@ -224,6 +224,16 @@ impl Client {
         self.syncplay_post("SetNewQueue", body).await
     }
 
+    /// Adds items to the group's queue: right after the playing entry with `next`, otherwise
+    /// at the end.
+    pub async fn syncplay_queue(&self, item_ids: &[String], next: bool) -> Result<()> {
+        let body = serde_json::json!({
+            "ItemIds": item_ids,
+            "Mode": if next { "QueueNext" } else { "Queue" },
+        });
+        self.syncplay_post("Queue", body).await
+    }
+
     pub async fn syncplay_pause(&self) -> Result<()> {
         self.syncplay_post("Pause", serde_json::json!({})).await
     }
