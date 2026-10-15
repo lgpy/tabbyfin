@@ -14,19 +14,21 @@ use crate::changes::Changes;
 use crate::components::Load;
 use crate::router::Navigator;
 use crate::runtime;
+use crate::smooth_scroll::smooth_wheel;
+use crate::zoom::{dp, dp_px};
 
 const LIST_MAX_H: f32 = 320.;
 
 pub fn open(client: Client, nav: Navigator, item: &BaseItemDto, window: &mut Window, cx: &mut App) {
     let picker = cx.new(|cx| AddToPlaylist::new(client, nav, item, window, cx));
     let input = picker.read(cx).input.clone();
-    window.open_dialog(cx, move |dialog, _, _| {
+    window.open_dialog(cx, move |dialog, window, _| {
         // Enter is the dialog's Confirm, which the text field never sees: it picks the
         // highlighted line, and the dialog closes once that's done.
         let chosen = picker.clone();
         dialog
             .title("Add to playlist")
-            .w(px(420.))
+            .w(dp_px(420., window))
             .on_ok(move |_, window, cx| {
                 chosen.update(cx, |picker, cx| picker.choose(picker.highlighted, window, cx));
                 false
@@ -48,6 +50,7 @@ struct AddToPlaylist {
     input: Entity<InputState>,
     highlighted: usize,
     busy: bool,
+    scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -85,6 +88,7 @@ impl AddToPlaylist {
             input,
             highlighted: 0,
             busy: false,
+            scroll: ScrollHandle::new(),
             _subscriptions,
         };
         this.load(cx);
@@ -255,8 +259,10 @@ impl AddToPlaylist {
             .collect();
         v_flex()
             .id("playlists")
-            .max_h(px(LIST_MAX_H))
+            .max_h(dp(LIST_MAX_H))
             .overflow_y_scroll()
+            .track_scroll(&self.scroll)
+            .on_scroll_wheel(smooth_wheel("playlists", &self.scroll))
             .children(lines)
             .into_any_element()
     }

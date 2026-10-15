@@ -30,6 +30,7 @@ use crate::views::library::{LibraryPage, Source};
 use crate::views::player::PlayerPage;
 use crate::views::search::SearchPage;
 use crate::views::settings::SettingsPage;
+use crate::zoom::dp;
 
 actions!(jelly, [Back, OpenSearch]);
 
@@ -519,7 +520,7 @@ impl ShellView {
         };
         let title = self.stack.last().map(|p| p.title.clone()).unwrap_or_default();
         h_flex()
-            .h(px(52.))
+            .h(dp(52.))
             .flex_none()
             .px_4()
             .gap_2()
@@ -690,7 +691,7 @@ fn account_panel(
     let others_count = others.len();
     let muted = cx.theme().muted_foreground;
     v_flex()
-        .w(px(280.))
+        .w(dp(280.))
         .gap_1()
         .children(current_label.map(|label| div().px_2().pb_1().text_sm().text_color(muted).child(label)))
         .when(!others.is_empty(), |el| {
@@ -844,7 +845,7 @@ fn syncplay_panel(syncplay: &Entity<SyncPlay>, new_name: &str, highlight: Option
                 .into_any_element()
         }
     };
-    div().w(px(300.)).child(body).into_any_element()
+    div().w(dp(300.)).child(body).into_any_element()
 }
 
 impl Focusable for ShellView {

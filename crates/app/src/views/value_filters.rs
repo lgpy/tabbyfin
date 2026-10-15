@@ -8,7 +8,9 @@ use gpui_kit::component::{ActiveTheme, WindowExt, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::smooth_scroll::smooth_wheel;
 use crate::views::library::{LibraryPage, ValueKind};
+use crate::zoom::{dp, dp_px};
 
 const LIST_MAX_H: f32 = 420.;
 
@@ -20,10 +22,10 @@ pub fn open(page: Entity<LibraryPage>, window: &mut Window, cx: &mut App) {
         scroll: ScrollHandle::new(),
     });
     let focus = dialog.read(cx).focus_handle.clone();
-    window.open_dialog(cx, move |modal, _, _| {
+    window.open_dialog(cx, move |modal, window, _| {
         modal
             .title("Genres, tags and ratings")
-            .w(px(380.))
+            .w(dp_px(380., window))
             .on_ok(|_, _, _| true)
             .child(dialog.clone())
     });
@@ -145,9 +147,10 @@ impl Render for ValueFilters {
             .id("value-filters")
             .track_focus(&self.focus_handle)
             .capture_key_down(cx.listener(Self::on_key_down))
-            .max_h(px(LIST_MAX_H))
+            .max_h(dp(LIST_MAX_H))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
+            .on_scroll_wheel(smooth_wheel("value-filters", &self.scroll))
             .children(rows)
     }
 }

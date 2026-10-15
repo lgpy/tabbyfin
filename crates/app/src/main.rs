@@ -15,6 +15,7 @@ mod remote;
 mod router;
 mod runtime;
 mod session;
+mod smooth_scroll;
 mod syncplay;
 mod theme;
 mod tracks;
@@ -22,6 +23,7 @@ mod trickplay;
 mod update;
 mod views;
 mod window;
+mod zoom;
 
 use gpui_kit::*;
 use tracing_subscriber::EnvFilter;
@@ -122,6 +124,7 @@ fn main() {
             gpui_kit::init(cx);
             let config = Config::load();
             theme::apply(config.theme, None, cx);
+            zoom::init(&config, cx);
             Changes::init(cx);
             let search_key = if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" };
             cx.bind_keys([

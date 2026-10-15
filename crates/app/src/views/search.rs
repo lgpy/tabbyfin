@@ -16,6 +16,8 @@ use crate::components::{
 use crate::images::ImageCache;
 use crate::router::Navigator;
 use crate::runtime;
+use crate::smooth_scroll::smooth_wheel;
+use crate::zoom::{dp, dp_px};
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
 const LIMIT: u32 = 60;
@@ -115,7 +117,7 @@ impl SearchPage {
         let Results::Loaded(items) = &self.results else {
             return Vec::new();
         };
-        let available = window.viewport_size().width - px(PADDING * 2.);
+        let available = window.viewport_size().width - dp_px(PADDING * 2., window);
         [
             ("Movies", BaseItemKind::Movie),
             ("Shows", BaseItemKind::Series),
@@ -129,7 +131,9 @@ impl SearchPage {
                 title,
                 items: items.iter().filter(|item| item.kind == kind).collect(),
                 landscape,
-                columns: ((available + px(CARD_GAP)) / px(width + CARD_GAP)).floor().max(1.) as usize,
+                columns: ((available + dp_px(CARD_GAP, window)) / dp_px(width + CARD_GAP, window))
+                    .floor()
+                    .max(1.) as usize,
             }
         })
         .filter(|group| !group.items.is_empty())
@@ -197,8 +201,8 @@ impl SearchPage {
                 });
                 children.push(
                     h_flex()
-                        .pb(px(CARD_GAP))
-                        .gap(px(CARD_GAP))
+                        .pb(dp(CARD_GAP))
+                        .gap(dp(CARD_GAP))
                         .items_start()
                         .children(cards.collect::<Vec<_>>())
                         .into_any_element(),
@@ -210,7 +214,8 @@ impl SearchPage {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .px(px(PADDING))
+            .on_scroll_wheel(smooth_wheel("search-results", &self.scroll))
+            .px(dp(PADDING))
             .pb_8()
             .text_color(cx.theme().foreground)
             .children(children)
@@ -291,7 +296,7 @@ impl Render for SearchPage {
             .size_full()
             .gap_4()
             .capture_key_down(cx.listener(Self::up_from_box))
-            .child(div().px_6().pt_6().max_w(px(640.)).child(Input::new(&self.input)))
+            .child(div().px_6().pt_6().max_w(dp(640.)).child(Input::new(&self.input)))
             .child(results)
     }
 }
