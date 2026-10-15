@@ -23,6 +23,12 @@ pub struct Config {
     /// The player's clock shows the time left instead of the time played. `None` means no.
     #[serde(default)]
     pub show_remaining_time: Option<bool>,
+    /// Text subtitle colour. `None` means white.
+    #[serde(default)]
+    pub subtitle_color: Option<SubtitleColor>,
+    /// Text subtitle outline or box. `None` means an outline.
+    #[serde(default)]
+    pub subtitle_style: Option<SubtitleStyle>,
     /// Subtitle size from the player's settings menu, 1.0 being the subtitles' own. `None`
     /// means 1.0.
     #[serde(default)]
@@ -60,6 +66,24 @@ pub enum ThemePreference {
     Light,
     #[default]
     Dark,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitleColor {
+    #[default]
+    White,
+    Yellow,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitleStyle {
+    /// A dark outline and shadow, mpv's default.
+    #[default]
+    Outline,
+    /// A translucent dark box behind the text.
+    Box,
 }
 
 /// The main window's position and size in the global screen space, in logical pixels.
