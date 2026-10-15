@@ -31,6 +31,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 ✅ Saved sort and filter views (date added + favorites, name + all), the Favorite button by keyboard and the Home shelf, the cast shelf with initials and roles, a person page.
 
 - ⬜ **Picking a sort or filter with the mouse** reloads the grid from the top and is remembered when the library is opened again; the order button flips it (and reshuffles for Random).
+- ⬜ **Genre, year and resolution menus** picked with the mouse: each narrows the grid, they combine with Show and the letter bar, *Clear filters* resets them, and they're remembered per library. (Checked with values set in the config: Documentary + 2020s + 4K on 12.2.)
 - ⬜ A library with **real metadata** (TMDb): sorting by rating, release date and runtime gives sensible orders; cast **photos** show.
 - ⬜ A person page for someone in **many** movies and shows.
 - ⬜ Favoriting from another device shows up in the Home shelf (via the live connection).

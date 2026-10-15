@@ -69,6 +69,8 @@ def main():
     save("next_up", get("/Shows/NextUp?Limit=24"))
     views = get("/UserViews")["Items"]
     save("latest", get(f"/Items/Latest?ParentId={views[0]['Id']}&Limit=24"))
+    library = next(v for v in views if v.get("CollectionType") == "movies")
+    save("item_filters", get(f"/Items/Filters?ParentId={library['Id']}&IncludeItemTypes=Movie"))
     save("media_segments", get(f"/MediaSegments/{episodes['Items'][0]['Id']}"))
     save("syncplay_list", get("/SyncPlay/List"))
     save("utc_time", get("/GetUtcTime"))

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use jellyfin::models::{
-    AuthenticationResult, BaseItemDto, BaseItemKind, MediaSegmentDto, PublicSystemInfo, QueryResult,
+    AuthenticationResult, BaseItemDto, BaseItemKind, ItemFilterValues, MediaSegmentDto, PublicSystemInfo, QueryResult,
 };
 use jellyfin::{GroupInfo, PlaybackInfoResponse};
 use serde::de::DeserializeOwned;
@@ -40,6 +40,9 @@ fn every_fixture_parses() {
             let _: BaseItemDto = load(version, name);
         }
         let _: Vec<BaseItemDto> = load(version, "latest");
+        let filters: ItemFilterValues = load(version, "item_filters");
+        assert!(filters.genres.contains(&"Science Fiction".to_owned()), "{version}");
+        assert!(filters.years.contains(&2024), "{version}");
         let _: QueryResult<MediaSegmentDto> = load(version, "media_segments");
         let _: Vec<GroupInfo> = load(version, "syncplay_list");
         let _: PlaybackInfoResponse = load(version, "playback_info_direct");

@@ -163,6 +163,16 @@ pub struct BaseItemDto {
     pub trickplay: HashMap<String, HashMap<String, TrickplayInfo>>,
 }
 
+/// The genres and years found among a library's items (`GET /Items/Filters`), to filter by.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ItemFilterValues {
+    #[serde(default, deserialize_with = "nullable")]
+    pub genres: Vec<String>,
+    #[serde(default, deserialize_with = "nullable")]
+    pub years: Vec<i32>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct NameGuidPair {
