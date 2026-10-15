@@ -11,7 +11,7 @@ use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::popover::{Popover, PopoverState};
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, Selectable, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, IconName, Selectable, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jellyfin::GroupState;
@@ -344,12 +344,15 @@ impl ShellView {
         if self.stack.last().is_some_and(|page| page.is_player) {
             return;
         }
-        let first = if self.stack.len() > 1 {
+        let can_go_back = self.stack.len() > 1;
+        let first = if can_go_back {
             TopBarItem::Back
         } else {
             TopBarItem::Home
         };
-        self.top_bar = Some(self.top_bar.unwrap_or(first));
+        // Back is hidden on the first page.
+        let kept = self.top_bar.filter(|item| *item != TopBarItem::Back || can_go_back);
+        self.top_bar = Some(kept.unwrap_or(first));
         self.focus_handle.focus(window, cx);
         cx.notify();
     }
@@ -528,15 +531,17 @@ impl ShellView {
             .gap_2()
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(ring(
-                TopBarItem::Back,
-                Button::new("back")
-                    .ghost()
-                    .icon(IconName::ArrowLeft)
-                    .disabled(!can_go_back)
-                    .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx)))
-                    .into_any_element(),
-            ))
+            // Only when there's a page to go back to.
+            .when(can_go_back, |el| {
+                el.child(ring(
+                    TopBarItem::Back,
+                    Button::new("back")
+                        .ghost()
+                        .icon(IconName::ArrowLeft)
+                        .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx)))
+                        .into_any_element(),
+                ))
+            })
             .child(ring(
                 TopBarItem::Home,
                 Button::new("home")
