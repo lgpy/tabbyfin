@@ -1084,6 +1084,54 @@ fn adjacent(mut items: Vec<BaseItemDto>, id: &str) -> (Option<BaseItemDto>, Opti
     (previous, next)
 }
 
+/// How long a connection measurement is reused.
+const BITRATE_TEST_TTL: Duration = Duration::from_secs(10 * 60);
+/// The share of the measured speed to stream at, leaving room for other traffic and dips.
+const BITRATE_HEADROOM: f64 = 0.8;
+/// Measured above this, the connection isn't the limit: no cap.
+const BITRATE_NO_LIMIT: u64 = 200_000_000;
+
+/// The last connection measurement: when, and the cap it gave (`None`: no limit).
+static MEASURED_BITRATE: std::sync::Mutex<Option<(Instant, Option<u64>)>> = std::sync::Mutex::new(None);
+
+/// The bitrate cap for the next playback: the setting, or with *Automatic* a measurement of
+/// the connection (reused for a while).
+async fn max_bitrate(client: &Client) -> Option<u64> {
+    let config = Config::load();
+    if !config.automatic_bitrate.unwrap_or(false) {
+        return config.max_streaming_bitrate;
+    }
+    if let Some((at, cap)) = *MEASURED_BITRATE.lock().unwrap()
+        && at.elapsed() < BITRATE_TEST_TTL
+    {
+        return cap;
+    }
+    let cap = match measure_bitrate(client).await {
+        Ok(bits) => {
+            let cap = (bits < BITRATE_NO_LIMIT).then_some((bits as f64 * BITRATE_HEADROOM) as u64);
+            tracing::info!(measured_mbps = bits / 1_000_000, cap_mbps = ?cap.map(|c| c / 1_000_000), "connection measured");
+            cap
+        }
+        Err(err) => {
+            // Without a measurement, fall back to the fixed setting.
+            tracing::warn!("couldn't measure the connection: {err}");
+            return config.max_streaming_bitrate;
+        }
+    };
+    *MEASURED_BITRATE.lock().unwrap() = Some((Instant::now(), cap));
+    cap
+}
+
+/// Like the web client: a small download first, and a bigger one when that was quick, so a
+/// fast connection isn't judged by its latency.
+async fn measure_bitrate(client: &Client) -> jellyfin::Result<u64> {
+    let small = client.bitrate_test(500_000).await?;
+    if small < 10_000_000 {
+        return Ok(small);
+    }
+    client.bitrate_test(3_000_000).await
+}
+
 /// Runs one playback from negotiation to the final stop report. Returns a user-facing error.
 async fn run_session(
     client: Client,
@@ -1102,7 +1150,8 @@ async fn run_session(
                 start_position: options.start,
                 audio_stream_index: options.audio_stream_index,
                 subtitle_stream_index: subtitle_index(options.subtitle),
-                max_streaming_bitrate: Config::load().max_streaming_bitrate,
+                max_streaming_bitrate: max_bitrate(&client).await,
+                prefer_hevc: Config::load().prefer_hevc.unwrap_or(false),
             },
         )
         .await

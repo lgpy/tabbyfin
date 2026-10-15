@@ -227,6 +227,8 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
    - **Network drops:** mpv's HTTP input reconnects by itself (`stream-lavf-o=reconnect=1,…`), which covers a server restart. If the stream still fails, or mpv hits EOF more than 10 s before the duration, the session ends as *lost* and the manager starts it again from that position after 2, 5 and 10 s ("Reconnecting…"), keeping the player up. Esc during the wait cancels it. Errors in the last 10 s aren't retried.
    - **Transcoding:** the server transcodes only when it won't direct play: above the *Settings → Playback → Max streaming bitrate* (sent as `MaxStreamingBitrate`), or when the user's policy forbids it.
      - The session then plays the HLS `TranscodingUrl` and reports `PlayMethod: Transcode`, and the player shows a "Transcoding" label.
+     - The transcoding profile asks for H.264 in MPEG-TS segments, or with *Ask for HEVC* for `hevc,h264` in fragmented MP4 (HEVC in HLS needs it); servers that don't allow HEVC encoding fall back to H.264.
+     - With the *Automatic* bitrate, the cap comes from timing `/Playback/BitrateTest` downloads before playing (80% of the measurement, none above 200 Mbit/s, reused for 10 minutes; on failure the fixed setting).
      - Subtitles the server delivers as files (`DeliveryMethod: External`, embedded text ones included) are added to mpv; image subtitles are burned in (`Encode`).
      - A transcode carries only the chosen audio track, so changing audio, or changing to or from a burned-in subtitle, restarts the session at the current position. The server picks the default audio by the user's language preference and names it in the URL (`AudioStreamIndex`), which the picker follows.
 2. It reports to the server:
