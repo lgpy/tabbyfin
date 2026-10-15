@@ -38,7 +38,7 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
 | ← / → | Seek 10 s |
 | ↑ / ↓ | Volume |
 | M | Mute |
-| Shift+N | Next episode |
+| Shift+N / Shift+P | Next / previous episode (or movie of the collection) |
 | PgUp / PgDn | Previous / next chapter |
 | Enter or S | Skip the intro, or play the next episode from the up-next card |
 | [ / ] | Slower / faster |

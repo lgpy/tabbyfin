@@ -230,20 +230,27 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
                 .await?
                 .items
         }
-        // A collection's movies (and shows) by release date.
-        BaseItemKind::BoxSet => {
-            let query = ItemsQuery {
-                parent_id: Some(item.id.clone()),
-                sort_by: vec![ItemSortBy::PremiereDate, ItemSortBy::SortName],
-                fields: vec![ItemField::PrimaryImageAspectRatio],
-                ..Default::default()
-            };
-            client.items(&query).await?.items
-        }
+        BaseItemKind::BoxSet => collection_items(&client, &item.id, &[ItemField::PrimaryImageAspectRatio]).await?,
         BaseItemKind::Playlist => client.playlist_items(&item.id, &[ItemField::Overview]).await?.items,
         _ => Vec::new(),
     };
     Ok(ItemData { item, children })
+}
+
+/// A collection's movies (and shows) by release date, as its page lists them. Playback's
+/// previous and next movie follow the same order.
+pub(crate) async fn collection_items(
+    client: &Client,
+    collection_id: &str,
+    fields: &[ItemField],
+) -> jellyfin::Result<Vec<BaseItemDto>> {
+    let query = ItemsQuery {
+        parent_id: Some(collection_id.to_owned()),
+        sort_by: vec![ItemSortBy::PremiereDate, ItemSortBy::SortName],
+        fields: fields.to_vec(),
+        ..Default::default()
+    };
+    Ok(client.items(&query).await?.items)
 }
 
 /// `2024 · 1h 42m · PG-13 · ★ 7.8`
@@ -681,7 +688,7 @@ impl ItemPage {
 }
 
 /// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
-fn shuffle<T>(items: &mut [T]) {
+pub(crate) fn shuffle<T>(items: &mut [T]) {
     let mut state = uuid::Uuid::new_v4().as_u128() as u64 | 1;
     for i in (1..items.len()).rev() {
         // xorshift64

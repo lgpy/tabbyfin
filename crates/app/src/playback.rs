@@ -188,7 +188,10 @@ pub struct Version {
 #[derive(Default)]
 struct Details {
     versions: Vec<Version>,
+    previous: Option<BaseItemDto>,
     next: Option<BaseItemDto>,
+    /// `next` is the following movie of a collection, which is offered but not autoplayed.
+    next_in_collection: bool,
     chapters: Vec<Chapter>,
     segments: Vec<Segment>,
 }
@@ -216,7 +219,11 @@ pub struct NowPlaying {
     /// All versions of the item, once known; empty or one entry means there's nothing to
     /// switch to.
     pub versions: Vec<Version>,
-    /// The following episode, for episodes.
+    /// The item before this one: the previous episode, or the previous movie of its
+    /// collection.
+    pub previous: Option<BaseItemDto>,
+    /// What plays next: the queue's next item, the following episode, or the following movie
+    /// of the item's collection.
     pub next: Option<BaseItemDto>,
     /// The user dismissed the up-next card: don't play the next episode at the end.
     pub next_cancelled: bool,
@@ -287,6 +294,13 @@ impl NowPlaying {
     pub fn play_next(&self, cx: &mut App) {
         if let Some(next) = self.next.clone() {
             PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_from_resume(&next, cx));
+        }
+    }
+
+    /// Plays the previous episode (or movie of the collection) from its resume point.
+    pub fn play_previous(&self, cx: &mut App) {
+        if let Some(previous) = self.previous.clone() {
+            PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_from_resume(&previous, cx));
         }
     }
 
@@ -616,6 +630,7 @@ impl PlaybackManager {
                             muted,
                             adjustments,
                             versions: Vec::new(),
+                            previous: None,
                             next: queued.clone(),
                             next_cancelled: false,
                             autoplay,
@@ -641,8 +656,11 @@ impl PlaybackManager {
                         if let Some(entity) = &now_playing {
                             entity.update(cx, |state, cx| {
                                 state.versions = details.versions;
+                                state.previous = details.previous;
                                 if !queued {
                                     state.next = details.next;
+                                    // A sequel isn't started without asking; the card offers it.
+                                    state.autoplay &= !details.next_in_collection;
                                 }
                                 state.chapters = details.chapters;
                                 state.segments = details.segments;
@@ -905,24 +923,17 @@ async fn start_player() -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>,
 /// Versions, chapters, segments and the next episode, for the player's controls. Failures
 /// only lose those controls.
 async fn details(client: &Client, item: &BaseItemDto) -> Details {
-    let next = async {
-        match (item.kind, &item.series_id) {
-            (BaseItemKind::Episode, Some(series_id)) => client.next_episode(series_id, &item.id).await,
-            _ => Ok(None),
-        }
-    };
-    let (full, segments, next) = tokio::join!(
+    let (full, segments, neighbours) = tokio::join!(
         client.item(&item.id, &[ItemField::MediaSources, ItemField::Chapters]),
         client.media_segments(&item.id),
-        next,
+        neighbours(client, item),
     );
     let full = full
         .inspect_err(|err| tracing::warn!("couldn't load versions and chapters: {err}"))
         .ok();
-    let next = next
-        .inspect_err(|err| tracing::warn!("couldn't find the next episode: {err}"))
-        .ok()
-        .flatten();
+    let neighbours = neighbours
+        .inspect_err(|err| tracing::warn!("couldn't find the previous and next items: {err}"))
+        .unwrap_or_default();
     let sources = full.as_ref().map(|f| f.media_sources.clone()).unwrap_or_default();
     let chapters = full
         .as_ref()
@@ -946,10 +957,60 @@ async fn details(client: &Client, item: &BaseItemDto) -> Details {
         .collect();
     Details {
         versions,
-        next,
+        previous: neighbours.previous,
+        next: neighbours.next,
+        next_in_collection: neighbours.in_collection,
         chapters,
         segments,
     }
+}
+
+#[derive(Default)]
+struct Neighbours {
+    previous: Option<BaseItemDto>,
+    next: Option<BaseItemDto>,
+    /// They're movies of the item's collection, not episodes.
+    in_collection: bool,
+}
+
+/// The episodes around an episode, across seasons; or for a movie, the movies around it in
+/// its first collection, in the collection page's order.
+async fn neighbours(client: &Client, item: &BaseItemDto) -> jellyfin::Result<Neighbours> {
+    match (item.kind, &item.series_id) {
+        (BaseItemKind::Episode, Some(series_id)) => {
+            let episodes = client.episodes(series_id, None, &[]).await?.items;
+            let (previous, next) = adjacent(episodes, &item.id);
+            Ok(Neighbours {
+                previous,
+                next,
+                in_collection: false,
+            })
+        }
+        (BaseItemKind::Movie | BaseItemKind::Video, _) => {
+            let Some(collection) = client.item_collections(&item.id).await?.into_iter().next() else {
+                return Ok(Neighbours::default());
+            };
+            let mut movies = crate::views::item::collection_items(client, &collection.id, &[]).await?;
+            movies.retain(|movie| matches!(movie.kind, BaseItemKind::Movie | BaseItemKind::Video));
+            let (previous, next) = adjacent(movies, &item.id);
+            Ok(Neighbours {
+                previous,
+                next,
+                in_collection: true,
+            })
+        }
+        _ => Ok(Neighbours::default()),
+    }
+}
+
+/// The items before and after the one with `id`, if it's there.
+fn adjacent(mut items: Vec<BaseItemDto>, id: &str) -> (Option<BaseItemDto>, Option<BaseItemDto>) {
+    let Some(index) = items.iter().position(|item| item.id == id) else {
+        return (None, None);
+    };
+    let next = (index + 1 < items.len()).then(|| items.remove(index + 1));
+    let previous = index.checked_sub(1).map(|i| items.swap_remove(i));
+    (previous, next)
 }
 
 /// Runs one playback from negotiation to the final stop report. Returns a user-facing error.
@@ -1340,7 +1401,7 @@ mod tests {
     // Not `super::*`: that glob brings in GPUI's `test` attribute, which shadows the std one.
     use jellyfin::models::{MediaSourceInfo, MediaStream, MediaStreamType};
 
-    use super::{Adjustments, mpv_subtitle_id, mpv_track_id, volume_level};
+    use super::{Adjustments, adjacent, mpv_subtitle_id, mpv_track_id, volume_level};
 
     fn stream(index: i32, kind: MediaStreamType, is_external: bool) -> MediaStream {
         serde_json::from_value(serde_json::json!({
@@ -1434,5 +1495,21 @@ mod tests {
         .for_next_item();
         assert_eq!((next.speed, next.subtitle_scale), (1.5, 1.4));
         assert_eq!((next.subtitle_delay, next.audio_delay), (0., 0.));
+    }
+
+    #[test]
+    fn adjacent_items() {
+        let item = |id: &str| -> jellyfin::models::BaseItemDto {
+            serde_json::from_value(serde_json::json!({ "Id": id, "Name": id })).expect("item")
+        };
+        let ids = |pair: (
+            Option<jellyfin::models::BaseItemDto>,
+            Option<jellyfin::models::BaseItemDto>,
+        )| { (pair.0.map(|i| i.id), pair.1.map(|i| i.id)) };
+        let items = || vec![item("a"), item("b"), item("c")];
+        assert_eq!(ids(adjacent(items(), "b")), (Some("a".into()), Some("c".into())));
+        assert_eq!(ids(adjacent(items(), "a")), (None, Some("b".into())));
+        assert_eq!(ids(adjacent(items(), "c")), (Some("b".into()), None));
+        assert_eq!(ids(adjacent(items(), "x")), (None, None));
     }
 }

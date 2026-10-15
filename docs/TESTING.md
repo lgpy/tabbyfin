@@ -173,3 +173,11 @@ Code-level and startup checks only so far: the development harness cannot send m
 - ⬜ **Switching in Settings** applies at once, without a restart, on every page.
 - ⬜ **Follow the system** on Windows, macOS and a Linux desktop, including switching the system between light and dark while the app runs.
 - ⬜ Every page in light: login, libraries (sort and filter menus), search, seasons and episodes, the SyncPlay popover, notifications.
+
+## 15. Previous and next (2.1.9)
+
+✅ With `JELLY_GPUI_KEYS` against 12.2: Shift+P on S01E02 played S01E01, Shift+N on Test Movie played Second Movie (the next in Test Collection), and Test Movie ending did not start Second Movie. The smoke test reads a movie's collections on 12.2 and gets none (no route) on 10.11.
+
+- ⬜ The **buttons** and their tooltips, and the up-next card offering a collection's next movie.
+- ⬜ A remote **previous** from the dashboard: restarts the item, or within 5 s goes to the previous one.
+- ⬜ A movie in **several collections** uses the first the server lists.

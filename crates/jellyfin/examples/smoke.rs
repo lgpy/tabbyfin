@@ -198,6 +198,10 @@ async fn main() -> anyhow::Result<()> {
     }
     ok(format!("{} marked watched and unwatched", movie.name));
 
+    // Jellyfin 12.0+; older servers have no such route, which reads as no collections.
+    let collections = client.item_collections(&movie.id).await?;
+    ok(format!("{} is in {} collection(s)", movie.name, collections.len()));
+
     // Images.
     let req = movie
         .primary_image()

@@ -14,6 +14,7 @@ use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use jellyfin::models::{BaseItemDto, BaseItemKind};
 use player::libmpv::Frame;
 
 use crate::components::timestamp;
@@ -31,6 +32,7 @@ actions!(
         VolumeDown,
         ToggleMute,
         NextEpisode,
+        PreviousEpisode,
         NextChapter,
         PrevChapter,
         Skip,
@@ -379,11 +381,14 @@ impl PlayerPage {
         self.show_controls(window, cx);
     }
 
+    /// Shift+N: the next episode, collection movie or queued item.
     fn next_episode(&mut self, _: &NextEpisode, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(next) = self.now_playing.read(cx).next.clone() else {
-            return;
-        };
-        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_from_resume(&next, cx));
+        self.now_playing.update(cx, |state, cx| state.play_next(cx));
+    }
+
+    /// Shift+P: the previous episode or collection movie.
+    fn previous_episode(&mut self, _: &PreviousEpisode, _: &mut Window, cx: &mut Context<Self>) {
+        self.now_playing.update(cx, |state, cx| state.play_previous(cx));
     }
 
     fn change_volume(&mut self, delta: f64, window: &mut Window, cx: &mut Context<Self>) {
@@ -524,7 +529,15 @@ impl PlayerPage {
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.now_playing.read(cx);
         let paused = state.paused;
-        let (muted, has_next) = (state.muted || state.volume == 0., state.next.is_some());
+        let muted = state.muted || state.volume == 0.;
+        let previous_tip = state
+            .previous
+            .as_ref()
+            .map(|item| format!("Previous {}(Shift+P)", kind_word(item)));
+        let next_tip = state
+            .next
+            .as_ref()
+            .map(|item| format!("Next {}(Shift+N)", kind_word(item)));
         let mut time = match state.duration {
             Some(duration) if self.show_remaining => format!(
                 "-{} / {}",
@@ -704,12 +717,23 @@ impl PlayerPage {
                     )
                     .child(div().flex_none().w(px(96.)).child(Slider::new(&self.volume).w_full()))
                     .child(div().flex_1())
-                    .when(has_next, |el| {
+                    .when_some(previous_tip, |el, tip| {
                         el.child(
-                            Button::new("next-episode")
+                            Button::new("previous-item")
+                                .ghost()
+                                .icon(Lucide::SkipBack)
+                                .tooltip(tip)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.previous_episode(&PreviousEpisode, window, cx)
+                                })),
+                        )
+                    })
+                    .when_some(next_tip, |el, tip| {
+                        el.child(
+                            Button::new("next-item")
                                 .ghost()
                                 .icon(Lucide::SkipForward)
-                                .label("Next episode")
+                                .tooltip(tip)
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.next_episode(&NextEpisode, window, cx)),
                                 ),
@@ -818,6 +842,15 @@ impl PlayerPage {
                 .bottom(px(bottom))
                 .child(prompt),
         )
+    }
+}
+
+/// "episode " or "movie " for a button's tooltip, or nothing for other kinds.
+fn kind_word(item: &BaseItemDto) -> &'static str {
+    match item.kind {
+        BaseItemKind::Episode => "episode ",
+        BaseItemKind::Movie => "movie ",
+        _ => "",
     }
 }
 
@@ -991,6 +1024,7 @@ impl Render for PlayerPage {
             .on_action(cx.listener(Self::volume_down))
             .on_action(cx.listener(Self::toggle_mute))
             .on_action(cx.listener(Self::next_episode))
+            .on_action(cx.listener(Self::previous_episode))
             .on_action(cx.listener(Self::next_chapter))
             .on_action(cx.listener(Self::prev_chapter))
             .on_action(cx.listener(Self::skip))

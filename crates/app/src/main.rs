@@ -28,8 +28,9 @@ use crate::app_view::AppView;
 use crate::changes::Changes;
 use crate::config::{Config, ThemePreference};
 use crate::views::player::{
-    self, ExitPlayer, NextChapter, NextEpisode, PrevChapter, SeekBackward, SeekForward, Skip, SpeedDown, SpeedUp,
-    SubtitleDelayDown, SubtitleDelayUp, ToggleFullscreen, ToggleMute, TogglePause, VolumeDown, VolumeUp,
+    self, ExitPlayer, NextChapter, NextEpisode, PrevChapter, PreviousEpisode, SeekBackward, SeekForward, Skip,
+    SpeedDown, SpeedUp, SubtitleDelayDown, SubtitleDelayUp, ToggleFullscreen, ToggleMute, TogglePause, VolumeDown,
+    VolumeUp,
 };
 use crate::views::shell::{self, Back, OpenSearch};
 
@@ -133,6 +134,7 @@ fn main() {
                 KeyBinding::new("down", VolumeDown, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("m", ToggleMute, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("shift-n", NextEpisode, Some(player::KEY_CONTEXT)),
+                KeyBinding::new("shift-p", PreviousEpisode, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("pagedown", NextChapter, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("pageup", PrevChapter, Some(player::KEY_CONTEXT)),
                 KeyBinding::new("enter", Skip, Some(player::KEY_CONTEXT)),
