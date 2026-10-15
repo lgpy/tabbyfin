@@ -56,8 +56,8 @@ pub struct Player(Backend);
 enum Backend {
     /// libmpv in this process. Its calls block, so they run on tokio's blocking pool.
     Embedded(Arc<libmpv::EmbeddedPlayer>),
-    /// libmpv in a player host process.
-    Remote(remote::RemotePlayer),
+    /// libmpv in a player host process. Boxed: it's much larger than the embedded handle.
+    Remote(Box<remote::RemotePlayer>),
 }
 
 type Started = (Player, mpsc::UnboundedReceiver<PlayerEvent>, libmpv::VideoOutput);
@@ -70,7 +70,7 @@ impl Player {
             return Self::spawn_embedded().await;
         }
         let (player, events, video) = remote::RemotePlayer::spawn().await?;
-        Ok((Player(Backend::Remote(player)), events, video))
+        Ok((Player(Backend::Remote(Box::new(player))), events, video))
     }
 
     /// Starts mpv in this process.
