@@ -136,6 +136,17 @@ impl SearchPage {
         .collect()
     }
 
+    /// Up in the search box goes on into the top bar; Down from there comes back to the box.
+    fn up_from_box(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.key == "up"
+            && !event.keystroke.modifiers.modified()
+            && self.input.focus_handle(cx).is_focused(window)
+        {
+            cx.stop_propagation();
+            self.nav.focus_top_bar(window, cx);
+        }
+    }
+
     /// Enter in the search box: move to the first result.
     fn enter_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.groups(window).is_empty() {
@@ -279,6 +290,7 @@ impl Render for SearchPage {
         v_flex()
             .size_full()
             .gap_4()
+            .capture_key_down(cx.listener(Self::up_from_box))
             .child(div().px_6().pt_6().max_w(px(640.)).child(Input::new(&self.input)))
             .child(results)
     }

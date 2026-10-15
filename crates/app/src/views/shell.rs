@@ -333,6 +333,11 @@ impl ShellView {
 
     /// Up past a page's first row (the page lets the action through): into the top bar.
     fn enter_top_bar(&mut self, _: &MoveUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_top_bar(window, cx);
+    }
+
+    /// Moves the keyboard into the top bar (also for Up in the search box).
+    pub fn focus_top_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.stack.last().is_some_and(|page| page.is_player) {
             return;
         }
