@@ -26,6 +26,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ With a **real keyboard**: the ring appears on the first arrow key, a mouse click hides it.
 ✅ Top bar and library toolbar by keyboard: Up from Home's first row into the top bar and back down (the cursor returns to its card), the account menu's highlight, a SyncPlay group created and the menu reopened with Leave highlighted, Esc closing the menu then the top bar; the library's Show stepped to Unwatched and *Clear filters*, the cursor staying in the toolbar.
 
+✅ The account menu is a gpui-kit `PopupMenu`: Enter on the user button opens it, Down highlights the accounts, *Add account…* and *Sign out*, Enter on *Add account…* shows sign-in, and Esc closes it with the keyboard back on the user button.
+
 - ⬜ With a real keyboard: the top bar after mouse use (a click elsewhere hides its ring), and the account menu switching to another saved account.
 - ⬜ Changing a picker by keyboard and then by mouse (or the other way) keeps them in step, and playing after a keyboard change uses the chosen version and tracks.
 - ⬜ A **large library** (hundreds of items): the grid scrolls to keep the selection visible, including rows that are still loading.
@@ -272,7 +274,7 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 ## 24. Several accounts (4.5)
 
-✅ With `dev` on 12.2 and `dev2` on 10.11 saved (tokens from a scratch config): the sign-in screen lists both; launching with `dev2` current restores it on 10.11; the account menu shows the current account, *Switch to*, *Add account…* and *Sign out*; switching restores the other account with a new websocket; *Add account* shows sign-in with *Back to your account*, which returns to the same session without reconnecting; signing out deletes and revokes the token and leaves `dev2` listed; an unfinished playback recorded for `dev` isn't reported by `dev2`. The menu, switch, add/cancel and sign-out were triggered through temporary test code, since the harness can't click and gpui-kit buttons don't take Enter or Space.
+✅ With `dev` on 12.2 and `dev2` on 10.11 saved (tokens from a scratch config): the sign-in screen lists both; launching with `dev2` current restores it on 10.11; the account menu lists the saved accounts with the current one checked, then *Add account…* and *Sign out*; switching restores the other account with a new websocket; *Add account* shows sign-in with *Back to your account*, which returns to the same session without reconnecting; signing out deletes and revokes the token and leaves `dev2` listed; an unfinished playback recorded for `dev` isn't reported by `dev2`. The menu, switch, add/cancel and sign-out were triggered through temporary test code, since the harness can't click and gpui-kit buttons don't take Enter or Space.
 
 - ⬜ **Clicking** through it all, including *Remove* on the sign-in screen and signing in to a new server while another account waits.
 - ⬜ **Windows and macOS keychains** with two accounts.
