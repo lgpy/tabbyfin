@@ -232,3 +232,9 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 - ⬜ A **remote trailer** (a library with real metadata): the button opens it in the browser.
 - ⬜ A series' extras and similar shows; extras with their own images.
+
+## 23. Update notice (5.5)
+
+✅ With `JELLY_GPUI_UPDATE_URL` pointing at a local fake `v9.9.9` release: the notification showed "Version 9.9.9 is out (this is 0.1.0)" with Download, and the check time was saved.
+
+- ⬜ After the **first published release**: an older build shows the notice once a day; the current one doesn't; *Download* opens the release page; the setting turns it off.

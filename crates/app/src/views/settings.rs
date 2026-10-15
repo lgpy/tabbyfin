@@ -43,6 +43,7 @@ pub struct SettingsPage {
     bitrate: ChoiceSelect,
     autoplay: bool,
     auto_skip: bool,
+    check_updates: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -51,6 +52,7 @@ impl SettingsPage {
         let config = Config::load();
         let autoplay = config.autoplay_next_episode.unwrap_or(true);
         let auto_skip = config.auto_skip_intro.unwrap_or(false);
+        let check_updates = config.check_for_updates.unwrap_or(true);
         let mut subscriptions = Vec::new();
 
         let theme = options_select(&THEMES, &config.theme, window, cx);
@@ -107,6 +109,7 @@ impl SettingsPage {
             bitrate,
             autoplay,
             auto_skip,
+            check_updates,
             _subscriptions: subscriptions,
         }
     }
@@ -120,6 +123,12 @@ impl SettingsPage {
     fn set_auto_skip(&mut self, auto_skip: bool, cx: &mut Context<Self>) {
         self.auto_skip = auto_skip;
         save(|config| config.auto_skip_intro = Some(auto_skip));
+        cx.notify();
+    }
+
+    fn set_check_updates(&mut self, check: bool, cx: &mut Context<Self>) {
+        self.check_updates = check;
+        save(|config| config.check_for_updates = Some(check));
         cx.notify();
     }
 
@@ -328,7 +337,19 @@ impl Render for SettingsPage {
                             ),
                     )
                     .child(section("Account", cx).child(hint(account, cx)))
-                    .child(section("About", cx).child(hint(format!("jelly-gpui {}", env!("CARGO_PKG_VERSION")), cx))),
+                    .child(
+                        section("About", cx)
+                            .child(hint(format!("jelly-gpui {}", env!("CARGO_PKG_VERSION")), cx))
+                            .child(
+                                Switch::new("check-updates")
+                                    .checked(self.check_updates)
+                                    .label("Tell me when a new version is out")
+                                    .on_click(
+                                        cx.listener(|this, checked: &bool, _, cx| this.set_check_updates(*checked, cx)),
+                                    ),
+                            )
+                            .child(hint("Checks the GitHub releases once a day, when the app starts.", cx)),
+                    ),
             )
     }
 }

@@ -19,6 +19,7 @@ mod syncplay;
 mod theme;
 mod tracks;
 mod trickplay;
+mod update;
 mod views;
 mod window;
 
