@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
         Some(SocketEvent::Connected) => println!("ok: websocket connected with header auth"),
         other => bail!("expected Connected, got {other:?}"),
     }
-    client.report_capabilities().await?;
+    client.report_capabilities(&Default::default()).await?;
     println!("ok: capabilities reported");
 
     let mut clock = ServerClock::default();

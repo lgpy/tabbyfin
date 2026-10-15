@@ -177,6 +177,13 @@ impl SyncPlay {
         });
     }
 
+    /// Adds `items` to the group's queue: after the playing entry with `next`, otherwise at
+    /// the end.
+    pub fn enqueue(&mut self, items: &[BaseItemDto], next: bool, cx: &mut Context<Self>) {
+        let ids: Vec<String> = items.iter().map(|item| item.id.clone()).collect();
+        self.call(cx, move |client| async move { client.syncplay_queue(&ids, next).await });
+    }
+
     /// The group's item ended here: move the group on to the next one (the server ignores
     /// the duplicate reports from other members).
     pub fn item_ended(&mut self, playlist_item_id: &str, cx: &mut Context<Self>) {

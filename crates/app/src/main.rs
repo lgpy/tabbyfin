@@ -11,6 +11,7 @@ mod images;
 mod live;
 mod markers;
 mod playback;
+mod remote;
 mod router;
 mod runtime;
 mod session;

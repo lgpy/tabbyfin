@@ -39,8 +39,10 @@ actions!(
 );
 
 pub const KEY_CONTEXT: &str = "Player";
-const SEEK_STEP: f64 = 10.;
-const VOLUME_STEP: f64 = 5.;
+/// Seconds per seek key press (and remote rewind or fast-forward).
+pub const SEEK_STEP: f64 = 10.;
+/// Volume percent per key press, wheel notch or remote volume step.
+pub const VOLUME_STEP: f64 = 5.;
 /// Wheel lines per volume step. X11 and Windows normalise a wheel notch to three lines, so
 /// one notch is one step; a trackpad's pixel deltas are turned into lines first.
 const SCROLL_LINES_PER_STEP: f32 = 3.;

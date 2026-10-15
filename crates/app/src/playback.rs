@@ -71,6 +71,7 @@ pub enum UiCommand {
     SeekTo(Duration),
     /// Percent, 0 to 100.
     SetVolume(f64),
+    SetMute(bool),
     ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
@@ -298,6 +299,8 @@ pub struct PlaybackManager {
     /// What plays after the current item ("Play all" on a playlist or collection). Takes the
     /// place of the next episode for the up-next card and autoplay.
     queue: VecDeque<BaseItemDto>,
+    /// The running session's state, once it has started.
+    now_playing: Option<Entity<NowPlaying>>,
     volume: f64,
     muted: bool,
 }
@@ -319,6 +322,7 @@ impl PlaybackManager {
             active: false,
             reconnect: None,
             queue: VecDeque::new(),
+            now_playing: None,
             volume,
             muted: false,
         });
@@ -331,6 +335,11 @@ impl PlaybackManager {
 
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    /// The running session's state; `None` while loading, between sessions or reconnecting.
+    pub fn now_playing(&self) -> Option<Entity<NowPlaying>> {
+        self.now_playing.clone()
     }
 
     /// Stops the current session, if any, or a pending reconnect (closing the player).
@@ -360,6 +369,12 @@ impl PlaybackManager {
 
     /// Plays `items` in order: the first now, the rest as a queue.
     pub fn play_all(&mut self, items: Vec<BaseItemDto>, cx: &mut Context<Self>) {
+        self.play_all_with(items, PlayOptions::default(), cx);
+    }
+
+    /// Plays `items` in order, the first with `options`. A SyncPlay group gets them as its
+    /// new queue instead, from the start.
+    pub fn play_all_with(&mut self, items: Vec<BaseItemDto>, options: PlayOptions, cx: &mut Context<Self>) {
         let mut items = VecDeque::from(items);
         let Some(first) = items.pop_front() else { return };
         if let Some(syncplay) = SyncPlay::try_global(cx).filter(|s| s.read(cx).group.is_some()) {
@@ -369,7 +384,35 @@ impl PlaybackManager {
             return;
         }
         self.queue = items;
-        self.play_now(&first, PlayOptions::default(), cx);
+        self.play_now(&first, options, cx);
+    }
+
+    /// Adds `items` to the queue: right after the playing item with `next`, otherwise at the
+    /// end. With nothing playing they play now.
+    pub fn enqueue(&mut self, items: Vec<BaseItemDto>, next: bool, cx: &mut Context<Self>) {
+        if let Some(syncplay) = SyncPlay::try_global(cx).filter(|s| s.read(cx).group.is_some()) {
+            syncplay.update(cx, |syncplay, cx| syncplay.enqueue(&items, next, cx));
+            return;
+        }
+        if !self.active {
+            self.play_all(items, cx);
+            return;
+        }
+        if next {
+            for item in items.into_iter().rev() {
+                self.queue.push_front(item);
+            }
+        } else {
+            self.queue.extend(items);
+        }
+        // The queue takes the place of the next episode for the up-next card and autoplay.
+        if let (Some(now_playing), Some(front)) = (&self.now_playing, self.queue.front()) {
+            let front = front.clone();
+            now_playing.update(cx, |state, cx| {
+                state.next = Some(front);
+                cx.notify();
+            });
+        }
     }
 
     pub fn play(&mut self, item: &BaseItemDto, options: PlayOptions, cx: &mut Context<Self>) {
@@ -462,15 +505,22 @@ impl PlaybackManager {
                             restarts: 0,
                             commands,
                         });
-                        this.update(cx, |_, cx| cx.emit(PlaybackEvent::Started(entity.clone())))
-                            .ok();
+                        this.update(cx, |this, cx| {
+                            if this.generation == generation {
+                                this.now_playing = Some(entity.clone());
+                            }
+                            cx.emit(PlaybackEvent::Started(entity.clone()));
+                        })
+                        .ok();
                         now_playing = Some(entity);
                     }
                     SessionUpdate::Details(details) => {
+                        // Items queued since the start (remote control) count too.
+                        let queued = this.read_with(cx, |this, _| !this.queue.is_empty()).unwrap_or(true);
                         if let Some(entity) = &now_playing {
                             entity.update(cx, |state, cx| {
                                 state.versions = details.versions;
-                                if queued.is_none() {
+                                if !queued {
                                     state.next = details.next;
                                 }
                                 state.chapters = details.chapters;
@@ -512,6 +562,7 @@ impl PlaybackManager {
                     return;
                 }
                 this.active = false;
+                this.now_playing = None;
                 match result {
                     // In a group, every member reports the end and the server moves the
                     // queue on (once); the next item then comes as a queue update.
@@ -979,7 +1030,7 @@ async fn run_session(
             Some(command) = channels.commands.recv() => {
                 tracing::debug!(?command, "player command");
                 // Volume and mute are reported from mpv's events instead, batched.
-                let reports = !matches!(command, UiCommand::SetVolume(_) | UiCommand::ToggleMute);
+                let reports = !matches!(command, UiCommand::SetVolume(_) | UiCommand::SetMute(_) | UiCommand::ToggleMute);
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
@@ -1064,6 +1115,7 @@ async fn apply_command(
                 .await
         }
         UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., 100.)).await,
+        UiCommand::SetMute(muted) => player.set_property("mute", muted).await,
         UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
         // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
         UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),

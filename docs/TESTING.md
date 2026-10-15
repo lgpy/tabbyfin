@@ -145,4 +145,13 @@ Code-level and startup checks only so far: the development harness cannot send m
 ✅ Against the 12.2 dev server: three volume-down presses and `m` inside the app left `VolumeLevel = 85` and `IsMuted = true` in the session's `PlayState` (`GET /Sessions`). The 10.11 spec carries the same fields on `PlaybackProgressInfo` (checked), not run at runtime.
 
 - ⬜ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app (about a second later; the report is batched).
-- ⬜ Re-run the `/Sessions` check above since the batching change.
+✅ Re-run after batching the reports: the same check gave `VolumeLevel = 85` and `IsMuted = true` about 3 s after the keys.
+
+## 12. Remote control (2.2.5)
+
+✅ Against the 12.2 dev server, driving the app's session over REST the way the dashboard does (`POST /Sessions/{id}/Playing…`, `/Command`, `/Message`): play now with a start position, pause, seek, unpause, set volume, mute, unmute, subtitles off, a message (shown as a notification), next and stop all show up in `/Sessions`. Play last plus play next with a series put the series' episodes (expanded by the server) ahead of the movie, and next went to S01E01. The 10.11.11 server sends the same `Play`, `Playstate` and `GeneralCommand` payloads (captured, not run against the app).
+
+- ⬜ From the **web dashboard** (and a phone app): the session shows a remote control, its buttons work, and the volume and tracks it shows follow the app.
+- ⬜ **Fullscreen** from the dashboard toggles the window (the harness can't check fullscreen).
+- ⬜ In a **SyncPlay group**: remote pause and seek act on the whole group, and play next/last add to the group's queue.
+- ⬜ Changing the **audio track** remotely during a transcode restarts the stream at the same position.
