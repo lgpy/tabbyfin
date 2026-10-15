@@ -122,14 +122,34 @@ pub struct LibraryView {
     pub sort: String,
     pub descending: bool,
     pub filter: String,
-    /// A genre name; `None` shows every genre.
-    #[serde(default)]
+    /// Genre names: items with any of them show (and with any of the tags and ratings, when
+    /// those are set too). Empty shows everything.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Official ratings (PG-13…).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ratings: Vec<String>,
+    /// The one genre earlier versions saved; [`LibraryView::upgrade`] moves it to `genres`.
+    #[serde(default, skip_serializing)]
     pub genre: Option<String>,
     /// A year ("2024") or a decade ("2020s"); `None` shows every year.
     #[serde(default)]
     pub year: Option<String>,
     #[serde(default)]
     pub resolution: Option<String>,
+}
+
+impl LibraryView {
+    /// Moves what older versions saved into the current fields.
+    pub fn upgrade(&mut self) {
+        if let Some(genre) = self.genre.take()
+            && !self.genres.contains(&genre)
+        {
+            self.genres.push(genre);
+        }
+    }
 }
 
 /// A sign-in: a user on a server.
@@ -274,7 +294,19 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, SavedServer};
+    use super::{Config, LibraryView, SavedServer};
+
+    #[test]
+    fn a_library_view_with_one_genre_upgrades_to_the_list() {
+        let mut view: LibraryView =
+            toml::from_str("sort = \"name\"\ndescending = false\nfilter = \"all\"\ngenre = \"Comedy\"\n")
+                .expect("parses");
+        view.upgrade();
+        assert_eq!(view.genres, ["Comedy"]);
+        assert_eq!(view.genre, None);
+        let saved = toml::to_string(&view).expect("serializes");
+        assert!(saved.contains("genres") && !saved.contains("genre ="), "{saved}");
+    }
 
     fn account(server: &str, user: &str) -> SavedServer {
         SavedServer {

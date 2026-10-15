@@ -134,8 +134,9 @@ def main():
 
 
 # No metadata fetchers run, so the item page's genres, studios, tags and "More like this"
-# (which matches on these) get something to show. Locked, so scans keep it. (The server
-# ignores RemoteTrailers in updates, so there's no remote trailer to test with.)
+# (which matches on these) get something to show, and the library's genre, tag, rating and
+# year filters something to tell apart. Locked, so scans keep it. (The server ignores
+# RemoteTrailers in updates, so there's no remote trailer to test with.)
 METADATA = {
     "Movie": {
         "Genres": ["Science Fiction", "Documentary"],
@@ -144,12 +145,36 @@ METADATA = {
     },
 }
 
+# Per item, on top of METADATA, by name prefix.
+ITEM_METADATA = {
+    "Test Movie": {"Tags": ["test pattern", "multi-version"], "OfficialRating": "PG"},
+    "Second Movie": {"Genres": ["Comedy"], "OfficialRating": "PG-13"},
+}
+
+
+def wanted_metadata(kind, name):
+    fields = dict(METADATA.get(kind, {}))
+    for prefix, extra in ITEM_METADATA.items():
+        if name.startswith(prefix):
+            fields.update(extra)
+    return fields
+
+
+def same(current, wanted):
+    """Compares what the server has with what's wanted; studios come back with ids."""
+    if isinstance(wanted, list) and wanted and isinstance(wanted[0], dict):
+        return sorted(s.get("Name") for s in current or []) == sorted(s["Name"] for s in wanted)
+    if isinstance(wanted, list):
+        return sorted(current or []) == sorted(wanted)
+    return current == wanted
+
 
 def set_metadata(token):
-    for kind, fields in METADATA.items():
+    for kind in METADATA:
         for item in request(f"/Items?Recursive=true&IncludeItemTypes={kind}", token=token)["Items"]:
             full = request(f"/Items/{item['Id']}", token=token)
-            if all(full.get(k) for k in fields):
+            fields = wanted_metadata(kind, full["Name"])
+            if all(same(full.get(k), v) for k, v in fields.items()):
                 continue
             # Posting back the whole item fails on 12.2 (a database constraint), so only the
             # identity and the fields to set; the rest of these items is empty anyway. 10.11

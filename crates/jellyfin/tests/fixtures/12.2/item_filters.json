@@ -1,10 +1,15 @@
 {
   "Genres": [
+    "Comedy",
     "Documentary",
     "Science Fiction"
   ],
-  "OfficialRatings": [],
+  "OfficialRatings": [
+    "PG",
+    "PG-13"
+  ],
   "Tags": [
+    "multi-version",
     "test pattern"
   ],
   "Years": [

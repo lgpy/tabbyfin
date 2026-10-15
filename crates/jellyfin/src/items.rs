@@ -33,8 +33,13 @@ pub struct ItemsQuery {
     /// Items a person appears in.
     pub person_ids: Vec<String>,
     pub filters: Vec<ItemFilter>,
-    /// Items with any of these genres (by name).
+    /// Items with any of these genres (by name). Different kinds of values (genres, tags,
+    /// ratings) must all match.
     pub genres: Vec<String>,
+    /// Items with any of these tags.
+    pub tags: Vec<String>,
+    /// Items with any of these official ratings (PG-13…).
+    pub official_ratings: Vec<String>,
     /// Items released in any of these years.
     pub years: Vec<i32>,
     /// Video width bounds, for resolution filters. The server's own `isHd` and `is4K` filters
@@ -78,9 +83,15 @@ impl ItemsQuery {
             .list("fields", &wire_list(&self.fields, ItemField::as_str))
             .opt("startIndex", self.start_index)
             .opt("limit", self.limit);
-        // Genre names may contain commas, so this list is the one the server splits on `|`.
-        if !self.genres.is_empty() {
-            q.push("genres", self.genres.join("|"));
+        // Names may contain commas, so these lists are the ones the server splits on `|`.
+        for (key, values) in [
+            ("genres", &self.genres),
+            ("tags", &self.tags),
+            ("officialRatings", &self.official_ratings),
+        ] {
+            if !values.is_empty() {
+                q.push(key, values.join("|"));
+            }
         }
         q
     }
@@ -327,9 +338,11 @@ mod tests {
     use super::ItemsQuery;
 
     #[test]
-    fn genres_are_split_on_pipes_and_years_on_commas() {
+    fn names_are_split_on_pipes_and_years_on_commas() {
         let query = ItemsQuery {
             genres: vec!["Action, Adventure".into(), "Drama".into()],
+            tags: vec!["4k".into()],
+            official_ratings: vec!["PG".into(), "PG-13".into()],
             years: vec![2024, 2025],
             max_width: Some(1199),
             ..Default::default()
@@ -337,6 +350,8 @@ mod tests {
         let params = query.to_query().0;
         let get = |key| params.iter().find(|(k, _)| *k == key).map(|(_, v)| v.as_str());
         assert_eq!(get("genres"), Some("Action, Adventure|Drama"));
+        assert_eq!(get("tags"), Some("4k"));
+        assert_eq!(get("officialRatings"), Some("PG|PG-13"));
         assert_eq!(get("years"), Some("2024,2025"));
         assert_eq!(get("maxWidth"), Some("1199"));
         assert_eq!(get("minWidth"), None);

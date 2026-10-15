@@ -48,10 +48,33 @@ enum Tool {
     Sort,
     Order,
     Show,
-    Genre,
+    /// Opens the genres, tags and ratings dialog.
+    Values,
     Year,
     Resolution,
     Clear,
+}
+
+/// The library's genres, tags and official ratings, which the dialog lists to choose from.
+#[derive(Clone, Default)]
+pub struct FilterValues {
+    pub genres: Vec<String>,
+    pub tags: Vec<String>,
+    pub ratings: Vec<String>,
+}
+
+impl FilterValues {
+    fn is_empty(&self) -> bool {
+        self.genres.is_empty() && self.tags.is_empty() && self.ratings.is_empty()
+    }
+}
+
+/// The kinds of values in the genres, tags and ratings dialog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValueKind {
+    Genre,
+    Tag,
+    Rating,
 }
 
 /// What the grid lists.
@@ -123,10 +146,10 @@ pub struct LibraryPage {
     sort: ChoiceSelect,
     filter: ChoiceSelect,
     filter_scope: Option<FilterScope>,
-    /// The library's genre names and year keys, offered after the "any" choice at index 0.
-    genres: Vec<String>,
+    /// The library's genres, tags and ratings, for the dialog.
+    values: FilterValues,
+    /// The library's year keys, offered after the "any" choice at index 0.
     years: Vec<String>,
-    genre: ChoiceSelect,
     year: ChoiceSelect,
     resolution: ChoiceSelect,
     _subscriptions: Vec<Subscription>,
@@ -169,7 +192,7 @@ impl LibraryPage {
             limit: Some(PAGE_SIZE as u32),
             ..base_query
         };
-        let view = Config::load()
+        let mut view = Config::load()
             .library_views
             .get(&view_key)
             .cloned()
@@ -179,6 +202,7 @@ impl LibraryPage {
                 filter: FILTERS[0].0.into(),
                 ..Default::default()
             });
+        view.upgrade();
         let select = |choices: Vec<(&str, &str)>, current: &str, window: &mut Window, cx: &mut Context<Self>| {
             let selected = choices.iter().position(|(key, _)| *key == current).unwrap_or(0);
             choice_select(choices.iter().map(|(_, label)| *label), selected, window, cx)
@@ -192,9 +216,12 @@ impl LibraryPage {
             cx,
         );
         // Until the library's own values arrive, the remembered ones are the only choices.
-        let genres: Vec<String> = view.genre.iter().cloned().collect();
+        let values = FilterValues {
+            genres: view.genres.clone(),
+            tags: view.tags.clone(),
+            ratings: view.ratings.clone(),
+        };
         let years: Vec<String> = view.year.iter().cloned().collect();
-        let genre = any_select("All genres", &genres, view.genre.as_ref(), window, cx);
         let year = any_select("Any year", &years, view.year.as_ref(), window, cx);
         let mut this = Self {
             client,
@@ -234,15 +261,6 @@ impl LibraryPage {
                         this.change_view(cx);
                     }
                 }),
-                cx.subscribe(&genre, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
-                    if let SelectEvent::Confirm(Some(i)) = event {
-                        let genre = chosen(&this.genres, *i);
-                        if this.view.genre != genre {
-                            this.view.genre = genre;
-                            this.change_view(cx);
-                        }
-                    }
-                }),
                 cx.subscribe(&year, |this, _, event: &SelectEvent<Vec<Choice>>, cx| {
                     if let SelectEvent::Confirm(Some(i)) = event {
                         let year = chosen(&this.years, *i);
@@ -266,9 +284,8 @@ impl LibraryPage {
             sort,
             filter,
             filter_scope,
-            genres,
+            values,
             years,
-            genre,
             year,
             resolution,
         };
@@ -278,8 +295,9 @@ impl LibraryPage {
         this
     }
 
-    /// Fills the genre and year menus with the values found in the library. A remembered
-    /// choice the library no longer has stays in its menu, so what's applied is still shown.
+    /// Fills the genres, tags and ratings and the year menu with the values found in the
+    /// library. A remembered choice the library no longer has stays listed, so what's applied
+    /// is still shown.
     fn load_filter_values(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(scope) = &self.filter_scope else {
             return;
@@ -292,13 +310,19 @@ impl LibraryPage {
                 Err(err) => return tracing::warn!("couldn't load the library's genres and years: {err}"),
             };
             this.update_in(cx, |this, window, cx| {
-                let mut genres = values.genres;
-                if let Some(genre) = &this.view.genre
-                    && !genres.contains(genre)
-                {
-                    genres.push(genre.clone());
-                    genres.sort_by_key(|genre| genre.to_lowercase());
-                }
+                let with_chosen = |mut found: Vec<String>, chosen: &[String]| {
+                    let missing: Vec<String> = chosen.iter().filter(|c| !found.contains(c)).cloned().collect();
+                    if !missing.is_empty() {
+                        found.extend(missing);
+                        found.sort_by_key(|value| value.to_lowercase());
+                    }
+                    found
+                };
+                this.values = FilterValues {
+                    genres: with_chosen(values.genres, &this.view.genres),
+                    tags: with_chosen(values.tags, &this.view.tags),
+                    ratings: with_chosen(values.official_ratings, &this.view.ratings),
+                };
                 let mut years = year_choices(&values.years);
                 if let Some(year) = &this.view.year
                     && !years.contains(year)
@@ -312,21 +336,12 @@ impl LibraryPage {
                     let index = current.and_then(|c| values.iter().position(|v| v == c));
                     Some(IndexPath::default().row(index.map_or(0, |i| i + 1)))
                 };
-                let (genre_choices, genre_index) = (
-                    labels("All genres", &genres),
-                    selected(&genres, this.view.genre.as_ref()),
-                );
-                this.genre.update(cx, |select, cx| {
-                    select.set_items(genre_choices, window, cx);
-                    select.set_selected_index(genre_index, window, cx);
-                });
                 let (year_choices, year_index) =
                     (labels("Any year", &years), selected(&years, this.view.year.as_ref()));
                 this.year.update(cx, |select, cx| {
                     select.set_items(year_choices, window, cx);
                     select.set_selected_index(year_index, window, cx);
                 });
-                this.genres = genres;
                 this.years = years;
                 cx.notify();
             })
@@ -350,7 +365,9 @@ impl LibraryPage {
         let Some(scope) = &self.filter_scope else {
             return;
         };
-        self.base_query.genres = self.view.genre.iter().cloned().collect();
+        self.base_query.genres = self.view.genres.clone();
+        self.base_query.tags = self.view.tags.clone();
+        self.base_query.official_ratings = self.view.ratings.clone();
         self.base_query.years = self.view.year.as_deref().map(years_of).unwrap_or_default();
         let resolution = RESOLUTIONS
             .iter()
@@ -359,18 +376,74 @@ impl LibraryPage {
         (self.base_query.min_width, self.base_query.max_width) = (resolution.2, resolution.3);
     }
 
+    /// The library's genres, tags and ratings, for the dialog.
+    pub fn filter_values(&self) -> &FilterValues {
+        &self.values
+    }
+
+    /// The chosen values of a kind.
+    pub fn chosen_values(&self, kind: ValueKind) -> &[String] {
+        match kind {
+            ValueKind::Genre => &self.view.genres,
+            ValueKind::Tag => &self.view.tags,
+            ValueKind::Rating => &self.view.ratings,
+        }
+    }
+
+    /// Ticks or unticks a genre, tag or rating, and reloads the grid.
+    pub fn toggle_value(&mut self, kind: ValueKind, value: &str, cx: &mut Context<Self>) {
+        let chosen = match kind {
+            ValueKind::Genre => &mut self.view.genres,
+            ValueKind::Tag => &mut self.view.tags,
+            ValueKind::Rating => &mut self.view.ratings,
+        };
+        match chosen.iter().position(|v| v == value) {
+            Some(i) => {
+                chosen.remove(i);
+            }
+            None => chosen.push(value.to_owned()),
+        }
+        self.change_view(cx);
+    }
+
+    fn open_value_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::views::value_filters::open(cx.entity(), window, cx);
+    }
+
+    /// The button's label: what's chosen, or what it's for.
+    fn values_summary(&self) -> SharedString {
+        let chosen: Vec<&String> = self
+            .view
+            .genres
+            .iter()
+            .chain(&self.view.tags)
+            .chain(&self.view.ratings)
+            .collect();
+        match chosen.as_slice() {
+            [] => "Genres, tags…".into(),
+            [one] => (*one).clone().into(),
+            [one, two] => format!("{one}, {two}").into(),
+            many => format!("{} filters", many.len()).into(),
+        }
+    }
+
     /// Whether anything is filtered out (the sort aside).
     fn filtered(&self) -> bool {
         self.view.filter != FILTERS[0].0
-            || self.view.genre.is_some()
+            || !self.view.genres.is_empty()
+            || !self.view.tags.is_empty()
+            || !self.view.ratings.is_empty()
             || self.view.year.is_some()
             || self.view.resolution.is_some()
     }
 
     fn clear_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.view.filter = FILTERS[0].0.into();
-        (self.view.genre, self.view.year, self.view.resolution) = (None, None, None);
-        for select in [&self.filter, &self.genre, &self.year, &self.resolution] {
+        (self.view.year, self.view.resolution) = (None, None);
+        self.view.genres.clear();
+        self.view.tags.clear();
+        self.view.ratings.clear();
+        for select in [&self.filter, &self.year, &self.resolution] {
             select.update(cx, |select, cx| {
                 select.set_selected_index(Some(IndexPath::default()), window, cx)
             });
@@ -733,6 +806,7 @@ impl Browse for LibraryPage {
         };
         match tool {
             Tool::Order => self.toggle_order(cx),
+            Tool::Values => self.open_value_filters(window, cx),
             Tool::Clear => self.clear_filters(window, cx),
             tool => {
                 if let Some(select) = self.tool_select(tool) {
@@ -748,8 +822,8 @@ impl LibraryPage {
     fn tools(&self) -> Vec<Tool> {
         let mut tools = vec![Tool::Sort, Tool::Order, Tool::Show];
         if let Some(scope) = &self.filter_scope {
-            if !self.genres.is_empty() {
-                tools.push(Tool::Genre);
+            if !self.values.is_empty() {
+                tools.push(Tool::Values);
             }
             if !self.years.is_empty() {
                 tools.push(Tool::Year);
@@ -768,10 +842,9 @@ impl LibraryPage {
         match tool {
             Tool::Sort => Some(&self.sort),
             Tool::Show => Some(&self.filter),
-            Tool::Genre => Some(&self.genre),
             Tool::Year => Some(&self.year),
             Tool::Resolution => Some(&self.resolution),
-            Tool::Order | Tool::Clear => None,
+            Tool::Order | Tool::Values | Tool::Clear => None,
         }
     }
 
@@ -795,6 +868,13 @@ impl LibraryPage {
                 })
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_order(cx)))
                 .into_any_element(),
+            Tool::Values => Button::new("value-filters")
+                .outline()
+                .small()
+                .icon(Lucide::ListFilter)
+                .label(self.values_summary())
+                .on_click(cx.listener(|this, _, window, cx| this.open_value_filters(window, cx)))
+                .into_any_element(),
             Tool::Clear => Button::new("clear-filters")
                 .ghost()
                 .small()
@@ -803,7 +883,7 @@ impl LibraryPage {
                 .into_any_element(),
             tool => {
                 let width = match tool {
-                    Tool::Sort | Tool::Genre => 160.,
+                    Tool::Sort => 160.,
                     Tool::Show => 140.,
                     Tool::Year => 120.,
                     _ => 150.,
