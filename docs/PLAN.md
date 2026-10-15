@@ -209,7 +209,7 @@ libmpv doesn't run inside the app. `Player::spawn` starts this same executable a
 - **Lifetime:** the host exits when its stdin closes, which happens when the app drops the player or exits. It's also killed when the app drops it.
 - **`JELLY_GPUI_PLAYER=embedded`** runs libmpv inside the app as before, for debugging.
 
-Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) through the host. Killing the host mid-play on both resumes playback in a new one. Linux GPU frames through the host aren't visually confirmed: the forced GPU path draws black on WSL's llvmpipe even in-process, where it used to work.
+Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) through the host. Killing the host mid-play on both resumes playback in a new one. Linux GPU frames through the host are confirmed on WSL's llvmpipe (forced GPU path), in-process too.
 
 ### 5.2 Threading and reporting
 

@@ -288,11 +288,13 @@ impl GpuRenderer {
 /// `JELLY_GPUI_VIDEO=gpu` forces the GPU path.
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn hardware_renderer(renderer: &str) -> bool {
-    if std::env::var("JELLY_GPUI_VIDEO").as_deref() == Ok("gpu") {
-        return true;
-    }
+    std::env::var("JELLY_GPUI_VIDEO").as_deref() == Ok("gpu") || !software_renderer(renderer)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn software_renderer(renderer: &str) -> bool {
     let renderer = renderer.to_ascii_lowercase();
-    ![
+    [
         "llvmpipe",
         "softpipe",
         "swiftshader",
@@ -301,6 +303,22 @@ pub(crate) fn hardware_renderer(renderer: &str) -> bool {
     ]
     .iter()
     .any(|name| renderer.contains(name))
+}
+
+/// On a software rasterizer (only with `JELLY_GPUI_VIDEO=gpu`), mpv's default scalers draw
+/// black frames: with mpv 0.37 on llvmpipe, scaling up or down rendered black every time, or
+/// only sometimes, depending on start-up timing. Bilinear scaling works there, and it's
+/// also the cheapest.
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn adapt_to_renderer(core: &Core, renderer: &str) {
+    if !software_renderer(renderer) {
+        return;
+    }
+    for name in ["scale", "dscale", "cscale"] {
+        if let Err(err) = core.set_property(name, "bilinear") {
+            tracing::warn!("couldn't set mpv's {name}: {err}");
+        }
+    }
 }
 
 /// The video's display size scaled down to fit the target, or `None` without video.
