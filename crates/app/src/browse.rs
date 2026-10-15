@@ -228,7 +228,19 @@ pub trait Browse: Sized + 'static {
     /// A key that would move the cursor past the first or last section.
     fn at_edge(&mut self, _mv: Move, _window: &mut Window, _cx: &mut Context<Self>) {}
 
+    /// Left or Right on a control that takes them itself (a picker or a switch), instead of
+    /// moving the cursor. Returns whether it did.
+    fn adjust(&mut self, _position: Position, _forward: bool, _window: &mut Window, _cx: &mut Context<Self>) -> bool {
+        false
+    }
+
     fn navigate(&mut self, mv: Move, window: &mut Window, cx: &mut Context<Self>) {
+        if let (Some(position), Move::Left | Move::Right) = (self.cursor().selected(), mv)
+            && self.adjust(position, mv == Move::Right, window, cx)
+        {
+            cx.notify();
+            return;
+        }
         let sections = self.sections(window, cx);
         match self.cursor().apply(mv, &sections) {
             Some(position) => {

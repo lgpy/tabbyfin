@@ -4,15 +4,19 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+
+use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
+use crate::components::selection_ring;
 
 use crate::config::{self, Config, SubtitleColor, SubtitleStyle, ThemePreference};
 use crate::images::ImageCache;
 use crate::playback::PlaybackManager;
 use crate::session::Session;
 use crate::theme;
-use crate::tracks::{Choice, ChoiceSelect};
+use crate::tracks::{Choice, ChoiceSelect, cycle_choice, step_choice};
 
 /// The theme choices, in the order the picker lists them.
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -33,9 +37,15 @@ const SUBTITLE_SCALES: [f64; 6] = [0.75, 1., 1.25, 1.5, 1.75, 2.];
 /// Max streaming bitrate choices in Mbit/s; 0 is no limit.
 const BITRATES_MBPS: [i32; 10] = [0, 120, 60, 40, 20, 10, 8, 4, 2, 1];
 
+/// Space around a control for the keyboard cursor's ring.
+const RING_GAP: f32 = 3.;
+const CONTENT_W: f32 = 720.;
+
 pub struct SettingsPage {
     session: Session,
     scroll: ScrollHandle,
+    cursor: Cursor,
+    focus_handle: FocusHandle,
     theme: ChoiceSelect,
     subtitle_color: ChoiceSelect,
     subtitle_style: ChoiceSelect,
@@ -102,6 +112,8 @@ impl SettingsPage {
         Self {
             session,
             scroll: ScrollHandle::new(),
+            cursor: Cursor::default(),
+            focus_handle: cx.focus_handle(),
             theme,
             subtitle_color,
             subtitle_style,
@@ -207,33 +219,33 @@ fn save(change: impl FnOnce(&mut Config)) {
     }
 }
 
-fn section(title: &'static str, cx: &App) -> Div {
-    v_flex().gap_3().child(
-        div()
-            .text_lg()
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(cx.theme().foreground)
-            .child(title),
-    )
+/// Everything the keyboard cursor can reach, top to bottom.
+#[derive(Clone, Copy, PartialEq)]
+enum Control {
+    Theme,
+    Autoplay,
+    AutoSkip,
+    Bitrate,
+    SubtitleColor,
+    SubtitleStyle,
+    SubtitleSize,
+    ClearCache,
+    OpenLogs,
+    CheckUpdates,
 }
 
-/// A picker with its label, in a settings row.
-fn labeled(label: &'static str, select: &ChoiceSelect) -> Div {
-    h_flex()
-        .gap_4()
-        .child(div().w(px(170.)).flex_none().text_sm().child(label))
-        .child(Select::new(select).w(px(180.)))
+/// A line of the page. Lines are the scroll container's direct children, so the cursor can
+/// scroll a control into view by its line's index.
+enum Line {
+    Title(&'static str),
+    Hint(SharedString),
+    Control(Control),
 }
 
-fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
-    div()
-        .text_sm()
-        .text_color(cx.theme().muted_foreground)
-        .child(text.into())
-}
-
-impl Render for SettingsPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl SettingsPage {
+    fn lines(&self) -> Vec<Line> {
+        use Control::*;
+        use Line::{Control as C, Hint, Title};
         let server = &self.session.server;
         let account = format!(
             "Signed in as {} on {} (Jellyfin {}) at {}",
@@ -242,114 +254,283 @@ impl Render for SettingsPage {
             server.version.as_deref().unwrap_or("?"),
             self.session.client.base_url(),
         );
+        vec![
+            Title("Appearance"),
+            C(Theme),
+            Title("Playback"),
+            C(Autoplay),
+            C(AutoSkip),
+            Hint(
+                "Audio and subtitle languages follow your Jellyfin profile (Settings → Playback in the web \
+                 client), as does whether subtitles show by default."
+                    .into(),
+            ),
+            C(Bitrate),
+            Hint(
+                "Videos above this bitrate are transcoded by the server, which uses its CPU or GPU. Lower it for \
+                 slow connections; other videos play the original file."
+                    .into(),
+            ),
+            Title("Home"),
+            Hint(
+                "The order of the sections and which libraries show follow your Jellyfin settings (Settings → \
+                 Home in the web client)."
+                    .into(),
+            ),
+            Title("Subtitles"),
+            C(SubtitleColor),
+            C(SubtitleStyle),
+            C(SubtitleSize),
+            Hint(
+                "For text subtitles such as SRT; styled (ASS) subtitles keep their own look and only change \
+                 size. The player's settings menu also changes the size while watching."
+                    .into(),
+            ),
+            Title("Storage"),
+            Hint(format!("Images are cached in {}.", config::cache_dir().join("images").display()).into()),
+            C(ClearCache),
+            Title("Logs"),
+            Hint(
+                format!(
+                    "A log file is written each day to {}. Attach it to bug reports.",
+                    config::log_dir().display()
+                )
+                .into(),
+            ),
+            C(OpenLogs),
+            Title("Account"),
+            Hint(account.into()),
+            Title("About"),
+            Hint(format!("jelly-gpui {}", env!("CARGO_PKG_VERSION")).into()),
+            C(CheckUpdates),
+            Hint("Checks the GitHub releases once a day, when the app starts.".into()),
+        ]
+    }
 
-        div()
-            .id("settings")
-            .size_full()
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .child(
-                v_flex()
-                    .p_6()
-                    .gap_8()
-                    .max_w(px(720.))
-                    .child(section("Appearance", cx).child(labeled("Theme", &self.theme)))
-                    .child(
-                        section("Playback", cx)
-                            .child(
-                                Switch::new("autoplay")
-                                    .checked(self.autoplay)
-                                    .label("Play the next episode automatically")
-                                    .on_click(
-                                        cx.listener(|this, checked: &bool, _, cx| this.set_autoplay(*checked, cx)),
-                                    ),
-                            )
-                            .child(
-                                Switch::new("auto-skip")
-                                    .checked(self.auto_skip)
-                                    .label("Skip intros and recaps automatically")
-                                    .on_click(
-                                        cx.listener(|this, checked: &bool, _, cx| this.set_auto_skip(*checked, cx)),
-                                    ),
-                            )
-                            .child(hint(
-                                "Audio and subtitle languages follow your Jellyfin profile (Settings → Playback in \
-                                 the web client), as does whether subtitles show by default.",
-                                cx,
-                            ))
-                            .child(labeled("Max streaming bitrate", &self.bitrate))
-                            .child(hint(
-                                "Videos above this bitrate are transcoded by the server, which uses its CPU or GPU. \
-                                 Lower it for slow connections; other videos play the original file.",
-                                cx,
-                            )),
-                    )
-                    .child(section("Home", cx).child(hint(
-                        "The order of the sections and which libraries show follow your Jellyfin settings \
-                         (Settings → Home in the web client).",
-                        cx,
-                    )))
-                    .child(
-                        section("Subtitles", cx)
-                            .child(labeled("Colour", &self.subtitle_color))
-                            .child(labeled("Style", &self.subtitle_style))
-                            .child(labeled("Size", &self.subtitle_size))
-                            .child(hint(
-                                "For text subtitles such as SRT; styled (ASS) subtitles keep their own look and \
-                                 only change size. The player's settings menu also changes the size while \
-                                 watching.",
-                                cx,
-                            )),
-                    )
-                    .child(
-                        section("Storage", cx)
-                            .child(hint(
-                                format!("Images are cached in {}.", config::cache_dir().join("images").display()),
-                                cx,
-                            ))
-                            .child(
-                                h_flex().child(
-                                    Button::new("clear-cache")
-                                        .outline()
-                                        .label("Clear image cache")
-                                        .on_click(
-                                            cx.listener(|this, _, window, cx| this.clear_image_cache(window, cx)),
-                                        ),
-                                ),
-                            ),
-                    )
-                    .child(
-                        section("Logs", cx)
-                            .child(hint(
-                                format!(
-                                    "A log file is written each day to {}. Attach it to bug reports.",
-                                    config::log_dir().display()
-                                ),
-                                cx,
-                            ))
-                            .child(
-                                h_flex().child(
-                                    Button::new("open-logs")
-                                        .outline()
-                                        .label("Open log folder")
-                                        .on_click(|_, _, cx| cx.open_with_system(&config::log_dir())),
-                                ),
-                            ),
-                    )
-                    .child(section("Account", cx).child(hint(account, cx)))
-                    .child(
-                        section("About", cx)
-                            .child(hint(format!("jelly-gpui {}", env!("CARGO_PKG_VERSION")), cx))
-                            .child(
-                                Switch::new("check-updates")
-                                    .checked(self.check_updates)
-                                    .label("Tell me when a new version is out")
-                                    .on_click(
-                                        cx.listener(|this, checked: &bool, _, cx| this.set_check_updates(*checked, cx)),
-                                    ),
-                            )
-                            .child(hint("Checks the GitHub releases once a day, when the app starts.", cx)),
-                    ),
-            )
+    fn controls(&self) -> Vec<Control> {
+        self.lines()
+            .into_iter()
+            .filter_map(|line| match line {
+                Line::Control(control) => Some(control),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn select(&self, control: Control) -> Option<&ChoiceSelect> {
+        match control {
+            Control::Theme => Some(&self.theme),
+            Control::Bitrate => Some(&self.bitrate),
+            Control::SubtitleColor => Some(&self.subtitle_color),
+            Control::SubtitleStyle => Some(&self.subtitle_style),
+            Control::SubtitleSize => Some(&self.subtitle_size),
+            _ => None,
+        }
+    }
+
+    /// Sets a switch, or flips it with `None`.
+    fn set_switch(&mut self, control: Control, on: Option<bool>, cx: &mut Context<Self>) {
+        match control {
+            Control::Autoplay => self.set_autoplay(on.unwrap_or(!self.autoplay), cx),
+            Control::AutoSkip => self.set_auto_skip(on.unwrap_or(!self.auto_skip), cx),
+            Control::CheckUpdates => self.set_check_updates(on.unwrap_or(!self.check_updates), cx),
+            _ => {}
+        }
+    }
+
+    fn render_control(&self, control: Control, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let switch =
+            |id: &'static str, checked: bool, label: &'static str, set: fn(&mut Self, bool, &mut Context<Self>)| {
+                Switch::new(id)
+                    .checked(checked)
+                    .label(label)
+                    .on_click(cx.listener(move |this, checked: &bool, _, cx| set(this, *checked, cx)))
+                    .into_any_element()
+            };
+        let element = match control {
+            Control::Theme
+            | Control::Bitrate
+            | Control::SubtitleColor
+            | Control::SubtitleStyle
+            | Control::SubtitleSize => {
+                let select = self.select(control).expect("a picker");
+                Select::new(select).w(px(180.)).into_any_element()
+            }
+            Control::Autoplay => switch(
+                "autoplay",
+                self.autoplay,
+                "Play the next episode automatically",
+                Self::set_autoplay,
+            ),
+            Control::AutoSkip => switch(
+                "auto-skip",
+                self.auto_skip,
+                "Skip intros and recaps automatically",
+                Self::set_auto_skip,
+            ),
+            Control::CheckUpdates => switch(
+                "check-updates",
+                self.check_updates,
+                "Tell me when a new version is out",
+                Self::set_check_updates,
+            ),
+            Control::ClearCache => Button::new("clear-cache")
+                .outline()
+                .label("Clear image cache")
+                .on_click(cx.listener(|this, _, window, cx| this.clear_image_cache(window, cx)))
+                .into_any_element(),
+            Control::OpenLogs => Button::new("open-logs")
+                .outline()
+                .label("Open log folder")
+                .on_click(|_, _, cx| open_logs(cx))
+                .into_any_element(),
+        };
+        // Only the control itself is ringed, not a picker's label.
+        let ringed = |element: AnyElement| {
+            div()
+                .relative()
+                .p(px(RING_GAP))
+                .rounded_lg()
+                .child(element)
+                .when(self.cursor.is_selected(0, index), |el| {
+                    el.child(selection_ring(cx).rounded_lg())
+                })
+        };
+        match self.select(control) {
+            Some(_) => h_flex()
+                .gap(px(16. - RING_GAP))
+                .child(div().w(px(170.)).flex_none().text_sm().child(control_label(control)))
+                .child(ringed(element))
+                .into_any_element(),
+            // A ring's width to the left, so the switch or button lines up with the text.
+            None => h_flex().ml(px(-RING_GAP)).child(ringed(element)).into_any_element(),
+        }
+    }
+}
+
+/// A picker's label, left of it.
+fn control_label(control: Control) -> &'static str {
+    match control {
+        Control::Theme => "Theme",
+        Control::Bitrate => "Max streaming bitrate",
+        Control::SubtitleColor => "Colour",
+        Control::SubtitleStyle => "Style",
+        Control::SubtitleSize => "Size",
+        _ => "",
+    }
+}
+
+fn open_logs(cx: &mut App) {
+    cx.open_with_system(&config::log_dir());
+}
+
+impl Browse for SettingsPage {
+    fn cursor(&mut self) -> &mut Cursor {
+        &mut self.cursor
+    }
+
+    fn sections(&self, _window: &Window, _cx: &App) -> Vec<Section> {
+        vec![Section::grid(self.controls().len(), 1)]
+    }
+
+    fn reveal(&mut self, position: Position, _window: &mut Window, _cx: &mut Context<Self>) {
+        let lines = self.lines();
+        let Some(line) = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| matches!(line, Line::Control(_)))
+            .nth(position.index)
+            .map(|(i, _)| i)
+        else {
+            return;
+        };
+        // A section's first control brings its title along.
+        if line > 0 && matches!(lines[line - 1], Line::Title(_)) {
+            browse::reveal(&self.scroll, line - 1, px(24.));
+        }
+        browse::reveal(&self.scroll, line, px(24.));
+    }
+
+    /// Left and Right step a picker, or turn a switch off and on.
+    fn adjust(&mut self, position: Position, forward: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(&control) = self.controls().get(position.index) else {
+            return false;
+        };
+        match self.select(control) {
+            Some(select) => {
+                step_choice(&select.clone(), forward, window, cx);
+            }
+            None => self.set_switch(control, Some(forward), cx),
+        }
+        // Buttons ignore them, rather than the cursor wandering off sideways.
+        true
+    }
+
+    /// Enter moves a picker to its next choice, flips a switch or presses a button.
+    fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(&control) = self.controls().get(position.index) else {
+            return;
+        };
+        if let Some(select) = self.select(control) {
+            cycle_choice(&select.clone(), window, cx);
+            return;
+        }
+        match control {
+            Control::ClearCache => self.clear_image_cache(window, cx),
+            Control::OpenLogs => open_logs(cx),
+            control => self.set_switch(control, None, cx),
+        }
+        cx.notify();
+    }
+}
+
+impl Focusable for SettingsPage {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for SettingsPage {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut control_index = 0;
+        let lines: Vec<AnyElement> = self
+            .lines()
+            .into_iter()
+            .enumerate()
+            .map(|(i, line)| {
+                let element = match line {
+                    Line::Title(title) => div()
+                        .when(i > 0, |el| el.pt_8())
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child(title)
+                        .into_any_element(),
+                    Line::Hint(text) => div()
+                        .pt_3()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(text)
+                        .into_any_element(),
+                    Line::Control(control) => {
+                        control_index += 1;
+                        div()
+                            .pt(px(12. - RING_GAP))
+                            .child(self.render_control(control, control_index - 1, cx))
+                            .into_any_element()
+                    }
+                };
+                div().w_full().max_w(px(CONTENT_W)).child(element).into_any_element()
+            })
+            .collect();
+        on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(
+            div()
+                .id("settings")
+                .size_full()
+                .overflow_y_scroll()
+                .track_scroll(&self.scroll)
+                .p_6()
+                .children(lines),
+        )
     }
 }
