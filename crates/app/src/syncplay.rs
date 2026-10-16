@@ -107,13 +107,13 @@ impl SyncPlay {
             _playback: cx.subscribe(&PlaybackManager::global(cx), Self::on_playback),
         });
         #[cfg(debug_assertions)]
-        if let Ok(name) = std::env::var("JELLY_GPUI_SYNCPLAY") {
+        if let Ok(name) = std::env::var("TABBYFIN_SYNCPLAY") {
             syncplay.update(cx, |syncplay, cx| syncplay.debug_join(name, cx));
         }
         cx.set_global(GlobalSyncPlay(syncplay));
     }
 
-    /// Dev aid: `JELLY_GPUI_SYNCPLAY=<group name>` joins that group at startup, creating it
+    /// Dev aid: `TABBYFIN_SYNCPLAY=<group name>` joins that group at startup, creating it
     /// if there's none.
     #[cfg(debug_assertions)]
     fn debug_join(&mut self, name: String, cx: &mut Context<Self>) {
@@ -669,13 +669,13 @@ impl SyncPlay {
     }
 }
 
-/// Dev aid: `JELLY_GPUI_SYNCPLAY_SKEW_MS=800` starts playback that much after the group, to
+/// Dev aid: `TABBYFIN_SYNCPLAY_SKEW_MS=800` starts playback that much after the group, to
 /// watch drift correction catch up.
 fn debug_skew() -> Duration {
     if !cfg!(debug_assertions) {
         return Duration::ZERO;
     }
-    std::env::var("JELLY_GPUI_SYNCPLAY_SKEW_MS")
+    std::env::var("TABBYFIN_SYNCPLAY_SKEW_MS")
         .ok()
         .and_then(|ms| ms.parse().ok())
         .map(Duration::from_millis)

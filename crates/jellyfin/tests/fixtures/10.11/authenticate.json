@@ -10,8 +10,8 @@
       "SupportsMediaControl": false,
       "SupportsPersistentIdentifier": true
     },
-    "Client": "jelly-gpui-fixtures",
-    "DeviceId": "jelly-gpui-fixtures",
+    "Client": "tabbyfin-fixtures",
+    "DeviceId": "tabbyfin-fixtures",
     "DeviceName": "fixtures",
     "HasCustomDeviceName": false,
     "Id": "b8dc4f67fb0870a6b30b06b22d99584e",

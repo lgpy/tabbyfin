@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Windows test loop from WSL: cross-builds a debug jelly-gpui.exe with mingw, copies it to
+# Windows test loop from WSL: cross-builds a debug tabbyfin.exe with mingw, copies it to
 # C:\Temp\jelly-dev, and runs it on the Windows host with logs on this terminal.
 #
 #   dev/win-run.sh [seconds]      # default: run until the window is closed
@@ -14,9 +14,9 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 dest=/mnt/c/Temp/jelly-dev
 target=x86_64-pc-windows-gnu
 
-cargo build -p jelly-gpui --target "$target"
+cargo build -p tabbyfin --target "$target"
 mkdir -p "$dest"
-x86_64-w64-mingw32-strip -o "$dest/jelly-gpui.exe" "$root/target/$target/debug/jelly-gpui.exe"
+x86_64-w64-mingw32-strip -o "$dest/tabbyfin.exe" "$root/target/$target/debug/tabbyfin.exe"
 
 mirror() { # <dir under a Linux path> -> same path on C:
   [[ -d "$1" ]] || return 0
@@ -43,12 +43,12 @@ fi
 cd "$dest"
 # A separate config folder, so test runs don't touch your real sign-in. Set it to an empty
 # string to use the normal one.
-export JELLY_GPUI_CONFIG_DIR="${JELLY_GPUI_CONFIG_DIR-C:\\Temp\\jelly-dev\\config}"
+export TABBYFIN_CONFIG_DIR="${TABBYFIN_CONFIG_DIR-C:\\Temp\\jelly-dev\\config}"
 # Pass these through WSL interop to the Windows process.
-export WSLENV="${WSLENV:+$WSLENV:}RUST_LOG:JELLY_GPUI_ROUTE:JELLY_GPUI_CONFIG_DIR:JELLY_GPUI_VIDEO:JELLY_GPUI_MPV_LOG:JELLY_GPUI_PLAYER"
+export WSLENV="${WSLENV:+$WSLENV:}RUST_LOG:TABBYFIN_ROUTE:TABBYFIN_CONFIG_DIR:TABBYFIN_VIDEO:TABBYFIN_MPV_LOG:TABBYFIN_PLAYER"
 if [[ $# -gt 0 ]]; then
-  RUST_LOG="${RUST_LOG:-info}" timeout "$1" ./jelly-gpui.exe || true
-  taskkill.exe /IM jelly-gpui.exe /F >/dev/null 2>&1 || true
+  RUST_LOG="${RUST_LOG:-info}" timeout "$1" ./tabbyfin.exe || true
+  taskkill.exe /IM tabbyfin.exe /F >/dev/null 2>&1 || true
 else
-  RUST_LOG="${RUST_LOG:-info}" ./jelly-gpui.exe
+  RUST_LOG="${RUST_LOG:-info}" ./tabbyfin.exe
 fi

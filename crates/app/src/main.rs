@@ -56,7 +56,7 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let _ = std::fs::create_dir_all(config::log_dir());
     let file = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("jelly-gpui")
+        .filename_prefix("tabbyfin")
         .filename_suffix("log")
         .max_log_files(LOG_FILES_KEPT)
         .build(config::log_dir());
@@ -120,7 +120,7 @@ fn main() {
         std::process::exit(::player::host::run());
     }
     let _log_guard = init_logging();
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting jelly-gpui");
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting tabbyfin");
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
@@ -164,7 +164,7 @@ fn main() {
                 window_min_size: Some(window::min_size()),
                 display_id: launch.display_id,
                 titlebar: Some(TitlebarOptions {
-                    title: Some("jelly-gpui".into()),
+                    title: Some("Tabbyfin".into()),
                     ..Default::default()
                 }),
                 ..Default::default()

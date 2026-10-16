@@ -1,7 +1,7 @@
 ; Windows installer (Inno Setup 6), built by packaging/package.sh from the same files as the
 ; .zip:
 ;
-;   ISCC.exe /DAppVersion=0.1.0 /DSourceDir=<staged app folder> /DOutputDir=<out> jelly-gpui.iss
+;   ISCC.exe /DAppVersion=0.1.0 /DSourceDir=<staged app folder> /DOutputDir=<out> tabbyfin.iss
 ;
 ; Installs for the current user by default (no admin prompt, into %LOCALAPPDATA%\Programs),
 ; with a Start-menu entry, an optional desktop icon, and an uninstaller in Settings -> Apps.
@@ -11,7 +11,7 @@
   #error Pass /DAppVersion=<version>
 #endif
 #ifndef SourceDir
-  #error Pass /DSourceDir=<folder with jelly-gpui.exe, libmpv-2.dll and ANGLE>
+  #error Pass /DSourceDir=<folder with tabbyfin.exe, libmpv-2.dll and ANGLE>
 #endif
 #ifndef OutputDir
   #define OutputDir "."
@@ -20,39 +20,47 @@
 [Setup]
 ; Fixed for good: it's how upgrades find the installed copy.
 AppId={{B1202137-F00E-48F6-9169-9B7EA09F23EC}
-AppName=jelly-gpui
+AppName=Tabbyfin
 AppVersion={#AppVersion}
-AppVerName=jelly-gpui {#AppVersion}
+AppVerName=Tabbyfin {#AppVersion}
 AppPublisher=lgpy
 AppPublisherURL=https://github.com/lgpy/jelly-gpui
 AppSupportURL=https://github.com/lgpy/jelly-gpui/issues
-DefaultDirName={autopf}\jelly-gpui
+DefaultDirName={autopf}\Tabbyfin
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
-OutputBaseFilename=jelly-gpui-{#AppVersion}-windows-x86_64-setup
-SetupIconFile=jelly-gpui.ico
-UninstallDisplayIcon={app}\jelly-gpui.ico
-UninstallDisplayName=jelly-gpui
+OutputBaseFilename=tabbyfin-{#AppVersion}-windows-x86_64-setup
+SetupIconFile=tabbyfin.ico
+UninstallDisplayIcon={app}\tabbyfin.ico
+UninstallDisplayName=Tabbyfin
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
-; Closes a running jelly-gpui (and its player process) before replacing its files.
+; Closes a running Tabbyfin (and its player process) before replacing its files.
 CloseApplications=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+[InstallDelete]
+; The app was called jelly-gpui before. The same AppId upgrades that install in place,
+; so its old executable, icon and shortcuts go.
+Type: files; Name: "{app}\jelly-gpui.exe"
+Type: files; Name: "{app}\jelly-gpui.ico"
+Type: files; Name: "{autoprograms}\jelly-gpui.lnk"
+Type: files; Name: "{autodesktop}\jelly-gpui.lnk"
+
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-Source: "jelly-gpui.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "tabbyfin.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\jelly-gpui"; Filename: "{app}\jelly-gpui.exe"; IconFilename: "{app}\jelly-gpui.ico"
-Name: "{autodesktop}\jelly-gpui"; Filename: "{app}\jelly-gpui.exe"; IconFilename: "{app}\jelly-gpui.ico"; Tasks: desktopicon
+Name: "{autoprograms}\Tabbyfin"; Filename: "{app}\tabbyfin.exe"; IconFilename: "{app}\tabbyfin.ico"
+Name: "{autodesktop}\Tabbyfin"; Filename: "{app}\tabbyfin.exe"; IconFilename: "{app}\tabbyfin.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\jelly-gpui.exe"; Description: "{cm:LaunchProgram,jelly-gpui}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\tabbyfin.exe"; Description: "{cm:LaunchProgram,Tabbyfin}"; Flags: nowait postinstall skipifsilent

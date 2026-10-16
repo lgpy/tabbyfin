@@ -1,4 +1,4 @@
-//! The player host process: `jelly-gpui --player-host`, started by [`crate::remote`].
+//! The player host process: `tabbyfin --player-host`, started by [`crate::remote`].
 //!
 //! It runs libmpv and its video output exactly as the embedded backend does, takes requests on
 //! stdin and sends events, replies and frames on stdout (see [`crate::wire`]). If mpv or a GPU
@@ -156,7 +156,7 @@ async fn send<W: AsyncWrite + Unpin>(out: &Mutex<W>, message: &Message, payload:
     wire::write(&mut *out, message, payload).await
 }
 
-/// The host's end of the fd socket (`JELLY_GPUI_PLAYER_FD`), for the Vulkan memory behind GPU
+/// The host's end of the fd socket (`TABBYFIN_PLAYER_FD`), for the Vulkan memory behind GPU
 /// frames. Each image's fd is sent once, with its id.
 #[cfg(target_os = "linux")]
 struct FdSender {

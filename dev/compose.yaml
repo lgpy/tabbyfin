@@ -1,5 +1,5 @@
 # Local Jellyfin test server for development. See dev/README.md.
-name: jelly-gpui-dev
+name: tabbyfin-dev
 
 services:
   jellyfin:

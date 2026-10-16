@@ -362,7 +362,7 @@ impl SettingsPage {
             Title("Account"),
             Hint(account.into()),
             Title("About"),
-            Hint(format!("jelly-gpui {}", env!("CARGO_PKG_VERSION")).into()),
+            Hint(format!("Tabbyfin {}", env!("CARGO_PKG_VERSION")).into()),
             C(CheckUpdates),
             Hint("Checks the GitHub releases once a day, when the app starts.".into()),
         ]

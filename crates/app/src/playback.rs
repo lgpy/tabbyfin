@@ -977,7 +977,7 @@ async fn start_player() -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>,
             let hint = if cfg!(target_os = "macos") {
                 "Install mpv with Homebrew (brew install mpv)."
             } else if cfg!(windows) {
-                "libmpv-2.dll is missing next to jelly-gpui.exe; reinstall the app."
+                "libmpv-2.dll is missing next to tabbyfin.exe; reinstall the app."
             } else {
                 "Install libmpv (the libmpv2 package on Debian and Ubuntu)."
             };

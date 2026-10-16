@@ -24,7 +24,7 @@ use crate::{EndReason, Error, PlayerEvent, Result};
 
 /// Environment variable naming the host's end of the fd socket (Linux).
 #[cfg(target_os = "linux")]
-pub(crate) const FD_ENV: &str = "JELLY_GPUI_PLAYER_FD";
+pub(crate) const FD_ENV: &str = "TABBYFIN_PLAYER_FD";
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<()>>>>>;
 
@@ -229,7 +229,7 @@ async fn forward_log(stderr: tokio::process::ChildStderr) {
     }
 }
 
-/// The fd socket: a socket pair whose host end the child inherits (`JELLY_GPUI_PLAYER_FD`).
+/// The fd socket: a socket pair whose host end the child inherits (`TABBYFIN_PLAYER_FD`).
 /// The host sends each GPU image's memory fd over it once (SCM_RIGHTS), tagged with its id.
 #[cfg(target_os = "linux")]
 struct FdSocket {

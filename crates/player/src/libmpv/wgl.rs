@@ -99,7 +99,7 @@ impl Wgl {
             let hwnd = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
                 w!("STATIC"),
-                w!("jelly-gpui mpv"),
+                w!("tabbyfin mpv"),
                 WS_OVERLAPPEDWINDOW,
                 0,
                 0,

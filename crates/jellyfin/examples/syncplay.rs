@@ -23,11 +23,11 @@ use tokio::sync::mpsc::UnboundedReceiver;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let env = |key: &str, default: &str| std::env::var(key).unwrap_or_else(|_| default.into());
-    let device = env("SYNCPLAY_DEVICE", "jelly-gpui-syncplay-test");
+    let device = env("SYNCPLAY_DEVICE", "tabbyfin-syncplay-test");
     let anon = Client::new(
         &env("JELLYFIN_URL", "localhost:8096"),
         ClientInfo {
-            client: "jelly-gpui-syncplay".into(),
+            client: "tabbyfin-syncplay".into(),
             device: device.clone(),
             device_id: device,
             version: env!("CARGO_PKG_VERSION").into(),
