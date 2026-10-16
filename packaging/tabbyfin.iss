@@ -46,14 +46,6 @@ CloseApplications=yes
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
-[InstallDelete]
-; The app was called jelly-gpui before. The same AppId upgrades that install in place,
-; so its old executable, icon and shortcuts go.
-Type: files; Name: "{app}\jelly-gpui.exe"
-Type: files; Name: "{app}\jelly-gpui.ico"
-Type: files; Name: "{autoprograms}\jelly-gpui.lnk"
-Type: files; Name: "{autodesktop}\jelly-gpui.lnk"
-
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "tabbyfin.ico"; DestDir: "{app}"; Flags: ignoreversion
