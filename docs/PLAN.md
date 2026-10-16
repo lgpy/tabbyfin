@@ -299,7 +299,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 - **Views load their own data:**
   - They spawn a fetch when created and move through `Loading`, then `Loaded(T)` or `Error`.
   - DTOs are cached in memory by id, so going back is instant.
-  - While loading, pages, the startup screen and the player show the mascot (`mascot.rs`): the app icon's jellycat, painted as GPUI paths each frame and still when animations are off. Its source drawings and SVGs are in `packaging/mascot/`.
+  - While loading, pages, the startup screen and the player show the mascot (`mascot.rs`): the app icon's jellycat, painted as GPUI paths each frame and still when animations are off. Each loader shows the cute or the evil face (`EVIL_ODDS`), picked when it appears and kept in element state while it shows; empty search results and empty libraries (`empty_state`) show the confused one, scratching its head under a question mark. Its source drawings and SVGs are in `packaging/mascot/`.
 - **Async bridge (`runtime.rs`):**
   - One global multi-threaded tokio `Runtime`.
   - A helper (an extension trait, for example `cx.spawn_tokio(fut)`) runs the future on tokio and returns the result to GPUI's foreground executor.
