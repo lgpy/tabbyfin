@@ -1361,15 +1361,15 @@ fn focuser<T: Focusable>(page: &Entity<T>) -> Focuser {
     Rc::new(move |cx| page.read(cx).focus_handle(cx))
 }
 
-/// Dev aid: `JELLY_GPUI_ROUTE=search:<term>` types `term` into the search box at startup.
+/// Dev aid: `TABBYFIN_ROUTE=search:<term>` types `term` into the search box at startup.
 #[cfg(debug_assertions)]
 fn debug_search_term() -> Option<String> {
-    let value = std::env::var("JELLY_GPUI_ROUTE").ok()?;
+    let value = std::env::var("TABBYFIN_ROUTE").ok()?;
     value.strip_prefix("search:").map(str::to_string)
 }
 
 /// Dev aid: open a page on top of Home at startup, for screenshots and quick iteration.
-/// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, `settings`, or
+/// `TABBYFIN_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, `search`, `settings`, or
 /// `play:<id>[:<audio index>[:<subtitle index or -1>[:<media source id>]]]` (opens the item and
 /// plays it from its resume point; empty fields keep the defaults). Returns the route and, for `play`, the track choices.
 #[cfg(debug_assertions)]
@@ -1377,7 +1377,7 @@ fn debug_search_term() -> Option<String> {
 fn debug_start_route() -> Option<(Route, Option<(Option<i32>, Option<i32>, Option<String>)>)> {
     use jellyfin::models::CollectionType;
 
-    let value = std::env::var("JELLY_GPUI_ROUTE").ok()?;
+    let value = std::env::var("TABBYFIN_ROUTE").ok()?;
     let mut parts = value.split(':');
     match (parts.next()?, parts.next()) {
         ("settings", _) => Some((Route::Settings, None)),

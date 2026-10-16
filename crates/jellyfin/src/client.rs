@@ -11,7 +11,7 @@ use crate::{Error, Result};
 /// Identifies this app and device to the server. Sent with every request.
 #[derive(Debug, Clone)]
 pub struct ClientInfo {
-    /// App name, e.g. `jelly-gpui`.
+    /// App name, e.g. `tabbyfin`.
     pub client: String,
     /// Human-readable device name, e.g. the hostname.
     pub device: String,
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn auth_header_encodes_values() {
         let info = ClientInfo {
-            client: "jelly-gpui".into(),
+            client: "tabbyfin".into(),
             device: r#"Lu's "PC", home"#.into(),
             device_id: "abc".into(),
             version: "0.1.0".into(),
@@ -302,7 +302,7 @@ mod tests {
         let client = Client::new("localhost", info).unwrap().with_token("tok");
         assert_eq!(
             client.authorization_header(),
-            r#"MediaBrowser Client="jelly-gpui", Device="Lu%27s+%22PC%22%2C+home", DeviceId="abc", Version="0.1.0", Token="tok""#
+            r#"MediaBrowser Client="tabbyfin", Device="Lu%27s+%22PC%22%2C+home", DeviceId="abc", Version="0.1.0", Token="tok""#
         );
     }
 }

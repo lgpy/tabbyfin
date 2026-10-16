@@ -13,7 +13,7 @@ use jellyfin::{Client, ItemsQuery};
 
 use crate::browse::{self, Browse, Cursor, Move, Position, Section, on_browse_actions};
 use crate::components::{
-    CARD_GAP, LANDSCAPE_W, POSTER_W, centered_message, centered_spinner, landscape_card, poster_card,
+    CARD_GAP, LANDSCAPE_W, POSTER_W, centered_message, centered_spinner, empty_state, landscape_card, poster_card,
 };
 use crate::images::ImageCache;
 use crate::item_menu::with_item_menu;
@@ -144,7 +144,7 @@ impl SearchPage {
             Results::Searching => return centered_spinner().into_any_element(),
             Results::Failed(message) => return centered_message(message.clone(), cx).into_any_element(),
             Results::Loaded(items) if items.is_empty() => {
-                return centered_message("No results.", cx).into_any_element();
+                return empty_state("No results.", cx).into_any_element();
             }
             Results::Loaded(_) => {}
         }

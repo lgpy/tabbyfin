@@ -487,7 +487,7 @@ impl Render for LoginView {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(div().text_2xl().font_weight(FontWeight::SEMIBOLD).child("jelly-gpui"))
+                            .child(div().text_2xl().font_weight(FontWeight::SEMIBOLD).child("Tabbyfin"))
                             .child(
                                 div()
                                     .text_sm()
@@ -560,7 +560,7 @@ async fn probe(
                     };
                     if !version.is_supported() {
                         return Err(format!(
-                            "This server runs Jellyfin {version}. jelly-gpui needs {MIN_SUPPORTED_VERSION} or newer."
+                            "This server runs Jellyfin {version}. Tabbyfin needs {MIN_SUPPORTED_VERSION} or newer."
                         ));
                     }
                     tracing::info!(url = %client.base_url(), %version, "connected to server");

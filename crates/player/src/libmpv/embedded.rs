@@ -62,9 +62,9 @@ impl EmbeddedPlayer {
         ] {
             set_option(name, value);
         }
-        // Dev aid: `JELLY_GPUI_MPV_OPTIONS="demuxer-max-bytes=1MiB;cache=no"` sets extra options.
+        // Dev aid: `TABBYFIN_MPV_OPTIONS="demuxer-max-bytes=1MiB;cache=no"` sets extra options.
         #[cfg(debug_assertions)]
-        for option in std::env::var("JELLY_GPUI_MPV_OPTIONS").unwrap_or_default().split(';') {
+        for option in std::env::var("TABBYFIN_MPV_OPTIONS").unwrap_or_default().split(';') {
             if let Some((name, value)) = option.split_once('=') {
                 set_option(name.trim(), value.trim());
             }
@@ -75,8 +75,8 @@ impl EmbeddedPlayer {
         // SAFETY: valid handle, options set.
         core.api
             .check("mpv_initialize", unsafe { (core.api.initialize)(core.mpv) })?;
-        // mpv's own log, forwarded to ours. `JELLY_GPUI_MPV_LOG` picks the level (e.g. `v`).
-        let level = cstring(&std::env::var("JELLY_GPUI_MPV_LOG").unwrap_or_else(|_| "warn".into()));
+        // mpv's own log, forwarded to ours. `TABBYFIN_MPV_LOG` picks the level (e.g. `v`).
+        let level = cstring(&std::env::var("TABBYFIN_MPV_LOG").unwrap_or_else(|_| "warn".into()));
         // SAFETY: valid handle and C string.
         unsafe { (core.api.request_log_messages)(core.mpv, level.as_ptr()) };
 

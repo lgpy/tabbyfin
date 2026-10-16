@@ -31,9 +31,9 @@ struct Release {
 /// Checks for a newer release if the setting allows and a day has passed since the last
 /// check. Any failure is logged and reads as no update. Runs on tokio.
 pub async fn check() -> Option<Update> {
-    // Dev aid: `JELLY_GPUI_UPDATE_URL` points the check elsewhere and checks every launch.
+    // Dev aid: `TABBYFIN_UPDATE_URL` points the check elsewhere and checks every launch.
     let override_url = cfg!(debug_assertions)
-        .then(|| std::env::var("JELLY_GPUI_UPDATE_URL").ok())
+        .then(|| std::env::var("TABBYFIN_UPDATE_URL").ok())
         .flatten();
     let mut config = Config::load();
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
@@ -71,7 +71,7 @@ async fn fetch(url: &str) -> anyhow::Result<Release> {
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         // GitHub's API refuses requests without one.
-        .user_agent(concat!("jelly-gpui/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("tabbyfin/", env!("CARGO_PKG_VERSION")))
         .build()?;
     let response = http
         .get(url)

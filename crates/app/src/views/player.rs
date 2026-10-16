@@ -11,7 +11,6 @@ use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -23,6 +22,7 @@ use player::libmpv::Frame;
 
 use crate::components::{remote_image, timestamp};
 use crate::markers::{self, SegmentKind};
+use crate::mascot::mascot;
 use crate::motion;
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, PlaybackManager, SubtitleChoice, UiCommand};
 use crate::smooth_scroll::smooth_wheel;
@@ -1405,7 +1405,7 @@ impl Render for PlayerPage {
                         .inset_0()
                         .items_center()
                         .justify_center()
-                        .child(Spinner::new().large()),
+                        .child(mascot(dp(128.))),
                 )
             })
             .when(self.controls_visible, |el| {

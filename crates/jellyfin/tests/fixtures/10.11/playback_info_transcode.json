@@ -149,7 +149,7 @@
       "SupportsTranscoding": true,
       "TranscodingContainer": "ts",
       "TranscodingSubProtocol": "hls",
-      "TranscodingUrl": "/videos/d265861e-ae31-cee1-d44b-13adac305eac/master.m3u8?&DeviceId=jelly-gpui-fixtures&MediaSourceId=f7b61b9d8cd0b1aa0e543f9e4772b029&VideoCodec=h264&AudioCodec=aac&AudioStreamIndex=1&VideoBitrate=1808000&AudioBitrate=192000&MaxFramerate=24&SegmentContainer=ts&BreakOnNonKeyFrames=False&PlaySessionId=4f59d070492d4cfcabb9315950c47961&ApiKey=00000000000000000000000000000000&RequireAvc=false&EnableAudioVbrEncoding=true&Tag=98991c6a77a06b1e1da5e4d5452ea6ee&hevc-level=150&hevc-videobitdepth=10&hevc-profile=main10&TranscodeReasons=ContainerBitrateExceedsLimit",
+      "TranscodingUrl": "/videos/d265861e-ae31-cee1-d44b-13adac305eac/master.m3u8?&DeviceId=tabbyfin-fixtures&MediaSourceId=f7b61b9d8cd0b1aa0e543f9e4772b029&VideoCodec=h264&AudioCodec=aac&AudioStreamIndex=1&VideoBitrate=1808000&AudioBitrate=192000&MaxFramerate=24&SegmentContainer=ts&BreakOnNonKeyFrames=False&PlaySessionId=4f59d070492d4cfcabb9315950c47961&ApiKey=00000000000000000000000000000000&RequireAvc=false&EnableAudioVbrEncoding=true&Tag=98991c6a77a06b1e1da5e4d5452ea6ee&hevc-level=150&hevc-videobitdepth=10&hevc-profile=main10&TranscodeReasons=ContainerBitrateExceedsLimit",
       "Type": "Default",
       "UseMostCompatibleTranscodingProfile": false,
       "VideoType": "VideoFile"
@@ -304,7 +304,7 @@
       "SupportsTranscoding": true,
       "TranscodingContainer": "ts",
       "TranscodingSubProtocol": "hls",
-      "TranscodingUrl": "/videos/d265861e-ae31-cee1-d44b-13adac305eac/master.m3u8?&DeviceId=jelly-gpui-fixtures&MediaSourceId=d265861eae31cee1d44b13adac305eac&VideoCodec=h264&AudioCodec=aac&AudioStreamIndex=1&VideoBitrate=1808000&AudioBitrate=192000&MaxFramerate=24&SegmentContainer=ts&BreakOnNonKeyFrames=False&PlaySessionId=4f59d070492d4cfcabb9315950c47961&ApiKey=00000000000000000000000000000000&RequireAvc=false&EnableAudioVbrEncoding=true&Tag=36c3af6989a320e3392dba7e3cc13769&h264-level=40&h264-videobitdepth=8&h264-profile=constrainedbaseline&TranscodeReasons=ContainerBitrateExceedsLimit",
+      "TranscodingUrl": "/videos/d265861e-ae31-cee1-d44b-13adac305eac/master.m3u8?&DeviceId=tabbyfin-fixtures&MediaSourceId=d265861eae31cee1d44b13adac305eac&VideoCodec=h264&AudioCodec=aac&AudioStreamIndex=1&VideoBitrate=1808000&AudioBitrate=192000&MaxFramerate=24&SegmentContainer=ts&BreakOnNonKeyFrames=False&PlaySessionId=4f59d070492d4cfcabb9315950c47961&ApiKey=00000000000000000000000000000000&RequireAvc=false&EnableAudioVbrEncoding=true&Tag=36c3af6989a320e3392dba7e3cc13769&h264-level=40&h264-videobitdepth=8&h264-profile=constrainedbaseline&TranscodeReasons=ContainerBitrateExceedsLimit",
       "Type": "Default",
       "UseMostCompatibleTranscodingProfile": false,
       "VideoType": "VideoFile"
@@ -459,7 +459,7 @@
       "SupportsTranscoding": true,
       "TranscodingContainer": "ts",
       "TranscodingSubProtocol": "hls",
-      "TranscodingUrl": "/videos/d265861e-ae31-cee1-d44b-13adac305eac/master.m3u8?&DeviceId=jelly-gpui-fixtures&MediaSourceId=f6e344f14448c7932ef08854e4218bdc&VideoCodec=h264&AudioCodec=aac&AudioStreamIndex=1&VideoBitrate=1808000&AudioBitrate=192000&MaxFramerate=24&SegmentContainer=ts&BreakOnNonKeyFrames=False&PlaySessionId=4f59d070492d4cfcabb9315950c47961&ApiKey=00000000000000000000000000000000&RequireAvc=false&EnableAudioVbrEncoding=true&Tag=5f06d1ed7d0b72f2ccb372feb3a9ee7a&h264-level=31&h264-videobitdepth=8&h264-profile=constrainedbaseline&TranscodeReasons=ContainerBitrateExceedsLimit",
+      "TranscodingUrl": "/videos/d265861e-ae31-cee1-d44b-13adac305eac/master.m3u8?&DeviceId=tabbyfin-fixtures&MediaSourceId=f6e344f14448c7932ef08854e4218bdc&VideoCodec=h264&AudioCodec=aac&AudioStreamIndex=1&VideoBitrate=1808000&AudioBitrate=192000&MaxFramerate=24&SegmentContainer=ts&BreakOnNonKeyFrames=False&PlaySessionId=4f59d070492d4cfcabb9315950c47961&ApiKey=00000000000000000000000000000000&RequireAvc=false&EnableAudioVbrEncoding=true&Tag=5f06d1ed7d0b72f2ccb372feb3a9ee7a&h264-level=31&h264-videobitdepth=8&h264-profile=constrainedbaseline&TranscodeReasons=ContainerBitrateExceedsLimit",
       "Type": "Default",
       "UseMostCompatibleTranscodingProfile": false,
       "VideoType": "VideoFile"
