@@ -2,7 +2,7 @@
 //! (whose entries can be reordered and removed here).
 
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants, Toggle, ToggleVariants};
@@ -26,8 +26,8 @@ use crate::components::{
 };
 use crate::images::ImageCache;
 use crate::item_menu::{
-    self, Mark, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played, resume_point,
-    with_item_menu,
+    self, Mark, can_add_to_playlist, episodes_of, favorite_icon, first_unwatched, is_favorite, is_playable, is_played,
+    played_icon, resume_point, with_item_menu,
 };
 use crate::motion;
 use crate::playback::{PlayOptions, PlaybackManager};
@@ -99,7 +99,31 @@ pub struct ItemPage {
     sending_edit: bool,
     /// The open More menu, and its dismissal.
     more_menu: Option<(Entity<PopupMenu>, Subscription)>,
+    /// The Watched and Favorite icons fill in when the item turns watched or favorite.
+    played_fill: Fill,
+    favorite_fill: Fill,
     _subscriptions: Vec<Subscription>,
+}
+
+/// When a toggle last turned on, and how many times it has, which names its animation.
+#[derive(Default)]
+struct Fill {
+    count: usize,
+    at: Option<Instant>,
+}
+
+impl Fill {
+    /// Starts the fill if `before` was off and `now` is on.
+    fn update(&mut self, before: bool, now: bool) {
+        if !before && now {
+            self.count += 1;
+            self.at = Some(Instant::now());
+        }
+    }
+
+    fn pop(&self, icon: Icon, name: &'static str) -> AnyElement {
+        motion::pop(icon, (name, self.count), self.at)
+    }
 }
 
 /// A change to a playlist's entries, by entry id.
@@ -142,6 +166,8 @@ impl ItemPage {
             playlist_edits: VecDeque::new(),
             sending_edit: false,
             more_menu: None,
+            played_fill: Fill::default(),
+            favorite_fill: Fill::default(),
             _subscriptions,
         };
         this.reload(cx);
@@ -159,6 +185,12 @@ impl ItemPage {
         cx.spawn(async move |this, cx| {
             let result = runtime::spawn(load(client, item_id)).await;
             this.update(cx, |this, cx| {
+                // Marked watched or favorite (here or elsewhere) since it last loaded.
+                if let (Load::Loaded(old), Ok(new)) = (&this.data, &result) {
+                    this.played_fill.update(is_played(&old.item), is_played(&new.item));
+                    this.favorite_fill
+                        .update(is_favorite(&old.item), is_favorite(&new.item));
+                }
                 this.data = match result {
                     Ok(data) => Load::Loaded(data),
                     Err(err) => Load::Failed(this.nav.handle_error(&err, cx)),
@@ -198,14 +230,53 @@ impl ItemPage {
     }
 
     fn set_played(&mut self, item_id: String, played: bool, window: &mut Window, cx: &mut Context<Self>) {
-        item_menu::mark(
+        self.mark(item_id, Mark::Played(played), window, cx);
+    }
+
+    /// Marks an item watched or favorite: on screen right away, then on the server, and back
+    /// again if the server refuses (`item_menu::mark` shows why).
+    fn mark(&mut self, item_id: String, change: Mark, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_mark(&item_id, change, false, cx);
+        let sent = item_menu::mark(
             self.client.clone(),
             self.nav.clone(),
-            item_id,
-            Mark::Played(played),
+            item_id.clone(),
+            change,
             window,
             cx,
         );
+        cx.spawn(async move |this, cx| {
+            if !sent.await {
+                this.update(cx, |this, cx| this.show_mark(&item_id, change, true, cx))
+                    .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Shows `change` on each copy of the item on the page (itself, a child or an episode of
+    /// the open season), or with `undo`, takes it back from those still showing it.
+    fn show_mark(&mut self, item_id: &str, change: Mark, undo: bool, cx: &mut Context<Self>) {
+        let Load::Loaded(data) = &mut self.data else { return };
+        let (played, favorite) = (is_played(&data.item), is_favorite(&data.item));
+        let episodes = match self.open_season.as_mut().map(|season| &mut season.episodes) {
+            Some(Load::Loaded(episodes)) => Some(episodes),
+            _ => None,
+        };
+        let items = std::iter::once(&mut data.item)
+            .chain(data.children.iter_mut())
+            .chain(episodes.into_iter().flatten())
+            .filter(|item| item.id == item_id);
+        for item in items {
+            if !undo {
+                change.apply(item);
+            } else if change.shown_on(item) {
+                change.undone().apply(item);
+            }
+        }
+        self.played_fill.update(played, is_played(&data.item));
+        self.favorite_fill.update(favorite, is_favorite(&data.item));
+        cx.notify();
     }
 
     /// Moves or removes a playlist entry: on screen right away, then on the server.
@@ -559,7 +630,8 @@ fn chapters(item: &BaseItemDto) -> &[ChapterInfo] {
 
 impl ItemPage {
     /// The actions on the title's line: playing it, named, then icon buttons. Watched and
-    /// Favorite are toggles, pressed while on; the less frequent actions are under More.
+    /// Favorite are toggles, pressed and filled in while on; the less frequent actions are under
+    /// More.
     fn render_actions(&self, item: &BaseItemDto, cx: &mut Context<Self>) -> impl IntoElement {
         let (played, favorite) = (is_played(item), is_favorite(item));
         // Room around each button for the keyboard cursor's ring.
@@ -592,15 +664,26 @@ impl ItemPage {
                 let (id, icon, tooltip, primary): (&'static str, Icon, SharedString, bool) = match action {
                     ItemAction::TogglePlayed | ItemAction::ToggleFavorite => {
                         let (id, icon, tooltip, on) = if matches!(action, ItemAction::TogglePlayed) {
-                            let icon = if played { IconName::CircleCheck } else { IconName::Check };
-                            ("toggle-played", Icon::new(icon), "Watched", played)
+                            let icon = played_icon(played, cx).size(dp(ACTION_ICON));
+                            (
+                                "toggle-played",
+                                self.played_fill.pop(icon, "played-fill"),
+                                "Watched",
+                                played,
+                            )
                         } else {
-                            ("toggle-favorite", Icon::new(Lucide::Heart), "Favorite", favorite)
+                            let icon = favorite_icon(favorite, cx).size(dp(ACTION_ICON));
+                            (
+                                "toggle-favorite",
+                                self.favorite_fill.pop(icon, "favorite-fill"),
+                                "Favorite",
+                                favorite,
+                            )
                         };
                         let toggle = Toggle::new(id)
                             .outline()
                             .size(dp(ACTION_SIZE))
-                            .icon(icon.size(dp(ACTION_ICON)))
+                            .child(icon)
                             .checked(on)
                             .tooltip(tooltip)
                             .on_click(
@@ -791,14 +874,7 @@ impl ItemPage {
             ItemAction::ToggleFavorite => {
                 let Load::Loaded(data) = &self.data else { return };
                 let (id, favorite) = (data.item.id.clone(), is_favorite(&data.item));
-                item_menu::mark(
-                    self.client.clone(),
-                    self.nav.clone(),
-                    id,
-                    Mark::Favorite(!favorite),
-                    window,
-                    cx,
-                );
+                self.mark(id, Mark::Favorite(!favorite), window, cx);
             }
             ItemAction::AddToPlaylist => {
                 let Load::Loaded(data) = &self.data else { return };
@@ -1217,7 +1293,7 @@ impl ItemPage {
                     .child(
                         // Pressed while watched, like the page's own Watched.
                         Toggle::new(element_id("toggle-played"))
-                            .icon(if played { IconName::CircleCheck } else { IconName::Check })
+                            .icon(played_icon(played, cx))
                             .checked(played)
                             .tooltip("Watched (W)")
                             .on_click(cx.listener(move |this, _: &bool, window, cx| {
