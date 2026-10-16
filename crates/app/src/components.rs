@@ -185,9 +185,11 @@ fn progress_bar(fraction: f32, cx: &App) -> impl IntoElement {
         .bottom_2()
         .left_2()
         .right_2()
-        .h(dp(4.))
+        .h(dp(6.))
         .rounded_full()
         .overflow_hidden()
+        .border_1()
+        .border_color(crate::theme::over_video::track_outline())
         .bg(crate::theme::over_video::track())
         .child(
             div()

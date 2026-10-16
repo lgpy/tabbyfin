@@ -258,8 +258,13 @@ pub mod over_video {
         white().opacity(0.6)
     }
 
-    /// Behind a card's progress bar, over its image.
+    /// Behind a card's progress bar, over its image. Dark against the fill, with a light outline
+    /// (`track_outline`) so the bar's full length still shows on dark images.
     pub fn track() -> Hsla {
         black().opacity(0.6)
+    }
+
+    pub fn track_outline() -> Hsla {
+        white().opacity(0.5)
     }
 }
