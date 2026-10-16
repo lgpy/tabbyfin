@@ -1,5 +1,5 @@
 [package]
-name = "jelly-gpui"
+name = "tabbyfin"
 description = "Desktop Jellyfin client built with GPUI"
 version.workspace = true
 edition.workspace = true
@@ -53,7 +53,7 @@ section = "video"
 depends = "$auto, libmpv2, libvulkan1, libwayland-client0"
 extended-description = "Desktop client for Jellyfin built with GPUI, playing media in mpv."
 assets = [
-    ["target/release/jelly-gpui", "usr/bin/", "755"],
-    ["../../packaging/jelly-gpui.desktop", "usr/share/applications/", "644"],
-    ["../../packaging/jelly-gpui.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
+    ["target/release/tabbyfin", "usr/bin/", "755"],
+    ["../../packaging/tabbyfin.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/tabbyfin.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
 ]

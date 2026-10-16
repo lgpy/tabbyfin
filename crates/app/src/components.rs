@@ -5,7 +5,6 @@ use std::hash::{Hash, Hasher};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::popover::Popover;
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -13,6 +12,7 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ChapterInfo, I
 use jellyfin::{ImageRequest, Ticks};
 
 use crate::images::ImageCache;
+use crate::mascot::{confused_mascot, mascot};
 use crate::motion;
 use crate::smooth_scroll::glide_by;
 use crate::zoom::{dp, dp_px};
@@ -623,12 +623,13 @@ pub fn shelf_with_rail(
         ))
 }
 
+/// The mascot in the middle of whatever is still loading.
 pub fn centered_spinner() -> impl IntoElement {
     v_flex()
         .size_full()
         .items_center()
         .justify_center()
-        .child(Spinner::new())
+        .child(mascot(dp(96.)))
 }
 
 pub fn centered_message(message: impl Into<SharedString>, cx: &App) -> impl IntoElement {
@@ -638,6 +639,17 @@ pub fn centered_message(message: impl Into<SharedString>, cx: &App) -> impl Into
         .justify_center()
         .text_color(cx.theme().muted_foreground)
         .child(message.into())
+}
+
+/// A page with nothing on it: the confused mascot over `message`.
+pub fn empty_state(message: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap_3()
+        .child(confused_mascot(dp(96.)))
+        .child(div().text_color(cx.theme().muted_foreground).child(message.into()))
 }
 
 /// A failed load with a Retry button.

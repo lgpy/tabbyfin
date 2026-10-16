@@ -6,7 +6,7 @@ a synthetic movie library of N items with generated posters, and logs the poster
     dev/fake-library.py 8098 http://localhost:8096 10000 60
 
 Point a copy of the config at http://localhost:8098 and open the library with
-JELLY_GPUI_ROUTE=library:ffffffffffffffffffffffffffffffff:movies. Everything else (sign-in,
+TABBYFIN_ROUTE=library:ffffffffffffffffffffffffffffffff:movies. Everything else (sign-in,
 Home, playback) goes through to the real server. Each poster request is logged to
 dev/.data/fake-library/images.log with how many were in flight; the delay stands in for the
 server resizing the image. Posters are made with ffmpeg on the first run.

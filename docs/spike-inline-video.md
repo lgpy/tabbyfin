@@ -15,7 +15,7 @@
 - **`crates/app/examples/inline_video.rs`:**
   - A GPUI window that turns each frame into a `RenderImage` and frees the previous frame's texture.
   - Overlays: stats, pause, and seek ±10 s.
-  - Run it with `cargo run --release -p jelly-gpui --example inline_video -- <url> [header] [WxH]`. Set `SPIKE_THREADS=1` to print the per-thread CPU breakdown.
+  - Run it with `cargo run --release -p tabbyfin --example inline_video -- <url> [header] [WxH]`. Set `SPIKE_THREADS=1` to print the per-thread CPU breakdown.
 
 ## Measurements
 

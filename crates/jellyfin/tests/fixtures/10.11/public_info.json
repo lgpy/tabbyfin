@@ -3,7 +3,7 @@
   "LocalAddress": "http://172.18.0.3:8096",
   "OperatingSystem": "",
   "ProductName": "Jellyfin Server",
-  "ServerName": "jelly-gpui dev",
+  "ServerName": "tabbyfin dev",
   "StartupWizardCompleted": true,
   "Version": "10.11.11"
 }

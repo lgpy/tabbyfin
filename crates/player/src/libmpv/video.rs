@@ -226,9 +226,9 @@ fn pack((w, h): (u32, u32)) -> u64 {
 type Ready = std::sync::mpsc::Sender<Result<()>>;
 
 fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>, ready: Ready) {
-    // `JELLY_GPUI_VIDEO=software` forces the software path, e.g. to rule out GPU driver issues.
+    // `TABBYFIN_VIDEO=software` forces the software path, e.g. to rule out GPU driver issues.
     #[cfg(any(windows, target_os = "linux"))]
-    if std::env::var("JELLY_GPUI_VIDEO").as_deref() != Ok("software") {
+    if std::env::var("TABBYFIN_VIDEO").as_deref() != Ok("software") {
         // On Windows, ANGLE first: it also gives zero-copy hardware decoding. Then plain WGL.
         use super::opengl::GlRenderer;
         #[cfg(windows)]
@@ -291,10 +291,10 @@ impl GpuRenderer {
 /// Whether to use the GPU path with this OpenGL renderer. CPU-emulated OpenGL (Mesa's
 /// llvmpipe/softpipe, SwiftShader, Windows' "GDI Generic") makes mpv's GPU shaders far more
 /// expensive than its software renderer, so those use the software path unless
-/// `JELLY_GPUI_VIDEO=gpu` forces the GPU path.
+/// `TABBYFIN_VIDEO=gpu` forces the GPU path.
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn hardware_renderer(renderer: &str) -> bool {
-    std::env::var("JELLY_GPUI_VIDEO").as_deref() == Ok("gpu") || !software_renderer(renderer)
+    std::env::var("TABBYFIN_VIDEO").as_deref() == Ok("gpu") || !software_renderer(renderer)
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -311,7 +311,7 @@ fn software_renderer(renderer: &str) -> bool {
     .any(|name| renderer.contains(name))
 }
 
-/// On a software rasterizer (only with `JELLY_GPUI_VIDEO=gpu`), mpv's default scalers draw
+/// On a software rasterizer (only with `TABBYFIN_VIDEO=gpu`), mpv's default scalers draw
 /// black frames: with mpv 0.37 on llvmpipe, scaling up or down rendered black every time, or
 /// only sometimes, depending on start-up timing. Bilinear scaling works there, and it's
 /// also the cheapest.

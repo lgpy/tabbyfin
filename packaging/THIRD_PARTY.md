@@ -1,8 +1,8 @@
 # Third-party software
 
-jelly-gpui itself is licensed under the GNU General Public License, version 3 or later (`LICENSE`). Source: https://github.com/lgpy/jelly-gpui.
+Tabbyfin itself is licensed under the GNU General Public License, version 3 or later (`LICENSE`). Source: https://github.com/lgpy/jelly-gpui.
 
-jelly-gpui plays video with **libmpv**, the library form of mpv, running inside the app.
+Tabbyfin plays video with **libmpv**, the library form of mpv, running inside the app.
 
 - **Windows:** the package includes `libmpv-2.dll`, a build from
   https://github.com/shinchiro/mpv-winbuild-cmake. The version is pinned in `packaging/mpv.lock`.
