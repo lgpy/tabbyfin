@@ -65,16 +65,14 @@ static LOGO: LazyLock<Arc<Image>> = LazyLock::new(|| {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TopBarItem {
     Back,
-    Home,
     Search,
     SyncPlay,
     Settings,
     Account,
 }
 
-const TOP_BAR: [TopBarItem; 6] = [
+const TOP_BAR: [TopBarItem; 5] = [
     TopBarItem::Back,
-    TopBarItem::Home,
     TopBarItem::Search,
     TopBarItem::SyncPlay,
     TopBarItem::Settings,
@@ -376,7 +374,7 @@ impl ShellView {
         let first = if can_go_back {
             TopBarItem::Back
         } else {
-            TopBarItem::Home
+            TopBarItem::Search
         };
         // Back is hidden on the first page.
         let kept = self.top_bar.filter(|item| *item != TopBarItem::Back || can_go_back);
@@ -456,10 +454,6 @@ impl ShellView {
             TopBarItem::Back => {
                 self.top_bar = None;
                 self.go_back(window, cx);
-            }
-            TopBarItem::Home => {
-                self.top_bar = None;
-                self.home(window, cx);
             }
             TopBarItem::Search => {
                 self.top_bar = None;
@@ -578,12 +572,6 @@ impl ShellView {
         self.push(Route::Search, window, cx);
     }
 
-    fn home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.stack.truncate(1);
-        self.focus_top(window, cx);
-        cx.notify();
-    }
-
     fn render_top_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let can_go_back = self.stack.len() > 1;
         // The keyboard's ring, while the shell itself has focus (a click elsewhere takes it).
@@ -621,16 +609,6 @@ impl ShellView {
                         .into_any_element(),
                 ))
             })
-            .child(ring(
-                TopBarItem::Home,
-                Button::new("home")
-                    .ghost()
-                    .h(dp(TOP_BAR_BUTTON))
-                    .child(bar_icon(Lucide::House))
-                    .tooltip("Home")
-                    .on_click(cx.listener(|this, _, window, cx| this.home(window, cx)))
-                    .into_any_element(),
-            ))
             .child(
                 div()
                     .flex_1()
