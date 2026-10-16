@@ -1,5 +1,6 @@
 //! Commands on one item, shared by its page, its cards and its rows: marking it watched or
-//! favorite, and the context menu with those and playing it.
+//! favorite, playing a series or season from its next episode, and the context menu with
+//! those and playing it.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
@@ -70,6 +71,61 @@ pub fn is_playable(item: &BaseItemDto) -> bool {
     )
 }
 
+/// The episode a series' or season's Play starts, out of its episodes in order: the first
+/// that isn't watched (resumed if it's partway), or the first if they all are. Specials
+/// (season 0) only count when there's nothing else, as with Jellyfin's web client.
+pub fn first_unwatched(episodes: &[BaseItemDto]) -> Option<&BaseItemDto> {
+    let regular: Vec<_> = episodes.iter().filter(|e| e.parent_index_number != Some(0)).collect();
+    let candidates = if regular.is_empty() {
+        episodes.iter().collect()
+    } else {
+        regular
+    };
+    candidates
+        .iter()
+        .find(|e| !is_played(e))
+        .or(candidates.first())
+        .copied()
+}
+
+/// All of a series' episodes in order, or a season's.
+pub async fn episodes_of(client: &Client, item: &BaseItemDto) -> jellyfin::Result<Vec<BaseItemDto>> {
+    Ok(match item.kind {
+        BaseItemKind::Series => client.episodes(&item.id, None, &[]).await?.items,
+        BaseItemKind::Season => {
+            let series_id = item.series_id.as_deref().unwrap_or_default();
+            client.episodes(series_id, Some(&item.id), &[]).await?.items
+        }
+        _ => Vec::new(),
+    })
+}
+
+/// Plays a series or season from [`first_unwatched`], resuming it if it's partway.
+pub fn play_up_next(client: Client, nav: Navigator, item: BaseItemDto, window: &mut Window, cx: &mut App) {
+    window
+        .spawn(cx, async move |cx| {
+            let result = runtime::spawn(async move { episodes_of(&client, &item).await }).await;
+            cx.update(|window, cx| match result {
+                Ok(episodes) => match first_unwatched(&episodes) {
+                    Some(episode) => {
+                        let options = PlayOptions {
+                            start: resume_point(episode),
+                            ..Default::default()
+                        };
+                        PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(episode, options, cx));
+                    }
+                    None => window.push_notification(Notification::info("Nothing here to play."), cx),
+                },
+                Err(err) => {
+                    let message = nav.handle_error(&err, cx);
+                    window.push_notification(Notification::error(message), cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+}
+
 /// Movies, episodes and what holds episodes can go in a playlist.
 pub fn can_add_to_playlist(item: &BaseItemDto) -> bool {
     is_playable(item) || matches!(item.kind, BaseItemKind::Series | BaseItemKind::Season)
@@ -119,6 +175,16 @@ fn item_menu(mut menu: PopupMenu, item: &BaseItemDto, client: &Client, nav: &Nav
             None => menu.item(PopupMenuItem::new("Play").icon(IconName::Play).on_click(play(None))),
         };
         menu = menu.separator();
+    } else if matches!(item.kind, BaseItemKind::Series | BaseItemKind::Season) {
+        // Which episode, and whether it resumes, takes a request; the page's button shows it.
+        let (client, nav, item) = (client.clone(), nav.clone(), item.clone());
+        menu = menu
+            .item(
+                PopupMenuItem::new("Play")
+                    .icon(IconName::Play)
+                    .on_click(move |_, window, cx| play_up_next(client.clone(), nav.clone(), item.clone(), window, cx)),
+            )
+            .separator();
     }
     let marker = |change: Mark| {
         let (client, nav, id) = (client.clone(), nav.clone(), item.id.clone());
@@ -156,4 +222,52 @@ fn item_menu(mut menu: PopupMenu, item: &BaseItemDto, client: &Client, nav: &Nav
             );
     }
     menu
+}
+
+#[cfg(test)]
+mod tests {
+    use jellyfin::models::BaseItemDto;
+
+    use super::first_unwatched;
+
+    fn episode(id: &str, season: i32, played: bool) -> BaseItemDto {
+        serde_json::from_value(serde_json::json!({
+            "Id": id,
+            "Name": id,
+            "Type": "Episode",
+            "ParentIndexNumber": season,
+            "UserData": { "Played": played, "PlaybackPositionTicks": 0, "IsFavorite": false },
+        }))
+        .expect("episode")
+    }
+
+    fn pick(episodes: &[BaseItemDto]) -> Option<&str> {
+        first_unwatched(episodes).map(|e| e.id.as_str())
+    }
+
+    #[test]
+    fn plays_the_first_unwatched_episode() {
+        let episodes = [episode("a", 1, true), episode("b", 1, false), episode("c", 2, false)];
+        assert_eq!(pick(&episodes), Some("b"));
+    }
+
+    #[test]
+    fn starts_over_when_everything_is_watched() {
+        let episodes = [episode("a", 1, true), episode("b", 1, true)];
+        assert_eq!(pick(&episodes), Some("a"));
+        assert_eq!(pick(&[]), None);
+    }
+
+    #[test]
+    fn skips_specials_unless_there_is_nothing_else() {
+        let episodes = [
+            episode("special", 0, false),
+            episode("a", 1, true),
+            episode("b", 1, false),
+        ];
+        assert_eq!(pick(&episodes), Some("b"));
+        let watched = [episode("special", 0, false), episode("a", 1, true)];
+        assert_eq!(pick(&watched), Some("a"));
+        assert_eq!(pick(&[episode("special", 0, false)]), Some("special"));
+    }
 }

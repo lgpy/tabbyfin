@@ -26,7 +26,8 @@ use crate::components::{
 };
 use crate::images::ImageCache;
 use crate::item_menu::{
-    self, Mark, can_add_to_playlist, is_favorite, is_playable, is_played, resume_point, with_item_menu,
+    self, Mark, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played, resume_point,
+    with_item_menu,
 };
 use crate::motion;
 use crate::playback::{PlayOptions, PlaybackManager};
@@ -53,6 +54,8 @@ struct ItemData {
     extras: Vec<BaseItemDto>,
     /// "More like this".
     similar: Vec<BaseItemDto>,
+    /// The episode a series' or season's Play starts ([`item_menu::first_unwatched`]).
+    up_next: Option<BaseItemDto>,
 }
 
 /// A series' season opened on its page, and its episodes once loaded.
@@ -184,8 +187,14 @@ impl ItemPage {
                 .and_then(|i| data.item.media_sources.get(i as usize))
                 .map(|source| source.id.clone());
         }
-        let item = data.item.clone();
+        // A series or season plays its next episode.
+        let item = data.up_next.clone().unwrap_or_else(|| data.item.clone());
         PlaybackManager::global(cx).update(cx, |playback, cx| playback.play(&item, options, cx));
+    }
+
+    /// A series or season, whose Play and Shuffle go through its episodes.
+    fn is_show(&self) -> bool {
+        matches!(&self.data, Load::Loaded(data) if matches!(data.item.kind, BaseItemKind::Series | BaseItemKind::Season))
     }
 
     fn set_played(&mut self, item_id: String, played: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -426,13 +435,32 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
         BaseItemKind::Playlist => client.playlist_items(&item.id, &[ItemField::Overview]).await?.items,
         _ => Vec::new(),
     };
-    let (extras, similar) = tokio::join!(extras(&client, &item), similar(&client, &item));
+    let (extras, similar, up_next) = tokio::join!(
+        extras(&client, &item),
+        similar(&client, &item),
+        up_next(&client, &item, &children)
+    );
     Ok(ItemData {
         item,
         children,
         extras,
         similar,
+        up_next,
     })
+}
+
+/// The episode Play starts on a series' or season's page. Without it there's no Play button,
+/// so a failure only leaves that out.
+async fn up_next(client: &Client, item: &BaseItemDto, children: &[BaseItemDto]) -> Option<BaseItemDto> {
+    match item.kind {
+        BaseItemKind::Season => first_unwatched(children).cloned(),
+        BaseItemKind::Series => episodes_of(client, item)
+            .await
+            .inspect_err(|err| tracing::warn!("couldn't load the series' episodes: {err}"))
+            .ok()
+            .and_then(|episodes| first_unwatched(&episodes).cloned()),
+        _ => None,
+    }
 }
 
 /// Trailers first, then the other extras. They're secondary, so a failure leaves them out.
@@ -551,7 +579,13 @@ impl ItemPage {
                 .size(dp(ACTION_SIZE))
                 .child(icon.size(dp(ACTION_ICON)))
         };
-        let buttons: Vec<_> = item_actions(item)
+        let up_next = match &self.data {
+            Load::Loaded(data) => data.up_next.as_ref(),
+            _ => None,
+        };
+        // A series or season names the episode it plays.
+        let episode = up_next.map(episode_label).filter(|label| !label.is_empty());
+        let buttons: Vec<_> = item_actions(item, up_next)
             .into_iter()
             .enumerate()
             .map(|(i, action)| {
@@ -626,10 +660,19 @@ impl ItemPage {
                     ),
                 };
                 // Playing is the main action, so it's named; the rest are icons.
-                let label = match action {
-                    ItemAction::Resume(_) => Some("Resume"),
-                    ItemAction::Play => Some("Play"),
-                    ItemAction::PlayAll => Some("Play all"),
+                let label: Option<SharedString> = match action {
+                    ItemAction::Resume(_) | ItemAction::Play => {
+                        let verb = if matches!(action, ItemAction::Play) {
+                            "Play"
+                        } else {
+                            "Resume"
+                        };
+                        Some(match &episode {
+                            Some(episode) => format!("{verb} {episode}").into(),
+                            None => verb.into(),
+                        })
+                    }
+                    ItemAction::PlayAll => Some("Play all".into()),
                     _ => None,
                 };
                 let button = Button::new(id)
@@ -703,6 +746,25 @@ impl ItemPage {
                 let Load::Loaded(data) = &self.data else { return };
                 let (id, played) = (data.item.id.clone(), is_played(&data.item));
                 self.set_played(id, !played, window, cx);
+            }
+            ItemAction::Shuffle if self.is_show() => {
+                let Load::Loaded(data) = &self.data else { return };
+                let (client, nav, item) = (self.client.clone(), self.nav.clone(), data.item.clone());
+                cx.spawn_in(window, async move |_, cx| {
+                    let result = runtime::spawn(async move { episodes_of(&client, &item).await }).await;
+                    cx.update(|window, cx| match result {
+                        Ok(mut episodes) => {
+                            shuffle(&mut episodes);
+                            PlaybackManager::global(cx).update(cx, |playback, cx| playback.play_all(episodes, cx));
+                        }
+                        Err(err) => {
+                            let message = nav.handle_error(&err, cx);
+                            window.push_notification(Notification::error(message), cx);
+                        }
+                    })
+                    .ok();
+                })
+                .detach();
             }
             ItemAction::PlayAll | ItemAction::Shuffle => {
                 let Load::Loaded(data) = &self.data else { return };
@@ -1456,9 +1518,13 @@ enum ItemAction {
     More,
 }
 
-/// The buttons under an item's title, in order.
-fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
-    let (playable, resume_at) = (is_playable(item), resume_point(item));
+/// The buttons under an item's title, in order. A series or season plays `up_next`, its next
+/// episode.
+fn item_actions(item: &BaseItemDto, up_next: Option<&BaseItemDto>) -> Vec<ItemAction> {
+    let (playable, resume_at) = match up_next {
+        Some(episode) => (true, resume_point(episode)),
+        None => (is_playable(item), resume_point(item)),
+    };
     let mut actions = match (playable, resume_at) {
         _ if matches!(item.kind, BaseItemKind::BoxSet | BaseItemKind::Playlist) => {
             vec![ItemAction::PlayAll, ItemAction::Shuffle]
@@ -1467,6 +1533,9 @@ fn item_actions(item: &BaseItemDto) -> Vec<ItemAction> {
         (true, Some(position)) => vec![ItemAction::Resume(position), ItemAction::PlayFromStart],
         (true, None) => vec![ItemAction::Play],
     };
+    if up_next.is_some() {
+        actions.push(ItemAction::Shuffle);
+    }
     if item.local_trailer_count.unwrap_or(0) > 0 || !item.remote_trailers.is_empty() {
         actions.push(ItemAction::Trailer);
     }
@@ -1539,7 +1608,7 @@ impl Browse for ItemPage {
             return Vec::new();
         };
         vec![
-            Section::row(item_actions(&data.item).len()),
+            Section::row(item_actions(&data.item, data.up_next.as_ref()).len()),
             Section::grid(self.picker_selects().len(), 1),
             Section::row(chapters(&data.item).len()),
             self.children_section(data, window),
@@ -1607,7 +1676,7 @@ impl Browse for ItemPage {
     fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
         let Load::Loaded(data) = &self.data else { return };
         if position.section == ACTIONS {
-            if let Some(&action) = item_actions(&data.item).get(position.index) {
+            if let Some(&action) = item_actions(&data.item, data.up_next.as_ref()).get(position.index) {
                 self.run_action(action, window, cx);
             }
         } else if position.section == PICKERS {

@@ -291,3 +291,11 @@ Code-level and startup checks only so far: the development harness cannot send m
 - ⬜ **Clicking** through it all, including *Remove* on the sign-in screen and signing in to a new server while another account waits.
 - ⬜ **Windows and macOS keychains** with two accounts.
 - ⬜ Switching **during playback** and **in a SyncPlay group** (the group is left first).
+
+## 25. Playing a series or season (3.12)
+
+✅ Against 12.2: Test Show (S1:E1 watched, S1:E2 partway) shows *Resume S1:E2*, *Play from beginning* and *Shuffle*; Enter on it resumed S01E02 at its position.
+
+- ⬜ **Clicking** the context menu's *Play* on a series and a season card.
+- ⬜ *Shuffle* on a big series, and in a SyncPlay group.
+- ⬜ A series with **specials** placed between seasons.
