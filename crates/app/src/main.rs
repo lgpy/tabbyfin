@@ -11,6 +11,7 @@ mod images;
 mod item_menu;
 mod live;
 mod markers;
+mod mascot;
 mod motion;
 mod playback;
 mod rail_drag;
