@@ -8,7 +8,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-repo=lgpy/jelly-gpui
+repo=lgpy/tabbyfin
 # shellcheck source=mpv.lock
 source "$here/mpv.lock"
 # shellcheck source=angle.lock
