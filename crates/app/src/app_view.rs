@@ -3,15 +3,16 @@
 
 use std::time::Duration;
 
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::*;
 use jellyfin::Client;
 
 use crate::config::{Config, SavedServer};
+use crate::mascot::mascot;
 use crate::session::{Session, client_info, describe_error};
 use crate::views::login::{LoginEvent, LoginView, Prefill};
 use crate::views::shell::{ShellEvent, ShellView};
+use crate::zoom::dp;
 use crate::{credentials, runtime, theme, window};
 
 /// How long after the last window bounds change its size and position are saved. Dragging
@@ -423,7 +424,7 @@ impl Render for AppView {
                 .items_center()
                 .justify_center()
                 .bg(cx.theme().background)
-                .child(Spinner::new())
+                .child(mascot(dp(160.)))
                 .into_any_element(),
             Screen::Login(view) => view.clone().into_any_element(),
             Screen::Home(view) => view.clone().into_any_element(),

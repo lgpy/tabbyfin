@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jelly Loader</title>
+<style>
+  :root { --bg:#faf7fd; --fg:#4a3b5c; --muted:#8a7d99; --card:#ffffff; --line:#e7def0; --accent:#8a63a9; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1b1724; --fg:#ece6f5; --muted:#a79bb8; --card:#262033; --line:#3a3149; --accent:#c396e7; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center; gap: 24px;
+    padding: 32px 16px 48px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  .stage { width: min(380px, 84vw); position: relative; }
+  .stage svg { width: 100%; height: auto; display: block; position: relative; }
+  .stage img.ref { position: absolute; inset: 0; width: 100%; opacity: .45; }
+  .row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .chip {
+    display: flex; align-items: center; gap: 12px; padding: 12px 18px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  }
+  .chip span { font-size: 15px; color: var(--muted); }
+  .controls { display: flex; gap: 16px 24px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  label { font-size: 14px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  output { font-variant-numeric: tabular-nums; min-width: 3em; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button, .btn {
+    font: inherit; font-size: 14px; padding: 6px 14px; border: 0; cursor: pointer;
+    background: var(--card); color: var(--fg);
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .btn { border: 1px solid var(--line); border-radius: 10px; }
+</style>
+</head>
+<body>
+  <h1>Jelly loader prototype</h1>
+  <div class="stage" data-jelly></div>
+
+  <div class="row">
+    <div class="chip"><div data-jelly data-size="64"></div><span>Loading…</span></div>
+    <div class="chip"><div data-jelly data-size="32"></div><span>Loading…</span></div>
+  </div>
+
+  <div class="controls">
+    <span class="seg" role="group" aria-label="Mood">
+      <button data-mood="cute" aria-pressed="true">Cute</button>
+      <button data-mood="evil" aria-pressed="false">Evil</button>
+    </span>
+    <button class="btn" id="flickBtn">Flick ear</button>
+    <button class="btn" id="blinkBtn">Blink</button>
+  </div>
+  <div class="controls">
+    <label>Loop length <input id="speed" type="range" min="0.8" max="3" step="0.1" value="1.0"><output id="speedOut">1.0s</output></label>
+    <label>Tentacle sway <input id="sway" type="range" min="0" max="140" step="2" value="126"><output id="swayOut">126</output></label>
+  </div>
+
+<script>
+// ---------- Geometry, traced from the 2000×2000 drawings ----------
+const BODY = '#c396e7', EAR_INNER = '#8a63a9';
+
+// Head outline (no ears). Points behind the ears stay inside both ear poses.
+const HEAD = [
+  [350,470],[372,360],[430,262],[505,205],[570,160],[650,122],[730,94],[850,70],[970,64],
+  [1090,64],[1170,73],[1250,86],[1330,104],[1400,170],[1470,262],[1495,350],[1513,410],
+  [1549,475],[1640,550],[1725,600],[1783,650],[1834,725],[1855,825],[1851,875],[1830,925],
+  [1782,975],[1678,1025],[1575,1052],[1489,1072],[1330,1083],[1090,1093],[890,1091],
+  [650,1080],[410,1053],[290,1028],[210,997],[146,950],[116,900],[111,850],[117,800],
+  [134,750],[171,700],[262,650],[320,600],[341,550],[348,500],
+];
+
+// Ears: polygons drawn with a fat round-joined stroke, so corners come out soft.
+// "up" is the rest pose, "flick" is the pose from the flick drawing.
+const EARS = [
+  { // left
+    outer: { up:    [[312,190],[522,192],[580,178],[515,420],[362,462],[334,330]],
+             flick: [[268,350],[522,192],[580,178],[515,420],[362,462],[305,420]] },
+    inner: { up:    [[356,256],[458,275],[406,405]],
+             flick: [[332,352],[466,284],[402,420]] },
+    pivot: [440,440], dir: -1,
+  },
+  { // right
+    outer: { up:    [[1275,108],[1335,118],[1495,66],[1506,190],[1488,385],[1505,430],[1390,330]],
+             flick: [[1275,108],[1335,118],[1612,250],[1560,325],[1515,395],[1505,430],[1390,330]] },
+    inner: { up:    [[1337,172],[1447,130],[1420,275]],
+             flick: [[1345,182],[1545,242],[1440,300]] },
+    pivot: [1430,360], dir: 1,
+  },
+];
+
+// Tentacle rest poses: root (hidden under the head) to tip.
+const TENTS = [
+  { pts: [[487,1000],[480,1150],[472,1290],[450,1385],[400,1452],[320,1500],[220,1517],[128,1507]], phase: 0.0 },
+  { pts: [[752,1000],[756,1200],[764,1450],[780,1640],[778,1730],[772,1795]], phase: 0.8 },
+  { pts: [[1012,1000],[1022,1200],[1050,1460],[1085,1620],[1120,1715],[1143,1770]], phase: 1.6 },
+  { pts: [[1227,1000],[1245,1200],[1295,1360],[1370,1500],[1460,1620],[1585,1745]], phase: 2.4 },
+  { pts: [[1427,1000],[1462,1200],[1500,1290],[1560,1350],[1660,1380],[1750,1365],[1815,1330],[1858,1285]], phase: 3.2 },
+];
+
+const EYES = [ { cx: 686, cy: 621, r: 106 }, { cx: 1228, cy: 544, r: 111 } ];
+// Evil eyes keep only what's below these brow lines.
+const EVIL_CLIP = [
+  [[560,573],[815,592],[815,760],[560,760]],
+  [[1095,569],[1355,460],[1355,690],[1095,690]],
+];
+const CLOSED_EYES = ['M572 647Q680 607 798 625', 'M1115 583Q1230 539 1342 514'];
+const MOUTH = {
+  cute: 'M932 790L982 705Q994 690 1010 700L1078 755',
+  evil: 'M895 718C888 770 915 798 945 796C972 794 985 770 990 745C1000 775 1025 795 1055 790C1090 786 1112 760 1106 730C1104 712 1095 700 1088 690',
+};
+const BLUSH = [ { cx: 626, cy: 801, rx: 155, ry: 95 }, { cx: 1338, cy: 681, rx: 145, ry: 88 } ];
+
+// ---------- Path helpers ----------
+const f = p => p[0].toFixed(1) + ',' + p[1].toFixed(1);
+const pts = a => a.map(f).join(' ');
+const lerp = (a, b, t) => a.map((p, i) => [p[0] + (b[i][0] - p[0]) * t, p[1] + (b[i][1] - p[1]) * t]);
+
+function smooth(p, closed = false) {
+  const n = p.length, at = i => closed ? p[(i + n) % n] : p[Math.max(0, Math.min(n - 1, i))];
+  let d = 'M' + f(p[0]);
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += 'C' + f(c1) + ' ' + f(c2) + ' ' + f(p2);
+  }
+  return closed ? d + 'Z' : d;
+}
+
+// ---------- Markup ----------
+function markup(uid) {
+  const id = s => s + uid;
+  return `
+<svg viewBox="-40 -110 2080 2080" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Loading">
+  <defs>
+    <linearGradient id="${id('tent')}" gradientUnits="userSpaceOnUse" x1="0" y1="1050" x2="0" y2="1780">
+      <stop offset="0" stop-color="#bd97e7"/>
+      <stop offset="1" stop-color="#9a8ee9"/>
+    </linearGradient>
+    <radialGradient id="${id('blush')}">
+      <stop offset="0" stop-color="#e08ce0" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#e08ce0" stop-opacity="0"/>
+    </radialGradient>
+    ${EVIL_CLIP.map((c, i) => `<clipPath id="${id('evil' + i)}"><polygon points="${pts(c)}"/></clipPath>`).join('')}
+  </defs>
+  <ellipse class="shadow" cx="990" cy="1915" rx="620" ry="30" fill="#7a5a9a" opacity="0.15"/>
+  <g class="all">
+    <g fill="none" stroke="url(#${id('tent')})" stroke-width="134" stroke-linecap="round" stroke-linejoin="round">
+      ${TENTS.map(t => `<path class="tent" d="${smooth(t.pts)}"/>`).join('')}
+    </g>
+    <g class="bodyg">
+      <path class="head" fill="${BODY}" d="${smooth(HEAD, true)}"/>
+      ${EARS.map(e => `<g class="ear">
+        <polygon class="earOuter" points="${pts(e.outer.up)}" fill="${BODY}" stroke="${BODY}" stroke-width="40" stroke-linejoin="round"/>
+        <polygon class="earInner" points="${pts(e.inner.up)}" fill="${EAR_INNER}" stroke="${EAR_INNER}" stroke-width="30" stroke-linejoin="round"/>
+      </g>`).join('')}
+      ${BLUSH.map(b => `<ellipse cx="${b.cx}" cy="${b.cy}" rx="${b.rx}" ry="${b.ry}" fill="url(#${id('blush')})"/>`).join('')}
+      <g class="eyesOpen" fill="#fff">
+        ${EYES.map((e, i) => `<ellipse class="eye" cx="${e.cx}" cy="${e.cy}" rx="${e.r}" ry="${e.r}" data-clip="url(#${id('evil' + i)})"/>`).join('')}
+      </g>
+      <g class="eyesClosed" fill="none" stroke="#fff" stroke-width="34" stroke-linecap="round" display="none">
+        ${CLOSED_EYES.map(d => `<path d="${d}"/>`).join('')}
+      </g>
+      <path class="mouth" d="${MOUTH.cute}" fill="none" stroke="#fff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>`;
+}
+
+function mount(host, uid) {
+  host.insertAdjacentHTML('beforeend', markup(uid));
+  const svg = host.lastElementChild;
+  if (host.dataset.size) { svg.setAttribute('width', host.dataset.size); svg.setAttribute('height', host.dataset.size); }
+  return {
+    svg,
+    all: svg.querySelector('.all'),
+    body: svg.querySelector('.bodyg'),
+    shadow: svg.querySelector('.shadow'),
+    tents: [...svg.querySelectorAll('.tent')],
+    ears: [...svg.querySelectorAll('.ear')].map(g => ({
+      g, outer: g.querySelector('.earOuter'), inner: g.querySelector('.earInner') })),
+    eyes: [...svg.querySelectorAll('.eye')],
+    eyesOpen: svg.querySelector('.eyesOpen'),
+    eyesClosed: svg.querySelector('.eyesClosed'),
+    mouth: svg.querySelector('.mouth'),
+  };
+}
+
+// ---------- Pose ----------
+// pose: { mood, bob, sx, sy, wave(i) -> points, ears: [{flick 0..1, sway deg}], eyeOpen 0..1 | 'closed' }
+function applyPose(inst, pose) {
+  inst.all.setAttribute('transform', `translate(0 ${pose.bob.toFixed(2)})`);
+  inst.body.setAttribute('transform',
+    `translate(980 600) scale(${pose.sx.toFixed(4)} ${pose.sy.toFixed(4)}) translate(-980 -600)`);
+  inst.tents.forEach((el, i) => el.setAttribute('d', smooth(pose.tentacle(i))));
+  inst.ears.forEach((e, i) => {
+    const E = EARS[i], p = pose.ears[i];
+    e.outer.setAttribute('points', pts(lerp(E.outer.up, E.outer.flick, p.flick)));
+    e.inner.setAttribute('points', pts(lerp(E.inner.up, E.inner.flick, p.flick)));
+    e.g.setAttribute('transform', `rotate(${(E.dir * p.sway).toFixed(2)} ${E.pivot.join(' ')})`);
+  });
+  const closed = pose.eyes === 'closed';
+  inst.eyesOpen.setAttribute('display', closed ? 'none' : 'inline');
+  inst.eyesClosed.setAttribute('display', closed ? 'inline' : 'none');
+  inst.eyes.forEach((el, i) => {
+    el.setAttribute('ry', (EYES[i].r * (closed ? 1 : pose.eyes)).toFixed(2));
+    if (pose.mood === 'evil') el.setAttribute('clip-path', el.dataset.clip);
+    else el.removeAttribute('clip-path');
+  });
+  inst.mouth.setAttribute('d', MOUTH[pose.mood]);
+}
+
+const restPose = (mood = 'cute', extra = {}) => ({
+  mood, bob: 0, sx: 1, sy: 1, tentacle: i => TENTS[i].pts,
+  ears: [{ flick: 0, sway: 0 }, { flick: 0, sway: 0 }], eyes: 1, ...extra,
+});
+
+// Clean standalone SVG for a given pose (used to export the logo files).
+function exportSvg(mood = 'cute', extra = {}) {
+  const host = document.createElement('div');
+  const inst = mount(host, '');
+  applyPose(inst, restPose(mood, extra));
+  inst.shadow.remove();
+  inst.svg.removeAttribute('role');
+  inst.svg.setAttribute('aria-label', 'Jelly cat logo');
+  inst.svg.setAttribute('viewBox', '0 0 2000 2000');
+  inst.svg.querySelectorAll('[transform]').forEach(n => n.removeAttribute('transform'));
+  inst.svg.querySelectorAll('[display="none"]').forEach(n => n.remove());
+  inst.svg.querySelectorAll('[display]').forEach(n => n.removeAttribute('display'));
+  inst.svg.querySelectorAll('[data-clip]').forEach(n => n.removeAttribute('data-clip'));
+  if (mood !== 'evil') inst.svg.querySelectorAll('clipPath').forEach(n => n.remove());
+  inst.svg.querySelectorAll('[class]').forEach(n => n.removeAttribute('class'));
+  return new XMLSerializer().serializeToString(inst.svg).replace(/>\s+</g, '>\n<');
+}
+
+// ---------- Animation ----------
+const params = new URLSearchParams(location.search);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let period = 1.0, sway = 126, mood = params.get('mood') || 'cute';
+
+const instances = [...document.querySelectorAll('[data-jelly]')].map((h, i) => mount(h, '-' + i));
+
+// Debug overlay: ?ref=refs/closed.webp lays a drawing under the big one, frozen at rest.
+if (params.get('ref')) {
+  const img = Object.assign(document.createElement('img'), { src: params.get('ref'), className: 'ref' });
+  document.querySelector('.stage').prepend(img);
+}
+const still = params.has('ref') || params.has('still');
+
+document.getElementById('speed').oninput = e => { period = +e.target.value; speedOut.textContent = period.toFixed(1) + 's'; };
+document.getElementById('sway').oninput = e => { sway = +e.target.value; swayOut.textContent = sway; };
+document.querySelectorAll('[data-mood]').forEach(b => b.onclick = () => {
+  mood = b.dataset.mood;
+  document.querySelectorAll('[data-mood]').forEach(x => x.setAttribute('aria-pressed', x === b));
+});
+
+// Tentacles: travelling wave along each one, tips move most.
+function wavePoints(t, time, amp) {
+  const n = t.pts.length;
+  return t.pts.map((p, i) => {
+    const a = t.pts[Math.max(i - 1, 0)], b = t.pts[Math.min(i + 1, n - 1)];
+    let tx = b[0] - a[0], ty = b[1] - a[1];
+    const len = Math.hypot(tx, ty) || 1; tx /= len; ty /= len;
+    const s = i / (n - 1);
+    const w = amp * Math.pow(s, 1.3) * Math.sin(time * Math.PI * 2 / period - s * 2.4 + t.phase);
+    return [p[0] - ty * w, p[1] + tx * w];
+  });
+}
+
+// Ear flick: snap to the flick pose, back, then a smaller second flick.
+const FLICK_LEN = 0.55;
+let flickAt = 2.5, flickEars = [0];
+function scheduleFlick(now, which) {
+  flickAt = now + (which ? 0 : 2.5 + Math.random() * 3.5);
+  const r = Math.random();
+  flickEars = which || (r < 0.45 ? [0] : r < 0.85 ? [1] : [0, 1]);
+}
+function flickAmount(time, i) {
+  if (!flickEars.includes(i)) return 0;
+  const u = (time - flickAt) / FLICK_LEN;
+  if (u < 0 || u > 1) return 0;
+  return Math.sin(u * Math.PI * 2) ** 2 * (u < 0.5 ? 1 : 0.55);
+}
+
+// Blink: squash the open eyes, swap to the closed-eye lines, open again.
+const BLINK_LEN = 0.24;
+let blinkAt = 1.2;
+function eyeState(time) {
+  const u = (time - blinkAt) / BLINK_LEN;
+  if (u < 0 || u > 1) return 1;
+  if (u < 0.25) return 1 - (u / 0.25) * 0.65;
+  if (u < 0.7) return 'closed';
+  return 0.35 + ((u - 0.7) / 0.3) * 0.65;
+}
+
+let now = 0;
+document.getElementById('flickBtn').onclick = () => scheduleFlick(now, [Math.random() < .5 ? 0 : 1]);
+document.getElementById('blinkBtn').onclick = () => { blinkAt = now; };
+
+function frame(ms) {
+  const time = now = ms / 1000;
+  if (still) {
+    instances.forEach(inst => applyPose(inst, restPose(mood)));
+    return requestAnimationFrame(frame);
+  }
+  const k = reduceMotion ? 0.4 : 1;
+  const ph = time * Math.PI * 2 / period;
+  const s = Math.sin(ph);
+
+  if (time > blinkAt + BLINK_LEN) blinkAt = time + 2 + Math.random() * 2.5;
+  if (time > flickAt + FLICK_LEN) scheduleFlick(time);
+  // Ears droop a touch toward the flick pose with each pulse. This moves only the
+  // tips, so the base stays glued to the head (rotating the whole ear opened seams).
+  const earDroop = 0.07 * (0.5 + 0.5 * Math.sin(ph - 1.0)) * k;
+
+  const pose = {
+    mood,
+    // Body contracts (narrow + tall) on the push, then relaxes; the bob lags slightly.
+    bob: -46 * Math.sin(ph - 0.6) * k,
+    sx: 1 - 0.045 * s * k,
+    sy: 1 + 0.045 * s * k,
+    tentacle: i => wavePoints(TENTS[i], time, sway * k),
+    ears: [0, 1].map(i => ({ flick: Math.min(1, flickAmount(time, i) + earDroop), sway: 0 })),
+    eyes: eyeState(time),
+  };
+  const lift = (pose.bob + 46) / 92; // 0 = high, 1 = low
+  for (const inst of instances) {
+    applyPose(inst, pose);
+    inst.shadow.setAttribute('rx', (500 + 140 * lift).toFixed(1));
+    inst.shadow.setAttribute('opacity', (0.08 + 0.1 * lift).toFixed(3));
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
