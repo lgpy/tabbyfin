@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use keyring::Entry;
 
-const SERVICE: &str = "jelly-gpui";
+const SERVICE: &str = "tabbyfin";
 
 pub fn load(account: &str) -> Option<String> {
     match entry(account).map(|e| e.get_password()) {

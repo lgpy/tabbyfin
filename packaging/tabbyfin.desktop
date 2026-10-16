@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=jelly-gpui
+Name=Tabbyfin
 GenericName=Media Player
 Comment=Desktop client for Jellyfin, with playback in mpv
-Exec=jelly-gpui
-Icon=jelly-gpui
+Exec=tabbyfin
+Icon=tabbyfin
 Terminal=false
 Categories=AudioVideo;Video;Player;
 Keywords=jellyfin;media;movies;tv;

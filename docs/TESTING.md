@@ -1,6 +1,6 @@
 # Manual testing checklist
 
-Things that work in development but haven't been tested where it matters: on real hardware, real servers, release builds, or with a real second person. Development happens in WSL2 without a GPU, against the local dev servers in `dev/` (see [`dev/README.md`](../dev/README.md)), with keys pressed from inside the app (`JELLY_GPUI_KEYS`) rather than a real mouse and keyboard.
+Things that work in development but haven't been tested where it matters: on real hardware, real servers, release builds, or with a real second person. Development happens in WSL2 without a GPU, against the local dev servers in `dev/` (see [`dev/README.md`](../dev/README.md)), with keys pressed from inside the app (`TABBYFIN_KEYS`) rather than a real mouse and keyboard.
 
 Tick an item when it's been tried; note the hardware, OS and server version, and file anything that fails. Roadmap numbers refer to [`ROADMAP.md`](ROADMAP.md).
 
@@ -13,7 +13,7 @@ Tick an item when it's been tried; note the hardware, OS and server version, and
 Everything below was built and run only as Linux debug builds. Use a CI package (`mise run ci:build`), unzipped over the old copy.
 
 - ⬜ **Player controls don't pause the video when clicked** (the `.occlude()` fix). Click the volume slider, the pickers, -10s/+10s and Fullscreen; playback must keep going.
-- ⬜ **Log file:** *Settings → Logs → Open log folder* opens the folder, today's `jelly-gpui.*.log` exists and has no colour codes in it.
+- ⬜ **Log file:** *Settings → Logs → Open log folder* opens the folder, today's `tabbyfin.*.log` exists and has no colour codes in it.
 - ⬜ **Settings → Playback:** the autoplay switch and the bitrate picker are remembered after a restart.
 - ⬜ **Everything in §2–§6** at least once on Windows, since the GPU and ANGLE paths only exist there.
 
@@ -89,7 +89,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ The websocket on 12.2 and 10.11 (`cargo run -p jellyfin --example socket`), a 150 s keep-alive hold; Home refreshing when an item is marked watched from elsewhere.
 
-- ⬜ **Another real device**: mark something watched in the web client or a phone app; jelly-gpui's open page refreshes within a second or so.
+- ⬜ **Another real device**: mark something watched in the web client or a phone app; Tabbyfin's open page refreshes within a second or so.
 - ⬜ **Reconnecting**: restart the server, or drop the network for a minute, while the app is open; the log shows "session websocket connected" again and refreshes still work.
 - ⬜ Behind a **reverse proxy with HTTPS** (`wss://`), e.g. nginx or Caddy, including a base path like `/jellyfin`.
 - ⬜ The app shows up in *Dashboard → Activity / Sessions* as a session that can play video.
@@ -120,16 +120,16 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ A **version switch** in a group, from the player's version menu (the same reload path as the audio change, not clicked yet), and removing a queue entry.
 
 - ⬜ **With the Jellyfin web client** as the other member, in a browser against the same server:
-  - ⬜ Create the group in jelly-gpui, join from the web, and the other way round.
+  - ⬜ Create the group in Tabbyfin, join from the web, and the other way round.
   - ⬜ Start an item from each side; both load and start together.
   - ⬜ Pause, unpause and seek from each side.
-  - ⬜ Stop from each side (Esc in jelly-gpui stops the group).
-  - ⬜ Join a group that's **already playing**; jelly-gpui loads the item and joins at the right position.
-- ⬜ **Two jelly-gpui instances on two machines** (or two users on one server). Check by ear that the audio stays in sync for 10+ minutes.
+  - ⬜ Stop from each side (Esc in Tabbyfin stops the group).
+  - ⬜ Join a group that's **already playing**; Tabbyfin loads the item and joins at the right position.
+- ⬜ **Two Tabbyfin instances on two machines** (or two users on one server). Check by ear that the audio stays in sync for 10+ minutes.
 - ⬜ **Next episode in a group**: let an episode end; the group moves on to the next episode together.
 - ⬜ **Notifications** for members joining and leaving, and Leave from the popover.
 - ⬜ A member **with a slow connection** or a transcode (bitrate limit on one side): the group waits for it, and it stays in sync.
-- ⬜ **Drift on real hardware**: `RUST_LOG=jelly_gpui::syncplay=debug` logs the drift each second; check it stays under ~0.1 s, and tune the thresholds in `syncplay.rs` if needed.
+- ⬜ **Drift on real hardware**: `RUST_LOG=tabbyfin::syncplay=debug` logs the drift each second; check it stays under ~0.1 s, and tune the thresholds in `syncplay.rs` if needed.
 - ⬜ Known gaps, check how badly they behave: changing audio during a transcode, switching version, and the next-episode button while in a group.
 
 ## 7. Video output and hardware (2.3.4, 2.3.5, 1.5)
@@ -151,7 +151,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **macOS:** playback works through the host (software frames over the pipe), and CPU use is reasonable at 1080p.
 - ⬜ **Windows on NVIDIA and Intel**, and a hybrid laptop: the host's ANGLE device and GPUI must be on the same adapter for shared handles.
 - ⬜ **A release build on Windows** (no console): the host starts without a window flashing up, and its log reaches the app's log file.
-- ⬜ Quitting the app during playback leaves no `jelly-gpui --player-host` process behind (Task Manager / `ps`).
+- ⬜ Quitting the app during playback leaves no `tabbyfin --player-host` process behind (Task Manager / `ps`).
 
 ## 8. Minimum server version (4.6)
 
@@ -202,7 +202,7 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 ## 13. Speed, delays, subtitle size and the clock (2.1.5–2.1.7)
 
-✅ With `JELLY_GPUI_KEYS`: `]` twice set 1.5× (the test pattern's timecode advanced about 1.5 s per second, and the badge showed "1.5×"), and `x` three times set the subtitle delay to +0.3 s, as the menu showed (opened by default for that screenshot only).
+✅ With `TABBYFIN_KEYS`: `]` twice set 1.5× (the test pattern's timecode advanced about 1.5 s per second, and the badge showed "1.5×"), and `x` three times set the subtitle delay to +0.3 s, as the menu showed (opened by default for that screenshot only).
 
 - ⬜ **Clicking** through the menu: each speed, the delay and size buttons, Reset; the controls stay up while it's open.
 - ⬜ **Subtitle delay** and **size** on a real subtitle track (the dev media's text subtitles), and **audio delay** with sound.
@@ -220,7 +220,7 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 ## 15. Previous and next (2.1.9)
 
-✅ With `JELLY_GPUI_KEYS` against 12.2: Shift+P on S01E02 played S01E01, Shift+N on Test Movie played Second Movie (the next in Test Collection), and Test Movie ending did not start Second Movie. The smoke test reads a movie's collections on 12.2 and gets none (no route) on 10.11.
+✅ With `TABBYFIN_KEYS` against 12.2: Shift+P on S01E02 played S01E01, Shift+N on Test Movie played Second Movie (the next in Test Collection), and Test Movie ending did not start Second Movie. The smoke test reads a movie's collections on 12.2 and gets none (no route) on 10.11.
 
 - ⬜ The **buttons** and their tooltips, and the up-next card offering a collection's next movie.
 - ⬜ A remote **previous** from the dashboard: restarts the item, or within 5 s goes to the previous one.
@@ -243,7 +243,7 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 ## 18. Resume prompt (2.1.10)
 
-✅ With `JELLY_GPUI_KEYS` against 12.2: Shift+P from S01E02 resumed S01E01 at 0:25 with "Resumed from 0:25 · Start over", and Enter restarted it from 0:00.
+✅ With `TABBYFIN_KEYS` against 12.2: Shift+P from S01E02 resumed S01E01 at 0:25 with "Resumed from 0:25 · Start over", and Enter restarted it from 0:00.
 
 - ⬜ **Autoplay** into an episode with a resume point shows the card, and it goes away by itself after 10 s.
 - ⬜ Clicking **Start over**; in a **SyncPlay** group it's a group seek.
@@ -279,7 +279,7 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 ## 23. Update notice (5.5)
 
-✅ With `JELLY_GPUI_UPDATE_URL` pointing at a local fake `v9.9.9` release: the notification showed "Version 9.9.9 is out (this is 0.1.0)" with Download, and the check time was saved.
+✅ With `TABBYFIN_UPDATE_URL` pointing at a local fake `v9.9.9` release: the notification showed "Version 9.9.9 is out (this is 0.1.0)" with Download, and the check time was saved.
 
 - ⬜ After the **first published release**: an older build shows the notice once a day; the current one doesn't; *Download* opens the release page; the setting turns it off.
 

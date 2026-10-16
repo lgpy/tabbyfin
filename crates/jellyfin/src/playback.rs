@@ -137,7 +137,7 @@ fn device_profile(max_bitrate: u64, prefer_hevc: bool) -> serde_json::Value {
         .map(|f| serde_json::json!({ "Format": f, "Method": "Embed" })),
     );
     serde_json::json!({
-        "Name": "jelly-gpui (mpv)",
+        "Name": "Tabbyfin (mpv)",
         "MaxStreamingBitrate": max_bitrate,
         "MaxStaticBitrate": max_bitrate,
         "DirectPlayProfiles": [

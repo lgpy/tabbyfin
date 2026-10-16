@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key>
-  <string>jelly-gpui</string>
+  <string>Tabbyfin</string>
   <key>CFBundleDisplayName</key>
-  <string>jelly-gpui</string>
+  <string>Tabbyfin</string>
   <key>CFBundleIdentifier</key>
-  <string>io.github.lgpy.jelly-gpui</string>
+  <string>io.github.lgpy.tabbyfin</string>
   <key>CFBundleExecutable</key>
-  <string>jelly-gpui</string>
+  <string>tabbyfin</string>
   <key>CFBundleIconFile</key>
-  <string>jelly-gpui</string>
+  <string>tabbyfin</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

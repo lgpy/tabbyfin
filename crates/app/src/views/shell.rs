@@ -1103,7 +1103,7 @@ fn focuser<T: Focusable>(page: &Entity<T>) -> Focuser {
 }
 
 /// Dev aid: open a page on top of Home at startup, for screenshots and quick iteration.
-/// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, `search`, `settings`, or
+/// `TABBYFIN_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, `search`, `settings`, or
 /// `play:<id>[:<audio index>[:<subtitle index or -1>[:<media source id>]]]` (opens the item and
 /// plays it from its resume point; empty fields keep the defaults). Returns the route and, for `play`, the track choices.
 #[cfg(debug_assertions)]
@@ -1111,7 +1111,7 @@ fn focuser<T: Focusable>(page: &Entity<T>) -> Focuser {
 fn debug_start_route() -> Option<(Route, Option<(Option<i32>, Option<i32>, Option<String>)>)> {
     use jellyfin::models::CollectionType;
 
-    let value = std::env::var("JELLY_GPUI_ROUTE").ok()?;
+    let value = std::env::var("TABBYFIN_ROUTE").ok()?;
     let mut parts = value.split(':');
     match (parts.next()?, parts.next()) {
         ("search", _) => Some((Route::Search, None)),
