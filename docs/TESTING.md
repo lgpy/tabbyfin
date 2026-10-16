@@ -20,7 +20,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ## 2. Keyboard navigation (3.1)
 
-✅ Home shelves, library grid, search (Enter into results, Up back to the box), item page buttons, seasons and episodes, Back keeping the cursor; Enter on Resume plays and Esc returns focus to the item page.
+✅ Home shelves, library grid, search (the top bar's search button opens into a box, which opens the results as you type; Enter or Down into them, Up back to the box, Esc closes them), item page buttons, seasons and episodes, Back keeping the cursor; Enter on Resume plays and Esc returns focus to the item page.
 
 ✅ Item page pickers by keyboard (Test Movie: version to 720p rebuilt the track pickers, then audio and subtitles stepped), and W on a season's first episode (watched off and on again on the server).
 

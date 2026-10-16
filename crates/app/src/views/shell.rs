@@ -3,6 +3,7 @@
 //! Pages stay alive while they're on the stack, so going back keeps their data and scroll
 //! position.
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -10,6 +11,7 @@ use std::time::Duration;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::button::{Button, ButtonVariants, Toggle};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::popover::Popover;
@@ -34,7 +36,7 @@ use crate::views::library::{LibraryPage, Source};
 use crate::views::player::PlayerPage;
 use crate::views::search::SearchPage;
 use crate::views::settings::SettingsPage;
-use crate::zoom::dp;
+use crate::zoom::{dp, dp_px};
 
 actions!(jelly, [Back, OpenSearch]);
 
@@ -44,6 +46,8 @@ const TOP_BAR_H: f32 = 72.;
 const TOP_BAR_ICON: f32 = 24.;
 /// The top bar's buttons' height.
 const TOP_BAR_BUTTON: f32 = 40.;
+/// The open search box's width, when the window has room for it.
+const SEARCH_BOX_W: f32 = 400.;
 
 /// A top-bar button's icon, a size up from a button's own. (A button sizes the icon it's
 /// given with `icon`, so these go in as children.)
@@ -60,7 +64,7 @@ static LOGO: LazyLock<Arc<Image>> = LazyLock::new(|| {
     ))
 });
 
-/// The top bar's buttons, in order, for the keyboard: Up past a page's first row reaches
+/// The top bar's controls, in order, for the keyboard: Up past a page's first row reaches
 /// them, Left and Right move along, Enter presses, Down or Esc returns to the page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TopBarItem {
@@ -140,6 +144,33 @@ pub struct ShellView {
     menu_focus: FocusHandle,
     /// The account menu, built fresh each time it opens, and its dismissal.
     account_menu: Option<(Entity<PopupMenu>, Subscription)>,
+    /// The search box. Typing in it opens the results page, clearing it closes the page.
+    search: Entity<InputState>,
+    _search: Subscription,
+    /// The search box is open in the middle of the bar (it also stays open while it has text).
+    /// Closed, it's a button with the others on the right.
+    search_open: bool,
+    /// How far the search button was from the window's right edge when last drawn (the
+    /// buttons are right-aligned, so it stays there): where the box opens from and closes to.
+    search_button: Rc<Cell<Option<Pixels>>>,
+    /// Where the open box was last drawn.
+    search_slot: Rc<Cell<Bounds<Pixels>>>,
+    /// The box opening out of the button or closing back into it.
+    search_motion: Option<SearchMotion>,
+    /// Ends the running animation.
+    _search_motion_end: Option<Task<()>>,
+}
+
+#[derive(Clone, Copy)]
+struct SearchMotion {
+    /// Counts the animations, for their ids.
+    epoch: usize,
+    closing: bool,
+    /// How far right of the box's place the button is.
+    dx: Pixels,
+    /// Still moving: the button is drawn too, fading out as the box opens, or in as it closes,
+    /// so one turns into the other.
+    running: bool,
 }
 
 impl EventEmitter<ShellEvent> for ShellView {}
@@ -178,6 +209,14 @@ impl ShellView {
             RemoteEvent::ToggleFullscreen => window.toggle_fullscreen(),
         });
         let _live = crate::live::connect(session.client.clone(), cx);
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+        let _search = cx.subscribe_in(&search, window, |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::Change => this.search_changed(window, cx),
+            InputEvent::PressEnter { .. } => this.enter_search_results(window, cx),
+            // Back to a button once nothing's typed in it.
+            InputEvent::Blur => this.close_search(window, cx),
+            _ => {}
+        });
         let mut this = Self {
             session,
             stack: Vec::new(),
@@ -191,10 +230,20 @@ impl ShellView {
             menu: None,
             menu_focus: cx.focus_handle(),
             account_menu: None,
+            search,
+            _search,
+            search_open: false,
+            search_button: Rc::default(),
+            search_slot: Rc::default(),
+            search_motion: None,
+            _search_motion_end: None,
         };
         this.push(Route::Home, window, cx);
         #[cfg(debug_assertions)]
-        if let Some((route, autoplay)) = debug_start_route() {
+        if let Some(term) = debug_search_term() {
+            this.search.update(cx, |search, cx| search.set_value(term, window, cx));
+            this.search_changed(window, cx);
+        } else if let Some((route, autoplay)) = debug_start_route() {
             if let (Some(autoplay_tracks), Route::Item { id, .. }) = (autoplay, &route) {
                 let (client, id) = (this.session.client.clone(), id.clone());
                 cx.spawn(async move |_, cx| {
@@ -283,7 +332,8 @@ impl ShellView {
             Route::Search => Page {
                 title: "Search".into(),
                 view: {
-                    let page = cx.new(|cx| SearchPage::new(client, nav, window, cx));
+                    let search = self.search.clone();
+                    let page = cx.new(|cx| SearchPage::new(client, nav, search, cx));
                     focus = Some(focuser(&page));
                     page.into()
                 },
@@ -355,6 +405,11 @@ impl ShellView {
             cx.notify();
         } else if self.top_bar.is_some() && self.focus_handle.is_focused(window) {
             self.leave_top_bar(window, cx);
+        } else if self.search.focus_handle(cx).is_focused(window)
+            && self.search_page().is_none_or(|i| i + 1 < self.stack.len())
+        {
+            // Esc in the box over another page: back to that page (over the results it closes them).
+            self.leave_top_bar(window, cx);
         } else {
             self.go_back(window, cx);
         }
@@ -365,7 +420,7 @@ impl ShellView {
         self.focus_top_bar(window, cx);
     }
 
-    /// Moves the keyboard into the top bar (also for Up in the search box).
+    /// Moves the keyboard into the top bar.
     pub fn focus_top_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.stack.last().is_some_and(|page| page.is_player) {
             return;
@@ -455,10 +510,7 @@ impl ShellView {
                 self.top_bar = None;
                 self.go_back(window, cx);
             }
-            TopBarItem::Search => {
-                self.top_bar = None;
-                self.push(Route::Search, window, cx);
-            }
+            TopBarItem::Search => self.focus_search(window, cx),
             TopBarItem::Settings => {
                 self.top_bar = None;
                 self.toggle_settings(window, cx);
@@ -563,13 +615,138 @@ impl ShellView {
         }
         if self.stack.len() > 1 {
             self.stack.pop();
+            // Leaving the results clears the box they were for.
+            if self.search_page().is_none() && !self.search.read(cx).value().is_empty() {
+                self.search.update(cx, |search, cx| search.set_value("", window, cx));
+                self.close_search(window, cx);
+            }
             self.focus_top(window, cx);
             cx.notify();
         }
     }
 
     fn open_search(&mut self, _: &OpenSearch, window: &mut Window, cx: &mut Context<Self>) {
-        self.push(Route::Search, window, cx);
+        self.focus_search(window, cx);
+    }
+
+    /// Opens the search box, if it's a button, and puts the keyboard in it (not over the
+    /// player, which hides the top bar).
+    fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.stack.last().is_some_and(|page| page.is_player) {
+            return;
+        }
+        let closing = self.search_motion.is_some_and(|motion| motion.closing);
+        if !self.search_shown(cx) || closing {
+            // The box goes in the middle of the bar, which (with as much on either side) is the
+            // middle of the window.
+            let width = dp_px(SEARCH_BOX_W, window);
+            let place = (window.viewport_size().width - width) / 2.;
+            self.start_search_motion(false, place, window, cx);
+        }
+        self.search_open = true;
+        self.top_bar = None;
+        self.menu = None;
+        self.search.update(cx, |search, cx| search.focus(window, cx));
+        cx.notify();
+    }
+
+    /// Turns the box back into the button, unless something's typed in it (it stays open
+    /// with the results).
+    fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let was_open = std::mem::take(&mut self.search_open);
+        if !was_open || !self.search.read(cx).value().is_empty() {
+            cx.notify();
+            return;
+        }
+        self.start_search_motion(true, self.search_slot.get().origin.x, window, cx);
+        cx.notify();
+    }
+
+    /// Starts the box opening from, or closing into, the button, with the box's place at
+    /// `place` (from the window's left). Without the button's position, the box just appears.
+    fn start_search_motion(&mut self, closing: bool, place: Pixels, window: &Window, cx: &mut Context<Self>) {
+        let epoch = self.search_motion.map_or(0, |motion| motion.epoch + 1);
+        self.search_motion = self.search_button.get().map(|from_right| SearchMotion {
+            epoch,
+            closing,
+            dx: window.viewport_size().width - from_right - place,
+            running: true,
+        });
+        let duration = motion::morph_duration(cx);
+        self._search_motion_end = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            this.update(cx, |this, cx| {
+                // Closed, the box goes; open, the button does.
+                match this.search_motion {
+                    Some(SearchMotion { closing: true, .. }) => this.search_motion = None,
+                    Some(ref mut motion) => motion.running = false,
+                    None => {}
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Whether the search box is in the bar rather than the button (also while it closes).
+    fn search_shown(&self, cx: &App) -> bool {
+        self.search_open
+            || !self.search.read(cx).value().is_empty()
+            || self.search_motion.is_some_and(|motion| motion.closing)
+    }
+
+    /// Where the results page is on the stack.
+    fn search_page(&self) -> Option<usize> {
+        self.stack
+            .iter()
+            .rposition(|page| page.view.clone().downcast::<SearchPage>().is_ok())
+    }
+
+    /// The box changed: search, opening the results (or going back to them, from a page
+    /// opened from them), or close the results when it's empty.
+    fn search_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let term = self.search.read(cx).value().trim().to_string();
+        let index = self.search_page();
+        if term.is_empty() {
+            // The keyboard stays in the box; Down or Esc gives it to the page below.
+            if let Some(index) = index {
+                self.stack.remove(index);
+                cx.notify();
+            }
+            return;
+        }
+        match index {
+            Some(index) => self.stack.truncate(index + 1),
+            None => self.push(Route::Search, window, cx),
+        }
+        if let Some(page) = self
+            .stack
+            .last()
+            .and_then(|page| page.view.clone().downcast::<SearchPage>().ok())
+        {
+            page.update(cx, |page, cx| page.set_term(term, cx));
+        }
+        cx.notify();
+    }
+
+    /// Enter or Down in the search box: into the results, or back to the page below.
+    fn enter_search_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let results = self
+            .stack
+            .last()
+            .and_then(|page| page.view.clone().downcast::<SearchPage>().ok());
+        match results {
+            Some(page) => page.update(cx, |page, cx| page.enter_results(window, cx)),
+            None => self.leave_top_bar(window, cx),
+        }
+    }
+
+    /// Down in the search box (which would otherwise ignore it).
+    fn search_box_keys(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.key == "down" && !event.keystroke.modifiers.modified() {
+            cx.stop_propagation();
+            self.enter_search_results(window, cx);
+        }
     }
 
     fn render_top_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -586,15 +763,13 @@ impl ShellView {
                 .when(keyboard == Some(item), |el| el.child(selection_ring(cx)))
         };
         let title = self.stack.last().map(|p| p.title.clone()).unwrap_or_default();
-        h_flex()
-            .h(dp(TOP_BAR_H))
-            .flex_none()
-            .px_6()
+        let search_shown = self.search_shown(cx);
+        // Logo, Back and the title on the left, the buttons on the right, the open search box
+        // between them. The two sides grow alike, which keeps the box in the middle.
+        let start = h_flex()
+            .flex_1()
+            .min_w_0()
             .gap_4()
-            // The account name; the title sets its own.
-            .text_lg()
-            .border_b_1()
-            .border_color(cx.theme().border)
             .child(img(LOGO.clone()).flex_none().size(dp(TOP_BAR_BUTTON)))
             // Only when there's a page to go back to.
             .when(can_go_back, |el| {
@@ -604,7 +779,9 @@ impl ShellView {
                         .ghost()
                         .h(dp(TOP_BAR_BUTTON))
                         .child(bar_icon(IconName::ArrowLeft))
-                        .tooltip("Back")
+                        // No tooltip: the button goes away under the pointer when it reaches the
+                        // first page, and gpui-kit's tooltip only hides when the pointer leaves
+                        // its button, so it stayed on screen.
                         .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx)))
                         .into_any_element(),
                 ))
@@ -612,21 +789,91 @@ impl ShellView {
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .truncate()
                     .text_xl()
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(title),
-            )
-            .child(ring(
+            );
+        let running = self.search_motion.filter(|motion| motion.running);
+        let search_button = (!search_shown || running.is_some()).then(|| {
+            let bounds = self.search_button.clone();
+            let button = ring(
                 TopBarItem::Search,
                 Button::new("search")
                     .ghost()
                     .h(dp(TOP_BAR_BUTTON))
                     .child(bar_icon(IconName::Search))
                     .tooltip("Search")
-                    .on_click(cx.listener(|this, _, window, cx| this.open_search(&OpenSearch, window, cx)))
+                    .on_click(cx.listener(|this, _, window, cx| this.focus_search(window, cx)))
+                    .child(
+                        canvas(
+                            move |b, window, _| bounds.set(Some(window.viewport_size().width - b.origin.x)),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
                     .into_any_element(),
-            ))
+            );
+            match running {
+                Some(SearchMotion { epoch, closing, .. }) => {
+                    let (from, to) = if closing { (0., 1.) } else { (1., 0.) };
+                    motion::fade(button, ("search-button-fade", epoch), from, to).into_any_element()
+                }
+                None => button.into_any_element(),
+            }
+        });
+        let search_box = search_shown.then(|| {
+            // While it moves it clips the input, which won't get as narrow as the button. (Not
+            // otherwise: that would cut off the focus ring.)
+            let input = div().w_full().when(running.is_some(), |el| el.overflow_hidden()).child(
+                Input::new(&self.search)
+                    .h(dp(TOP_BAR_BUTTON))
+                    .prefix(Icon::new(IconName::Search).text_color(cx.theme().muted_foreground))
+                    .cleanable(true),
+            );
+            // Grows out of the button into its place, or back.
+            let input = match self.search_motion {
+                Some(SearchMotion { epoch, closing, dx, .. }) => {
+                    let button = (dx, dp_px(TOP_BAR_BUTTON, window));
+                    // Opening, its slot may not have been laid out yet; `morph` keeps it within.
+                    let width = match closing {
+                        true => self.search_slot.get().size.width,
+                        false => dp_px(SEARCH_BOX_W, window),
+                    };
+                    let (button, place) = ((button.0, button.1, 0.), (px(0.), width.max(button.1), 1.));
+                    let (from, to) = if closing { (place, button) } else { (button, place) };
+                    motion::morph(input, ("search-motion", epoch), from, to).into_any_element()
+                }
+                None => input.into_any_element(),
+            };
+            let slot = self.search_slot.clone();
+            div()
+                .relative()
+                .min_w(dp(TOP_BAR_BUTTON * 4.))
+                .w(dp(SEARCH_BOX_W))
+                .text_base()
+                .capture_key_down(cx.listener(Self::search_box_keys))
+                .child(
+                    canvas(move |b, _, _| slot.set(b), |_, _, _, _| {})
+                        .absolute()
+                        .size_full(),
+                )
+                .child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .rounded_lg()
+                        .child(input)
+                        .when(keyboard == Some(TopBarItem::Search), |el| el.child(selection_ring(cx))),
+                )
+        });
+        let end = h_flex()
+            .flex_1()
+            .justify_end()
+            .gap_4()
+            .children(search_button)
             .child(ring(TopBarItem::SyncPlay, syncplay))
             .child(ring(
                 TopBarItem::Settings,
@@ -638,7 +885,19 @@ impl ShellView {
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_settings(window, cx)))
                     .into_any_element(),
             ))
-            .child(ring(TopBarItem::Account, account))
+            .child(ring(TopBarItem::Account, account));
+        h_flex()
+            .h(dp(TOP_BAR_H))
+            .flex_none()
+            .px_6()
+            .gap_4()
+            // The account name; the title sets its own.
+            .text_lg()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(start)
+            .children(search_box)
+            .child(end)
     }
 
     /// The user button and its menu: the saved accounts to switch to, adding one, signing out.
@@ -1102,8 +1361,15 @@ fn focuser<T: Focusable>(page: &Entity<T>) -> Focuser {
     Rc::new(move |cx| page.read(cx).focus_handle(cx))
 }
 
+/// Dev aid: `JELLY_GPUI_ROUTE=search:<term>` types `term` into the search box at startup.
+#[cfg(debug_assertions)]
+fn debug_search_term() -> Option<String> {
+    let value = std::env::var("JELLY_GPUI_ROUTE").ok()?;
+    value.strip_prefix("search:").map(str::to_string)
+}
+
 /// Dev aid: open a page on top of Home at startup, for screenshots and quick iteration.
-/// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, `search`, `settings`, or
+/// `JELLY_GPUI_ROUTE=library:<id>:<movies|tvshows>`, `item:<id>`, `settings`, or
 /// `play:<id>[:<audio index>[:<subtitle index or -1>[:<media source id>]]]` (opens the item and
 /// plays it from its resume point; empty fields keep the defaults). Returns the route and, for `play`, the track choices.
 #[cfg(debug_assertions)]
@@ -1114,7 +1380,6 @@ fn debug_start_route() -> Option<(Route, Option<(Option<i32>, Option<i32>, Optio
     let value = std::env::var("JELLY_GPUI_ROUTE").ok()?;
     let mut parts = value.split(':');
     match (parts.next()?, parts.next()) {
-        ("search", _) => Some((Route::Search, None)),
         ("settings", _) => Some((Route::Settings, None)),
         (kind @ ("item" | "play"), Some(id)) => {
             let rest: Vec<&str> = parts.collect();

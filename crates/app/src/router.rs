@@ -60,11 +60,6 @@ impl Navigator {
         self.push(Route::for_item(item), window, cx);
     }
 
-    /// Moves the keyboard into the top bar.
-    pub fn focus_top_bar(&self, window: &mut Window, cx: &mut App) {
-        self.0.update(cx, |shell, cx| shell.focus_top_bar(window, cx)).ok();
-    }
-
     /// Closes the top page, like the Back button.
     pub fn back(&self, window: &mut Window, cx: &mut App) {
         self.0.update(cx, |shell, cx| shell.go_back(window, cx)).ok();
