@@ -86,6 +86,21 @@ fn image(req: Option<ImageRequest>, item: Option<&BaseItemDto>, rounded: bool, c
         .into_any_element()
 }
 
+/// Tall image for an item. An episode's own image is a landscape still that a poster would
+/// crop, so it shows its series' poster, as Jellyfin's web client does (Latest lists a single
+/// new episode on its own rather than under its series).
+pub fn poster_image(item: &BaseItemDto) -> Option<ImageRequest> {
+    let series_poster = || {
+        let series_id = item.series_id.as_ref()?;
+        let tag = item.series_primary_image_tag.clone()?;
+        Some(ImageRequest::new(series_id, ImageType::Primary, Some(tag)))
+    };
+    match item.kind {
+        BaseItemKind::Episode => series_poster().or_else(|| item.primary_image()),
+        _ => item.primary_image(),
+    }
+}
+
 /// Wide image for an item: its own thumb/backdrop, then the parent's, then the primary image
 /// (episode screen grabs are already landscape).
 pub fn landscape_image(item: &BaseItemDto) -> Option<ImageRequest> {
@@ -352,7 +367,7 @@ pub fn poster_card_scaled(
     cx: &mut App,
 ) -> Stateful<Div> {
     let (width, height) = (POSTER_W * scale, POSTER_H * scale);
-    let image = item.primary_image().map(|r| r.fill_width((width * 2.).ceil() as u32));
+    let image = poster_image(item).map(|r| r.fill_width((width * 2.).ceil() as u32));
     card(id.into(), item, (width, height), image, selected, on_click, cx)
 }
 
