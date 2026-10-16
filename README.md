@@ -51,7 +51,7 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
 
 ## Install
 
-Download the package for your system from the [releases](https://github.com/lgpy/jelly-gpui/releases).
+Download the package for your system from the [releases](https://github.com/lgpy/tabbyfin/releases).
 
 | System | Package | Notes |
 |---|---|---|

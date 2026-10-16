@@ -20,8 +20,8 @@
     </p>
   </description>
   <launchable type="desktop-id">io.github.lgpy.tabbyfin.desktop</launchable>
-  <url type="homepage">https://github.com/lgpy/jelly-gpui</url>
-  <url type="bugtracker">https://github.com/lgpy/jelly-gpui/issues</url>
+  <url type="homepage">https://github.com/lgpy/tabbyfin</url>
+  <url type="bugtracker">https://github.com/lgpy/tabbyfin/issues</url>
   <content_rating type="oars-1.1"/>
   <requires>
     <display_length compare="ge">768</display_length>

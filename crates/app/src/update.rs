@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::config::Config;
 
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/lgpy/jelly-gpui/releases/latest";
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/lgpy/tabbyfin/releases/latest";
 /// GitHub allows 60 unauthenticated requests an hour; once a day is plenty.
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 

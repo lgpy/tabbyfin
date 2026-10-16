@@ -7,7 +7,7 @@ default-members = ["crates/app"]
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/lgpy/jelly-gpui"
+repository = "https://github.com/lgpy/tabbyfin"
 publish = false
 
 [workspace.dependencies]

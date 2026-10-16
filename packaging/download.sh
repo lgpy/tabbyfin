@@ -12,7 +12,7 @@ set -euo pipefail
 url="$1"
 sha="$2"
 out="$3"
-repo=lgpy/jelly-gpui
+repo=lgpy/tabbyfin
 
 sha256() {
   if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
