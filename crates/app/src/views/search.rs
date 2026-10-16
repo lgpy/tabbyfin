@@ -1,8 +1,10 @@
-//! Search across movies, shows and episodes. Searches as you type, after a short pause.
+//! Search results for movies, shows and episodes. The box is the top bar's (the shell opens
+//! this page when something is typed in it and closes it when the box is cleared); the page
+//! searches as the term changes, after a short pause.
 
 use std::time::Duration;
 
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::InputState;
 use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -25,7 +27,6 @@ const LIMIT: u32 = 60;
 const PADDING: f32 = 24.;
 
 enum Results {
-    Idle,
     Searching,
     Loaded(Vec<BaseItemDto>),
     Failed(SharedString),
@@ -34,6 +35,7 @@ enum Results {
 pub struct SearchPage {
     client: Client,
     nav: Navigator,
+    /// The top bar's search box, which has the keyboard until the cursor is in the results.
     input: Entity<InputState>,
     results: Results,
     /// What `results` are for (or will be).
@@ -47,22 +49,13 @@ pub struct SearchPage {
 }
 
 impl SearchPage {
-    pub fn new(client: Client, nav: Navigator, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search movies, shows and episodes"));
-        input.update(cx, |input, cx| input.focus(window, cx));
-        let _subscriptions = vec![
-            cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
-            cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => this.schedule_search(cx),
-                InputEvent::PressEnter { .. } => this.enter_results(window, cx),
-                _ => {}
-            }),
-        ];
+    pub fn new(client: Client, nav: Navigator, input: Entity<InputState>, cx: &mut Context<Self>) -> Self {
+        let _subscriptions = vec![cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify())];
         Self {
             client,
             nav,
             input,
-            results: Results::Idle,
+            results: Results::Searching,
             term: String::new(),
             search: None,
             scroll: ScrollHandle::new(),
@@ -72,19 +65,13 @@ impl SearchPage {
         }
     }
 
-    fn schedule_search(&mut self, cx: &mut Context<Self>) {
-        let term = self.input.read(cx).value().trim().to_string();
+    /// Searches for `term` (not empty) after the pause.
+    pub fn set_term(&mut self, term: String, cx: &mut Context<Self>) {
         // Enter also reports a change; don't search again (and drop the cursor) for that.
         if term == self.term {
             return;
         }
         self.term = term.clone();
-        if term.is_empty() {
-            self.search = None;
-            self.results = Results::Idle;
-            cx.notify();
-            return;
-        }
         self.results = Results::Searching;
         self.cursor.hide();
         cx.notify();
@@ -141,19 +128,8 @@ impl SearchPage {
         .collect()
     }
 
-    /// Up in the search box goes on into the top bar; Down from there comes back to the box.
-    fn up_from_box(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.key == "up"
-            && !event.keystroke.modifiers.modified()
-            && self.input.focus_handle(cx).is_focused(window)
-        {
-            cx.stop_propagation();
-            self.nav.focus_top_bar(window, cx);
-        }
-    }
-
-    /// Enter in the search box: move to the first result.
-    fn enter_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Enter or Down in the search box: move to the first result.
+    pub fn enter_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.groups(window).is_empty() {
             return;
         }
@@ -165,7 +141,6 @@ impl SearchPage {
 
     fn render_results(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         match &self.results {
-            Results::Idle => return centered_message("Type to search your libraries.", cx).into_any_element(),
             Results::Searching => return centered_spinner().into_any_element(),
             Results::Failed(message) => return centered_message(message.clone(), cx).into_any_element(),
             Results::Loaded(items) if items.is_empty() => {
@@ -294,11 +269,6 @@ impl Render for SearchPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let results = self.render_results(window, cx);
         let results = on_browse_actions(div().flex_1().min_h_0().track_focus(&self.focus_handle), cx).child(results);
-        v_flex()
-            .size_full()
-            .gap_4()
-            .capture_key_down(cx.listener(Self::up_from_box))
-            .child(div().px_6().pt_6().max_w(dp(640.)).child(Input::new(&self.input)))
-            .child(results)
+        v_flex().size_full().pt_6().child(results)
     }
 }

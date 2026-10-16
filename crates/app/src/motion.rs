@@ -46,6 +46,41 @@ pub fn slide_in<E: Styled + IntoElement + 'static>(element: E, id: impl Into<Ele
     })
 }
 
+/// How long [`morph`] takes, or nothing with animations off.
+pub fn morph_duration(cx: &App) -> Duration {
+    if cx.reduce_motion() { Duration::ZERO } else { ENTER }
+}
+
+/// Moves `element` from `from` to `to` (its offset right of its place, its width, kept within
+/// its parent's, and its opacity): a control opening out of another one at a different spot,
+/// or closing back into it. The other one [`fade`]s alongside, over the same time.
+pub fn morph<E: Styled + IntoElement + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+    from: (Pixels, Pixels, f32),
+    to: (Pixels, Pixels, f32),
+) -> AnimationElement<E> {
+    animate(element, id, ENTER, Duration::ZERO, move |el, t| {
+        el.relative()
+            .left(from.0 + (to.0 - from.0) * t)
+            .w(from.1 + (to.1 - from.1) * t)
+            .max_w_full()
+            .opacity(from.2 + (to.2 - from.2) * t)
+    })
+}
+
+/// Fades `element` from opacity `from` to `to`, as [`morph`] moves.
+pub fn fade<E: Styled + IntoElement + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+    from: f32,
+    to: f32,
+) -> AnimationElement<E> {
+    animate(element, id, ENTER, Duration::ZERO, move |el, t| {
+        el.opacity(from + (to - from) * t)
+    })
+}
+
 /// Runs `animator` from 0 to 1 over `duration`, eased out, after `delay`.
 fn animate<E: IntoElement + 'static>(
     element: E,

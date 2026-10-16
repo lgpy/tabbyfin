@@ -313,7 +313,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
     - The arrow keys move it, Tab and Shift+Tab jump between sections, and Enter opens the card or presses the button.
     - It's hidden until a key is pressed and hides again on a click, so mouse users never see it.
     - Each page keeps its cursor while it's on the stack, so Back returns to the same card.
-    - In search, Enter in the box moves to the first result, and Up from the top row returns to the box.
+    - Search is a button in the top bar that opens into a box in the middle of the bar (also Ctrl+F / ⌘F); the box turns back into the button when it loses focus empty. Typing opens the results page (or goes back to it from a page opened from it), clearing the box or Esc closes it. Enter or Down in the box moves to the first result, and Up from the top row returns to the box.
     - An item's version and track pickers are a column of the cursor: Up/Down move between them, Left/Right step through the choices and Enter moves to the next one, wrapping. gpui-kit's Select only opens its menu with a click, so the keys set it directly and send the same `Confirm` a menu pick would (`tracks::step_choice`).
     - Settings is gpui-kit's `Settings` panel (a page per topic, searchable) and isn't on the cursor.
     - On an item page, W toggles watched on the highlighted episode, season or entry; in a playlist, Alt+Up/Alt+Down move the entry and Delete removes it.
