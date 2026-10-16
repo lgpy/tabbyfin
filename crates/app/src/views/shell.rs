@@ -4,6 +4,7 @@
 //! position.
 
 use std::rc::Rc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
@@ -49,6 +50,15 @@ const TOP_BAR_BUTTON: f32 = 40.;
 fn bar_icon(icon: impl Into<Icon>) -> Icon {
     icon.into().size(dp(TOP_BAR_ICON))
 }
+
+/// The app icon at the start of the bar. A 128 px copy rather than the 512 px one the
+/// packages ship: GPUI scales images without mipmaps, so a big one would shimmer this small.
+static LOGO: LazyLock<Arc<Image>> = LazyLock::new(|| {
+    Arc::new(Image::from_bytes(
+        ImageFormat::Png,
+        include_bytes!("../../assets/logo.png").to_vec(),
+    ))
+});
 
 /// The top bar's buttons, in order, for the keyboard: Up past a page's first row reaches
 /// them, Left and Right move along, Enter presses, Down or Esc returns to the page.
@@ -597,6 +607,7 @@ impl ShellView {
             .text_lg()
             .border_b_1()
             .border_color(cx.theme().border)
+            .child(img(LOGO.clone()).flex_none().size(dp(TOP_BAR_BUTTON)))
             // Only when there's a page to go back to.
             .when(can_go_back, |el| {
                 el.child(ring(
