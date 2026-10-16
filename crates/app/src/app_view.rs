@@ -368,14 +368,14 @@ impl AppView {
     }
 }
 
-/// Dev aid: `JELLY_GPUI_KEYS="down right enter wait escape"` presses keys after startup, for
+/// Dev aid: `TABBYFIN_KEYS="down right enter wait escape"` presses keys after startup, for
 /// testing keyboard navigation without touching the desktop, on any screen (sign-in too). `wait`
 /// pauses for a second; `down*40` presses a key 40 times, 30 ms apart (a held key, roughly).
 #[cfg(debug_assertions)]
 fn replay_debug_keys(window: &mut Window, cx: &mut Context<AppView>) {
     use std::time::Duration;
 
-    let Ok(keys) = std::env::var("JELLY_GPUI_KEYS") else {
+    let Ok(keys) = std::env::var("TABBYFIN_KEYS") else {
         return;
     };
     cx.spawn_in(window, async move |_, cx| {

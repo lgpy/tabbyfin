@@ -20,7 +20,7 @@ impl Session {
 pub fn client_info(device_id: &str) -> ClientInfo {
     let device = gethostname::gethostname().to_string_lossy().into_owned();
     ClientInfo {
-        client: "jelly-gpui".into(),
+        client: "Tabbyfin".into(),
         device: if device.is_empty() { "Desktop".into() } else { device },
         device_id: device_id.to_owned(),
         version: env!("CARGO_PKG_VERSION").into(),

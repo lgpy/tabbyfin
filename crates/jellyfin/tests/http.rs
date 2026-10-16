@@ -13,7 +13,7 @@ const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 
 async fn client(server: &MockServer) -> Client {
     let info = ClientInfo {
-        client: "jelly-gpui-tests".into(),
+        client: "tabbyfin-tests".into(),
         device: "tests".into(),
         device_id: "test-device".into(),
         version: "0.1.0".into(),

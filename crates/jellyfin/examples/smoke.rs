@@ -22,9 +22,9 @@ async fn main() -> anyhow::Result<()> {
     let anon = Client::new(
         &url,
         ClientInfo {
-            client: "jelly-gpui-smoke".into(),
+            client: "tabbyfin-smoke".into(),
             device: "smoke-test".into(),
-            device_id: "jelly-gpui-smoke-test".into(),
+            device_id: "tabbyfin-smoke-test".into(),
             version: env!("CARGO_PKG_VERSION").into(),
         },
     )?;

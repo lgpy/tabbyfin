@@ -13,8 +13,8 @@ import urllib.request
 BASE = os.environ.get("JELLYFIN_URL", "http://localhost:8096")
 USER = os.environ.get("JELLYFIN_USER", "dev")
 PASS = os.environ.get("JELLYFIN_PASS", "dev")
-SERVER_NAME = "jelly-gpui dev"
-CLIENT = 'Client="jelly-gpui-dev", Device="setup-script", DeviceId="jelly-gpui-dev-setup", Version="0.1.0"'
+SERVER_NAME = "tabbyfin dev"
+CLIENT = 'Client="tabbyfin-dev", Device="setup-script", DeviceId="tabbyfin-dev-setup", Version="0.1.0"'
 
 LIBRARIES = [
     ("Movies", "movies", "/media/Movies", ["Movie"]),

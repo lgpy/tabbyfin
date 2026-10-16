@@ -46,20 +46,20 @@ tool="$work/linuxdeploy-x86_64.AppImage"
 chmod +x "$tool"
 
 appdir="$work/AppDir"
-mkdir -p "$appdir/usr/share/doc/jelly-gpui"
-cp "$here/../LICENSE" "$here/THIRD_PARTY.md" "$appdir/usr/share/doc/jelly-gpui/"
+mkdir -p "$appdir/usr/share/doc/tabbyfin"
+cp "$here/../LICENSE" "$here/THIRD_PARTY.md" "$appdir/usr/share/doc/tabbyfin/"
 
 # The app finds libmpv in ../lib next to its executable (usr/bin -> usr/lib). Without FUSE
 # (containers, CI, WSL) linuxdeploy runs from its own extracted copy.
 (
   cd "$work"
-  APPIMAGE_EXTRACT_AND_RUN=1 LDAI_OUTPUT="jelly-gpui-$version-linux-x86_64.AppImage" LDAI_VERSION="$version" \
+  APPIMAGE_EXTRACT_AND_RUN=1 LDAI_OUTPUT="tabbyfin-$version-linux-x86_64.AppImage" LDAI_VERSION="$version" \
     "$tool" --appdir "$appdir" \
     --executable "$binary" \
     --library "$libmpv" "${extra[@]}" \
     --exclude-library 'libvulkan.so*' \
-    --desktop-file "$here/jelly-gpui.desktop" \
-    --icon-file "$here/jelly-gpui.png" \
+    --desktop-file "$here/tabbyfin.desktop" \
+    --icon-file "$here/tabbyfin.png" \
     --output appimage
 )
-mv "$work/jelly-gpui-$version-linux-x86_64.AppImage" "$out/"
+mv "$work/tabbyfin-$version-linux-x86_64.AppImage" "$out/"

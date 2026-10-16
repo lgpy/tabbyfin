@@ -1,19 +1,19 @@
 # Flatpak build (docs/PLAN.md §5.3):
 #
-#   mise run package:flatpak         # builds dist/jelly-gpui-<version>.flatpak
+#   mise run package:flatpak         # builds dist/tabbyfin-<version>.flatpak
 #
 # The freedesktop runtime has FFmpeg (with the codecs-extra extension for H.264, HEVC…) but not
 # mpv, so mpv and the two libraries it needs that the runtime lacks (libass, libplacebo) are
 # built here first. The Rust crates come from cargo-sources.json, generated from Cargo.lock by
 # flatpak-builder-tools' flatpak-cargo-generator.py (packaging/flatpak/update-cargo-sources.sh),
 # since the build has no network.
-id: io.github.lgpy.jelly-gpui
+id: io.github.lgpy.tabbyfin
 runtime: org.freedesktop.Platform
 runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: jelly-gpui
+command: tabbyfin
 finish-args:
   - --share=network
   - --share=ipc
@@ -65,22 +65,22 @@ modules:
         url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz
         sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
 
-  - name: jelly-gpui
+  - name: tabbyfin
     buildsystem: simple
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin
       env:
-        CARGO_HOME: /run/build/jelly-gpui/cargo
+        CARGO_HOME: /run/build/tabbyfin/cargo
     build-commands:
       - cargo --offline fetch --manifest-path Cargo.toml --verbose
-      - cargo --offline build --release --locked -p jelly-gpui
-      - install -Dm755 target/release/jelly-gpui /app/bin/jelly-gpui
+      - cargo --offline build --release --locked -p tabbyfin
+      - install -Dm755 target/release/tabbyfin /app/bin/tabbyfin
       # The desktop file and icon go by the app id in a Flatpak.
-      - install -Dm644 packaging/jelly-gpui.desktop /app/share/applications/io.github.lgpy.jelly-gpui.desktop
-      - desktop-file-edit --set-icon=io.github.lgpy.jelly-gpui /app/share/applications/io.github.lgpy.jelly-gpui.desktop
-      - install -Dm644 packaging/jelly-gpui.png /app/share/icons/hicolor/512x512/apps/io.github.lgpy.jelly-gpui.png
-      - install -Dm644 packaging/flatpak/io.github.lgpy.jelly-gpui.metainfo.xml /app/share/metainfo/io.github.lgpy.jelly-gpui.metainfo.xml
-      - install -Dm644 LICENSE /app/share/licenses/io.github.lgpy.jelly-gpui/LICENSE
+      - install -Dm644 packaging/tabbyfin.desktop /app/share/applications/io.github.lgpy.tabbyfin.desktop
+      - desktop-file-edit --set-icon=io.github.lgpy.tabbyfin /app/share/applications/io.github.lgpy.tabbyfin.desktop
+      - install -Dm644 packaging/tabbyfin.png /app/share/icons/hicolor/512x512/apps/io.github.lgpy.tabbyfin.png
+      - install -Dm644 packaging/flatpak/io.github.lgpy.tabbyfin.metainfo.xml /app/share/metainfo/io.github.lgpy.tabbyfin.metainfo.xml
+      - install -Dm644 LICENSE /app/share/licenses/io.github.lgpy.tabbyfin/LICENSE
     sources:
       - type: dir
         path: ../..

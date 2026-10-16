@@ -3,7 +3,7 @@
 //! libmpv renders into a [`libmpv::VideoOutput`] the UI draws; see `docs/in-app-video.md`. By
 //! default it runs in a separate player host process (this executable with `--player-host`,
 //! see [`host`] and [`remote`]), so an mpv or GPU driver crash doesn't take the app down;
-//! `JELLY_GPUI_PLAYER=embedded` runs it inside the app instead. Commands are async; player
+//! `TABBYFIN_PLAYER=embedded` runs it inside the app instead. Commands are async; player
 //! state arrives as [`PlayerEvent`]s on a channel. Dropping the [`Player`] stops playback. Must
 //! be used from within a tokio runtime.
 
@@ -63,10 +63,10 @@ enum Backend {
 type Started = (Player, mpsc::UnboundedReceiver<PlayerEvent>, libmpv::VideoOutput);
 
 impl Player {
-    /// Starts mpv, in a player host process unless `JELLY_GPUI_PLAYER=embedded`. Fails with
+    /// Starts mpv, in a player host process unless `TABBYFIN_PLAYER=embedded`. Fails with
     /// [`Error::LibmpvUnavailable`] where libmpv can't be loaded.
     pub async fn spawn() -> Result<Started> {
-        if std::env::var("JELLY_GPUI_PLAYER").as_deref() == Ok("embedded") {
+        if std::env::var("TABBYFIN_PLAYER").as_deref() == Ok("embedded") {
             return Self::spawn_embedded().await;
         }
         let (player, events, video) = remote::RemotePlayer::spawn().await?;

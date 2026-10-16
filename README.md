@@ -1,6 +1,6 @@
-<p align="center"><img src="packaging/jelly-gpui.png" alt="" width="160"></p>
+<p align="center"><img src="packaging/tabbyfin.png" alt="" width="160"></p>
 
-<h1 align="center">jelly-gpui</h1>
+<h1 align="center">Tabbyfin</h1>
 
 A native desktop client for [Jellyfin](https://jellyfin.org), built with [GPUI](https://www.gpui.rs/) through [GPUI Kit](https://github.com/longbridge/gpui-kit). Video plays inside the app with [mpv](https://mpv.io) (libmpv), drawn straight from the GPU.
 
@@ -55,13 +55,13 @@ Download the package for your system from the [releases](https://github.com/lgpy
 
 | System | Package | Notes |
 |---|---|---|
-| Windows 10/11 (x86_64) | `jelly-gpui-<version>-windows-x86_64-setup.exe` | Installs for your user (no admin rights needed), with a Start-menu entry and an uninstaller in Settings → Apps. libmpv and ANGLE are included. The build isn't code-signed, so SmartScreen may ask before it runs. |
-| Windows, portable | `jelly-gpui-<version>-windows-x86_64.zip` | The same files: unzip anywhere and run `jelly-gpui.exe`. |
-| Debian, Ubuntu (x86_64) | `jelly-gpui_<version>-1_amd64.deb` | `sudo apt install ./jelly-gpui_<version>-1_amd64.deb` pulls in `libmpv2` and Vulkan. |
-| Other Linux (x86_64) | `jelly-gpui-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it. libmpv is included; needs a Vulkan driver and a 2022 or newer distribution (glibc 2.35: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21…). Without FUSE, run it with `--appimage-extract-and-run`. |
-| Linux, Flatpak (x86_64) | `jelly-gpui-<version>.flatpak` | `flatpak install --user jelly-gpui-<version>.flatpak` (it fetches the freedesktop runtime from Flathub), then start it from the menu or with `flatpak run io.github.lgpy.jelly-gpui`. mpv is included. Settings live in `~/.var/app/io.github.lgpy.jelly-gpui/`, apart from the other packages'. |
-| Linux, tarball | `jelly-gpui-<version>-linux-x86_64.tar.gz` | Needs libmpv (`libmpv.so.2`) and a Vulkan driver installed. For a menu entry, copy `jelly-gpui` to `~/.local/bin/`, `jelly-gpui.desktop` to `~/.local/share/applications/` and `jelly-gpui.png` to `~/.local/share/icons/hicolor/512x512/apps/`. |
-| macOS 12+ (Apple silicon, Intel) | `jelly-gpui-<version>-macos-<arch>.zip` | Needs `brew install mpv` for playback. The app is ad-hoc signed, not notarised: right-click it and choose Open the first time. |
+| Windows 10/11 (x86_64) | `tabbyfin-<version>-windows-x86_64-setup.exe` | Installs for your user (no admin rights needed), with a Start-menu entry and an uninstaller in Settings → Apps. libmpv and ANGLE are included. The build isn't code-signed, so SmartScreen may ask before it runs. |
+| Windows, portable | `tabbyfin-<version>-windows-x86_64.zip` | The same files: unzip anywhere and run `tabbyfin.exe`. |
+| Debian, Ubuntu (x86_64) | `tabbyfin_<version>-1_amd64.deb` | `sudo apt install ./tabbyfin_<version>-1_amd64.deb` pulls in `libmpv2` and Vulkan. |
+| Other Linux (x86_64) | `tabbyfin-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it. libmpv is included; needs a Vulkan driver and a 2022 or newer distribution (glibc 2.35: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21…). Without FUSE, run it with `--appimage-extract-and-run`. |
+| Linux, Flatpak (x86_64) | `tabbyfin-<version>.flatpak` | `flatpak install --user tabbyfin-<version>.flatpak` (it fetches the freedesktop runtime from Flathub), then start it from the menu or with `flatpak run io.github.lgpy.tabbyfin`. mpv is included. Settings live in `~/.var/app/io.github.lgpy.tabbyfin/`, apart from the other packages'. |
+| Linux, tarball | `tabbyfin-<version>-linux-x86_64.tar.gz` | Needs libmpv (`libmpv.so.2`) and a Vulkan driver installed. For a menu entry, copy `tabbyfin` to `~/.local/bin/`, `tabbyfin.desktop` to `~/.local/share/applications/` and `tabbyfin.png` to `~/.local/share/icons/hicolor/512x512/apps/`. |
+| macOS 12+ (Apple silicon, Intel) | `tabbyfin-<version>-macos-<arch>.zip` | Needs `brew install mpv` for playback. The app is ad-hoc signed, not notarised: right-click it and choose Open the first time. |
 
 **Logs** are written to a daily file. *Settings → Logs → Open log folder* opens it; attach the log to bug reports.
 
@@ -95,6 +95,6 @@ Plain `cargo run` works too, with the Rust version pinned in `mise.toml` (1.99).
 
 ## License
 
-jelly-gpui is licensed under the [GNU General Public License v3.0 or later](LICENSE).
+Tabbyfin is licensed under the [GNU General Public License v3.0 or later](LICENSE).
 
 Packages include third-party software under its own licenses: libmpv (GPL-2.0-or-later) and, on Windows, ANGLE and the MinGW runtime. See [`packaging/THIRD_PARTY.md`](packaging/THIRD_PARTY.md). GPUI and GPUI Kit are Apache-2.0; the patched GPUI crates in `third_party/gpui/` keep that license.

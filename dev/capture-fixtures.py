@@ -19,7 +19,7 @@ from pathlib import Path
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8096"
 LABEL = sys.argv[2] if len(sys.argv) > 2 else "12.2"
 OUT = Path(__file__).resolve().parent.parent / "crates/jellyfin/tests/fixtures" / LABEL
-CLIENT = 'Client="jelly-gpui-fixtures", Device="fixtures", DeviceId="jelly-gpui-fixtures", Version="0.1.0"'
+CLIENT = 'Client="tabbyfin-fixtures", Device="fixtures", DeviceId="tabbyfin-fixtures", Version="0.1.0"'
 SECRET = re.compile(r"(?i)((?:api_?key|token)[\"=:]+\s*\"?)[0-9a-f]{32}")
 
 
