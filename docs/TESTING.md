@@ -13,15 +13,16 @@ Tick an item when it's been tried; note the hardware, OS and server version, and
 Everything below was built and run only as Linux debug builds. Use a CI package (`mise run ci:build`), unzipped over the old copy.
 
 - ⬜ **Player controls don't pause the video when clicked** (the `.occlude()` fix). Click the volume slider, the pickers, -10s/+10s and Fullscreen; playback must keep going.
-- ⬜ **Log file:** *Settings → Logs → Open log folder* opens the folder, today's `jelly-gpui.*.log` exists and has no colour codes in it.
+- ⬜ **Log file:** *Settings → Storage → Logs → Open folder* opens the folder, today's `jelly-gpui.*.log` exists and has no colour codes in it.
 - ⬜ **Settings → Playback:** the autoplay switch and the bitrate picker are remembered after a restart.
+- ⬜ **Settings panel** (gpui-kit's `Settings`): every sidebar page and sub-entry opens, the search box filters items, a page's reset button puts its switches back to their defaults, and *Clear* empties the image cache. Seen so far only in screenshots (Appearance, Playback, Storage, Account).
 - ⬜ **Everything in §2–§6** at least once on Windows, since the GPU and ANGLE paths only exist there.
 
 ## 2. Keyboard navigation (3.1)
 
 ✅ Home shelves, library grid, search (Enter into results, Up back to the box), item page buttons, seasons and episodes, Back keeping the cursor; Enter on Resume plays and Esc returns focus to the item page.
 
-✅ Item page pickers by keyboard (Test Movie: version to 720p rebuilt the track pickers, then audio and subtitles stepped), W on a season's first episode (watched off and on again on the server), and Settings (theme to Light, autoplay off, subtitle colour to Yellow, saved to the config; the page scrolls with the cursor).
+✅ Item page pickers by keyboard (Test Movie: version to 720p rebuilt the track pickers, then audio and subtitles stepped), and W on a season's first episode (watched off and on again on the server).
 
 - ⬜ With a **real keyboard**: the ring appears on the first arrow key, a mouse click hides it.
 ✅ Top bar and library toolbar by keyboard: Up from Home's first row into the top bar and back down (the cursor returns to its card), the account menu's highlight, a SyncPlay group created and the menu reopened with Leave highlighted, Esc closing the menu then the top bar; the library's Show stepped to Unwatched and *Clear filters*, the cursor staying in the toolbar.
