@@ -315,7 +315,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
     - Each page keeps its cursor while it's on the stack, so Back returns to the same card.
     - In search, Enter in the box moves to the first result, and Up from the top row returns to the box.
     - An item's version and track pickers are a column of the cursor: Up/Down move between them, Left/Right step through the choices and Enter moves to the next one, wrapping. gpui-kit's Select only opens its menu with a click, so the keys set it directly and send the same `Confirm` a menu pick would (`tracks::step_choice`).
-    - Settings is a cursor over its controls: pickers as above, switches (Left off, Right on, Enter flips) and buttons (Enter).
+    - Settings is gpui-kit's `Settings` panel (a page per topic, searchable) and isn't on the cursor.
     - On an item page, W toggles watched on the highlighted episode, season or entry; in a playlist, Alt+Up/Alt+Down move the entry and Delete removes it.
     - The library toolbar (sort, order, show, genre, year, resolution, clear) is the row above the grid; Enter steps a picker to its next choice or presses a button.
     - Up past a page's first row lets the action through to the shell, which moves into the top bar (the page's cursor hides until the page has the keys again). Left/Right move along it, Enter presses, Down or Esc go back. The account and SyncPlay menus are controlled popovers: opened from the keyboard they highlight an entry, which Up/Down move and Enter chooses. Their content renders in an overlay outside the shell, so it takes the popover's focus itself, forwards keys to the shell, and handles `Confirm` (the popover binds Enter to it) before the popover dismisses.
