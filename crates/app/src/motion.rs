@@ -4,8 +4,9 @@
 //! An animation plays when its element first renders, so each of these plays when what it
 //! wraps appears: a page opened, an image loaded, the player's controls shown.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use gpui_kit::component::Icon;
 use gpui_kit::*;
 
 use crate::config::Config;
@@ -14,6 +15,7 @@ use crate::config::Config;
 const LIFT: f32 = 12.;
 const ENTER: Duration = Duration::from_millis(260);
 const FADE: Duration = Duration::from_millis(220);
+const POP: Duration = Duration::from_millis(420);
 
 pub fn init(config: &Config, cx: &mut App) {
     cx.set_reduce_motion(!config.animations.unwrap_or(true));
@@ -79,6 +81,22 @@ pub fn fade<E: Styled + IntoElement + 'static>(
     animate(element, id, ENTER, Duration::ZERO, move |el, t| {
         el.opacity(from + (to - from) * t)
     })
+}
+
+/// Grows `icon` from half its size to a little past it and back: a toggle's icon filling in as
+/// it turns on. Only within [`POP`] of `started`, so it doesn't play again when the page shows
+/// again later; `id` is new for each start.
+pub fn pop(icon: Icon, id: impl Into<ElementId>, started: Option<Instant>) -> AnyElement {
+    if started.is_none_or(|at| at.elapsed() >= POP) {
+        return icon.into_any_element();
+    }
+    let ease = ease_out_quint();
+    icon.with_animation(id, Animation::new(POP), move |icon, t| {
+        let t = ease(t);
+        let scale = 0.5 + 0.5 * t + 0.35 * (std::f32::consts::PI * t).sin();
+        icon.transform(Transformation::scale(size(scale, scale)))
+    })
+    .into_any_element()
 }
 
 /// Runs `animator` from 0 to 1 over `duration`, eased out, after `delay`.

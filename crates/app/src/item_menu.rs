@@ -5,7 +5,7 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{IconName, WindowExt};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, WindowExt};
 use gpui_kit::*;
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 use jellyfin::{Client, Ticks};
@@ -23,29 +23,66 @@ pub enum Mark {
     Favorite(bool),
 }
 
-/// Sets watched or favorite state on the server, then refreshes the pages showing it.
-pub fn mark(client: Client, nav: Navigator, item_id: String, mark: Mark, window: &mut Window, cx: &mut App) {
-    window
-        .spawn(cx, async move |cx| {
-            let result = runtime::spawn(async move {
-                match mark {
-                    Mark::Played(true) => client.mark_played(&item_id).await,
-                    Mark::Played(false) => client.mark_unplayed(&item_id).await,
-                    Mark::Favorite(true) => client.mark_favorite(&item_id).await,
-                    Mark::Favorite(false) => client.unmark_favorite(&item_id).await,
-                }
-            })
-            .await;
-            cx.update(|window, cx| match result {
-                Ok(()) => Changes::notify_user_data(cx),
-                Err(err) => {
-                    let message = nav.handle_error(&err, cx);
-                    window.push_notification(Notification::error(message), cx);
-                }
-            })
-            .ok();
+impl Mark {
+    /// Whether `item` already shows this.
+    pub fn shown_on(self, item: &BaseItemDto) -> bool {
+        match self {
+            Mark::Played(played) => is_played(item) == played,
+            Mark::Favorite(favorite) => is_favorite(item) == favorite,
+        }
+    }
+
+    /// Shows this on `item`, ahead of the server. The rest of its user data (a played item's
+    /// resume point) comes with the reload that follows.
+    pub fn apply(self, item: &mut BaseItemDto) {
+        let data = item.user_data.get_or_insert_default();
+        match self {
+            Mark::Played(played) => data.played = played,
+            Mark::Favorite(favorite) => data.is_favorite = favorite,
+        }
+    }
+
+    pub fn undone(self) -> Mark {
+        match self {
+            Mark::Played(played) => Mark::Played(!played),
+            Mark::Favorite(favorite) => Mark::Favorite(!favorite),
+        }
+    }
+}
+
+/// Sets watched or favorite state on the server, then refreshes the pages showing it. A failure
+/// shows an error; the task says whether it worked, for a page that showed the change already.
+pub fn mark(
+    client: Client,
+    nav: Navigator,
+    item_id: String,
+    mark: Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Task<bool> {
+    window.spawn(cx, async move |cx| {
+        let result = runtime::spawn(async move {
+            match mark {
+                Mark::Played(true) => client.mark_played(&item_id).await,
+                Mark::Played(false) => client.mark_unplayed(&item_id).await,
+                Mark::Favorite(true) => client.mark_favorite(&item_id).await,
+                Mark::Favorite(false) => client.unmark_favorite(&item_id).await,
+            }
         })
-        .detach();
+        .await;
+        cx.update(|window, cx| match result {
+            Ok(()) => {
+                Changes::notify_user_data(cx);
+                true
+            }
+            Err(err) => {
+                let message = nav.handle_error(&err, cx);
+                window.push_notification(Notification::error(message), cx);
+                false
+            }
+        })
+        .unwrap_or(false)
+    })
 }
 
 pub fn is_played(item: &BaseItemDto) -> bool {
@@ -54,6 +91,37 @@ pub fn is_played(item: &BaseItemDto) -> bool {
 
 pub fn is_favorite(item: &BaseItemDto) -> bool {
     item.user_data.as_ref().is_some_and(|d| d.is_favorite)
+}
+
+/// Lucide's circle-check filled in, with the check cut out of it.
+const CIRCLE_CHECK_FILLED: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <mask id="check"><rect width="24" height="24" fill="white"/>
+    <path d="m16 9-5.5 5.5L8 12" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </mask>
+  <circle cx="12" cy="12" r="11" fill="currentColor" mask="url(#check)"/>
+</svg>"#;
+
+/// Lucide's heart filled in.
+const HEART_FILLED: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/>
+</svg>"#;
+
+/// Watched's icon: a check, filled in green once it's watched.
+pub fn played_icon(played: bool, cx: &App) -> Icon {
+    if played {
+        Icon::default().data(CIRCLE_CHECK_FILLED).text_color(cx.theme().success)
+    } else {
+        Icon::new(IconName::Check)
+    }
+}
+
+/// Favorite's icon: a heart, filled in red once it's a favorite.
+pub fn favorite_icon(favorite: bool, cx: &App) -> Icon {
+    if favorite {
+        Icon::default().data(HEART_FILLED).text_color(cx.theme().red)
+    } else {
+        Icon::new(Lucide::Heart)
+    }
 }
 
 /// Where playback would resume, if it's partway through.
@@ -189,7 +257,7 @@ fn item_menu(mut menu: PopupMenu, item: &BaseItemDto, client: &Client, nav: &Nav
     let marker = |change: Mark| {
         let (client, nav, id) = (client.clone(), nav.clone(), item.id.clone());
         move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-            mark(client.clone(), nav.clone(), id.clone(), change, window, cx)
+            mark(client.clone(), nav.clone(), id.clone(), change, window, cx).detach()
         }
     };
     let (played, favorite) = (is_played(item), is_favorite(item));
