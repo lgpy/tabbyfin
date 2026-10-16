@@ -245,10 +245,12 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
 | Windows | `libmpv-2.dll` next to `jelly-gpui.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. The zip also carries ANGLE (`libEGL.dll`, `libGLESv2.dll`) and its MinGW runtime DLLs, MSYS2 builds pinned in `packaging/angle.lock` and fetched by `packaging/fetch-angle.sh`, for zero-copy video. |
 | macOS | Not bundled yet. The app looks in Homebrew's folders, so `brew install mpv` makes playback work. Bundling `libmpv.dylib` is still to do. The app is ad-hoc signed, not notarized. |
 
-**App icon:** a drawing, so there's no SVG: `packaging/jelly-gpui-artwork.png` is the original (850×850), and `packaging/jelly-gpui.png` (512×512, resized from it with `convert -filter Lanczos -resize 512x512 -strip`) is what's shipped. Linux installs it as the 512×512 hicolor icon (the `.deb`, the AppImage, the Flatpak; the tarball carries it). Windows uses `packaging/jelly-gpui.ico`, embedded in `jelly-gpui.exe` as icon resource 1 by `crates/app/build.rs` (GPUI gives its windows that icon) and used by the installer's shortcuts. macOS gets `jelly-gpui.icns`, made from the PNG with `sips` and `iconutil` when `package.sh` builds the bundle. After changing the PNG, remake the `.ico`:
+**App icon:** the mascot traced from the drawing, as a vector: `packaging/jelly-gpui.svg` is the source (the rest pose from `packaging/mascot/jelly-logo.svg`, cropped square), and the PNGs and the `.ico` are rendered from it. `packaging/jelly-gpui.png` (512×512) is what's shipped, and `packaging/jelly-gpui-artwork.png` is a 1024×1024 render for anywhere that wants it bigger. Linux installs the PNG as the 512×512 hicolor icon (the `.deb`, the AppImage, the Flatpak; the tarball carries it). Windows uses `packaging/jelly-gpui.ico`, embedded in `jelly-gpui.exe` as icon resource 1 by `crates/app/build.rs` (GPUI gives its windows that icon) and used by the installer's shortcuts. macOS gets `jelly-gpui.icns`, made from the PNG with `sips` and `iconutil` when `package.sh` builds the bundle. After changing the SVG, render them again with resvg (`cargo install resvg`), each `.ico` size drawn at its own size so the small ones stay sharp:
 
 ```sh
-for z in 256 128 64 48 32 16; do convert packaging/jelly-gpui.png -filter Lanczos -resize ${z}x$z -strip /tmp/icon-$z.png; done
+resvg -w 512 -h 512 packaging/jelly-gpui.svg packaging/jelly-gpui.png
+resvg -w 1024 -h 1024 packaging/jelly-gpui.svg packaging/jelly-gpui-artwork.png
+for z in 256 128 64 48 32 16; do resvg -w $z -h $z packaging/jelly-gpui.svg /tmp/icon-$z.png; done
 convert /tmp/icon-{256,128,64,48,32,16}.png packaging/jelly-gpui.ico
 ```
 
