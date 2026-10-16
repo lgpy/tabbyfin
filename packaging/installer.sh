@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Windows installer (packaging/jelly-gpui.iss) with Inno Setup's ISCC.exe, from a
+# Builds the Windows installer (packaging/tabbyfin.iss) with Inno Setup's ISCC.exe, from a
 # staged app folder. Works from Git Bash on Windows (CI) and from WSL. Without ISCC it says so
 # and does nothing, so the .zip alone still gets built.
 #
@@ -31,4 +31,4 @@ winpath() {
   if command -v cygpath >/dev/null; then cygpath -w "$1"; else wslpath -w "$1"; fi
 }
 "$iscc" /Q "/DAppVersion=$version" "/DSourceDir=$(winpath "$source_dir")" "/DOutputDir=$(winpath "$out")" \
-  "$(winpath "$here/jelly-gpui.iss")"
+  "$(winpath "$here/tabbyfin.iss")"

@@ -188,7 +188,7 @@ impl SavedServer {
         account_key(&self.server_id, &self.user_id)
     }
 
-    /// "dev on jelly-gpui dev", or the address without a server name.
+    /// "dev on tabbyfin dev", or the address without a server name.
     pub fn label(&self) -> String {
         let server = self.server_name.clone().unwrap_or_else(|| self.url.clone());
         format!("{} on {server}", self.username)
@@ -201,41 +201,41 @@ pub fn account_key(server_id: &str, user_id: &str) -> String {
 }
 
 fn project_dirs() -> Option<ProjectDirs> {
-    ProjectDirs::from("", "", "jelly-gpui")
+    ProjectDirs::from("", "", "tabbyfin")
 }
 
-/// The config folder. `JELLY_GPUI_CONFIG_DIR` overrides it, e.g. so test runs
+/// The config folder. `TABBYFIN_CONFIG_DIR` overrides it, e.g. so test runs
 /// (`dev/win-run.sh`) don't touch the real sign-in.
 pub fn dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("JELLY_GPUI_CONFIG_DIR") {
+    if let Some(dir) = std::env::var_os("TABBYFIN_CONFIG_DIR") {
         return PathBuf::from(dir);
     }
     project_dirs()
         .map(|d| d.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".jelly-gpui"))
+        .unwrap_or_else(|| PathBuf::from(".tabbyfin"))
 }
 
-/// Log files. Under the config folder when `JELLY_GPUI_CONFIG_DIR` is set, so test runs keep
+/// Log files. Under the config folder when `TABBYFIN_CONFIG_DIR` is set, so test runs keep
 /// their logs to themselves; otherwise the platform's local data dir.
 pub fn log_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("JELLY_GPUI_CONFIG_DIR") {
+    if let Some(dir) = std::env::var_os("TABBYFIN_CONFIG_DIR") {
         return PathBuf::from(dir).join("logs");
     }
     project_dirs()
         .map(|d| d.data_local_dir().join("logs"))
-        .unwrap_or_else(|| PathBuf::from(".jelly-gpui/logs"))
+        .unwrap_or_else(|| PathBuf::from(".tabbyfin/logs"))
 }
 
 /// Platform cache dir, for data that can be deleted at any time (e.g. images).
-/// The image cache. Under the config folder when `JELLY_GPUI_CONFIG_DIR` is set, so test runs
+/// The image cache. Under the config folder when `TABBYFIN_CONFIG_DIR` is set, so test runs
 /// don't fill the real cache.
 pub fn cache_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("JELLY_GPUI_CONFIG_DIR") {
+    if let Some(dir) = std::env::var_os("TABBYFIN_CONFIG_DIR") {
         return PathBuf::from(dir).join("cache");
     }
     project_dirs()
         .map(|d| d.cache_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".jelly-gpui/cache"))
+        .unwrap_or_else(|| PathBuf::from(".tabbyfin/cache"))
 }
 
 fn path() -> PathBuf {

@@ -122,7 +122,7 @@ jobs:
       - name: Install Inno Setup (Windows installer)
         if: runner.os == 'Windows'
         run: choco install innosetup --version 6.7.1 --no-progress -y
-      - run: cargo build --release --locked -p jelly-gpui --target ${{ matrix.target }}
+      - run: cargo build --release --locked -p tabbyfin --target ${{ matrix.target }}
       - name: Package
         shell: bash
         env:
@@ -131,7 +131,7 @@ jobs:
         run: packaging/package.sh ${{ matrix.target }} dist
       - uses: actions/upload-artifact@v4
         with:
-          name: jelly-gpui-${{ matrix.target }}
+          name: tabbyfin-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
 
@@ -148,7 +148,7 @@ jobs:
         run: packaging/appimage-docker.sh dist
       - uses: actions/upload-artifact@v4
         with:
-          name: jelly-gpui-appimage
+          name: tabbyfin-appimage
           path: dist/*.AppImage
           if-no-files-found: error
 
@@ -165,7 +165,7 @@ jobs:
         run: packaging/flatpak/build.sh dist
       - uses: actions/upload-artifact@v4
         with:
-          name: jelly-gpui-flatpak
+          name: tabbyfin-flatpak
           path: dist/*.flatpak
           if-no-files-found: error
 

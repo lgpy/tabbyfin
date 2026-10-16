@@ -37,7 +37,7 @@ export CARGO_HOME=/src/target/appimage/cargo RUSTUP_HOME=/src/target/appimage/ru
 [[ -x "$CARGO_HOME/bin/cargo" ]] || curl -fsSL https://sh.rustup.rs | sh -s -- -y -q --profile minimal \
   --default-toolchain "$RUST" --no-modify-path
 "$CARGO_HOME/bin/rustup" toolchain install --profile minimal "$RUST" >/dev/null
-CARGO_TARGET_DIR=/src/target/appimage/build "$CARGO_HOME/bin/cargo" "+$RUST" build --release --locked -p jelly-gpui
-packaging/appimage.sh target/appimage/build/release/jelly-gpui "$VERSION" "$OUT"
+CARGO_TARGET_DIR=/src/target/appimage/build "$CARGO_HOME/bin/cargo" "+$RUST" build --release --locked -p tabbyfin
+packaging/appimage.sh target/appimage/build/release/tabbyfin "$VERSION" "$OUT"
 '
 ls -l "$root/$out"/*.AppImage

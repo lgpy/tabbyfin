@@ -15,7 +15,7 @@ RUST_LOG = "info"
 
 [tasks.run]
 description = "Run the app (debug build)"
-run = "cargo run -p jelly-gpui"
+run = "cargo run -p tabbyfin"
 
 [tasks.build]
 description = "Build the workspace"
@@ -91,7 +91,7 @@ run = [
 description = "Release build and package for a target (default: this Linux machine)"
 usage = 'arg "[target]" default="x86_64-unknown-linux-gnu"'
 run = [
-  "cargo build --release --locked -p jelly-gpui --target {{arg(name='target')}}",
+  "cargo build --release --locked -p tabbyfin --target {{arg(name='target')}}",
   "packaging/package.sh {{arg(name='target')}} dist",
 ]
 

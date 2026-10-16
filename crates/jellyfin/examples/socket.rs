@@ -22,9 +22,9 @@ async fn main() -> anyhow::Result<()> {
     let anon = Client::new(
         &env("JELLYFIN_URL", "localhost:8096"),
         ClientInfo {
-            client: "jelly-gpui-socket".into(),
+            client: "tabbyfin-socket".into(),
             device: "socket-test".into(),
-            device_id: "jelly-gpui-socket-test".into(),
+            device_id: "tabbyfin-socket-test".into(),
             version: env!("CARGO_PKG_VERSION").into(),
         },
     )?;

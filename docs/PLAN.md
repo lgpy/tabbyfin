@@ -1,4 +1,4 @@
-# jelly-gpui: Foundation Plan
+# Tabbyfin: Foundation Plan
 
 A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](https://www.gpui.rs/) through [GPUI Kit](https://github.com/longbridge/gpui-kit), and playback runs in mpv.
 
@@ -48,7 +48,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 ## 3. Workspace layout
 
 ```
-jelly-gpui/
+tabbyfin/
 ├── Cargo.toml                # workspace; pins gpui-kit
 ├── crates/
 │   ├── jellyfin/             # Pure API client: no gpui, no mpv
@@ -89,7 +89,7 @@ Jellyfin 12.0 **disables legacy authorization by default**, and existing install
 
 - The `Authorization` header with the `MediaBrowser` scheme:
   ```
-  Authorization: MediaBrowser Client="jelly-gpui", Device="<hostname>", DeviceId="<stable uuid>", Version="<crate version>", Token="<token>"
+  Authorization: MediaBrowser Client="tabbyfin", Device="<hostname>", DeviceId="<stable uuid>", Version="<crate version>", Token="<token>"
   ```
 - The `ApiKey` query parameter, for cases where we can't set a header.
 
@@ -191,11 +191,11 @@ Video plays **inside the app** through libmpv. There's no separate mpv window an
   3. After `file-loaded`, `sub-add` for each external subtitle. These requests are authenticated by the same header.
 - **Observed properties:** `time-pos` (throttled to about once a second), `duration`, `pause`, `volume` and `mute`.
 - **Hardware decoding:** `hwdec=auto-safe` on the GPU video paths, so frames stay on the GPU where mpv has an interop for the render context (`d3d11va` through ANGLE on Windows, `nvdec` anywhere), and `auto-copy-safe` on the software path. The log says which decoder each file got (`video decoding: …`).
-- **mpv's log** is forwarded to ours at `warn` level. `JELLY_GPUI_MPV_LOG=v` (or any mpv level) shows more.
+- **mpv's log** is forwarded to ours at `warn` level. `TABBYFIN_MPV_LOG=v` (or any mpv level) shows more.
 
 ### 5.1b The player host process
 
-libmpv doesn't run inside the app. `Player::spawn` starts this same executable again as `jelly-gpui --player-host` (`crates/player/src/host.rs`). That process runs libmpv and the video output described above, and the app talks to it over its stdin and stdout (`remote.rs`, `wire.rs`). An mpv or GPU driver crash then only kills the player process.
+libmpv doesn't run inside the app. `Player::spawn` starts this same executable again as `tabbyfin --player-host` (`crates/player/src/host.rs`). That process runs libmpv and the video output described above, and the app talks to it over its stdin and stdout (`remote.rs`, `wire.rs`). An mpv or GPU driver crash then only kills the player process.
 
 - **Messages:** length-prefixed JSON headers with an optional binary payload.
   - App to host: mpv commands, properties (each answered with a reply) and the on-screen size.
@@ -203,11 +203,11 @@ libmpv doesn't run inside the app. `Player::spawn` starts this same executable a
 - **Frames:**
   - **Software:** the BGRA pixels go as the payload. Only the newest frame is sent, so a slow app skips frames instead of queueing them.
   - **Windows:** only the D3D11 texture's legacy share handle is sent; any process can open it.
-  - **Linux:** the Vulkan memory fd of each image is passed once over a socket pair (`SCM_RIGHTS`; the host inherits its end as `JELLY_GPUI_PLAYER_FD`). The app keeps the newest 8 open, since GPUI duplicates an fd when it first draws it.
+  - **Linux:** the Vulkan memory fd of each image is passed once over a socket pair (`SCM_RIGHTS`; the host inherits its end as `TABBYFIN_PLAYER_FD`). The app keeps the newest 8 open, since GPUI duplicates an fd when it first draws it.
 - **Logging:** the host logs plain lines to stderr. The app forwards them into its own log under the `player` target.
 - **Crashes:** when the host dies without having finished, the app gets `EndFile(Error(HOST_CRASHED))` and `Exited`. The session ends as *lost*, the manager starts a new session (and host) at the same position, and the user sees "The player stopped unexpectedly. Restarting it…". After three tries the error says the player keeps crashing.
 - **Lifetime:** the host exits when its stdin closes, which happens when the app drops the player or exits. It's also killed when the app drops it.
-- **`JELLY_GPUI_PLAYER=embedded`** runs libmpv inside the app as before, for debugging.
+- **`TABBYFIN_PLAYER=embedded`** runs libmpv inside the app as before, for debugging.
 
 Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) through the host. Killing the host mid-play on both resumes playback in a new one. Linux GPU frames through the host are confirmed on WSL's llvmpipe (forced GPU path), in-process too.
 
@@ -241,15 +241,18 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
 
 | Platform | libmpv |
 |---|---|
-| Linux | The system's `libmpv2` for the `.deb` (which depends on it) and the tarball. The AppImage bundles it with the libraries it needs (`packaging/appimage.sh`, with linuxdeploy pinned in `packaging/linuxdeploy.lock`), leaving out what has to match the system (glibc, GL, X11/Wayland, the Vulkan loader) and forcing in `libjack` and `libusb`, which linuxdeploy's exclude list skips but plenty of desktops lack. The app looks for libmpv in `../lib` next to its executable (the AppImage's `usr/lib`), any version, before the system's. The AppImage is built in an Ubuntu 22.04 container (`packaging/appimage-docker.sh`, `mise run package:appimage`, a CI job of its own), so it needs glibc 2.35 and carries that release's mpv 0.34 (`libmpv.so.1`). The Flatpak (`packaging/flatpak/`, app id `io.github.lgpy.jelly-gpui`, freedesktop 26.08 runtime) builds mpv 0.41 itself, with libass and libplacebo, on the runtime's FFmpeg; the runtime's codecs-extra extension supplies H.264, HEVC and the rest. Its Rust crates are listed in `packaging/flatpak/cargo-sources.json` because the build is offline: regenerate it with `mise run flatpak:sources` whenever `Cargo.lock` changes. It builds with the SDK's Rust (1.98 for 26.08), so the code must not need anything newer. |
-| Windows | `libmpv-2.dll` next to `jelly-gpui.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. The zip also carries ANGLE (`libEGL.dll`, `libGLESv2.dll`) and its MinGW runtime DLLs, MSYS2 builds pinned in `packaging/angle.lock` and fetched by `packaging/fetch-angle.sh`, for zero-copy video. |
+| Linux | The system's `libmpv2` for the `.deb` (which depends on it) and the tarball. The AppImage bundles it with the libraries it needs (`packaging/appimage.sh`, with linuxdeploy pinned in `packaging/linuxdeploy.lock`), leaving out what has to match the system (glibc, GL, X11/Wayland, the Vulkan loader) and forcing in `libjack` and `libusb`, which linuxdeploy's exclude list skips but plenty of desktops lack. The app looks for libmpv in `../lib` next to its executable (the AppImage's `usr/lib`), any version, before the system's. The AppImage is built in an Ubuntu 22.04 container (`packaging/appimage-docker.sh`, `mise run package:appimage`, a CI job of its own), so it needs glibc 2.35 and carries that release's mpv 0.34 (`libmpv.so.1`). The Flatpak (`packaging/flatpak/`, app id `io.github.lgpy.tabbyfin`, freedesktop 26.08 runtime) builds mpv 0.41 itself, with libass and libplacebo, on the runtime's FFmpeg; the runtime's codecs-extra extension supplies H.264, HEVC and the rest. Its Rust crates are listed in `packaging/flatpak/cargo-sources.json` because the build is offline: regenerate it with `mise run flatpak:sources` whenever `Cargo.lock` changes. It builds with the SDK's Rust (1.98 for 26.08), so the code must not need anything newer. |
+| Windows | `libmpv-2.dll` next to `tabbyfin.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. The zip also carries ANGLE (`libEGL.dll`, `libGLESv2.dll`) and its MinGW runtime DLLs, MSYS2 builds pinned in `packaging/angle.lock` and fetched by `packaging/fetch-angle.sh`, for zero-copy video. |
 | macOS | Not bundled yet. The app looks in Homebrew's folders, so `brew install mpv` makes playback work. Bundling `libmpv.dylib` is still to do. The app is ad-hoc signed, not notarized. |
 
-**App icon:** a drawing, so there's no SVG: `packaging/jelly-gpui-artwork.png` is the original (850×850), and `packaging/jelly-gpui.png` (512×512, resized from it with `convert -filter Lanczos -resize 512x512 -strip`) is what's shipped. The top bar shows `crates/app/assets/logo.png`, a 128×128 copy embedded in the binary (GPUI scales images without mipmaps, so the 512 px one would alias at 40 px). Linux installs it as the 512×512 hicolor icon (the `.deb`, the AppImage, the Flatpak; the tarball carries it). Windows uses `packaging/jelly-gpui.ico`, embedded in `jelly-gpui.exe` as icon resource 1 by `crates/app/build.rs` (GPUI gives its windows that icon) and used by the installer's shortcuts. macOS gets `jelly-gpui.icns`, made from the PNG with `sips` and `iconutil` when `package.sh` builds the bundle. After changing the PNG, remake the `.ico`:
+**App icon:** the mascot traced from the drawing, as a vector: `packaging/tabbyfin.svg` is the source (the rest pose from `packaging/mascot/jelly-logo.svg`, cropped square), and the PNGs and the `.ico` are rendered from it. `packaging/tabbyfin.png` (512×512) is what's shipped, and `packaging/tabbyfin-artwork.png` is a 1024×1024 render for anywhere that wants it bigger. The top bar shows `crates/app/assets/logo.png`, a 128×128 render embedded in the binary (GPUI scales images without mipmaps, so the 512 px one would alias at 40 px). Linux installs the PNG as the 512×512 hicolor icon (the `.deb`, the AppImage, the Flatpak; the tarball carries it). Windows uses `packaging/tabbyfin.ico`, embedded in `tabbyfin.exe` as icon resource 1 by `crates/app/build.rs` (GPUI gives its windows that icon) and used by the installer's shortcuts. macOS gets `tabbyfin.icns`, made from the PNG with `sips` and `iconutil` when `package.sh` builds the bundle. After changing the SVG, render them again with resvg (`cargo install resvg`), each `.ico` size drawn at its own size so the small ones stay sharp:
 
 ```sh
-for z in 256 128 64 48 32 16; do convert packaging/jelly-gpui.png -filter Lanczos -resize ${z}x$z -strip /tmp/icon-$z.png; done
-convert /tmp/icon-{256,128,64,48,32,16}.png packaging/jelly-gpui.ico
+resvg -w 512 -h 512 packaging/tabbyfin.svg packaging/tabbyfin.png
+resvg -w 1024 -h 1024 packaging/tabbyfin.svg packaging/tabbyfin-artwork.png
+resvg -w 128 -h 128 packaging/tabbyfin.svg crates/app/assets/logo.png
+for z in 256 128 64 48 32 16; do resvg -w $z -h $z packaging/tabbyfin.svg /tmp/icon-$z.png; done
+convert /tmp/icon-{256,128,64,48,32,16}.png packaging/tabbyfin.ico
 ```
 
 **Pinned downloads** (`packaging/mpv.lock`, `angle.lock`, `linuxdeploy.lock`) go through `packaging/download.sh`, which tries our copy first (the repo's `deps` release, one asset per file, named by its SHA256; fetched with `gh` and CI's token while the repo is private), then the original URL, and checks the checksum either way. After changing a lock file, `mise run deps:mirror` uploads the new file. The Flatpak's sources (libass, libplacebo, mpv, crates) aren't mirrored: Flathub-style builds fetch them from their projects.
@@ -258,7 +261,7 @@ convert /tmp/icon-{256,128,64,48,32,16}.png packaging/jelly-gpui.ico
 
 **Builds:** `.github/workflows/ci.yml` runs clippy and the tests on all three OSes. On a `v*` tag, or when started by hand, it also packages all four targets:
 - Linux `.tar.gz` and `.deb`, the AppImage (built in Ubuntu 22.04), and a Flatpak bundle (`packaging/flatpak/build.sh`)
-- Windows `.zip`, and an installer from the same files (`packaging/jelly-gpui.iss`, Inno Setup 6, built by `packaging/installer.sh`): per-user install without admin rights, Start-menu and optional desktop shortcuts, an uninstaller, upgrades in place
+- Windows `.zip`, and an installer from the same files (`packaging/tabbyfin.iss`, Inno Setup 6, built by `packaging/installer.sh`): per-user install without admin rights, Start-menu and optional desktop shortcuts, an uninstaller, upgrades in place
 - macOS arm64 and x86_64 `.zip`
 
 A tag also creates a draft GitHub release with these files. Locally, `mise run package` packages Linux (`package:appimage` and `package:flatpak` build those two), and `mise run ci:build` builds every OS on CI.
@@ -299,6 +302,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 - **Views load their own data:**
   - They spawn a fetch when created and move through `Loading`, then `Loaded(T)` or `Error`.
   - DTOs are cached in memory by id, so going back is instant.
+  - While loading, pages, the startup screen and the player show the mascot (`mascot.rs`): the app icon's jellycat, painted as GPUI paths each frame and still when animations are off. Each loader shows the cute or the evil face (`EVIL_ODDS`), picked when it appears and kept in element state while it shows; empty search results and empty libraries (`empty_state`) show the confused one, scratching its head under a question mark. Its source drawings and SVGs are in `packaging/mascot/`.
 - **Async bridge (`runtime.rs`):**
   - One global multi-threaded tokio `Runtime`.
   - A helper (an extension trait, for example `cx.spawn_tokio(fut)`) runs the future on tokio and returns the result to GPUI's foreground executor.
@@ -371,11 +375,11 @@ sudo apt install build-essential pkg-config libmpv2 \
 ```
 - `libmpv2` is the runtime library the player loads. No `-dev` package is needed, because libmpv is loaded at runtime.
 - `mingw-w64` adds the Windows test loop: `dev/win-run.sh` cross-builds, copies to `C:\Temp\jelly-dev` and runs on the Windows host.
-  - It uses its own config folder (`JELLY_GPUI_CONFIG_DIR=C:\Temp\jelly-dev\config`), so your real sign-in isn't touched. Set it to an empty string to use the normal one.
-  - `JELLY_GPUI_VIDEO=software` forces software video and `=gpu` forces the GPU path, even on software OpenGL, to compare the two. Both work on Linux too.
+  - It uses its own config folder (`TABBYFIN_CONFIG_DIR=C:\Temp\jelly-dev\config`), so your real sign-in isn't touched. Set it to an empty string to use the normal one.
+  - `TABBYFIN_VIDEO=software` forces software video and `=gpu` forces the GPU path, even on software OpenGL, to compare the two. Both work on Linux too.
   - The script also fetches ANGLE next to the exe. Delete `libEGL.dll` there to try the WGL path.
-  - `JELLY_GPUI_ROUTE=play:<id>:::<media source id>` plays a specific version, e.g. the 4K HEVC 10-bit one that `dev/make-media.sh` adds to Test Movie.
-- `JELLY_GPUI_KEYS="down right enter wait escape"` (debug builds) presses keys inside the app 3 s after sign-in, 250 ms apart; `wait` pauses for a second. Together with a screenshot (`import -window <id>` under X11), it tests keyboard navigation without touching the desktop's real keyboard or mouse.
+  - `TABBYFIN_ROUTE=play:<id>:::<media source id>` plays a specific version, e.g. the 4K HEVC 10-bit one that `dev/make-media.sh` adds to Test Movie.
+- `TABBYFIN_KEYS="down right enter wait escape"` (debug builds) presses keys inside the app 3 s after sign-in, 250 ms apart; `wait` pauses for a second. Together with a screenshot (`import -window <id>` under X11), it tests keyboard navigation without touching the desktop's real keyboard or mouse.
 - GPUI on WSL2 runs through WSLg (`WAYLAND_DISPLAY=wayland-0` is set). It needs a working Vulkan driver, such as mesa `dzn` or llvmpipe.
 - Run `vulkaninfo --summary` before debugging rendering problems.
 - If WSLg rendering is poor, use a native Windows build for daily UI work. GPUI supports Windows directly.
