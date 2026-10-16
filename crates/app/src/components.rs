@@ -12,7 +12,7 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, BaseItemPerson, ChapterInfo, I
 use jellyfin::{ImageRequest, Ticks};
 
 use crate::images::ImageCache;
-use crate::mascot::mascot;
+use crate::mascot::{confused_mascot, mascot};
 use crate::motion;
 use crate::smooth_scroll::glide_by;
 use crate::zoom::{dp, dp_px};
@@ -622,6 +622,17 @@ pub fn centered_message(message: impl Into<SharedString>, cx: &App) -> impl Into
         .justify_center()
         .text_color(cx.theme().muted_foreground)
         .child(message.into())
+}
+
+/// A page with nothing on it: the confused mascot over `message`.
+pub fn empty_state(message: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap_3()
+        .child(confused_mascot(dp(96.)))
+        .child(div().text_color(cx.theme().muted_foreground).child(message.into()))
 }
 
 /// A failed load with a Retry button.

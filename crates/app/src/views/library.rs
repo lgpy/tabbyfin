@@ -16,7 +16,7 @@ use jellyfin::{Client, ItemsQuery, SortOrder};
 use crate::browse::{Browse, Cursor, Position, Section, on_browse_actions};
 use crate::changes::{Changes, UserDataChanged};
 use crate::components::{
-    CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_message, centered_spinner, error_state, placeholder_card,
+    CARD_GAP, CARD_TEXT_H, POSTER_H, POSTER_W, centered_spinner, empty_state, error_state, placeholder_card,
     poster_card, selection_ring,
 };
 use crate::config::{Config, LibraryView};
@@ -984,7 +984,7 @@ impl LibraryPage {
             } else {
                 "Nothing here yet."
             };
-            return centered_message(message, cx).into_any_element();
+            return empty_state(message, cx).into_any_element();
         }
 
         let columns = self.columns(window);
