@@ -3,36 +3,13 @@
 //!
 //! The cursor stays hidden until a key is pressed, and hides again on a click, so mouse users
 //! never see it.
+//!
+//! A page implements [`Browse`] and passes its keys to [`on_key`] (its `Page::on_key`). While
+//! drawing, it marks the card at [`Cursor::is_selected`] and calls [`reveal`] for it, and calls
+//! [`hide_on_click`].
 
-use gpui_kit::*;
-
-actions!(
-    browse,
-    [
-        MoveLeft,
-        MoveRight,
-        MoveUp,
-        MoveDown,
-        NextSection,
-        PrevSection,
-        Activate
-    ]
-);
-
-pub const KEY_CONTEXT: &str = "Browse";
-
-pub fn key_bindings() -> Vec<KeyBinding> {
-    let context = Some(KEY_CONTEXT);
-    vec![
-        KeyBinding::new("left", MoveLeft, context),
-        KeyBinding::new("right", MoveRight, context),
-        KeyBinding::new("up", MoveUp, context),
-        KeyBinding::new("down", MoveDown, context),
-        KeyBinding::new("tab", NextSection, context),
-        KeyBinding::new("shift-tab", PrevSection, context),
-        KeyBinding::new("enter", Activate, context),
-    ]
-}
+use crate::keys::Action;
+use crate::views::PageCx;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Move {
@@ -81,6 +58,8 @@ pub struct Position {
 pub struct Cursor {
     position: Position,
     visible: bool,
+    /// A key moved the cursor (or showed it) since the selected card last scrolled into view.
+    reveal: bool,
 }
 
 impl Cursor {
@@ -88,7 +67,7 @@ impl Cursor {
     pub fn starting_at(position: Position) -> Self {
         Self {
             position,
-            visible: false,
+            ..Self::default()
         }
     }
 
@@ -110,6 +89,7 @@ impl Cursor {
     pub fn show_at(&mut self, position: Position) {
         self.position = position;
         self.visible = true;
+        self.reveal = true;
     }
 
     /// Applies a key press. The first press only shows the cursor where it was. Returns the
@@ -123,7 +103,14 @@ impl Cursor {
         };
         self.position = next;
         self.visible = true;
+        self.reveal = true;
         Some(next)
+    }
+
+    /// Whether the selected card should scroll into view, once after each move: scrolling
+    /// it every frame would fight the mouse wheel.
+    pub fn take_reveal(&mut self) -> bool {
+        std::mem::take(&mut self.reveal)
     }
 }
 
@@ -178,135 +165,79 @@ fn step(Position { section, index }: Position, mv: Move, sections: &[Section]) -
     }
 }
 
-/// Scrolls `handle` by the least amount that brings its child `ix` into view, leaving
-/// `margin` around it. Uses the layout from the last frame.
-pub fn reveal(handle: &ScrollHandle, ix: usize, margin: Pixels) {
-    let Some(child) = handle.bounds_for_item(ix) else {
-        return;
-    };
-    let viewport = handle.bounds();
-    let max = handle.max_offset();
-    let mut offset = handle.offset();
-    // Child bounds are laid out without the scroll offset.
-    let axis = |offset: Pixels, start: Pixels, len: Pixels, view_start: Pixels, view_len: Pixels, max: Pixels| {
-        let start = start - view_start;
-        let end = start + len;
-        let visible_start = -offset;
-        let next = if len + margin * 2. > view_len || start - margin < visible_start {
-            -(start - margin)
-        } else if end + margin > visible_start + view_len {
-            -(end + margin - view_len)
-        } else {
-            offset
-        };
-        next.clamp(-max, px(0.))
-    };
-    offset.x = axis(
-        offset.x,
-        child.origin.x,
-        child.size.width,
-        viewport.origin.x,
-        viewport.size.width,
-        max.x,
-    );
-    offset.y = axis(
-        offset.y,
-        child.origin.y,
-        child.size.height,
-        viewport.origin.y,
-        viewport.size.height,
-        max.y,
-    );
-    handle.set_offset(offset);
-}
-
-/// A page with a [`Cursor`]. [`on_browse_actions`] wires up the keys.
-pub trait Browse: Sized + 'static {
+/// A page with a [`Cursor`]: what [`on_key`] needs to move it and act on it.
+pub trait Browse {
     fn cursor(&mut self) -> &mut Cursor;
 
     /// The current layout, in the order sections appear on the page.
-    fn sections(&self, window: &Window, cx: &App) -> Vec<Section>;
-
-    /// Scrolls the selected card into view.
-    fn reveal(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>);
+    fn sections(&self) -> Vec<Section>;
 
     /// Enter on a card.
-    fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>);
+    fn activate(&mut self, position: Position, cx: &mut PageCx);
 
-    /// A key that would move the cursor past the first or last section. By default Up goes on
-    /// to the shell, which moves into the top bar; the cursor hides meanwhile, and the next
-    /// key on the page shows it where it was.
-    fn at_edge(&mut self, mv: Move, _window: &mut Window, cx: &mut Context<Self>) {
+    /// A key that would move the cursor past the first or last section. Returns whether the
+    /// page used it. By default Up goes on to the shell, which moves into the top bar; the
+    /// cursor hides meanwhile, and the next key on the page shows it where it was.
+    fn at_edge(&mut self, mv: Move, _cx: &mut PageCx) -> bool {
         if mv == Move::Up {
             self.cursor().hide();
-            cx.notify();
-            cx.propagate();
+            return false;
         }
+        true
     }
 
     /// Left or Right on a control that takes them itself (a picker or a switch), instead of
     /// moving the cursor. Returns whether it did.
-    fn adjust(&mut self, _position: Position, _forward: bool, _window: &mut Window, _cx: &mut Context<Self>) -> bool {
+    fn adjust(&mut self, _position: Position, _forward: bool, _cx: &mut PageCx) -> bool {
         false
-    }
-
-    fn navigate(&mut self, mv: Move, window: &mut Window, cx: &mut Context<Self>) {
-        if let (Some(position), Move::Left | Move::Right) = (self.cursor().selected(), mv)
-            && self.adjust(position, mv == Move::Right, window, cx)
-        {
-            cx.notify();
-            return;
-        }
-        let sections = self.sections(window, cx);
-        match self.cursor().apply(mv, &sections) {
-            Some(position) => {
-                self.reveal(position, window, cx);
-                cx.notify();
-            }
-            None => self.at_edge(mv, window, cx),
-        }
     }
 }
 
-/// Adds the cursor's key handlers to a page's root element, and hides the cursor on a click.
-pub fn on_browse_actions<T: Browse, E: InteractiveElement>(element: E, cx: &mut Context<T>) -> E {
-    let mv = |mv: Move| move |this: &mut T, window: &mut Window, cx: &mut Context<T>| this.navigate(mv, window, cx);
-    let (left, right, up, down, next, prev) = (
-        mv(Move::Left),
-        mv(Move::Right),
-        mv(Move::Up),
-        mv(Move::Down),
-        mv(Move::NextSection),
-        mv(Move::PrevSection),
-    );
-    element
-        .key_context(KEY_CONTEXT)
-        .on_action(cx.listener(move |this, _: &MoveLeft, window, cx| left(this, window, cx)))
-        .on_action(cx.listener(move |this, _: &MoveRight, window, cx| right(this, window, cx)))
-        .on_action(cx.listener(move |this, _: &MoveUp, window, cx| up(this, window, cx)))
-        .on_action(cx.listener(move |this, _: &MoveDown, window, cx| down(this, window, cx)))
-        .on_action(cx.listener(move |this, _: &NextSection, window, cx| next(this, window, cx)))
-        .on_action(cx.listener(move |this, _: &PrevSection, window, cx| prev(this, window, cx)))
-        .on_action(cx.listener(|this, _: &Activate, window, cx| {
-            match this.cursor().selected() {
-                Some(position) => this.activate(position, window, cx),
-                // Enter with the cursor hidden shows it, like an arrow key.
-                None => this.navigate(Move::Left, window, cx),
+/// A browsing page's keys: its `Page::on_key`. Returns whether the key was used; the ones that
+/// weren't go on to the shell.
+pub fn on_key<B: Browse>(page: &mut B, action: Action, cx: &mut PageCx) -> bool {
+    let mv = match action {
+        Action::Move(mv) => mv,
+        Action::Activate => match page.cursor().selected() {
+            Some(position) => {
+                page.activate(position, cx);
+                return true;
             }
-        }))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _, _, cx| {
-                if this.cursor().hide() {
-                    cx.notify();
-                }
-            }),
-        )
+            // Enter with the cursor hidden shows it, like an arrow key.
+            None => Move::Left,
+        },
+        _ => return false,
+    };
+    if let (Some(position), Move::Left | Move::Right) = (page.cursor().selected(), mv)
+        && page.adjust(position, mv == Move::Right, cx)
+    {
+        return true;
+    }
+    let sections = page.sections();
+    match page.cursor().apply(mv, &sections) {
+        Some(_) => true,
+        None => page.at_edge(mv, cx),
+    }
+}
+
+/// Scrolls the selected card into view after a key moved the cursor onto it. Call it with the
+/// selected card's response while drawing.
+pub fn reveal(cursor: &mut Cursor, card: &egui::Response) {
+    if cursor.take_reveal() {
+        card.scroll_to_me(None);
+    }
+}
+
+/// Hides the cursor when the mouse is pressed on the page, so mouse users never see it. Call it
+/// with the page's whole `Ui`.
+pub fn hide_on_click(cursor: &mut Cursor, ui: &egui::Ui) {
+    if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) {
+        cursor.hide();
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    // Not `super::*`: GPUI's glob would shadow `#[test]`.
     use super::{Cursor, Move, Position, Section};
 
     fn pos(section: usize, index: usize) -> Position {
@@ -403,5 +334,14 @@ mod tests {
         // Nothing left to select.
         assert_eq!(cursor.apply(Move::Left, &[Section::row(0)]), None);
         assert_eq!(cursor.apply(Move::Left, &[]), None);
+    }
+
+    #[test]
+    fn a_move_reveals_the_card_once() {
+        let mut cursor = Cursor::default();
+        assert!(!cursor.take_reveal());
+        cursor.apply(Move::Right, &[Section::row(3)]);
+        assert!(cursor.take_reveal());
+        assert!(!cursor.take_reveal());
     }
 }

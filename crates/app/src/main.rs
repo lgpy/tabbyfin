@@ -1,46 +1,43 @@
 // Release builds on Windows run without a console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// While the app moves to egui, code arrives before its callers (docs/egui-migration.md). X3
+// removes this.
+#![allow(dead_code)]
 
-mod app_view;
+// Every module of the egui app is declared here, including those later tasks fill, so they
+// never need to edit this file. Each one's doc comment says which task brings it.
+mod app;
 mod browse;
-mod changes;
-mod components;
 mod config;
 mod credentials;
+#[cfg(debug_assertions)]
+mod debug;
 mod images;
 mod item_menu;
+mod keys;
 mod live;
 mod markers;
-mod mascot;
-mod motion;
+mod nav;
 mod playback;
-mod rail_drag;
 mod remote;
-mod router;
 mod runtime;
+mod services;
 mod session;
-mod smooth_scroll;
 mod syncplay;
+mod task;
 mod theme;
+mod toasts;
 mod tracks;
 mod trickplay;
 mod update;
 mod views;
+mod widgets;
 mod window;
-mod zoom;
 
-use gpui_kit::*;
+use std::sync::Arc;
+
+use egui_wgpu::wgpu;
 use tracing_subscriber::EnvFilter;
-
-use crate::app_view::AppView;
-use crate::changes::Changes;
-use crate::config::{Config, ThemePreference};
-use crate::views::player::{
-    self, ExitPlayer, NextChapter, NextEpisode, PrevChapter, PreviousEpisode, SeekBackward, SeekForward, Skip,
-    SpeedDown, SpeedUp, SubtitleDelayDown, SubtitleDelayUp, ToggleFullscreen, ToggleMute, TogglePause, VolumeDown,
-    VolumeUp,
-};
-use crate::views::shell::{self, Back, OpenSearch};
 
 /// Daily log files kept in [`config::log_dir`].
 const LOG_FILES_KEPT: usize = 7;
@@ -122,60 +119,49 @@ fn main() {
     let _log_guard = init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting tabbyfin");
 
-    gpui_kit::application()
-        .with_assets(gpui_kit::assets::AllAssets)
-        .run(|cx| {
-            gpui_kit::init(cx);
-            let config = Config::load();
-            theme::apply(config.theme, None, cx);
-            zoom::init(&config, cx);
-            motion::init(&config, cx);
-            Changes::init(cx);
-            let search_key = if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" };
-            cx.bind_keys([
-                KeyBinding::new(search_key, OpenSearch, Some(shell::KEY_CONTEXT)),
-                KeyBinding::new("escape", Back, Some(shell::KEY_CONTEXT)),
-                KeyBinding::new("backspace", Back, Some(shell::KEY_CONTEXT)),
-                KeyBinding::new("alt-left", Back, Some(shell::KEY_CONTEXT)),
-                KeyBinding::new("space", TogglePause, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("right", SeekForward, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("left", SeekBackward, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("up", VolumeUp, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("down", VolumeDown, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("m", ToggleMute, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("shift-n", NextEpisode, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("shift-p", PreviousEpisode, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("pagedown", NextChapter, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("pageup", PrevChapter, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("enter", Skip, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("s", Skip, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("f", ToggleFullscreen, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("escape", ExitPlayer, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("]", SpeedUp, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("[", SpeedDown, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("x", SubtitleDelayUp, Some(player::KEY_CONTEXT)),
-                KeyBinding::new("z", SubtitleDelayDown, Some(player::KEY_CONTEXT)),
-            ]);
-            cx.bind_keys(browse::key_bindings());
+    let config = config::Config::load();
+    let options = eframe::NativeOptions {
+        viewport: window::viewport(&config),
+        wgpu_options: wgpu_options(),
+        ..Default::default()
+    };
+    let result = eframe::run_native(
+        "Tabbyfin",
+        options,
+        Box::new(|cc| Ok(Box::new(app::App::new(cc, config)))),
+    );
+    if let Err(err) = result {
+        tracing::error!("couldn't open the window: {err}");
+        std::process::exit(1);
+    }
+}
 
-            let launch = window::launch_placement(&config, cx);
-            let options = WindowOptions {
-                window_bounds: Some(launch.window_bounds()),
-                window_min_size: Some(window::min_size()),
-                display_id: launch.display_id,
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Tabbyfin".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            };
-            gpui_kit::open_window(options, cx, |window, cx| {
-                // Again with the window, whose appearance is the reliable one on Linux.
-                if config.theme == ThemePreference::System {
-                    theme::apply(ThemePreference::System, Some(window), cx);
-                }
-                cx.new(|cx| AppView::new(config, launch.placement, window, cx))
-            })
-            .expect("failed to open window");
-        });
+/// The graphics API per OS. mpv's frames are shown without a copy by importing the player's
+/// textures into wgpu's device (docs/in-app-video.md), so the API matters: the player shares
+/// D3D11 textures, which D3D12 opens, and Vulkan memory, which Vulkan imports.
+#[cfg(windows)]
+const BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
+#[cfg(target_os = "macos")]
+const BACKENDS: wgpu::Backends = wgpu::Backends::METAL;
+/// GL is the fallback where Vulkan is missing (some VMs, old drivers); only software video
+/// frames work there. wgpu prefers Vulkan when both run on the same kind of device.
+#[cfg(not(any(windows, target_os = "macos")))]
+const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN.union(wgpu::Backends::GL);
+
+/// egui-wgpu's setup with our backends (`WGPU_BACKEND` still overrides them, for testing), and a
+/// device that can import Vulkan memory where the adapter supports it: the device has to be
+/// created with that feature for the player's frames to be imported later.
+fn wgpu_options() -> egui_wgpu::WgpuConfiguration {
+    let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    setup.instance_descriptor.backends = wgpu::Backends::from_env().unwrap_or(BACKENDS);
+    let default_device = setup.device_descriptor.clone();
+    setup.device_descriptor = Arc::new(move |adapter| {
+        let mut descriptor = default_device(adapter);
+        descriptor.required_features |= adapter.features() & wgpu::Features::VULKAN_EXTERNAL_MEMORY_FD;
+        descriptor
+    });
+    egui_wgpu::WgpuConfiguration {
+        wgpu_setup: setup.into(),
+        ..Default::default()
+    }
 }
