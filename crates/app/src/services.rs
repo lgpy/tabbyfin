@@ -8,6 +8,7 @@
 //!
 //! Still to come: `images` (I1), `playback` (P1), `syncplay` (P2), `remote` and `live` (P3).
 
+use crate::config::SavedServer;
 use crate::session::{Session, describe_error};
 use crate::toasts::Toast;
 
@@ -27,6 +28,12 @@ pub enum AppEvent {
     Toast(Toast),
     /// The server rejected the session's token: back to sign-in.
     SessionExpired,
+    /// The user signed out: revoke the token and go back to sign-in.
+    SignOut,
+    /// Switch to another saved account, ending this session.
+    SwitchAccount(SavedServer),
+    /// Sign in to another server or user, keeping this session to come back to.
+    AddAccount,
 }
 
 impl Services {
@@ -42,6 +49,11 @@ impl Services {
     /// deadlines. Runs from `App::logic` before each frame, and also while the window is
     /// hidden, so playback keeps reporting when it's minimised.
     pub fn tick(&mut self, _ctx: &egui::Context) {}
+
+    /// The one hook for "this session is ending", called before another account takes over or
+    /// the screen showing it is dropped: P1 stops playback here and P2 leaves a SyncPlay group.
+    /// Dropping the services afterwards cancels whatever they still have running.
+    pub fn end(&mut self) {}
 
     pub fn toast(&mut self, toast: Toast) {
         self.events.push(AppEvent::Toast(toast));

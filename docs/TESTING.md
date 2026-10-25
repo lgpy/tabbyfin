@@ -288,7 +288,11 @@ The development harness cannot send mouse input. The cursor hiding uses `App::hi
 
 ✅ With `dev` on 12.2 and `dev2` on 10.11 saved (tokens from a scratch config): the sign-in screen lists both; launching with `dev2` current restores it on 10.11; the account menu lists the saved accounts with the current one checked, then *Add account…* and *Sign out*; switching restores the other account with a new websocket; *Add account* shows sign-in with *Back to your account*, which returns to the same session without reconnecting; signing out deletes and revokes the token and leaves `dev2` listed; an unfinished playback recorded for `dev` isn't reported by `dev2`. The menu, switch, add/cancel and sign-out were triggered through temporary test code, since the harness can't click and gpui-kit buttons don't take Enter or Space.
 
-- ⬜ **Clicking** through it all, including *Remove* on the sign-in screen and signing in to a new server while another account waits.
+✅ **egui (S1)**, against 12.2 with `dev` and `dev2` on one server: restoring `dev`; the form's server address (HTTPS tried before HTTP), username and password with Enter moving between them and signing in; Quick Connect, approved through `POST /QuickConnect/Authorize` (the endpoint the web client uses); a saved account's *continue as*; *Add account* keeping the signed-in session, *Back to your account* returning to it, and signing in as `dev2` instead (the waiting session is dropped); *Sign out* revoking the token and dropping the account from the config while `dev2` stays listed; switching accounts; *Remove* on the sign-in screen; removing the *parked* account from the Add-account form, which ends its session and takes *Back to your account* away; an expired session, which keeps the account, deletes the token and prefills the form with the error; a server stopped during restore, which waits and signs back in when it answers. The account menu's choices and the expiry event were driven with temporary test code: egui 0.37 menus don't take the keyboard yet, so the button and menu are pointer-only until U1.
+
+- ⬜ **Clicking** through all of the above (the egui menu needs a pointer for now).
+- ⬜ Signing in to a **new server** while another account waits.
+- ⬜ **Sign out with no account left** (the form prefilled with the server and username).
 - ⬜ **Windows and macOS keychains** with two accounts.
 - ⬜ Switching **during playback** and **in a SyncPlay group** (the group is left first).
 
