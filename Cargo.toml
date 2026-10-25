@@ -14,9 +14,12 @@ publish = false
 jellyfin = { path = "crates/jellyfin" }
 player = { path = "crates/player" }
 
-# gpui-kit pins and re-exports its exact GPUI snapshot. Never depend on `gpui` directly.
-# Bump deliberately, in its own commit, after reading the gpui-kit changelog.
-gpui-kit = "=0.7.3"
+# The UI. egui, eframe and egui-wgpu are released together; bump them together, along with
+# egui_material_icons (built for one egui version).
+eframe = "0.37"
+egui = "0.37"
+egui-wgpu = "0.37"
+egui_material_icons = { version = "0.9", features = ["filled", "outline"] }
 
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
 # The session websocket, upgraded through reqwest so it shares its TLS setup.
@@ -39,9 +42,3 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-
-# GPUI crates patched for in-app video; see third_party/gpui/PATCHES.md.
-[patch.crates-io]
-gpui-pre = { path = "third_party/gpui/gpui-pre" }
-gpui-pre-windows = { path = "third_party/gpui/gpui-pre-windows" }
-gpui-pre-wgpu = { path = "third_party/gpui/gpui-pre-wgpu" }
