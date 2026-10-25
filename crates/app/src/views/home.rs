@@ -1,5 +1,6 @@
 //! Home. For now it lists the user's libraries: the exemplar page that shows the patterns every
-//! page follows. U3 turns it into the real Home (its shelves, sections and cards from `main`).
+//! page follows. U3 turns it into the real Home (its shelves and cards), drawing them in the
+//! order [`home_sections`] gives.
 //!
 //! - Data loads through a [`Task`] polled in `show`, never awaited on the UI thread, and the
 //!   page shows what it has until new data arrives.
@@ -9,6 +10,8 @@
 //! - The browse cursor: [`Browse`] for the keys, [`browse::reveal`] and
 //!   [`browse::hide_on_click`] while drawing.
 
+use std::collections::HashMap;
+
 use jellyfin::models::BaseItemDto;
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
@@ -17,6 +20,52 @@ use crate::nav::{NavRequest, Route};
 use crate::task::Task;
 use crate::views::{Page, PageCx};
 use crate::widgets::text::Load;
+
+/// The Home sections of the web client's Settings → Home that this app has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HomeSection {
+    MyMedia,
+    Resume,
+    NextUp,
+    Latest,
+}
+
+/// The web client's section for each of its ten Home slots when the user hasn't picked one.
+pub const DEFAULT_SECTIONS: [&str; 10] = [
+    "smalllibrarytiles",
+    "resume",
+    "resumeaudio",
+    "resumebook",
+    "livetv",
+    "nextup",
+    "latestmedia",
+    "none",
+    "none",
+    "none",
+];
+
+/// The sections in the user's order, from the web client's `homesection0`…`homesection9`
+/// preferences. Sections this app doesn't have (music, books, live TV) are skipped, and a
+/// section listed twice keeps its first place.
+pub fn home_sections(prefs: &HashMap<String, String>) -> Vec<HomeSection> {
+    let mut sections = Vec::new();
+    for (slot, default) in DEFAULT_SECTIONS.iter().enumerate() {
+        let value = prefs
+            .get(&format!("homesection{slot}"))
+            .map_or(*default, String::as_str);
+        let section = match value {
+            "smalllibrarytiles" | "librarybuttons" => HomeSection::MyMedia,
+            "resume" => HomeSection::Resume,
+            "nextup" => HomeSection::NextUp,
+            "latestmedia" => HomeSection::Latest,
+            _ => continue,
+        };
+        if !sections.contains(&section) {
+            sections.push(section);
+        }
+    }
+    sections
+}
 
 #[derive(Default)]
 pub struct HomePage {
@@ -126,5 +175,44 @@ impl Browse for HomePage {
         {
             Self::open(library, cx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{HomeSection, home_sections};
+
+    #[test]
+    fn default_home_sections() {
+        let sections = home_sections(&HashMap::new());
+        assert_eq!(
+            sections,
+            [
+                HomeSection::MyMedia,
+                HomeSection::Resume,
+                HomeSection::NextUp,
+                HomeSection::Latest
+            ]
+        );
+    }
+
+    #[test]
+    fn the_users_order_with_hidden_and_unknown_sections() {
+        let prefs: HashMap<String, String> = [
+            ("homesection0", "nextup"),
+            ("homesection1", "livetv"),
+            ("homesection2", "librarybuttons"),
+            ("homesection3", "none"),
+            ("homesection4", "nextup"),
+            ("homesection5", "none"),
+            ("homesection6", "none"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        // Slots 7–9 default to none: no Continue Watching and no Latest.
+        assert_eq!(home_sections(&prefs), [HomeSection::NextUp, HomeSection::MyMedia]);
     }
 }
