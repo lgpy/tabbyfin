@@ -12,7 +12,7 @@ Tick an item when it's been tried; note the hardware, OS and server version, and
 
 Everything below was built and run only as Linux debug builds. Use a CI package (`mise run ci:build`), unzipped over the old copy.
 
-- ⬜ **Player controls don't pause the video when clicked** (the `.occlude()` fix). Click the volume slider, the pickers, -10s/+10s and Fullscreen; playback must keep going.
+- ✅ **Player controls don't pause the video when clicked** (the `.occlude()` fix). Click the volume slider, the pickers, -10s/+10s and Fullscreen; playback must keep going.
 - ⬜ **Log file:** *Settings → Storage → Logs → Open folder* opens the folder, today's `tabbyfin.*.log` exists and has no colour codes in it.
 - ⬜ **Settings → Playback:** the autoplay switch and the bitrate picker are remembered after a restart.
 - ⬜ **Settings panel** (gpui-kit's `Settings`): every sidebar page and sub-entry opens, the search box filters items, a page's reset button puts its switches back to their defaults, and *Clear* empties the image cache. Seen so far only in screenshots (Appearance, Playback, Storage, Account).
@@ -177,26 +177,26 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ## 10. Player mouse niceties (2.1.8)
 
-Code-level and startup checks only so far: the development harness cannot send mouse input. The cursor hiding uses `App::hide_cursor_until_mouse_moves` (the gpui-pre patch), which the platforms restore on the next mouse move.
+The development harness cannot send mouse input. The cursor hiding uses `App::hide_cursor_until_mouse_moves` (the gpui-pre patch), which the platforms restore on the next mouse move.
 
-- ⬜ **Single click** on the video pauses; a **double click** toggles fullscreen and leaves the video playing (the first click's pause is undone), also in a SyncPlay group, where the group must not end up paused.
-- ⬜ **Wheel over the video**: one notch is 5% volume, scrolling down takes it away, and a fast spin follows the wheel rather than the event count.
+- ✅ **Single click** on the video pauses; a **double click** toggles fullscreen and leaves the video playing (the first click's pause is undone), also in a SyncPlay group, where the group must not end up paused.
+- ✅ **Wheel over the video**: one notch is 5% volume, scrolling down takes it away, and a fast spin follows the wheel rather than the event count.
 - ⬜ **Trackpad** (macOS, or a Windows precision touchpad): small deltas add up instead of being ignored, and one flick does not slam the volume to 0 or 100.
-- ⬜ **Cursor and controls**: after 3 s without movement both disappear while playing; any movement brings both back; neither happens while paused.
-- ⬜ The wheel over the control bars does not change the volume.
+- ✅ **Cursor and controls**: after 3 s without movement both disappear while playing; any movement brings both back; neither happens while paused.
+- ✅ The wheel over the control bars does not change the volume.
 
 ## 11. Volume and mute in reports (2.2.4)
 
 ✅ Against the 12.2 dev server: three volume-down presses and `m` inside the app left `VolumeLevel = 85` and `IsMuted = true` in the session's `PlayState` (`GET /Sessions`). The 10.11 spec carries the same fields on `PlaybackProgressInfo` (checked), not run at runtime.
 
-- ⬜ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app (about a second later; the report is batched).
+- ✅ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app (about a second later; the report is batched).
 ✅ Re-run after batching the reports: the same check gave `VolumeLevel = 85` and `IsMuted = true` about 3 s after the keys.
 
 ## 12. Remote control (2.2.5)
 
 ✅ Against the 12.2 dev server, driving the app's session over REST the way the dashboard does (`POST /Sessions/{id}/Playing…`, `/Command`, `/Message`): play now with a start position, pause, seek, unpause, set volume, mute, unmute, subtitles off, a message (shown as a notification), next and stop all show up in `/Sessions`. Play last plus play next with a series put the series' episodes (expanded by the server) ahead of the movie, and next went to S01E01. The 10.11.11 server sends the same `Play`, `Playstate` and `GeneralCommand` payloads (captured, not run against the app).
 
-- ⬜ From the **web dashboard** (and a phone app): the session shows a remote control, its buttons work, and the volume and tracks it shows follow the app.
+- ✅ From the **web dashboard** (and a phone app): the session shows a remote control, its buttons work, and the volume and tracks it shows follow the app.
 - ⬜ **Fullscreen** from the dashboard toggles the window (the harness can't check fullscreen).
 - ⬜ In a **SyncPlay group**: remote pause and seek act on the whole group, and play next/last add to the group's queue.
 - ⬜ Changing the **audio track** remotely during a transcode restarts the stream at the same position.
@@ -205,9 +205,9 @@ Code-level and startup checks only so far: the development harness cannot send m
 
 ✅ With `TABBYFIN_KEYS`: `]` twice set 1.5× (the test pattern's timecode advanced about 1.5 s per second, and the badge showed "1.5×"), and `x` three times set the subtitle delay to +0.3 s, as the menu showed (opened by default for that screenshot only).
 
-- ⬜ **Clicking** through the menu: each speed, the delay and size buttons, Reset; the controls stay up while it's open.
-- ⬜ **Subtitle delay** and **size** on a real subtitle track (the dev media's text subtitles), and **audio delay** with sound.
-- ⬜ **Hovering the seek bar** shows the time under the mouse, close to where a click would seek.
+- ✅ **Clicking** through the menu: each speed, the delay and size buttons, Reset; the controls stay up while it's open.
+- ✅ **Subtitle delay** and **size** on a real subtitle track (the dev media's text subtitles), and **audio delay** with sound.
+- ✅ **Hovering the seek bar** shows the time under the mouse, close to where a click would seek.
 - ⬜ **Clicking the clock** switches to the time left, and the choice survives a restart.
 - ⬜ The next episode keeps the speed and size and drops the delays; a **SyncPlay** group shows "Normal in SyncPlay" and stays at 1×.
 
