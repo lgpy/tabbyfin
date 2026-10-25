@@ -1,7 +1,7 @@
-//! Bridge between GPUI's executor and tokio, which `reqwest` needs.
+//! The tokio runtime, which `reqwest` needs.
 //!
-//! GPUI code never awaits `jellyfin` calls directly. It wraps them in [`spawn`] and awaits the
-//! returned future, which works from any executor.
+//! UI code never awaits `jellyfin` calls. It runs them here through a [`crate::task::Task`],
+//! whose result it polls each frame.
 
 use std::future::Future;
 use std::sync::OnceLock;
@@ -34,6 +34,16 @@ where
             Err(err) => std::panic::resume_unwind(err.into_panic()),
         }
     }
+}
+
+/// Starts `fut` on the tokio runtime. Dropping the handle leaves it running; aborting it stops
+/// the future at its next await.
+pub fn start<F>(fut: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    runtime().spawn(fut)
 }
 
 /// Runs `fut` on the tokio runtime without waiting for it.
