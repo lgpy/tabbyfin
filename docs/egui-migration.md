@@ -1,6 +1,6 @@
 # Moving Tabbyfin to egui: plan
 
-**Status (2026-10-25):** plan only, nothing ported yet. Work happens on the `egui` branch; `main` stays the GPUI app until the switch is done.
+**Status (2026-10-25):** F1 (the foundation) is done; the other tasks are open. Work happens on the `egui` branch; `main` stays the GPUI app until the switch is done.
 
 **Approach:** replace in place. The first task (F1) deletes the GPUI code from `crates/app` and sets up the egui app. Every later task ports one piece back. The old code stays readable on `main`:
 
@@ -77,52 +77,72 @@ pi -p --model opencode-go/deepseek-v4.1-flash --thinking high \
 
 ## 3. Target architecture
 
-F1 builds this; every other task follows it. F1 may refine it, and then updates this section.
+F1 built this; every other task follows it. The patterns below exist in code: `views/home.rs` is the exemplar page, and each module's doc comment says which task fills it.
 
 ### Layout
 
 ```
 crates/app/src/
-├── main.rs          logging (unchanged), player host check, eframe::run_native
+├── main.rs          logging (unchanged), player host check, wgpu setup, eframe::run_native; declares every module
 ├── app.rs           eframe::App: screens (restoring, sign-in, signed in), account switching (was app_view.rs)
-├── services.rs      Services: everything per signed-in session, and Services::tick
-├── task.rs          Task<T>: a tokio future whose result the UI polls; Deadline: a timer
-├── runtime.rs       the tokio runtime (unchanged)
-├── keys.rs          every key binding, and the order keys are routed in
+├── services.rs      Services: everything per signed-in session, AppEvent, Services::tick
+├── task.rs          Task<T>: a tokio future whose result the UI polls; channel: repaint-on-send; Deadline: a timer
+├── runtime.rs       the tokio runtime (unchanged, plus `start` returning the JoinHandle)
+├── keys.rs          every key binding, and who gets a key: egui or the app
 ├── toasts.rs        notifications
 ├── nav.rs           Route, NavRequest (was router.rs)
-├── debug.rs         TABBYFIN_KEYS replay, TABBYFIN_ROUTE parsing (debug builds)
+├── debug.rs         TABBYFIN_KEYS replay, TABBYFIN_ROUTE parsing (compiled in debug builds only)
+├── browse.rs        the keyboard cursor (main's logic and tests) and its egui wiring
 ├── config.rs, credentials.rs, session.rs, update.rs, markers.rs   unchanged
+├── item_menu.rs, tracks.rs                                        pure logic (L1)
 ├── playback.rs, syncplay.rs, remote.rs, live.rs                   services
 ├── images.rs, trickplay.rs                                        textures
-├── theme.rs, window.rs                                            appearance, window placement
-├── browse.rs        the keyboard cursor
-├── widgets/         cards, shelves, images, menus, states, dialogs
-└── views/           shell, login, home, search, library, item, settings, player, dialogs
+├── theme.rs         appearance: theme, text size, zoom, animations, over_video (A1; `theme::apply` is called at launch)
+├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement (A1)
+├── widgets/         text (Load<T>), card, image, shelf, menu, state, video
+└── views/           mod (Page, PageCx, open, StubPage), shell, home, login, search, library, value_filters, item, settings, player, dialogs
 ```
 
 ### State: no entities, one owner
 
-- The app owns `Option<Services>` while signed in. Pages get a `&mut PageCx` each frame: `services`, a `nav: Vec<NavRequest>` to push into, and `render_state: Option<&egui_wgpu::RenderState>` (the player needs it). No `Rc<RefCell<…>>`, no globals.
-- `Services` holds the session (client, user, server), `images`, `playback`, `syncplay`, `remote`, `live`, `user_data: u64` and `events: Vec<AppEvent>`.
+- The app owns `Option<Services>` while signed in (`Screen::SignedIn`), and the toasts. Pages get a `&mut PageCx` each frame: `ctx`, `services`, a `nav: Vec<NavRequest>` to push into, and `render_state: Option<&egui_wgpu::RenderState>` (the player needs it; `None` in tests). No `Rc<RefCell<…>>`, no globals.
+- `Services` holds the session (client, user, server), `user_data: u64` and `events: Vec<AppEvent>`; `images` (I1), `playback` (P1), `syncplay` (P2), `remote` and `live` (P3) join it.
 - Cross-service calls that GPUI did through globals (`NowPlaying::control` asking SyncPlay, `PlaybackManager::play` handing over to a group) become methods on `Services`, which can reach every part: `services.control(UiCommand)`, `services.play(&item, options)`.
-- GPUI events (`PlaybackEvent`, `SyncPlayEvent`, `RemoteEvent`, `ShellEvent`) become `AppEvent`s pushed to `services.events`. The shell drains them every frame: show the player, close it, toasts, session expired, toggle fullscreen.
-- The old `Changes` global becomes `services.user_data`, a counter bumped on `UserDataChanged`. Pages remember the value they loaded at and reload when it changes.
+- GPUI events become `AppEvent`s pushed to `services.events`; the app drains them every frame after the shell has drawn. F1 has `Toast(Toast)` and `SessionExpired`; tasks add theirs (player started or ended, toggle fullscreen…). Shortcuts: `services.toast(…)`, and `services.handle_error(&err) -> String` (the user-facing message; `Unauthorized` also pushes `SessionExpired`, as `Navigator::handle_error` did).
+- The old `Changes` global becomes `services.user_data`, a counter bumped on `UserDataChanged`.
+
+### Pages and navigation
+
+- A page is a struct implementing `views::Page`: `title()`, `scope()` (its key bindings, see Keyboard), `on_key(action, cx) -> bool`, `show(ui, cx)`. The shell keeps a stack of `Box<dyn Page>` (pages stay alive while stacked, so Back keeps their state) and draws the top one in a `CentralPanel` under the top bar (`egui::Panel::top`).
+- `views::open(route, cx)` makes the page for a route. Routes whose page isn't ported yet open a `StubPage` naming the task; each page task replaces its arm there.
+- Pages navigate by pushing `NavRequest::Push(route)` / `NavRequest::Back` into `cx.nav`; the shell applies them after drawing and requests a repaint so the new page shows at once.
+- Loading (the exemplar, `views/home.rs`): the page keeps `Load<T>` (`widgets/text.rs`), an `Option<Task<…>>`, and `loaded_at: Option<u64>`. In `show` it starts a load when `loaded_at != Some(services.user_data)`, which covers the first load, Retry (set it to `None`) and watch data changing elsewhere; then polls the task. What's on screen stays until new data arrives. Unlike `main`, a page under others doesn't reload in the background: it catches up when it's back on top.
 
 ### Async
 
 - **Rule kept from GPUI:** UI code never awaits `jellyfin` futures. Work runs on the tokio runtime (`runtime.rs`).
-- `Task<T>`: `Task::spawn(ctx, future)` runs the future on tokio and requests a repaint when it completes. `task.poll() -> Option<T>` hands the result over once. Dropping the task aborts the future, like dropping a GPUI `Task`. Owners keep `Option<Task<T>>`; replacing it cancels the previous one.
-- Long-lived streams (a playback session's updates, the websocket) are `mpsc` channels whose senders request a repaint after each send. `Services::tick` drains them. It's called from `App::logic`, so playback keeps reporting while the window is minimised.
-- Timers (controls hiding, search debounce, SyncPlay's scheduled commands, saving the window placement): a `Deadline` (an `Instant`) plus `ctx.request_repaint_after(remaining)`, checked in `tick` or `show`. No thread sleeps on the UI side.
+- `Task<T>`: `Task::spawn(ctx, future)` runs the future on tokio and requests a repaint once its result is ready. `task.poll() -> Option<T>` hands the result over once; a panic in the future is raised again on the UI thread (as `runtime::spawn` did). Dropping the task aborts the future, like dropping a GPUI `Task`. Owners keep `Option<Task<T>>`: replacing it cancels the previous one; they set it back to `None` after `poll` returned the result:
+  ```rust
+  if let Some(result) = self.loading.as_mut().and_then(Task::poll) {
+      self.loading = None;
+      …
+  }
+  ```
+- Long-lived streams (a playback session's updates, the websocket) are `task::channel(ctx)`: `Sender::send` requests a repaint after each send (and returns the value if the receiver is gone, the sign to stop; `Sender::closed().await` for async code), `Receiver::drain()` takes everything without waiting. `Services::tick` drains them. It's called from `App::logic`, which eframe also calls while the window is hidden whenever a repaint was requested, so playback keeps reporting while the window is minimised.
+- Timers (controls hiding, search debounce, SyncPlay's scheduled commands, saving the window placement): a `task::Deadline`. `set(after)` starts or restarts it, `cancel()`, and `fire(ctx)` returns true once when it's due and otherwise calls `ctx.request_repaint_after(remaining)`. Checked in `tick` or `show`. No thread sleeps on the UI side.
 - Stale results: as on `main`, owners keep a generation counter (library pages, playback sessions) and drop results for an older one.
-- Idle CPU must stay near zero. Nothing calls `request_repaint()` every frame except while something moves (video, an animation).
+- Idle CPU must stay near zero. Nothing calls `request_repaint()` every frame except while something moves (video, an animation, a spinner). F1 measured 0 ticks over 10 s idle on Home.
 
 ### Keyboard
 
-- `keys.rs` has every binding in one table (what `main.rs` and `browse::key_bindings` had) and one routing order: open dialog or menu → focused text field (it keeps its keys; Down and Enter in the search box are the exceptions) → top bar → page (the browse cursor, or the player) → global keys (Back, Ctrl+F, zoom).
-- egui moves focus between widgets with Tab and the arrow keys, and Space/Enter press the focused widget. That clashes with the browse cursor (Tab is the next section). F1 decides how to keep them apart and writes it down here. Likely: intercept those keys in `App::raw_input_hook` while no text field or egui menu has focus, and feed them to `keys.rs` instead.
-- The browse `Cursor` (pure logic, tests kept) stays. A page implements `Browse` (`sections`, `activate`, `adjust`, `at_edge`). A card that's selected after the cursor moved calls `response.scroll_to_me(...)`, which replaces `browse::reveal` and its scroll handles.
+**Decided in F1: egui or the app owns the keyboard, per frame.** egui moves focus by itself (Tab from nothing; the arrows only once a widget has focus) and presses the focused widget with Space or Enter; buttons don't take focus on a click (only text fields and drag values do). On a cursor page Tab would start egui focus and Enter would press the focused widget as well as open the card. So `App::raw_input_hook` decides before egui sees the frame's input, from the state the last frame left (as egui's own focus does):
+
+- **egui keeps every key** while it's busy with keys (`keys::egui_wants_keys`): a widget has focus (a text field, or anything reached with Tab on a page without a scope), or a modal (`top_modal_layer`) or a menu, combo box or popup (`Popup::is_any_open`) is open. egui then works as egui does: Tab and the arrows move focus, Space and Enter press, Esc closes the popup or drops the focus. The code that owns such a widget reads the keys it needs itself through `ui.input_mut(|i| i.consume_key(…))`: the search box's Down and Enter (U1), a dialog's Up/Down/Enter (U8), the SyncPlay panel's keys (U2). A single-line text field that uses Up/Down sets `Memory::set_focus_lock_filter` so egui doesn't also move focus with them.
+- **Otherwise the app takes the keys bound in the active scopes** (`keys::take`): the press events are removed from egui's input, so egui never sees them, queued, and routed by the shell before anything is drawn. Unbound keys (and all key releases) stay with egui.
+- `keys.rs` has one table, `BINDINGS`: `(Scope, modifiers, key) → Action`, holding everything `main.rs` and `browse::key_bindings` had. Scopes replace GPUI's key contexts: `Shell` (Back on Esc, Backspace and Alt+Left; search on Ctrl/Cmd+F), `Browse` (arrows, Tab, Shift+Tab, Enter), `Player`. The active scopes are the top page's `Page::scope()` and `Shell`. Modifiers match exactly (Alt+Left isn't Left), except on punctuation (`[`, `]`, `+`, `-`, `=`), which some layouts type with Shift or AltGr. Tasks that need more keys (W on the item page, Alt+Up/Alt+Down/Delete on playlists) add bindings and actions there.
+- A page without the cursor (Settings, U9) returns `None` from `scope()`: Tab, the arrows, Space and Enter aren't bound in `Shell`, so they stay with egui and its focus works there, while Esc and Backspace still go back when nothing has focus.
+- Routing order: open dialog, menu or focused text field (through egui, above) → top bar while the keyboard is in it (U1) → the page (`Page::on_key` with the action for its scope; returns whether it used it) → the shell's own keys (Back, search). An Up the page didn't use (`Browse::at_edge`) is where U1 moves into the top bar.
+- The browse `Cursor` (pure logic, `main`'s tests kept, ported in F1) stays. A page implements `browse::Browse` (`cursor`, `sections`, `activate`, `adjust`, `at_edge`) and makes `browse::on_key` its `Page::on_key`. While drawing, the selected card calls `browse::reveal(cursor, &response)`, which calls `response.scroll_to_me` once after each move (replacing `browse::reveal` and its scroll handles), and the page calls `browse::hide_on_click(cursor, ui)`.
 - The cursor stays hidden until a key is pressed and hides again on a click, as now.
 
 ### Images and video
@@ -130,15 +150,24 @@ crates/app/src/
 - `ImageCache` keeps its budget, queue and blurhash placeholders, but holds `egui::TextureHandle`s. Dropping a handle frees the texture, so GPUI's atlas workaround goes. Decoding stays off the UI thread; `egui::Context` can upload textures from any thread.
 - Video is a widget that owns its textures in egui-wgpu's renderer (`register_native_texture`): software frames are written with `queue.write_texture` into one reused texture (not through egui's texture deltas, which would copy every frame twice). GPU frames are imported textures, cached per ring slot.
 - The app tells the player host what it can import when it starts it (V1): pixels only, Vulkan memory from a given device, or D3D11 textures on a given DX12 adapter. The host then picks a matching path, so it never produces frames the UI can't show.
+- wgpu setup (`main.rs`): backends `DX12` on Windows, `METAL` on macOS, `VULKAN | GL` elsewhere (`WGPU_BACKEND` still overrides). wgpu already prefers Vulkan over GL for the same kind of device, so no adapter selector is needed. The device is requested with `VULKAN_EXTERNAL_MEMORY_FD` when the adapter has it. On WSL it picks Vulkan on llvmpipe.
+
+### Toasts
+
+`toasts.rs`: `Toast::info/success/error(text)`, `.title(…)`, `.action(label, ToastAction)`. They stay 5 s (errors 8 s), longer while the pointer is on them, at most four at once, and have a close button. The app owns `Toasts` and draws them over everything; a clicked action comes back from `Toasts::show` for the app to carry out (`ToastAction::OpenUrl` for the update notice). Signed-in code raises them with `services.toast(…)`. Each toast is logged.
 
 ### Dev knobs, kept as they are
 
-`TABBYFIN_ROUTE` (pages and `play:`), `TABBYFIN_KEYS` (injected as `egui::Event::Key` from `raw_input_hook`, same syntax incl. `wait` and `key*N`), `TABBYFIN_SYNCPLAY`, `TABBYFIN_SYNCPLAY_SKEW_MS`, `TABBYFIN_MPV_OPTIONS`, `TABBYFIN_VIDEO`, `TABBYFIN_MPV_LOG`, `TABBYFIN_UPDATE_URL`, `TABBYFIN_CONFIG_DIR`, `TABBYFIN_PLAYER=embedded`. Screenshots as before: no `WAYLAND_DISPLAY` (X11), `import -window`.
+`TABBYFIN_ROUTE` (pages and `play:`), `TABBYFIN_KEYS`, `TABBYFIN_SYNCPLAY`, `TABBYFIN_SYNCPLAY_SKEW_MS`, `TABBYFIN_MPV_OPTIONS`, `TABBYFIN_VIDEO`, `TABBYFIN_MPV_LOG`, `TABBYFIN_UPDATE_URL`, `TABBYFIN_CONFIG_DIR`, `TABBYFIN_PLAYER=embedded`. Screenshots as before: no `WAYLAND_DISPLAY` (X11), `import -window`.
+
+- `TABBYFIN_KEYS`: same syntax and timing as `main` (first key after 3 s, `wait` 1 s, `key*N` 30 ms apart, 250 ms after each key; keys named `down`, `shift-tab`, `ctrl-f`, `alt-left`, `pageup`, `]`, `a`…). `debug::KeyScript` injects each press as `egui::Event::Key` (press and release, plus `Event::Text` for printable keys, so typing reaches a focused text field) in `App::raw_input_hook`, before `keys::take`, so scripted keys take the same path as real ones. `App::logic` requests a repaint for when the next one is due.
+- `TABBYFIN_ROUTE`: parsed by `debug::Start` (`settings`, `item:<id>`, `library:<id>[:movies|tvshows]`, `search:<term>`, `play:<id>[:audio[:sub[:source]]]`); the shell opens it over Home. Until U1 and P1, `search:` opens the Search stub and `play:` opens the item without playing.
 
 ### During the migration
 
-- `main.rs` gets a temporary `#![allow(dead_code)]`, since code arrives before its callers. X3 removes it.
+- `main.rs` has a temporary `#![allow(dead_code)]`, since code arrives before its callers. X3 removes it.
 - Each task updates the docs its change touches (`docs/ROADMAP.md`, `docs/PLAN.md`, `docs/TESTING.md`), as AGENTS.md asks; X2 does the full rewrite at the end.
+- Hooks already in place so tasks don't need `main.rs`: `window::viewport(&config)` (the launch size, A1 adds the saved placement), `window::Placement` (`tick` from `App::logic`, `save_now` from `App::on_exit`), `theme::apply(ctx, &config)` (from `App::new`).
 
 ---
 
@@ -225,10 +254,10 @@ Give the agent: this file, `AGENTS.md`, the task's section below, and the files 
 **Goal:** the pure functions (and their tests) the views need, back in their old modules, free of GPUI types.
 
 **From `main`, keep the module names:**
-- `browse.rs`: `Move`, `Section`, `Position`, `Cursor`, `clamp`, `step` and all their tests. Not the GPUI actions, `reveal` or `on_browse_actions` (F1 has the egui wiring; merge with what F1 put there).
+- `browse.rs`: done in F1 (the cursor and its tests came over with the egui wiring).
 - `tracks.rs`: `SUBTITLES_OFF`, `Choice` (label as `String`), `track_choices`. Not the select helpers.
 - `item_menu.rs`: `Mark`, `is_played`, `is_favorite`, `resume_point`, `is_playable`, `first_unwatched`, `episodes_of`, `can_add_to_playlist`, `can_mark`, their tests.
-- `widgets/text.rs` (from `components.rs`): `card_text`, `episode_label`, `timestamp`, `runtime_text`, `poster_image`, `landscape_image`, `kind_label`, `is_placeholder_episode_name`, the size constants, `Load<T>` (with `String` errors), tests.
+- `widgets/text.rs` (from `components.rs`): `card_text`, `episode_label`, `timestamp`, `runtime_text`, `poster_image`, `landscape_image`, `kind_label`, `is_placeholder_episode_name`, the size constants, tests. (`Load<T>`, with `String` errors, is there already from F1.)
 - `views/library.rs`: `SORTS`, `FILTERS`, `RESOLUTIONS`, `year_choices`, `years_of`, `Jump`, `jump_target`, `chosen`, tests.
 - `views/home.rs`: `HomeSection`, `DEFAULT_SECTIONS`, `home_sections`, tests.
 - `views/item.rs`: `shuffle`, `collection_items`, `meta_line`, `chapters`, `item_actions`, `more_actions`, `ItemAction`.
@@ -376,7 +405,7 @@ Scheduled commands are only as precise as `tick` runs: `request_repaint_after` w
 
 **From `main`:** `views/shell.rs` (all but the SyncPlay panel), `router.rs`.
 
-**Do:** the top bar (logo, Back when there's somewhere to go, the page title, the search box, SyncPlay button, Settings that toggles, the account button with its initial), the page stack (pages stay alive while stacked), the player page replacing the bar while it plays, leaving the player stopping playback, closing the player leaving fullscreen. Search box: typing opens the results page (or returns to it), clearing it closes them, Enter or Down moves into the results, Esc in it goes back to the page; no open/close animation yet (R4). Keyboard: Up past a page's first row into the bar, Left/Right along it, Enter presses, Down or Esc back to the page with its cursor shown where it was; the account menu opens with a keyboard highlight. Account menu: saved accounts (current checked), *Add account…*, *Sign out*. Esc, Backspace and Alt+Left go back; Ctrl+F (Cmd+F) opens search. Toasts from `services.events`. The update notice with *Download*. All of `debug_start_route` / `debug_search_term`.
+**Do:** the top bar (logo, Back when there's somewhere to go, the page title, the search box, SyncPlay button, Settings that toggles, the account button with its initial), the page stack (pages stay alive while stacked), the player page replacing the bar while it plays, leaving the player stopping playback, closing the player leaving fullscreen. Search box: typing opens the results page (or returns to it), clearing it closes them, Enter or Down moves into the results, Esc in it goes back to the page; no open/close animation yet (R4). Keyboard: Up past a page's first row into the bar, Left/Right along it, Enter presses, Down or Esc back to the page with its cursor shown where it was; the account menu opens with a keyboard highlight. Account menu: saved accounts (current checked), *Add account…*, *Sign out*. Esc, Backspace and Alt+Left go back; Ctrl+F (Cmd+F) opens search. Toasts from `services.events` (the app already shows them). The update notice with *Download* (F1 already shows it). All of `debug_start_route` / `debug_search_term` (F1 parses them in `debug::Start`; U1 types the search term).
 
 **Acceptance:** `TABBYFIN_KEYS` walks into the top bar and back; account switching works from the menu; `TABBYFIN_ROUTE=search:test` opens results.
 
@@ -507,7 +536,8 @@ The reviewer reads the old file(s) on `main` next to the diff:
 
 ## 6. Risks and open questions
 
-- **Keyboard vs egui focus** (F1): egui's Tab/arrow focus moving and Space/Enter pressing the focused widget clash with the browse cursor. Settled in F1 before any page is ported.
+- ~~**Keyboard vs egui focus** (F1)~~: settled in F1, see §3 Keyboard. egui keeps every key while a widget has focus or a modal, menu or popup is open; otherwise the app takes the keys bound in the active scopes before egui sees them.
+- **Settled in F1, besides the keyboard:** `egui_material_icons` with both its `filled` and `outline` fonts (`main`'s Lucide icons are outlines; Watched and Favorite are filled); no wgpu adapter selector (wgpu ranks by device type and lists Vulkan before GL); the window's launch options live in `window.rs` and `theme::apply` is called from `App::new`, so A1 needs neither `main.rs` nor much of `app.rs`; pages under others reload when they're back on top rather than in the background (§3 Pages); the update notice moved into F1's shell, since it was the toasts' first user.
 - **Windows DX12 import** (V3): untested combination of NT-handle textures with `WGL_NV_DX_interop2` and ANGLE's client buffers; only one test GPU (AMD). Fallback stays software, so this can't break playback, only make it more expensive.
 - **Linux on GL** (V2): where wgpu falls back to GL (some VMs, old drivers), GPU frames can't be imported; the handshake sends pixels instead.
 - **Off-screen windows** (A1): eframe can't check the saved position against the monitors before opening; needs a check after the first frame.

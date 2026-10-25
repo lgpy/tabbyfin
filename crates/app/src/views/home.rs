@@ -1,322 +1,109 @@
-//! Home: libraries, Continue Watching, Next Up, Favorites, and Latest per library, in the order
-//! and with the libraries the user set in the web client's Settings → Home.
+//! Home. For now it lists the user's libraries: the exemplar page that shows the patterns every
+//! page follows. U3 turns it into the real Home (its shelves, sections and cards from `main`).
+//!
+//! - Data loads through a [`Task`] polled in `show`, never awaited on the UI thread, and the
+//!   page shows what it has until new data arrives.
+//! - It loads again when `services.user_data` moves on (watch data changed elsewhere), checked
+//!   in `show`, so a page under others catches up when it's back on top.
+//! - Clicks and Enter open pages through `cx.nav`; Esc going back is the shell's.
+//! - The browse cursor: [`Browse`] for the keys, [`browse::reveal`] and
+//!   [`browse::hide_on_click`] while drawing.
 
-use std::collections::HashMap;
-use std::time::Duration;
+use jellyfin::models::BaseItemDto;
 
-use gpui_kit::component::{ActiveTheme, v_flex};
-use gpui_kit::*;
-use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemSortBy};
-use jellyfin::{Client, ItemsQuery};
+use crate::browse::{self, Browse, Cursor, Position, Section};
+use crate::keys::{Action, Scope};
+use crate::nav::{NavRequest, Route};
+use crate::task::Task;
+use crate::views::{Page, PageCx};
+use crate::widgets::text::Load;
 
-use crate::browse::{self, Browse, Cursor, Position, Section, on_browse_actions};
-use crate::changes::{Changes, UserDataChanged};
-use crate::components::{
-    Load, centered_message, centered_spinner, error_state, landscape_card_scaled, poster_card_scaled, shelf_with_rail,
-};
-use crate::images::ImageCache;
-use crate::item_menu::with_item_menu;
-use crate::motion;
-use crate::rail_drag::RailDrag;
-use crate::router::Navigator;
-use crate::runtime;
-use crate::smooth_scroll::smooth_wheel;
-
-const SHELF_LIMIT: u32 = 24;
-const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
-/// Home's cards are larger than the other pages', with more room between them.
-const CARD_SCALE: f32 = 1.2;
-const CARD_GAP: f32 = 24.;
-/// The delay between one shelf appearing and the next.
-const SHELF_STAGGER: Duration = Duration::from_millis(60);
-
-/// The Home sections of the web client's Settings → Home that this app has.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HomeSection {
-    MyMedia,
-    Resume,
-    NextUp,
-    Latest,
-}
-
-/// The web client's section for each of its ten Home slots when the user hasn't picked one.
-const DEFAULT_SECTIONS: [&str; 10] = [
-    "smalllibrarytiles",
-    "resume",
-    "resumeaudio",
-    "resumebook",
-    "livetv",
-    "nextup",
-    "latestmedia",
-    "none",
-    "none",
-    "none",
-];
-
-/// The sections in the user's order, from the web client's `homesection0`…`homesection9`
-/// preferences. Sections this app doesn't have (music, books, live TV) are skipped.
-fn home_sections(prefs: &HashMap<String, String>) -> Vec<HomeSection> {
-    let mut sections = Vec::new();
-    for (slot, default) in DEFAULT_SECTIONS.iter().enumerate() {
-        let value = prefs
-            .get(&format!("homesection{slot}"))
-            .map_or(*default, String::as_str);
-        let section = match value {
-            "smalllibrarytiles" | "librarybuttons" => HomeSection::MyMedia,
-            "resume" => HomeSection::Resume,
-            "nextup" => HomeSection::NextUp,
-            "latestmedia" => HomeSection::Latest,
-            _ => continue,
-        };
-        if !sections.contains(&section) {
-            sections.push(section);
-        }
-    }
-    sections
-}
-
-struct HomeData {
-    sections: Vec<HomeSection>,
-    views: Vec<BaseItemDto>,
-    resume: Vec<BaseItemDto>,
-    next_up: Vec<BaseItemDto>,
-    favorites: Vec<BaseItemDto>,
-    /// Latest items per library.
-    latest: Vec<(BaseItemDto, Vec<BaseItemDto>)>,
-}
-
+#[derive(Default)]
 pub struct HomePage {
-    client: Client,
-    nav: Navigator,
-    data: Load<HomeData>,
-    scroll: ScrollHandle,
-    /// One per shelf, in display order.
-    shelf_scrolls: Vec<ScrollHandle>,
-    /// Dragging the shelves sideways.
-    rail_drag: RailDrag,
+    libraries: Load<Vec<BaseItemDto>>,
+    loading: Option<Task<jellyfin::Result<Vec<BaseItemDto>>>>,
+    /// The `services.user_data` the libraries were loaded at; `None` before the first load or
+    /// after Retry.
+    loaded_at: Option<u64>,
     cursor: Cursor,
-    focus_handle: FocusHandle,
-    _subscriptions: Vec<Subscription>,
 }
 
 impl HomePage {
-    pub fn new(client: Client, nav: Navigator, cx: &mut Context<Self>) -> Self {
-        let _subscriptions = vec![
-            cx.observe(&ImageCache::global(cx), |_, _, cx| cx.notify()),
-            // Resume points and Next Up change after playback or marking items watched.
-            cx.subscribe(&Changes::global(cx), |this, _, _: &UserDataChanged, cx| this.reload(cx)),
-        ];
-        let mut this = Self {
-            client,
-            nav,
-            data: Load::Loading,
-            scroll: ScrollHandle::new(),
-            shelf_scrolls: Vec::new(),
-            rail_drag: RailDrag::default(),
-            cursor: Cursor::default(),
-            focus_handle: cx.focus_handle(),
-            _subscriptions,
-        };
-        this.reload(cx);
-        this
+    /// Fetches the libraries again. What's on screen stays up until they arrive; a load still
+    /// running is replaced, which cancels it.
+    fn reload(&mut self, cx: &mut PageCx) {
+        self.loaded_at = Some(cx.services.user_data);
+        let client = cx.services.session.client.clone();
+        self.loading = Some(Task::spawn(cx.ctx, async move {
+            client.user_views().await.map(|views| views.items)
+        }));
     }
 
-    /// Fetches everything again. The current content stays up until the new data arrives.
-    fn reload(&mut self, cx: &mut Context<Self>) {
-        let client = self.client.clone();
-        cx.spawn(async move |this, cx| {
-            let result = runtime::spawn(load(client)).await;
-            this.update(cx, |this, cx| {
-                this.data = match result {
-                    Ok(data) => Load::Loaded(data),
-                    Err(err) => Load::Failed(this.nav.handle_error(&err, cx)),
-                };
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
+    fn open(item: &BaseItemDto, cx: &mut PageCx) {
+        cx.nav.push(NavRequest::Push(Route::for_item(item)));
     }
 }
 
-async fn load(client: Client) -> jellyfin::Result<HomeData> {
-    let favorites = ItemsQuery {
-        include_item_types: vec![BaseItemKind::Movie, BaseItemKind::Series, BaseItemKind::Episode],
-        recursive: true,
-        filters: vec![ItemFilter::IsFavorite],
-        sort_by: vec![ItemSortBy::SortName],
-        fields: FIELDS.to_vec(),
-        limit: Some(SHELF_LIMIT),
-        ..Default::default()
-    };
-    // The user's Home settings are a nicety: without them, Home uses the defaults.
-    let settings = async {
-        let (user, prefs) = tokio::join!(
-            client.current_user(),
-            client.display_preferences("usersettings", "emby")
-        );
-        let latest_excludes = user
-            .inspect_err(|err| tracing::warn!("couldn't read the user's settings: {err}"))
-            .ok()
-            .and_then(|user| user.configuration)
-            .unwrap_or_default()
-            .latest_items_excludes;
-        let prefs = prefs
-            .inspect_err(|err| tracing::warn!("couldn't read the Home settings: {err}"))
-            .unwrap_or_default()
-            .custom_prefs;
-        Ok((home_sections(&prefs), latest_excludes))
-    };
-    let (views, resume, next_up, favorites, (sections, latest_excludes)) = tokio::try_join!(
-        client.user_views(),
-        client.resume(SHELF_LIMIT, FIELDS),
-        client.next_up(SHELF_LIMIT, FIELDS),
-        client.items(&favorites),
-        settings,
-    )?;
-    let mut latest = Vec::new();
-    for view in &views.items {
-        if matches!(
-            view.collection_type,
-            Some(CollectionType::Movies | CollectionType::TvShows)
-        ) && !latest_excludes.contains(&view.id)
-        {
-            let items = client.latest(&view.id, SHELF_LIMIT, FIELDS).await?;
-            if !items.is_empty() {
-                latest.push((view.clone(), items));
+impl Page for HomePage {
+    fn title(&self) -> &str {
+        "Home"
+    }
+
+    fn scope(&self) -> Option<Scope> {
+        Some(Scope::Browse)
+    }
+
+    fn on_key(&mut self, action: Action, cx: &mut PageCx) -> bool {
+        browse::on_key(self, action, cx)
+    }
+
+    fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        if self.loaded_at != Some(cx.services.user_data) {
+            self.reload(cx);
+        }
+        if let Some(result) = self.loading.as_mut().and_then(Task::poll) {
+            self.loading = None;
+            self.libraries = match result {
+                Ok(libraries) => Load::Loaded(libraries),
+                Err(err) => Load::Failed(cx.services.handle_error(&err)),
+            };
+        }
+        browse::hide_on_click(&mut self.cursor, ui);
+
+        match &self.libraries {
+            Load::Loading => {
+                ui.centered_and_justified(|ui| ui.spinner());
             }
-        }
-    }
-    Ok(HomeData {
-        sections,
-        views: views.items,
-        resume: resume.items,
-        next_up: next_up.items,
-        favorites: favorites.items,
-        latest,
-    })
-}
-
-/// One row of cards on the page, in display order.
-struct Shelf<'a> {
-    id: ElementId,
-    title: SharedString,
-    items: &'a [BaseItemDto],
-    landscape: bool,
-}
-
-/// The shelves in the user's section order. Favorites, which the web client has no section
-/// for, comes just before the Latest shelves, or last without them.
-fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
-    let row = |id: &'static str, title: &'static str, items, landscape| Shelf {
-        id: id.into(),
-        title: title.into(),
-        items,
-        landscape,
-    };
-    let favorites = || row("favorites", "Favorites", &data.favorites, false);
-    let mut shelves = Vec::new();
-    for section in &data.sections {
-        match section {
-            HomeSection::MyMedia => shelves.push(row("views", "My Media", &data.views, true)),
-            HomeSection::Resume => shelves.push(row("resume", "Continue Watching", &data.resume, true)),
-            HomeSection::NextUp => shelves.push(row("next-up", "Next Up", &data.next_up, true)),
-            HomeSection::Latest => {
-                shelves.push(favorites());
-                shelves.extend(data.latest.iter().enumerate().map(|(i, (view, items))| Shelf {
-                    id: ("latest", i).into(),
-                    title: format!("Latest {}", view.name).into(),
-                    items,
-                    landscape: false,
-                }));
-            }
-        }
-    }
-    if !data.sections.contains(&HomeSection::Latest) {
-        shelves.push(favorites());
-    }
-    shelves.retain(|shelf| !shelf.items.is_empty());
-    shelves
-}
-
-impl HomePage {
-    fn cards(&self, section: usize, shelf: &Shelf, cx: &mut App) -> Vec<AnyElement> {
-        shelf
-            .items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                let nav = self.nav.clone();
-                let target = item.clone();
-                let on_click = self
-                    .rail_drag
-                    .guard(move |_: &ClickEvent, window: &mut Window, cx: &mut App| nav.open(&target, window, cx));
-                let selected = self.cursor.is_selected(section, i);
-                let card = if shelf.landscape {
-                    landscape_card_scaled(i, item, CARD_SCALE, selected, on_click, cx)
-                } else {
-                    poster_card_scaled(i, item, CARD_SCALE, selected, on_click, cx)
-                };
-                with_item_menu(card, item, &self.client, &self.nav)
-            })
-            .collect()
-    }
-
-    fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let count = match &self.data {
-            Load::Loaded(data) => shelves(data).len(),
-            _ => 0,
-        };
-        if self.shelf_scrolls.len() < count {
-            self.shelf_scrolls.resize_with(count, ScrollHandle::new);
-        }
-        let data = match &self.data {
-            Load::Loading => return centered_spinner().into_any_element(),
             Load::Failed(message) => {
-                let retry = cx.listener(|this, _, _, cx| {
-                    this.data = Load::Loading;
-                    this.reload(cx);
-                });
-                return error_state(message.clone(), retry, cx).into_any_element();
+                let retry = ui
+                    .vertical_centered(|ui| {
+                        ui.label(message);
+                        ui.button("Retry").clicked()
+                    })
+                    .inner;
+                if retry {
+                    self.libraries = Load::Loading;
+                    self.loaded_at = None;
+                }
             }
-            Load::Loaded(data) => data,
-        };
-
-        let sections: Vec<AnyElement> = shelves(data)
-            .iter()
-            .enumerate()
-            .map(|(s, shelf)| {
-                let cards = self.cards(s, shelf, cx);
-                let shelf = shelf_with_rail(
-                    shelf.id.clone(),
-                    shelf.title.clone(),
-                    cards,
-                    CARD_GAP,
-                    8.,
-                    &self.shelf_scrolls[s],
-                    self.rail_drag.rail(&self.shelf_scrolls[s]),
-                    cx,
-                );
-                // One after another, down the page.
-                motion::enter(div().child(shelf), ("shelf", s), SHELF_STAGGER * s as u32).into_any_element()
-            })
-            .collect();
-        if sections.is_empty() {
-            return centered_message("Your server has no libraries yet.", cx).into_any_element();
+            Load::Loaded(libraries) if libraries.is_empty() => {
+                ui.centered_and_justified(|ui| ui.label("Your server has no libraries yet."));
+            }
+            Load::Loaded(libraries) => {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (index, library) in libraries.iter().enumerate() {
+                        let selected = self.cursor.is_selected(0, index);
+                        let response = ui.add(egui::Button::selectable(selected, &library.name));
+                        if selected {
+                            browse::reveal(&mut self.cursor, &response);
+                        }
+                        if response.clicked() {
+                            Self::open(library, cx);
+                        }
+                    }
+                });
+            }
         }
-
-        // The shelves are the scroll container's direct children, for `browse::reveal`.
-        let page = v_flex()
-            .id("home")
-            .size_full()
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .on_scroll_wheel(smooth_wheel("home", &self.scroll))
-            .py_6()
-            .gap_8()
-            .text_color(cx.theme().foreground)
-            .children(sections);
-        self.rail_drag.track(page).into_any_element()
     }
 }
 
@@ -325,79 +112,19 @@ impl Browse for HomePage {
         &mut self.cursor
     }
 
-    fn sections(&self, _window: &Window, _cx: &App) -> Vec<Section> {
-        match &self.data {
-            Load::Loaded(data) => shelves(data).iter().map(|s| Section::row(s.items.len())).collect(),
+    /// One column: every arrow key moves along the list.
+    fn sections(&self) -> Vec<Section> {
+        match &self.libraries {
+            Load::Loaded(libraries) => vec![Section::grid(libraries.len(), 1)],
             _ => Vec::new(),
         }
     }
 
-    fn reveal(&mut self, position: Position, _window: &mut Window, _cx: &mut Context<Self>) {
-        browse::reveal(&self.scroll, position.section, px(24.));
-        if let Some(scroll) = self.shelf_scrolls.get(position.section) {
-            browse::reveal(scroll, position.index, px(24.));
-        }
-    }
-
-    fn activate(&mut self, position: Position, window: &mut Window, cx: &mut Context<Self>) {
-        let Load::Loaded(data) = &self.data else { return };
-        if let Some(item) = shelves(data)
-            .get(position.section)
-            .and_then(|shelf| shelf.items.get(position.index))
+    fn activate(&mut self, position: Position, cx: &mut PageCx) {
+        if let Load::Loaded(libraries) = &self.libraries
+            && let Some(library) = libraries.get(position.index)
         {
-            self.nav.open(item, window, cx);
+            Self::open(library, cx);
         }
-    }
-}
-
-impl Focusable for HomePage {
-    fn focus_handle(&self, _cx: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl Render for HomePage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = self.render_content(cx);
-        on_browse_actions(div().size_full().track_focus(&self.focus_handle), cx).child(content)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use super::{HomeSection, home_sections};
-
-    #[test]
-    fn default_home_sections() {
-        let sections = home_sections(&HashMap::new());
-        assert_eq!(
-            sections,
-            [
-                HomeSection::MyMedia,
-                HomeSection::Resume,
-                HomeSection::NextUp,
-                HomeSection::Latest
-            ]
-        );
-    }
-
-    #[test]
-    fn the_users_order_with_hidden_and_unknown_sections() {
-        let prefs: HashMap<String, String> = [
-            ("homesection0", "nextup"),
-            ("homesection1", "livetv"),
-            ("homesection2", "librarybuttons"),
-            ("homesection3", "none"),
-            ("homesection4", "nextup"),
-            ("homesection5", "none"),
-            ("homesection6", "none"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        .collect();
-        // Slots 7–9 default to none: no Continue Watching and no Latest.
-        assert_eq!(home_sections(&prefs), [HomeSection::NextUp, HomeSection::MyMedia]);
     }
 }
