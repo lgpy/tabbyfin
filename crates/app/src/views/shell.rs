@@ -1,13 +1,16 @@
 //! The signed-in frame: a top bar and a navigation stack of pages.
 //!
 //! Pages stay alive while they're on the stack, so going back keeps their data and scroll
-//! position. For now the bar has Back and the page's title; U1 brings the rest of `main`'s
-//! shell (logo, search box, SyncPlay, Settings, the account menu, the keyboard in the bar).
+//! position. For now the bar has Back, the page's title and the account menu S1 needs; U1
+//! brings the rest of `main`'s shell (logo, search box, SyncPlay, Settings, the account
+//! button's initial, the keyboard in the bar).
 
-use egui_material_icons::icons::ICON_ARROW_BACK;
+use egui_material_icons::icons::{ICON_ACCOUNT_CIRCLE, ICON_ARROW_BACK};
 
+use crate::config::{Config, SavedServer};
 use crate::keys::{Action, Press, Scope};
 use crate::nav::{NavRequest, Route};
+use crate::services::AppEvent;
 use crate::task::Task;
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
@@ -17,6 +20,8 @@ pub struct Shell {
     /// Never empty: Home is at the bottom.
     stack: Vec<Box<dyn Page>>,
     update_check: Option<Task<Option<Update>>>,
+    /// The saved accounts, read from the config when the account menu opens, as on `main`.
+    accounts: Vec<SavedServer>,
 }
 
 impl Shell {
@@ -24,6 +29,7 @@ impl Shell {
         let mut shell = Self {
             stack: vec![views::open(Route::Home, cx)],
             update_check: Some(Task::spawn(cx.ctx, update::check())),
+            accounts: Vec::new(),
         };
         #[cfg(debug_assertions)]
         shell.debug_start(cx);
@@ -68,6 +74,47 @@ impl Shell {
                 cx.nav.push(NavRequest::Back);
             }
             ui.heading(self.top().title());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.account_menu(ui, cx);
+            });
+        });
+    }
+
+    /// The account menu: the saved accounts to switch to (the current one checked), adding one,
+    /// and signing out. The app carries the choice out after the frame. U1 turns the button
+    /// into the user's initial and gives the bar its keyboard; the choices stay.
+    fn account_menu(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        let session = &cx.services.session;
+        let account = match &session.server.server_name {
+            Some(server) => format!("{} on {server}", session.user.name),
+            None => session.user.name.clone(),
+        };
+        let button = ui.button(ICON_ACCOUNT_CIRCLE).on_hover_text(account);
+        if button.clicked() {
+            self.accounts = Config::load().accounts;
+        }
+        egui::Popup::menu(&button).show(|ui| {
+            let current = cx.services.session.account_key();
+            for account in self.accounts.clone() {
+                let checked = account.credential_account() == current;
+                if ui.selectable_label(checked, account.label()).clicked() {
+                    // Choosing the account already signed in just closes the menu, as on
+                    // `main`: switching to it would end the session and lose the page stack.
+                    if !checked {
+                        cx.services.events.push(AppEvent::SwitchAccount(account));
+                    }
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button("Add account…").clicked() {
+                cx.services.events.push(AppEvent::AddAccount);
+                ui.close();
+            }
+            if ui.button("Sign out").clicked() {
+                cx.services.events.push(AppEvent::SignOut);
+                ui.close();
+            }
         });
     }
 
