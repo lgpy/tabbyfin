@@ -408,6 +408,16 @@ impl App {
         for event in events {
             match event {
                 AppEvent::Toast(toast) => self.toasts.push(toast),
+                AppEvent::PlaybackStarted => {
+                    if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
+                        signed_in.shell.player_started();
+                    }
+                }
+                AppEvent::PlaybackEnded => {
+                    if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
+                        signed_in.shell.player_ended(ctx);
+                    }
+                }
                 // The screen changes; what's left of this frame's events would belong to the
                 // session that just ended.
                 AppEvent::SessionExpired => {
@@ -566,5 +576,13 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         self.placement.save_now();
+        // Ending a session drops its services, which stops playback in the background; quitting
+        // has to wait for that, for the signed-in session and a parked one alike.
+        let current = match self.screen.as_mut() {
+            Some(Screen::SignedIn(signed_in)) => Some(&mut signed_in.services),
+            _ => None,
+        };
+        let parked = self.parked.as_mut().map(|parked| &mut parked.services);
+        Services::shut_down(current.into_iter().chain(parked));
     }
 }
