@@ -1,12 +1,19 @@
 //! GPU video output on Linux: mpv renders through OpenGL (libmpv's only GPU render API) into
 //! Vulkan images whose memory is exported as opaque fds (`VK_KHR_external_memory_fd`) and
-//! imported into GL (`GL_EXT_memory_object_fd`). GPUI's wgpu (Vulkan) renderer imports the same
-//! memory and draws it, so frames never pass through the CPU.
+//! imported into GL (`GL_EXT_memory_object_fd`). The app's wgpu (Vulkan) device imports the same
+//! memory and draws it (`widgets/video.rs` in the app), so frames never pass through the CPU.
+//!
+//! Memory can only be shared within one GPU, so everything here is on the app's: the exporting
+//! Vulkan device is the one with the app's device UUID ([`VideoImport::VulkanMemory`]), and the
+//! OpenGL context is made on the EGL device whose GL reports that UUID.
 //! See `docs/in-app-video.md` (phase 3) and `examples/vk_interop_probe.rs`.
+//!
+//! [`VideoImport::VulkanMemory`]: super::VideoImport::VulkanMemory
 
 use std::ffi::{CStr, c_char, c_void};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::ptr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ash::{khr, vk};
@@ -28,8 +35,9 @@ const GL_DEDICATED_MEMORY_OBJECT_EXT: u32 = 0x9581;
 const GL_TEXTURE_TILING_EXT: u32 = 0x9580;
 const GL_LINEAR_TILING_EXT: i32 = 0x9585;
 const GL_DEVICE_UUID_EXT: u32 = 0x9597;
+const EGL_PLATFORM_DEVICE_EXT: u32 = 0x313F;
 
-/// The shared image layout; GPUI's importer (`gpui_wgpu::shared_texture`) must match it.
+/// The shared image layout; the app's importer (`widgets/video.rs`) must match it.
 const FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 
 /// Ids for shared images, unique across players in this process.
@@ -70,20 +78,22 @@ unsafe extern "C" fn get_proc_address(ctx: *mut c_void, name: *const c_char) -> 
     egl.get_proc_address(name).map_or(ptr::null_mut(), |f| f as *mut c_void)
 }
 
-/// One shared image: Vulkan memory exported to GPUI (`fd`) and imported into GL.
+/// One shared image: Vulkan memory exported to the UI (`fd`) and imported into GL.
 pub(crate) struct Slot {
     id: u64,
     image: vk::Image,
     memory: vk::DeviceMemory,
     allocation_size: u64,
-    /// Kept open for GPUI, which duplicates it on import.
-    fd: OwnedFd,
+    /// For the UI, which imports a duplicate. Shared with the frames that use this image, so it
+    /// stays open (and the memory with it) until the last of them is gone, even after the ring
+    /// moved on.
+    fd: Arc<OwnedFd>,
     gl_memory: u32,
     gl_texture: u32,
     fbo: u32,
 }
 
-/// The exporting Vulkan device. It only allocates memory; GL renders and GPUI samples.
+/// The exporting Vulkan device. It only allocates memory; GL renders and the UI samples.
 struct Exporter {
     _entry: ash::Entry,
     instance: ash::Instance,
@@ -93,8 +103,8 @@ struct Exporter {
 }
 
 impl Exporter {
-    /// Picks the Vulkan device with OpenGL's device UUID, so both share the same GPU.
-    fn new(gl_uuid: [u8; 16]) -> Result<Self> {
+    /// Picks the Vulkan device with the app's device UUID, the GPU the UI and OpenGL are on.
+    fn new(device_uuid: [u8; 16]) -> Result<Self> {
         // SAFETY: plain Vulkan setup; objects are destroyed in `Drop`.
         unsafe {
             let entry = ash::Entry::load().map_err(failed)?;
@@ -110,11 +120,11 @@ impl Exporter {
                     let mut id = vk::PhysicalDeviceIDProperties::default();
                     let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
                     instance.get_physical_device_properties2(device, &mut props);
-                    id.device_uuid == gl_uuid
+                    id.device_uuid == device_uuid
                 });
             let Some(physical) = physical else {
                 instance.destroy_instance(None);
-                return Err(failed("no Vulkan device matches the OpenGL device"));
+                return Err(failed("no Vulkan device here matches the app's"));
             };
             let queue_family = instance
                 .get_physical_device_queue_family_properties(physical)
@@ -254,89 +264,206 @@ pub(crate) struct EglVulkan {
 }
 
 impl EglVulkan {
-    /// Sets up EGL/OpenGL and the exporting Vulkan device on the calling (render) thread.
-    pub fn new(core: &Core) -> Result<Self> {
-        // SAFETY: EGL/GL setup on this thread; every object is checked and cleaned up.
-        unsafe {
-            let egl = Box::new(Egl::load_required().map_err(failed)?);
-            let display = egl
-                .get_display(egl::DEFAULT_DISPLAY)
-                .ok_or_else(|| failed("no EGL display"))?;
-            egl.initialize(display).map_err(failed)?;
-            egl.bind_api(egl::OPENGL_API).map_err(failed)?;
-            let attributes = [egl::RENDERABLE_TYPE, egl::OPENGL_BIT, egl::NONE];
-            let config = egl
-                .choose_first_config(display, &attributes)
-                .map_err(failed)?
-                .ok_or_else(|| failed("no EGL config"))?;
-            let context = egl
-                .create_context(display, config, None, &[egl::NONE])
-                .map_err(failed)?;
-            let fail = |egl: &Egl, err: Error| {
-                let _ = egl.make_current(display, None, None, None);
-                let _ = egl.destroy_context(display, context);
-                err
-            };
-            if let Err(err) = egl.make_current(display, None, None, Some(context)) {
-                return Err(fail(&egl, failed(err)));
-            }
-
-            macro_rules! gl {
-                ($($name:ident),*) => {
-                    Gl { $($name: match egl.get_proc_address(stringify!($name)) {
-                        Some(f) => cast(f),
-                        None => return Err(fail(&egl, failed(concat!(stringify!($name), " missing")))),
-                    },)* }
-                };
-            }
-            let gl = gl!(
-                glGetString,
-                glGetStringi,
-                glGetIntegerv,
-                glGetUnsignedBytei_vEXT,
-                glCreateMemoryObjectsEXT,
-                glDeleteMemoryObjectsEXT,
-                glMemoryObjectParameterivEXT,
-                glImportMemoryFdEXT,
-                glGenTextures,
-                glDeleteTextures,
-                glBindTexture,
-                glTexParameteri,
-                glTexStorageMem2DEXT,
-                glGenFramebuffers,
-                glDeleteFramebuffers,
-                glBindFramebuffer,
-                glFramebufferTexture2D,
-                glCheckFramebufferStatus,
-                glFinish
-            );
-            let renderer = CStr::from_ptr((gl.glGetString)(GL_RENDERER) as *const c_char).to_string_lossy();
-            tracing::info!(%renderer, "OpenGL context for mpv");
-            if !super::video::hardware_renderer(&renderer) {
-                return Err(fail(&egl, failed(format!("{renderer} is a software OpenGL renderer"))));
-            }
-            super::video::adapt_to_renderer(core, &renderer);
-            let mut count = 0;
-            (gl.glGetIntegerv)(GL_NUM_EXTENSIONS, &mut count);
-            let has_memory_object = (0..count as u32).any(|i| {
-                CStr::from_ptr((gl.glGetStringi)(GL_EXTENSIONS, i) as *const c_char).to_bytes()
-                    == b"GL_EXT_memory_object_fd"
-            });
-            if !has_memory_object {
-                return Err(fail(&egl, failed("GL_EXT_memory_object_fd isn't supported")));
-            }
-            let mut uuid = [0u8; 16];
-            (gl.glGetUnsignedBytei_vEXT)(GL_DEVICE_UUID_EXT, 0, uuid.as_mut_ptr());
-            let exporter = Exporter::new(uuid).map_err(|err| fail(&egl, err))?;
-
-            Ok(Self {
-                egl,
-                display,
-                context,
-                gl,
-                exporter,
-            })
+    /// Sets up EGL/OpenGL and the exporting Vulkan device on the calling (render) thread, both
+    /// on the GPU with `device_uuid` (the app's).
+    pub fn new(core: &Core, device_uuid: [u8; 16]) -> Result<Self> {
+        let egl = Box::new(unsafe { Egl::load_required() }.map_err(failed)?);
+        let opened = open_on_device(&egl, device_uuid)?;
+        let close = |err: Error| {
+            opened.close(&egl);
+            err
+        };
+        if !super::video::hardware_renderer(&opened.renderer) {
+            let renderer = &opened.renderer;
+            return Err(close(failed(format!("{renderer} is a software OpenGL renderer"))));
         }
+        super::video::adapt_to_renderer(core, &opened.renderer);
+        let exporter = Exporter::new(device_uuid).map_err(close)?;
+        let Opened {
+            display, context, gl, ..
+        } = opened;
+        Ok(Self {
+            egl,
+            display,
+            context,
+            gl,
+            exporter,
+        })
+    }
+}
+
+/// An OpenGL context, current on this thread, with what's needed to import Vulkan memory.
+struct Opened {
+    display: egl::Display,
+    context: egl::Context,
+    gl: Gl,
+    renderer: String,
+    /// `GL_DEVICE_UUID_EXT`: the GPU it runs on, as Vulkan names it.
+    uuid: [u8; 16],
+}
+
+impl Opened {
+    fn close(&self, egl: &Egl) {
+        let _ = egl.make_current(self.display, None, None, None);
+        let _ = egl.destroy_context(self.display, self.context);
+    }
+}
+
+/// An OpenGL context on the GPU with `device_uuid`. The default display first, which is that GPU
+/// unless there are several (a laptop's integrated and discrete GPUs, where the window may be on
+/// either); then each EGL device (`EGL_EXT_device_enumeration`, `EGL_EXT_platform_device`).
+fn open_on_device(egl: &Egl, device_uuid: [u8; 16]) -> Result<Opened> {
+    // SAFETY: the default display needs no native display.
+    let default = unsafe { egl.get_display(egl::DEFAULT_DISPLAY) };
+    let mut tried = Vec::new();
+    for display in default.into_iter().map(Ok).chain(device_displays(egl)) {
+        let opened = match display.and_then(|display| open(egl, display)) {
+            Ok(opened) => opened,
+            Err(err) => {
+                tracing::debug!("no OpenGL on an EGL display: {err}");
+                continue;
+            }
+        };
+        if opened.uuid == device_uuid {
+            tracing::info!(renderer = %opened.renderer, "OpenGL context for mpv");
+            return Ok(opened);
+        }
+        tried.push(opened.renderer.clone());
+        opened.close(egl);
+    }
+    Err(failed(format!(
+        "no OpenGL on the app's GPU (OpenGL found: {})",
+        if tried.is_empty() {
+            "none".into()
+        } else {
+            tried.join(", ")
+        }
+    )))
+}
+
+/// A display for each EGL device, made as they're needed, where EGL can list them.
+fn device_displays(egl: &Egl) -> impl Iterator<Item = Result<egl::Display>> + '_ {
+    type QueryDevices = unsafe extern "C" fn(i32, *mut *mut c_void, *mut i32) -> u32;
+    type GetPlatformDisplay = unsafe extern "C" fn(u32, *mut c_void, *const i32) -> *mut c_void;
+
+    let client = egl
+        .query_string(None, egl::EXTENSIONS)
+        .map(|extensions| extensions.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let has = |name: &str| client.split_ascii_whitespace().any(|e| e == name);
+    let supported = (has("EGL_EXT_device_enumeration") || has("EGL_EXT_device_base")) && has("EGL_EXT_platform_device");
+    let functions = supported
+        .then(|| {
+            let query: QueryDevices = unsafe { cast(egl.get_proc_address("eglQueryDevicesEXT")?) };
+            let display: GetPlatformDisplay = unsafe { cast(egl.get_proc_address("eglGetPlatformDisplayEXT")?) };
+            Some((query, display))
+        })
+        .flatten();
+    let devices = functions.map_or_else(Vec::new, |(query, _)| {
+        let mut count = 0;
+        // SAFETY: first the count, then up to that many handles into a buffer that long.
+        unsafe {
+            if query(0, ptr::null_mut(), &mut count) == 0 || count <= 0 {
+                return Vec::new();
+            }
+            let mut devices = vec![ptr::null_mut(); count as usize];
+            if query(count, devices.as_mut_ptr(), &mut count) == 0 {
+                return Vec::new();
+            }
+            devices.truncate(count.max(0) as usize);
+            devices
+        }
+    });
+    devices.into_iter().map(move |device| {
+        let (_, get_display) = functions.expect("devices are only listed with the functions");
+        let attributes = [egl::NONE];
+        // SAFETY: a device EGL just listed, and an empty attribute list.
+        let display = unsafe { get_display(EGL_PLATFORM_DEVICE_EXT, device, attributes.as_ptr()) };
+        if display.is_null() {
+            return Err(failed("no EGL display for a device"));
+        }
+        // SAFETY: a display EGL just returned.
+        Ok(unsafe { egl::Display::from_ptr(display) })
+    })
+}
+
+/// An OpenGL context on `display`, made current, if it can import Vulkan memory.
+fn open(egl: &Egl, display: egl::Display) -> Result<Opened> {
+    // SAFETY: EGL/GL setup on this thread; every object is checked and cleaned up.
+    unsafe {
+        egl.initialize(display).map_err(failed)?;
+        egl.bind_api(egl::OPENGL_API).map_err(failed)?;
+        // No surface: mpv draws into our framebuffers only. (Without this EGL wants window
+        // surfaces, which a device's display doesn't have.)
+        let attributes = [egl::RENDERABLE_TYPE, egl::OPENGL_BIT, egl::SURFACE_TYPE, 0, egl::NONE];
+        let config = egl
+            .choose_first_config(display, &attributes)
+            .map_err(failed)?
+            .ok_or_else(|| failed("no EGL config"))?;
+        let context = egl
+            .create_context(display, config, None, &[egl::NONE])
+            .map_err(failed)?;
+        let fail = |err: Error| {
+            let _ = egl.make_current(display, None, None, None);
+            let _ = egl.destroy_context(display, context);
+            err
+        };
+        if let Err(err) = egl.make_current(display, None, None, Some(context)) {
+            return Err(fail(failed(err)));
+        }
+
+        macro_rules! gl {
+            ($($name:ident),*) => {
+                Gl { $($name: match egl.get_proc_address(stringify!($name)) {
+                    Some(f) => cast(f),
+                    None => return Err(fail(failed(concat!(stringify!($name), " missing")))),
+                },)* }
+            };
+        }
+        let gl = gl!(
+            glGetString,
+            glGetStringi,
+            glGetIntegerv,
+            glGetUnsignedBytei_vEXT,
+            glCreateMemoryObjectsEXT,
+            glDeleteMemoryObjectsEXT,
+            glMemoryObjectParameterivEXT,
+            glImportMemoryFdEXT,
+            glGenTextures,
+            glDeleteTextures,
+            glBindTexture,
+            glTexParameteri,
+            glTexStorageMem2DEXT,
+            glGenFramebuffers,
+            glDeleteFramebuffers,
+            glBindFramebuffer,
+            glFramebufferTexture2D,
+            glCheckFramebufferStatus,
+            glFinish
+        );
+        let renderer = CStr::from_ptr((gl.glGetString)(GL_RENDERER) as *const c_char)
+            .to_string_lossy()
+            .into_owned();
+        let mut count = 0;
+        (gl.glGetIntegerv)(GL_NUM_EXTENSIONS, &mut count);
+        let has_memory_object = (0..count as u32).any(|i| {
+            CStr::from_ptr((gl.glGetStringi)(GL_EXTENSIONS, i) as *const c_char).to_bytes()
+                == b"GL_EXT_memory_object_fd"
+        });
+        if !has_memory_object {
+            return Err(fail(failed(format!(
+                "{renderer}: GL_EXT_memory_object_fd isn't supported"
+            ))));
+        }
+        let mut uuid = [0u8; 16];
+        (gl.glGetUnsignedBytei_vEXT)(GL_DEVICE_UUID_EXT, 0, uuid.as_mut_ptr());
+        Ok(Opened {
+            display,
+            context,
+            gl,
+            renderer,
+            uuid,
+        })
     }
 }
 
@@ -354,13 +481,14 @@ impl Backend for EglVulkan {
         draw: impl FnOnce(u32) -> Result<()>,
     ) -> Result<SharedFrame> {
         let drawn = draw(slot.fbo);
-        // Make sure the frame is complete before GPUI's device reads it.
+        // Make sure the frame is complete before the UI's device reads it: the UI only hears of
+        // it after this, and has no other way to wait for GL.
         // SAFETY: on the thread owning the context.
         unsafe { (self.gl.glFinish)() };
         drawn?;
         Ok(SharedFrame {
             id: slot.id,
-            fd: slot.fd.as_raw_fd(),
+            fd: slot.fd.clone(),
             allocation_size: slot.allocation_size,
             width,
             height,
@@ -370,7 +498,7 @@ impl Backend for EglVulkan {
     fn create_slot(&self, width: u32, height: u32) -> Result<Slot> {
         let (image, memory, allocation_size) = self.exporter.allocate(width, height)?;
         let exported = (|| Ok::<_, Error>((self.exporter.export(memory)?, self.exporter.export(memory)?)))();
-        let (gpui_fd, gl_fd) = match exported {
+        let (ui_fd, gl_fd) = match exported {
             Ok(fds) => fds,
             Err(err) => {
                 self.exporter.free(image, memory);
@@ -406,7 +534,7 @@ impl Backend for EglVulkan {
                 image,
                 memory,
                 allocation_size,
-                fd: gpui_fd,
+                fd: Arc::new(ui_fd),
                 gl_memory,
                 gl_texture,
                 fbo,
@@ -421,8 +549,9 @@ impl Backend for EglVulkan {
 
     fn release_slot(&self, slot: Slot) {
         let gl = &self.gl;
-        // SAFETY: objects created by this renderer, with the context current. GPUI holds its
-        // own import of the memory, so freeing ours doesn't pull it out from under a frame.
+        // SAFETY: objects created by this renderer, with the context current. The UI holds its
+        // own import of the memory (and frames still hold the fd), so freeing ours doesn't pull
+        // it out from under a frame.
         unsafe {
             (gl.glDeleteFramebuffers)(1, &slot.fbo);
             (gl.glDeleteTextures)(1, &slot.gl_texture);

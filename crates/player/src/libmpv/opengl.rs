@@ -1,5 +1,5 @@
 //! What the GPU renderers share: mpv renders through libmpv's `opengl` render API into a ring
-//! of textures that GPUI's device can also open, and GPUI draws the latest while mpv renders
+//! of textures that the UI's device can also open, and the UI draws the latest while mpv renders
 //! into the oldest. Each renderer is a `Backend` that brings the GL context, makes the shared
 //! textures and syncs a frame for the other device: ANGLE (`angle.rs`) and WGL (`wgl.rs`) on
 //! Windows, EGL with Vulkan memory (`egl.rs`) on Linux.
@@ -25,7 +25,12 @@ pub(crate) const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
 pub(crate) const GL_FRAMEBUFFER_COMPLETE: u32 = 0x8CD5;
 pub(crate) const GL_RENDERER: u32 = 0x1F01;
 
-/// Frames in flight: GPUI draws the latest while mpv renders into the oldest.
+/// Frames in flight: the UI draws the latest while mpv renders into the oldest. There's no
+/// fence the other way: a frame's texture is written again two frames after it was sent, by
+/// which time the UI has long finished drawing it (it draws the newest frame each time it
+/// paints, and a paint takes far less than two video frames).
+///
+/// The UI hears of a frame only after `glFinish`, so it never reads one GL is still drawing.
 const RING: usize = 3;
 
 /// libmpv's GL loader callback: `(ctx, name) -> function`.
@@ -58,7 +63,7 @@ pub(crate) fn failed(what: impl std::fmt::Display) -> Error {
     Error::GpuUnavailable(what.to_string())
 }
 
-/// A GL context, current on the render thread, with textures GPUI's device can open.
+/// A GL context, current on the render thread, with textures the UI's device can open.
 pub(crate) trait Backend {
     /// One shared texture attached to a framebuffer.
     type Slot;
@@ -71,7 +76,7 @@ pub(crate) trait Backend {
     fn release_slot(&self, slot: Self::Slot);
 
     /// Has mpv draw into `slot` (`draw` takes its framebuffer), makes sure the frame is
-    /// complete before GPUI's device reads it, and describes it for GPUI.
+    /// complete before the UI's device reads it, and describes it for the UI.
     fn render(&self, slot: &Self::Slot, size: (u32, u32), draw: impl FnOnce(u32) -> Result<()>) -> Result<SharedFrame>;
 }
 
@@ -173,7 +178,7 @@ impl<B: Backend> GlRenderer<B> {
                 h: height as c_int,
                 internal_format: 0,
             };
-            // Every backend's texture already has the row order GPUI samples in (checked with
+            // Every backend's texture already has the row order the UI samples in (checked with
             // D3D11 on AMD and with Vulkan on Mesa), so no flip.
             let mut flip: c_int = 0;
             let mut params = [

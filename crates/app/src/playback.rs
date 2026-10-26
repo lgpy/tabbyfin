@@ -883,6 +883,18 @@ impl Services {
         self.playback.adjustments = new;
     }
 
+    /// The window couldn't import the player's GPU frames (`Video::import_failed`): plays on
+    /// from here with software frames, which always show, and keeps to them for the rest of the
+    /// sign-in, since the import would fail again.
+    pub fn fall_back_to_pixels(&mut self) {
+        if self.playback.video_import == VideoImport::Pixels {
+            return;
+        }
+        tracing::warn!("video: switching to software frames");
+        self.playback.set_video_import(VideoImport::Pixels);
+        self.restart();
+    }
+
     /// Plays the same version again from the current position with the current tracks.
     fn restart(&mut self) {
         let Some(state) = self.playback.now_playing() else {
