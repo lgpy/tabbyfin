@@ -119,16 +119,23 @@ fn main() {
     let _log_guard = init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting tabbyfin");
 
+    #[cfg(windows)]
+    window::become_dpi_aware();
     let config = config::Config::load();
+    let launch = window::launch(&config);
     let options = eframe::NativeOptions {
-        viewport: window::viewport(&config),
+        viewport: window::viewport(launch),
+        // Centred on the first launch, and when the saved spot is on no monitor any more
+        // (Windows, checked before the window exists); a saved spot is used otherwise.
+        centered: launch.is_none(),
         wgpu_options: wgpu_options(),
         ..Default::default()
     };
+    let placement = window::Placement::new(launch);
     let result = eframe::run_native(
         "Tabbyfin",
         options,
-        Box::new(|cc| Ok(Box::new(app::App::new(cc, config)))),
+        Box::new(|cc| Ok(Box::new(app::App::new(cc, config, placement)))),
     );
     if let Err(err) = result {
         tracing::error!("couldn't open the window: {err}");

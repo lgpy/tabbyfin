@@ -25,6 +25,10 @@ pub struct Services {
 #[derive(Debug)]
 pub enum AppEvent {
     Toast(Toast),
+    /// An appearance setting was saved: the app applies it, and starts or stops following the
+    /// desktop's colour scheme with it. Settings raises this rather than calling
+    /// `theme::apply` itself, since the app owns that watch.
+    AppearanceChanged,
     /// The server rejected the session's token: back to sign-in.
     SessionExpired,
 }
