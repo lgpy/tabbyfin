@@ -1,6 +1,6 @@
-//! Home. For now it lists the user's libraries: the exemplar page that shows the patterns every
-//! page follows. U3 turns it into the real Home (its shelves and cards), drawing them in the
-//! order [`home_sections`] gives.
+//! Home. For now it shows the user's libraries and the newest items as shelves of cards: the
+//! exemplar page that shows the patterns every page follows. U3 turns it into the real Home
+//! (its sections and order), drawing them in the order [`home_sections`] gives.
 //!
 //! - Data loads through a [`Task`] polled in `show`, never awaited on the UI thread, and the
 //!   page shows what it has until new data arrives.
@@ -9,17 +9,28 @@
 //! - Clicks and Enter open pages through `cx.nav`; Esc going back is the shell's.
 //! - The browse cursor: [`Browse`] for the keys, [`browse::reveal`] and
 //!   [`browse::hide_on_click`] while drawing.
+//! - Cards and shelves are `widgets/`, the item menu `widgets/menu.rs`; what a menu asks for is
+//!   carried out here, after the frame's drawing.
 
 use std::collections::HashMap;
 
-use jellyfin::models::BaseItemDto;
+use jellyfin::ItemsQuery;
+use jellyfin::SortOrder;
+use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, ItemSortBy};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
+use crate::images::ImageCache;
 use crate::keys::{Action, Scope};
 use crate::nav::{NavRequest, Route};
 use crate::task::Task;
+use crate::toasts::Toast;
 use crate::views::{Page, PageCx};
+use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::Load;
+use crate::widgets::{card, shelf, state};
+
+/// How many of the newest items the second shelf shows.
+const LATEST_LIMIT: u32 = 16;
 
 /// The Home sections of the web client's Settings → Home that this app has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,29 +78,57 @@ pub fn home_sections(prefs: &HashMap<String, String>) -> Vec<HomeSection> {
     sections
 }
 
+/// What the exemplar page shows.
+struct HomeData {
+    libraries: Vec<BaseItemDto>,
+    /// The newest movies and shows, so the page has item cards (and their menus) to show until
+    /// U3 brings Home's real shelves.
+    latest: Vec<BaseItemDto>,
+}
+
+impl HomeData {
+    /// The page's shelves in drawing order: their items. The cursor's sections follow it.
+    fn rows(&self) -> [&[BaseItemDto]; 2] {
+        [&self.libraries, &self.latest]
+    }
+
+    fn section(&self, section: usize) -> Option<&[BaseItemDto]> {
+        self.rows().get(section).copied()
+    }
+}
+
 #[derive(Default)]
 pub struct HomePage {
-    libraries: Load<Vec<BaseItemDto>>,
-    loading: Option<Task<jellyfin::Result<Vec<BaseItemDto>>>>,
-    /// The `services.user_data` the libraries were loaded at; `None` before the first load or
-    /// after Retry.
+    data: Load<HomeData>,
+    loading: Option<Task<jellyfin::Result<HomeData>>>,
+    /// The `services.user_data` the data was loaded at; `None` before the first load or after
+    /// Retry.
     loaded_at: Option<u64>,
     cursor: Cursor,
 }
 
 impl HomePage {
-    /// Fetches the libraries again. What's on screen stays up until they arrive; a load still
+    /// Fetches everything again. What's on screen stays up until it arrives; a load still
     /// running is replaced, which cancels it.
     fn reload(&mut self, cx: &mut PageCx) {
         self.loaded_at = Some(cx.services.user_data);
         let client = cx.services.session.client.clone();
         self.loading = Some(Task::spawn(cx.ctx, async move {
-            client.user_views().await.map(|views| views.items)
+            let libraries = client.user_views().await?.items;
+            let latest = client
+                .items(&ItemsQuery {
+                    include_item_types: vec![BaseItemKind::Movie, BaseItemKind::Series],
+                    recursive: true,
+                    sort_by: vec![ItemSortBy::DateCreated],
+                    sort_order: Some(SortOrder::Descending),
+                    fields: vec![ItemField::PrimaryImageAspectRatio],
+                    limit: Some(LATEST_LIMIT),
+                    ..Default::default()
+                })
+                .await?
+                .items;
+            Ok(HomeData { libraries, latest })
         }));
-    }
-
-    fn open(item: &BaseItemDto, cx: &mut PageCx) {
-        cx.nav.push(NavRequest::Push(Route::for_item(item)));
     }
 }
 
@@ -112,46 +151,88 @@ impl Page for HomePage {
         }
         if let Some(result) = self.loading.as_mut().and_then(Task::poll) {
             self.loading = None;
-            self.libraries = match result {
-                Ok(libraries) => Load::Loaded(libraries),
+            self.data = match result {
+                Ok(data) => Load::Loaded(data),
                 Err(err) => Load::Failed(cx.services.handle_error(&err)),
             };
         }
         browse::hide_on_click(&mut self.cursor, ui);
 
-        match &self.libraries {
-            Load::Loading => {
-                ui.centered_and_justified(|ui| ui.spinner());
-            }
+        match &self.data {
+            Load::Loading => state::spinner(ui),
             Load::Failed(message) => {
-                let retry = ui
-                    .vertical_centered(|ui| {
-                        ui.label(message);
-                        ui.button("Retry").clicked()
-                    })
-                    .inner;
+                let retry = state::error(ui, message.clone());
                 if retry {
-                    self.libraries = Load::Loading;
+                    self.data = Load::Loading;
                     self.loaded_at = None;
                 }
             }
-            Load::Loaded(libraries) if libraries.is_empty() => {
-                ui.centered_and_justified(|ui| ui.label("Your server has no libraries yet."));
+            Load::Loaded(data) if data.libraries.is_empty() => {
+                state::empty(ui, "Your server has no libraries yet.");
             }
-            Load::Loaded(libraries) => {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index, library) in libraries.iter().enumerate() {
-                        let selected = self.cursor.is_selected(0, index);
-                        let response = ui.add(egui::Button::selectable(selected, &library.name));
-                        if selected {
-                            browse::reveal(&mut self.cursor, &response);
-                        }
-                        if response.clicked() {
-                            Self::open(library, cx);
-                        }
-                    }
-                });
-            }
+            Load::Loaded(data) => shelves(ui, data, &mut self.cursor, cx),
+        }
+    }
+}
+
+/// The page's two shelves, then what they asked for.
+fn shelves(ui: &mut egui::Ui, data: &HomeData, cursor: &mut Cursor, cx: &mut PageCx) {
+    let mut opened = None;
+    let mut chosen = None;
+    let images = &mut cx.services.images;
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        shelf::shelf(ui, "libraries", "Libraries", |ui| {
+            cards(ui, &data.libraries, 0, false, cursor, images, &mut opened, &mut chosen);
+        });
+        ui.add_space(16.);
+        shelf::shelf(ui, "latest", "Recently added", |ui| {
+            cards(ui, &data.latest, 1, true, cursor, images, &mut opened, &mut chosen);
+        });
+    });
+    if let Some(route) = opened {
+        cx.nav.push(NavRequest::Push(route));
+    }
+    if let Some((action, item)) = chosen {
+        act(action, &item, cx);
+    }
+}
+
+/// What a card's menu asked for: the services play it or mark it, and the only thing left is
+/// U8's *Add to playlist* dialog, which isn't here yet.
+fn act(action: MenuAction, item: &BaseItemDto, cx: &mut PageCx) {
+    if let Some(MenuAction::AddToPlaylist) = cx.services.carry_out(action, item) {
+        cx.services.toast(Toast::info("Add to playlist arrives with U8."));
+    }
+}
+
+/// One shelf's cards, in the cursor's section: a click (or Enter) opens the item's page and a
+/// right-click its menu.
+#[allow(clippy::too_many_arguments)]
+fn cards(
+    ui: &mut egui::Ui,
+    items: &[BaseItemDto],
+    section: usize,
+    posters: bool,
+    cursor: &mut Cursor,
+    images: &mut ImageCache,
+    opened: &mut Option<Route>,
+    chosen: &mut Option<(MenuAction, BaseItemDto)>,
+) {
+    for (index, item) in items.iter().enumerate() {
+        let selected = cursor.is_selected(section, index);
+        let response = if posters {
+            card::poster(ui, images, item, selected)
+        } else {
+            card::landscape(ui, images, item, selected)
+        };
+        if selected {
+            browse::reveal(cursor, &response);
+        }
+        if response.clicked() {
+            *opened = Some(Route::for_item(item));
+        }
+        if let Some(action) = menu::item_menu(&response, item) {
+            *chosen = Some((action, item.clone()));
         }
     }
 }
@@ -161,19 +242,21 @@ impl Browse for HomePage {
         &mut self.cursor
     }
 
-    /// One column: every arrow key moves along the list.
+    /// One row per shelf.
     fn sections(&self) -> Vec<Section> {
-        match &self.libraries {
-            Load::Loaded(libraries) => vec![Section::grid(libraries.len(), 1)],
+        match &self.data {
+            Load::Loaded(data) => data.rows().iter().map(|items| Section::row(items.len())).collect(),
             _ => Vec::new(),
         }
     }
 
     fn activate(&mut self, position: Position, cx: &mut PageCx) {
-        if let Load::Loaded(libraries) = &self.libraries
-            && let Some(library) = libraries.get(position.index)
+        if let Load::Loaded(data) = &self.data
+            && let Some(item) = data
+                .section(position.section)
+                .and_then(|items| items.get(position.index))
         {
-            Self::open(library, cx);
+            cx.nav.push(NavRequest::Push(Route::for_item(item)));
         }
     }
 }

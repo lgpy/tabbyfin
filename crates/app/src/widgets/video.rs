@@ -17,6 +17,7 @@ use player::libmpv::{Frame, VideoFrame, VideoImport, VideoOutput};
 use tokio::sync::watch;
 
 use crate::task::Task;
+use crate::theme::over_video;
 
 /// How soon after a new frame arrives the UI draws it.
 const REPAINT_AFTER: Duration = Duration::from_millis(1);
@@ -91,7 +92,7 @@ impl Video {
         }
 
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0., egui::Color32::BLACK);
+        painter.rect_filled(rect, 0., over_video::BACKDROP);
         if let Some(texture) = &self.texture {
             // On whole pixels, so a frame rendered at the window's size isn't blurred by
             // sampling between them.

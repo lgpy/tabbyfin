@@ -17,6 +17,7 @@ use crate::nav::{NavRequest, Route};
 use crate::playback;
 use crate::services::AppEvent;
 use crate::task::Task;
+use crate::theme::over_video;
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::{self, Page, PageCx, player};
@@ -25,7 +26,7 @@ use crate::widgets::video::Video;
 
 pub struct Shell {
     /// Never empty: Home is at the bottom.
-    stack: Vec<Box<dyn Page>>,
+    stack: Vec<StackEntry>,
     update_check: Option<Task<Option<Update>>>,
     /// The player is open: from a session's start until playback ends for good (it stays
     /// through autoplay and reconnects). Where U10's player page goes on the stack; leaving it
@@ -45,12 +46,23 @@ pub struct Shell {
     accounts: Vec<SavedServer>,
 }
 
+/// A page's [`StackEntry::serial`]. Counted for the whole process rather than per shell, so a
+/// page never shares ids with an earlier one, not even with the last account's Home after a
+/// switch.
+fn next_serial() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Shell {
     pub fn new(cx: &mut PageCx) -> Self {
         // `mut` is for the debug build's `debug_start` below.
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut shell = Self {
-            stack: vec![views::open(Route::Home, cx)],
+            stack: vec![StackEntry {
+                serial: next_serial(),
+                page: views::open(Route::Home, cx),
+            }],
             update_check: Some(Task::spawn(cx.ctx, update::check())),
             player: false,
             video: None,
@@ -99,11 +111,17 @@ impl Shell {
         self.debug_play(cx);
         if self.player {
             egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
+                .frame(egui::Frame::NONE.fill(over_video::BACKDROP))
                 .show(ui, |ui| self.show_player(ui, cx));
         } else {
             egui::Panel::top("top_bar").show(ui, |ui| self.top_bar(ui, cx));
-            egui::CentralPanel::default().show(ui, |ui| self.top_mut().show(ui, cx));
+            egui::CentralPanel::default().show(ui, |ui| {
+                // Each page's widgets and scroll areas live under its own id scope, so stacked
+                // pages can use the same names for theirs (two `"cast"` shelves, two
+                // `ScrollArea`s).
+                let entry = self.stack.last_mut().expect("the page stack is never empty");
+                ui.push_id(entry.serial, |ui| entry.page.show(ui, cx));
+            });
         }
         self.navigate(cx);
     }
@@ -203,7 +221,10 @@ impl Shell {
         };
         if !shown || state.is_none_or(|state| state.loading) {
             let spinner = egui::Rect::from_center_size(rect.center(), egui::vec2(48., 48.));
-            ui.put(spinner, egui::Spinner::new().size(48.).color(egui::Color32::LIGHT_GRAY));
+            ui.put(
+                spinner,
+                egui::Spinner::new().size(48.).color(over_video::MUTED_FOREGROUND),
+            );
         }
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| now_playing_bar(ui, cx));
     }
@@ -224,7 +245,10 @@ impl Shell {
 
     fn push(&mut self, route: Route, cx: &mut PageCx) {
         let page = views::open(route, cx);
-        self.stack.push(page);
+        self.stack.push(StackEntry {
+            serial: next_serial(),
+            page,
+        });
     }
 
     /// Closes the top page, unless it's Home.
@@ -235,11 +259,15 @@ impl Shell {
     }
 
     fn top(&self) -> &dyn Page {
-        self.stack.last().expect("the page stack is never empty").as_ref()
+        self.stack.last().expect("the page stack is never empty").page.as_ref()
     }
 
     fn top_mut(&mut self) -> &mut dyn Page {
-        self.stack.last_mut().expect("the page stack is never empty").as_mut()
+        self.stack
+            .last_mut()
+            .expect("the page stack is never empty")
+            .page
+            .as_mut()
     }
 
     /// When the update check finds a newer release, says so with a link to it.
@@ -330,12 +358,22 @@ impl Shell {
     }
 }
 
+/// A page on the stack and the number that scopes its ids.
+struct StackEntry {
+    /// Different for every page ever pushed, so two pages of the same kind don't share widget
+    /// state (a shelf's scroll offset, a scroll area's position).
+    serial: u64,
+    page: Box<dyn Page>,
+}
+
 /// Over the top of the video: Back, what's playing and where, and Stop. All the controls there
-/// are until U10. Dark in either theme, as the player is.
+/// are until U10. Dark in either theme, as the player is: the over-video colours, with egui's
+/// dark buttons.
 fn now_playing_bar(ui: &mut egui::Ui, cx: &mut PageCx) {
     ui.style_mut().visuals = egui::Visuals::dark();
+    ui.style_mut().visuals.override_text_color = Some(over_video::FOREGROUND);
     egui::Frame::NONE
-        .fill(egui::Color32::from_black_alpha(160))
+        .fill(over_video::SCRIM)
         .inner_margin(8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
