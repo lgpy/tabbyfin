@@ -75,8 +75,8 @@ pub struct Config {
     /// Sort and filter per library, by library id.
     #[serde(default)]
     pub library_views: BTreeMap<String, LibraryView>,
-    /// The main window's last size and position; restored at launch when it still lands on a
-    /// display.
+    /// The main window's last placement (frame position, content size and scale factor);
+    /// restored at launch when it still lands on a display.
     #[serde(default)]
     pub window_bounds: Option<WindowGeometry>,
     /// Whether the main window was maximized; restored on top of `window_bounds`.
@@ -112,13 +112,19 @@ pub enum SubtitleStyle {
     Box,
 }
 
-/// The main window's position and size in the global screen space, in logical pixels.
+/// The main window's last placement: the frame's top-left in physical pixels (or in points in
+/// configs saved before `scale`), the content area's size in OS points, and the scale factor the
+/// position was measured at.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct WindowGeometry {
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    /// The monitor scale factor `x` and `y` were saved with. `None` in configs from before it
+    /// was kept, whose position is in points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
