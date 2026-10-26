@@ -124,6 +124,12 @@ impl<T> Receiver<T> {
     pub fn drain(&mut self) -> impl Iterator<Item = T> + '_ {
         std::iter::from_fn(|| self.0.try_recv().ok())
     }
+
+    /// The next value, waiting for it; `None` once every sender is gone. For async code that
+    /// takes a stream over from the UI (playback finishing its sessions after sign-out).
+    pub async fn recv(&mut self) -> Option<T> {
+        self.0.recv().await
+    }
 }
 
 /// A timer for UI code (hiding the player's controls, debouncing a search, saving the window's
@@ -233,6 +239,23 @@ mod tests {
         assert_eq!(receiver.drain().count(), 0);
         drop(receiver);
         assert_eq!(sender.send(3), Err(3));
+    }
+
+    #[test]
+    fn a_channel_can_be_awaited_until_its_senders_are_gone() {
+        let ctx = egui::Context::default();
+        let (sender, mut receiver) = channel(&ctx);
+        sender.send(1).unwrap();
+        let mut received = Task::spawn(&ctx, async move {
+            let mut values = Vec::new();
+            while let Some(value) = receiver.recv().await {
+                values.push(value);
+            }
+            values
+        });
+        sender.send(2).unwrap();
+        drop(sender);
+        assert_eq!(wait_for(&mut received), [1, 2]);
     }
 
     #[test]

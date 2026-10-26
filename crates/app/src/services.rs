@@ -4,21 +4,31 @@
 //! signed in and lends it to the shell and its pages each frame (`PageCx::services`), so
 //! nothing is shared through globals or `Rc<RefCell<…>>`. Code that needs two parts at once
 //! (playback asking SyncPlay, remote control driving playback) is a method here, which can
-//! reach every part.
+//! reach every part; each part's module adds its own `impl Services` block (playback's
+//! controls are in `playback.rs`).
 //!
-//! Still to come: `images` (I1), `playback` (P1), `syncplay` (P2), `remote` and `live` (P3).
+//! Still to come: `syncplay` (P2), `remote` and `live` (P3).
 
+use crate::config::SavedServer;
+use crate::images::ImageCache;
+use crate::playback::{self, PlaybackManager};
 use crate::session::{Session, describe_error};
 use crate::toasts::Toast;
 
 pub struct Services {
     pub session: Session,
+    /// Server images as egui textures (`images.rs`), with their queue and memory budget.
+    pub images: ImageCache,
     /// Bumped when the user's watch data changed elsewhere (played state, resume points,
     /// favorites). Pages remember the value they loaded at and load again when it differs.
     pub user_data: u64,
     /// What happened since the app last looked, for the app and the shell to act on. Drained
     /// every frame.
     pub events: Vec<AppEvent>,
+    /// Playback sessions, the play queue and what carries over between items. Playing and the
+    /// player's controls are methods on `Services` (`playback.rs`), since SyncPlay may take
+    /// them over.
+    pub playback: PlaybackManager,
 }
 
 /// Something signed-in code can't handle itself, for the app or the shell.
@@ -31,11 +41,26 @@ pub enum AppEvent {
     AppearanceChanged,
     /// The server rejected the session's token: back to sign-in.
     SessionExpired,
+    /// The user signed out: revoke the token and go back to sign-in.
+    SignOut,
+    /// Switch to another saved account, ending this session.
+    SwitchAccount(SavedServer),
+    /// Sign in to another server or user, keeping this session to come back to.
+    AddAccount,
+    /// A playback session started: show the player (`services.playback.now_playing()`). A new
+    /// session replaces the player that's showing.
+    PlaybackStarted,
+    /// Playback ended for good (stopped, failed, or finished with nothing to play next): close
+    /// the player. Not sent between an episode and the next one it autoplays, nor while waiting
+    /// to reconnect.
+    PlaybackEnded,
 }
 
 impl Services {
-    pub fn new(session: Session) -> Self {
+    pub fn new(session: Session, ctx: &egui::Context) -> Self {
         Self {
+            images: ImageCache::new(session.client.clone(), ctx),
+            playback: PlaybackManager::new(ctx, session.client.clone(), session.account_key()),
             session,
             user_data: 0,
             events: Vec::new(),
@@ -43,9 +68,32 @@ impl Services {
     }
 
     /// Work that has to go on whatever is on screen: draining the background channels, firing
-    /// deadlines. Runs from `App::logic` before each frame, and also while the window is
-    /// hidden, so playback keeps reporting when it's minimised.
-    pub fn tick(&mut self, _ctx: &egui::Context) {}
+    /// deadlines, uploading the images that finished loading. Runs from `App::logic` before each
+    /// frame, and also while the window is hidden, so playback keeps reporting when it's
+    /// minimised.
+    pub fn tick(&mut self, _ctx: &egui::Context) {
+        self.images.tick();
+        self.tick_playback();
+    }
+
+    /// The one hook for "this session is ending", called before another account takes over or
+    /// the screen showing it is dropped: P1 stops playback here and P2 leaves a SyncPlay group.
+    /// Dropping the services afterwards cancels whatever they still have running; a stopped
+    /// playback session finishes in the background, reporting its stop once.
+    pub fn end(&mut self) {
+        self.stop_playback();
+    }
+
+    /// The app is quitting: stops what these sessions (the signed-in one, and one parked behind
+    /// *Add account*) are doing on the server, and waits a little for it to be reported, since
+    /// the process ends right after.
+    pub fn shut_down<'a>(all: impl IntoIterator<Item = &'a mut Services>) {
+        let stopping: Vec<_> = all
+            .into_iter()
+            .filter_map(|services| services.playback.stop_for_exit())
+            .collect();
+        playback::wait_for_exit(stopping);
+    }
 
     pub fn toast(&mut self, toast: Toast) {
         self.events.push(AppEvent::Toast(toast));
