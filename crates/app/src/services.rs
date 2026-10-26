@@ -4,13 +4,15 @@
 //! signed in and lends it to the shell and its pages each frame (`PageCx::services`), so
 //! nothing is shared through globals or `Rc<RefCell<…>>`. Code that needs two parts at once
 //! (playback asking SyncPlay, remote control driving playback) is a method here, which can
-//! reach every part.
+//! reach every part; each part's module adds its own `impl Services` block (playback's
+//! controls are in `playback.rs`).
 //!
-//! Still to come: `playback` (P1), `syncplay` (P2), `remote` and `live` (P3).
+//! Still to come: `syncplay` (P2), `remote` and `live` (P3).
 
 use crate::config::SavedServer;
 use crate::images::ImageCache;
 use crate::item_menu::Mark;
+use crate::playback::{self, PlaybackManager};
 use crate::session::{Session, describe_error};
 use crate::task;
 use crate::toasts::Toast;
@@ -28,6 +30,10 @@ pub struct Services {
     /// Watched and favorite changes that finished on the server, for [`Services::tick`] to apply.
     marked: task::Receiver<Marked>,
     marking: task::Sender<Marked>,
+    /// Playback sessions, the play queue and what carries over between items. Playing and the
+    /// player's controls are methods on `Services` (`playback.rs`), since SyncPlay may take
+    /// them over.
+    pub playback: PlaybackManager,
 }
 
 /// A watched or favorite change, as its request finishes: what was asked for, on which item,
@@ -38,6 +44,10 @@ type Marked = (Mark, String, jellyfin::Result<()>);
 #[derive(Debug)]
 pub enum AppEvent {
     Toast(Toast),
+    /// An appearance setting was saved: the app applies it, and starts or stops following the
+    /// desktop's colour scheme with it. Settings raises this rather than calling
+    /// `theme::apply` itself, since the app owns that watch.
+    AppearanceChanged,
     /// The server rejected the session's token: back to sign-in.
     SessionExpired,
     /// The user signed out: revoke the token and go back to sign-in.
@@ -46,6 +56,13 @@ pub enum AppEvent {
     SwitchAccount(SavedServer),
     /// Sign in to another server or user, keeping this session to come back to.
     AddAccount,
+    /// A playback session started: show the player (`services.playback.now_playing()`). A new
+    /// session replaces the player that's showing.
+    PlaybackStarted,
+    /// Playback ended for good (stopped, failed, or finished with nothing to play next): close
+    /// the player. Not sent between an episode and the next one it autoplays, nor while waiting
+    /// to reconnect.
+    PlaybackEnded,
 }
 
 impl Services {
@@ -53,6 +70,7 @@ impl Services {
         let (marking, marked) = task::channel(ctx);
         Self {
             images: ImageCache::new(session.client.clone(), ctx),
+            playback: PlaybackManager::new(ctx, session.client.clone(), session.account_key()),
             session,
             user_data: 0,
             events: Vec::new(),
@@ -68,12 +86,27 @@ impl Services {
     pub fn tick(&mut self, _ctx: &egui::Context) {
         self.images.tick();
         self.apply_marks();
+        self.tick_playback();
     }
 
     /// The one hook for "this session is ending", called before another account takes over or
     /// the screen showing it is dropped: P1 stops playback here and P2 leaves a SyncPlay group.
-    /// Dropping the services afterwards cancels whatever they still have running.
-    pub fn end(&mut self) {}
+    /// Dropping the services afterwards cancels whatever they still have running; a stopped
+    /// playback session finishes in the background, reporting its stop once.
+    pub fn end(&mut self) {
+        self.stop_playback();
+    }
+
+    /// The app is quitting: stops what these sessions (the signed-in one, and one parked behind
+    /// *Add account*) are doing on the server, and waits a little for it to be reported, since
+    /// the process ends right after.
+    pub fn shut_down<'a>(all: impl IntoIterator<Item = &'a mut Services>) {
+        let stopping: Vec<_> = all
+            .into_iter()
+            .filter_map(|services| services.playback.stop_for_exit())
+            .collect();
+        playback::wait_for_exit(stopping);
+    }
 
     /// Sets watched or favorite state on the server, from a card's menu. The pages that show it
     /// reload when it worked (`user_data`); a failure is a toast. The request runs on tokio and
