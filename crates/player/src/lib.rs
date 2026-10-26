@@ -1,6 +1,7 @@
 //! mpv playback for the app.
 //!
-//! libmpv renders into a [`libmpv::VideoOutput`] the UI draws; see `docs/in-app-video.md`. By
+//! libmpv renders into a [`libmpv::VideoOutput`] the UI draws, in a form the UI said it can take
+//! ([`libmpv::VideoImport`]); see `docs/in-app-video.md`. By
 //! default it runs in a separate player host process (this executable with `--player-host`,
 //! see [`host`] and [`remote`]), so an mpv or GPU driver crash doesn't take the app down;
 //! `TABBYFIN_PLAYER=embedded` runs it inside the app instead. Commands are async; player
@@ -63,19 +64,20 @@ enum Backend {
 type Started = (Player, mpsc::UnboundedReceiver<PlayerEvent>, libmpv::VideoOutput);
 
 impl Player {
-    /// Starts mpv, in a player host process unless `TABBYFIN_PLAYER=embedded`. Fails with
-    /// [`Error::LibmpvUnavailable`] where libmpv can't be loaded.
-    pub async fn spawn() -> Result<Started> {
+    /// Starts mpv, in a player host process unless `TABBYFIN_PLAYER=embedded`, with a video
+    /// output whose frames the UI can draw (`import`). Fails with [`Error::LibmpvUnavailable`]
+    /// where libmpv can't be loaded.
+    pub async fn spawn(import: libmpv::VideoImport) -> Result<Started> {
         if std::env::var("TABBYFIN_PLAYER").as_deref() == Ok("embedded") {
-            return Self::spawn_embedded().await;
+            return Self::spawn_embedded(import).await;
         }
-        let (player, events, video) = remote::RemotePlayer::spawn().await?;
+        let (player, events, video) = remote::RemotePlayer::spawn(import).await?;
         Ok((Player(Backend::Remote(Box::new(player))), events, video))
     }
 
     /// Starts mpv in this process.
-    pub(crate) async fn spawn_embedded() -> Result<Started> {
-        let (player, events) = tokio::task::spawn_blocking(libmpv::EmbeddedPlayer::spawn)
+    pub(crate) async fn spawn_embedded(import: libmpv::VideoImport) -> Result<Started> {
+        let (player, events) = tokio::task::spawn_blocking(move || libmpv::EmbeddedPlayer::spawn(import))
             .await
             .map_err(|_| Error::Closed)??;
         let video = player.video();

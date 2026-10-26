@@ -40,6 +40,10 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Placeholders for images still loading (`ImageBlurHashes`).
 blurhash = { version = "0.2", default-features = false }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Reading wgpu's Vulkan device UUID for the player (`widgets/video.rs`). The version wgpu uses.
+ash = "0.38"
+
 [build-dependencies]
 winresource = "0.1.34"
 
