@@ -277,9 +277,13 @@ impl Shell {
 
 impl Shell {
     /// Dev aid: plays the `TABBYFIN_ROUTE=play:…` item once it's fetched, from its resume point
-    /// with the tracks given.
+    /// with the tracks given. With `TABBYFIN_SYNCPLAY` too, it waits until the group is joined,
+    /// so the item plays for the group.
     #[cfg(debug_assertions)]
     fn debug_play(&mut self, cx: &mut PageCx) {
+        if std::env::var_os("TABBYFIN_SYNCPLAY").is_some() && !cx.services.in_group() {
+            return;
+        }
         let Some(result) = self.debug_play.as_mut().and_then(|(item, _)| item.poll()) else {
             return;
         };

@@ -5,14 +5,16 @@
 //! nothing is shared through globals or `Rc<RefCell<…>>`. Code that needs two parts at once
 //! (playback asking SyncPlay, remote control driving playback) is a method here, which can
 //! reach every part; each part's module adds its own `impl Services` block (playback's
-//! controls are in `playback.rs`).
+//! controls are in `playback.rs`, SyncPlay's in `syncplay.rs`).
 //!
-//! Still to come: `syncplay` (P2), `remote` and `live` (P3).
+//! Still to come: `remote` (P3), and the rest of `live` (P3).
 
 use crate::config::SavedServer;
 use crate::images::ImageCache;
+use crate::live::Live;
 use crate::playback::{self, PlaybackManager};
 use crate::session::{Session, describe_error};
+use crate::syncplay::SyncPlay;
 use crate::toasts::Toast;
 
 pub struct Services {
@@ -29,6 +31,12 @@ pub struct Services {
     /// player's controls are methods on `Services` (`playback.rs`), since SyncPlay may take
     /// them over.
     pub playback: PlaybackManager,
+    /// The SyncPlay group this session is in, its queue, and the panel's requests. What
+    /// involves playback is on `Services` (`syncplay.rs`).
+    pub syncplay: SyncPlay,
+    /// The session websocket, which feeds SyncPlay (and, with P3, remote control and
+    /// watch-data refreshes).
+    pub live: Live,
 }
 
 /// Something signed-in code can't handle itself, for the app or the shell.
@@ -57,6 +65,8 @@ impl Services {
         Self {
             images: ImageCache::new(session.client.clone(), ctx),
             playback: PlaybackManager::new(ctx, session.client.clone(), session.account_key()),
+            syncplay: SyncPlay::new(session.client.clone(), ctx),
+            live: Live::connect(session.client.clone(), ctx),
             session,
             user_data: 0,
             events: Vec::new(),
@@ -70,24 +80,31 @@ impl Services {
     pub fn tick(&mut self, _ctx: &egui::Context) {
         self.images.tick();
         self.tick_playback();
+        self.tick_live();
+        self.tick_syncplay();
     }
 
     /// The one hook for "this session is ending", called before another account takes over or
-    /// the screen showing it is dropped: P1 stops playback here and P2 leaves a SyncPlay group.
-    /// Dropping the services afterwards cancels whatever they still have running; a stopped
-    /// playback session finishes in the background, reporting its stop once.
+    /// the screen showing it is dropped: stops playback and leaves a SyncPlay group. Dropping
+    /// the services afterwards cancels whatever they still have running; a stopped playback
+    /// session finishes in the background, reporting its stop once, and the request leaving the
+    /// group still goes out.
     pub fn end(&mut self) {
         self.stop_playback();
+        if self.in_group() {
+            self.syncplay.leave();
+        }
     }
 
     /// The app is quitting: stops what these sessions (the signed-in one, and one parked behind
-    /// *Add account*) are doing on the server, and waits a little for it to be reported, since
-    /// the process ends right after.
+    /// *Add account*) are doing on the server, playback and a SyncPlay group, and waits a
+    /// little for the server to hear it, since the process ends right after.
     pub fn shut_down<'a>(all: impl IntoIterator<Item = &'a mut Services>) {
-        let stopping: Vec<_> = all
-            .into_iter()
-            .filter_map(|services| services.playback.stop_for_exit())
-            .collect();
+        let mut stopping = Vec::new();
+        for services in all {
+            stopping.extend(services.playback.stop_for_exit());
+            stopping.extend(services.syncplay.leave_for_exit());
+        }
         playback::wait_for_exit(stopping);
     }
 
