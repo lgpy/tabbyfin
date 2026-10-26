@@ -48,6 +48,17 @@ pub trait Page {
         false
     }
 
+    /// The top bar's search box typed a new term (trimmed, never empty), for the results page
+    /// to search for. Only [`search::SearchPage`] uses it; U4 searches when it arrives.
+    fn set_search_term(&mut self, _term: &str, _cx: &mut PageCx) {}
+
+    /// Enter or Down in the search box: the results page takes the keyboard. Returns whether
+    /// it did, i.e. whether there is something to put the cursor on; otherwise the box keeps
+    /// the keyboard, as a search still running or with no results does.
+    fn enter_results(&mut self, _cx: &mut PageCx) -> bool {
+        false
+    }
+
     /// Draws the page and handles its input. Results of the page's tasks are polled here too.
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx);
 }
@@ -59,7 +70,7 @@ pub fn open(route: Route, _cx: &mut PageCx) -> Box<dyn Page> {
         Route::Library { name, .. } => Box::new(StubPage::new(name, "U5")),
         Route::Item { name, .. } => Box::new(StubPage::new(name, "U6")),
         Route::Person { name, .. } => Box::new(StubPage::new(name, "U5")),
-        Route::Search => Box::new(StubPage::new("Search".into(), "U4")),
+        Route::Search => Box::new(search::SearchPage::default()),
         Route::Settings => Box::new(StubPage::new("Settings".into(), "U9")),
         #[cfg(debug_assertions)]
         Route::Posters { id } => Box::new(posters::PostersPage::new(id)),
