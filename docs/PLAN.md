@@ -272,10 +272,10 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 
 `syncplay.rs` holds the group this session is in. The protocol is in `docs/ROADMAP.md` §2.4; the flow here:
 
-1. **Joining:** the top-bar popover lists groups (`/SyncPlay/List`), creates one or joins one. The server confirms with a `GroupJoined` update on the websocket. While in a group, the server clock is sampled (4 samples, then one a minute) and the ping is reported.
+1. **Joining:** the top-bar popover lists groups (`/SyncPlay/List`), creates one or joins one. The server confirms with a `GroupJoined` update on the websocket. While in a group, the server clock is sampled (4 samples, then one a minute) and the ping is reported. Requests go out one at a time, in the order they're made, so a `Ready` never overtakes its `Buffering`.
 2. **Starting something** while in a group (Play on an item page, next episode…) doesn't play locally: `PlaybackManager::play` hands it to SyncPlay, which sends `SetNewQueue` (the item, plus the next episode for episodes).
 3. **Queue updates:** when the queue's current entry changes, every member (this one too) loads it paused at the group's position (`PlayOptions::start_paused`, `group_item`), reports `Buffering`, then `Ready` after mpv's first `playback-restart`.
-4. **Commands** arrive with a `When` in server time:
+4. **Commands** arrive with a `When` in server time. The app waits for it on tokio, not on the UI's frames (which can be 16 ms apart, more on a slow renderer), and sends the command straight to the player from there:
    - `Unpause`: seek to the group's position if more than 0.4 s off, wait until `When`, then unpause. If it arrived late, seek ahead by the lateness and unpause now.
    - `Pause`: at `When`, pause and seek to the group's position.
    - `Seek`: pause, seek, report `Buffering`, and `Ready` after the restart; the server then unpauses everyone.
@@ -289,7 +289,8 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
    - In WSL with software rendering, a member drifts up to about 0.4 s while playback warms up, is back within 0.1 s after about 8 s, and stays within ±70 ms after that.
 
 8. **Local reloads:** another version, or a transcode restarted for other tracks, reloads the item here only (`NowPlaying::reload` → `SyncPlay::reload`): report `Buffering` (the server pauses everyone and keeps the group's position), load paused as the same queue entry, report `Ready` once loaded (the server resumes everyone, or first has this member seek if it landed elsewhere). The old session stops being watched first, or it would answer `Ready` at once.
-9. **The queue:** the SyncPlay menu lists the group's queue (names fetched by id) with the playing entry marked: `SetPlaylistItem` plays an entry, `MovePlaylistItem` and `RemoveFromPlaylist` edit it, `SetShuffleMode` and `SetRepeatMode` set the modes. The changes come back as queue updates to everyone.
+9. **Leaving:** signing out, switching accounts and quitting leave the group first.
+10. **The queue:** the SyncPlay menu lists the group's queue (names fetched by id) with the playing entry marked: `SetPlaylistItem` plays an entry, `MovePlaylistItem` and `RemoveFromPlaylist` edit it, `SetShuffleMode` and `SetRepeatMode` set the modes. The changes come back as queue updates to everyone.
 
 ## 6. App architecture (GPUI side)
 
