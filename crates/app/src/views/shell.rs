@@ -13,9 +13,10 @@
 //! to it from a page opened from them), clearing it closes them, and Enter or Down moves into
 //! the results; Esc gives the keyboard back to the page.
 //!
-//! While a playback session shows, the player takes the window: no top bar, just a line at the
-//! bottom saying what's playing with the player's keys working, until U10's player page
-//! replaces it. Going back stops playback; the player closing leaves fullscreen.
+//! While a playback session shows, the player takes the window: no top bar, the video filling
+//! the window with a bar over it saying what's playing, and the player's keys working, until
+//! U10's player page replaces it. Going back stops playback; the player closing leaves
+//! fullscreen.
 
 use egui::text::LayoutJob;
 use egui::{
@@ -32,10 +33,12 @@ use crate::nav::{NavRequest, Route};
 use crate::playback;
 use crate::services::AppEvent;
 use crate::task::Task;
+use crate::theme::over_video;
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::{self, Page, PageCx, player};
 use crate::widgets::text::timestamp;
+use crate::widgets::video::Video;
 
 /// The bar's height, inside the panel's own margin.
 const BAR_H: f32 = 52.;
@@ -112,6 +115,10 @@ pub struct Shell {
     /// through autoplay and reconnects). Where U10's player page goes on the stack; leaving it
     /// stops playback.
     player: bool,
+    /// The playing session's video, with the session's number: a new session (the next
+    /// episode, a reconnect) brings a new video output. Kept between sessions, so the last
+    /// frame stays up while the next one loads.
+    video: Option<(u64, Video)>,
     /// `TABBYFIN_ROUTE=play:…`: the item being fetched, and how to play it.
     #[cfg(debug_assertions)]
     debug_play: Option<(
@@ -162,6 +169,7 @@ impl Shell {
             }],
             update_check: Some(Task::spawn(cx.ctx, update::check())),
             player: false,
+            video: None,
             #[cfg(debug_assertions)]
             debug_play: None,
             accounts: Vec::new(),
@@ -208,6 +216,7 @@ impl Shell {
     /// Playback ended for good (`AppEvent::PlaybackEnded`): the player closes, leaving
     /// fullscreen.
     pub fn player_ended(&mut self, ctx: &egui::Context) {
+        self.video = None;
         if std::mem::take(&mut self.player) && ctx.input(|i| i.viewport().fullscreen).unwrap_or(false) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
         }
@@ -224,16 +233,19 @@ impl Shell {
         #[cfg(debug_assertions)]
         self.debug_play(cx);
         if self.player {
-            egui::Panel::bottom("now_playing").show(ui, |ui| now_playing_line(ui, cx));
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(over_video::BACKDROP))
+                .show(ui, |ui| self.show_player(ui, cx));
         } else {
             egui::Panel::top("top_bar").show(ui, |ui| self.top_bar(ui, cx));
+            egui::CentralPanel::default().show(ui, |ui| {
+                // Each page's widgets and scroll areas live under its own id scope, so stacked
+                // pages can use the same names for theirs (two `"cast"` shelves, two
+                // `ScrollArea`s).
+                let entry = self.stack.last_mut().expect("the page stack is never empty");
+                ui.push_id(entry.serial, |ui| entry.page.show(ui, cx));
+            });
         }
-        egui::CentralPanel::default().show(ui, |ui| {
-            // Each page's widgets and scroll areas live under its own id scope, so stacked pages
-            // can use the same names for theirs (two `"cast"` shelves, two `ScrollArea`s).
-            let entry = self.stack.last_mut().expect("the page stack is never empty");
-            ui.push_id(entry.serial, |ui| entry.page.show(ui, cx));
-        });
         self.navigate(cx);
     }
 
@@ -744,6 +756,33 @@ impl Shell {
         }
     }
 
+    /// The player until U10: the video filling the window, a spinner until it shows, and the
+    /// bar over it.
+    fn show_player(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        let state = cx.services.playback.now_playing();
+        if let (Some(state), Some(render_state)) = (state, cx.render_state)
+            && self.video.as_ref().map(|(session, _)| *session) != Some(state.session)
+        {
+            self.video = Some((state.session, Video::new(cx.ctx, state.video.clone(), render_state)));
+        }
+        let rect = ui.max_rect();
+        let shown = match &mut self.video {
+            Some((_, video)) => {
+                video.show(ui);
+                video.has_frame()
+            }
+            None => false,
+        };
+        if !shown || state.is_none_or(|state| state.loading) {
+            let spinner = egui::Rect::from_center_size(rect.center(), egui::vec2(48., 48.));
+            ui.put(
+                spinner,
+                egui::Spinner::new().size(48.).color(over_video::MUTED_FOREGROUND),
+            );
+        }
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| now_playing_bar(ui, cx));
+    }
+
     fn navigate(&mut self, cx: &mut PageCx) {
         if cx.nav.is_empty() {
             return;
@@ -859,9 +898,13 @@ impl Shell {
 
 impl Shell {
     /// Dev aid: plays the `TABBYFIN_ROUTE=play:…` item once it's fetched, from its resume point
-    /// with the tracks given.
+    /// with the tracks given. With `TABBYFIN_SYNCPLAY` too, it waits until the group is joined,
+    /// so the item plays for the group.
     #[cfg(debug_assertions)]
     fn debug_play(&mut self, cx: &mut PageCx) {
+        if std::env::var_os("TABBYFIN_SYNCPLAY").is_some() && !cx.services.in_group() {
+            return;
+        }
         let Some(result) = self.debug_play.as_mut().and_then(|(item, _)| item.poll()) else {
             return;
         };
@@ -976,34 +1019,46 @@ fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     Some(ctx.load_texture("logo", image, egui::TextureOptions::LINEAR))
 }
 
-/// What's playing, where, and Stop: all the player there is until U10.
-fn now_playing_line(ui: &mut egui::Ui, cx: &mut PageCx) {
-    ui.horizontal(|ui| {
-        let text = match cx.services.playback.now_playing() {
-            Some(state) => {
-                let mut text = format!(
-                    "Playing {}  {}",
-                    playback::title(&state.item),
-                    timestamp(state.position)
-                );
-                if let Some(duration) = state.duration {
-                    text += &format!(" / {}", timestamp(duration));
+/// Over the top of the video: Back, what's playing and where, and Stop. All the controls there
+/// are until U10. Dark in either theme, as the player is: the over-video colours, with egui's
+/// dark buttons.
+fn now_playing_bar(ui: &mut egui::Ui, cx: &mut PageCx) {
+    ui.style_mut().visuals = egui::Visuals::dark();
+    ui.style_mut().visuals.override_text_color = Some(over_video::FOREGROUND);
+    egui::Frame::NONE
+        .fill(over_video::SCRIM)
+        .inner_margin(8)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                // Leaving the player stops playback; it closes when the session ends.
+                if ui.button(ICON_ARROW_BACK).on_hover_text("Back").clicked() {
+                    cx.services.stop_playback();
                 }
-                if state.paused {
-                    text += "  (paused)";
-                }
-                if state.is_transcoding() {
-                    text += "  · Transcoding";
-                }
-                text
-            }
-            None => "Starting playback…".to_owned(),
-        };
-        ui.label(text);
-        if ui.button("Stop").clicked() {
-            cx.services.control(playback::UiCommand::Stop);
-        }
-    });
+                let text = match cx.services.playback.now_playing() {
+                    Some(state) => {
+                        let mut text = format!("{}  {}", playback::title(&state.item), timestamp(state.position));
+                        if let Some(duration) = state.duration {
+                            text += &format!(" / {}", timestamp(duration));
+                        }
+                        if state.paused {
+                            text += "  (paused)";
+                        }
+                        if state.is_transcoding() {
+                            text += "  · Transcoding";
+                        }
+                        text
+                    }
+                    None => "Starting playback…".to_owned(),
+                };
+                ui.label(text);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Stop").clicked() {
+                        cx.services.control(playback::UiCommand::Stop);
+                    }
+                });
+            });
+        });
 }
 
 #[cfg(test)]
