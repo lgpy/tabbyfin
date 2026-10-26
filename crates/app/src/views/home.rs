@@ -197,15 +197,11 @@ fn shelves(ui: &mut egui::Ui, data: &HomeData, cursor: &mut Cursor, cx: &mut Pag
     }
 }
 
-/// What a card's menu asked for. Marking happens here; playing and the playlist dialog belong
-/// to the player (P1) and U8's dialog, so the pages that own those wire them up (U5, U6).
+/// What a card's menu asked for: the services play it or mark it, and the only thing left is
+/// U8's *Add to playlist* dialog, which isn't here yet.
 fn act(action: MenuAction, item: &BaseItemDto, cx: &mut PageCx) {
-    match action {
-        MenuAction::Mark(mark) => cx.services.mark(item.id.clone(), mark),
-        MenuAction::Play { .. } | MenuAction::UpNext => {
-            cx.services.toast(Toast::info("Playing from a card arrives with U6."));
-        }
-        MenuAction::AddToPlaylist => cx.services.toast(Toast::info("Add to playlist arrives with U8.")),
+    if let Some(MenuAction::AddToPlaylist) = cx.services.carry_out(action, item) {
+        cx.services.toast(Toast::info("Add to playlist arrives with U8."));
     }
 }
 

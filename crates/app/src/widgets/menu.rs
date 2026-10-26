@@ -2,10 +2,14 @@
 //! mark it watched or favorite, add it to a playlist. The rules (what's offered for which kind,
 //! what's checked) are [`crate::item_menu`]'s.
 //!
-//! The menu returns what was chosen instead of carrying it out: marking an item is a
-//! [`crate::services::Services::mark`] call the page makes, while playing it and the playlist
-//! dialog belong to the player (P1) and the dialogs (U8), so the pages that own those carry
-//! [`MenuAction`]s out. `main`'s menu did all of it itself, through GPUI globals.
+//! The menu returns what was chosen instead of carrying it out. [`Services::carry_out`] does
+//! everything only the services can — playing, playing a series' next episode, marking it
+//! watched or favorite — and hands back *Add to playlist…* for the page to open U8's dialog.
+//! `main`'s menu did all of it itself, through GPUI globals.
+//!
+//! Each action that takes a request first ([`Services::mark`], [`Services::play_up_next`])
+//! runs it on tokio and reports back in [`Services::apply_menu_requests`], which `Services::tick`
+//! calls, so no page owns a task for it.
 //!
 //! egui's menus don't take keys, so the menu is pointer-only for now, like the account menu
 //! (S1).
@@ -16,7 +20,10 @@ use egui_material_icons::icons::{ICON_CHECK, ICON_CHECK_CIRCLE, ICON_FAVORITE, I
 
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 
-use crate::item_menu::{Mark, can_add_to_playlist, can_mark, is_favorite, is_playable, is_played, resume_point};
+use crate::item_menu::{self, Mark, can_add_to_playlist, can_mark, is_favorite, is_playable, is_played, resume_point};
+use crate::playback::PlayOptions;
+use crate::services::{Marked, Services, UpNext};
+use crate::toasts::Toast;
 use crate::widgets::text::timestamp;
 
 /// What a choice in [`item_menu`] asks for.
@@ -24,8 +31,7 @@ use crate::widgets::text::timestamp;
 pub enum MenuAction {
     /// Play the item, resuming at `start` if it's partway through.
     Play { start: Option<jellyfin::Ticks> },
-    /// Play a series or season from its next episode: the page fetches the episodes
-    /// (`item_menu::episodes_of`, `item_menu::first_unwatched`) and plays that one.
+    /// Play a series or season from its next episode (`item_menu::first_unwatched`).
     UpNext,
     /// Set watched or favorite state.
     Mark(Mark),
@@ -150,3 +156,103 @@ fn icon_entry(ui: &mut Ui, icon: egui_material_icons::MaterialIcon, label: &str)
 /// R1 brings the theme's own tokens.
 const SUCCESS: Color32 = Color32::from_rgb(0x2e, 0xc4, 0x6e);
 const RED: Color32 = Color32::from_rgb(0xef, 0x44, 0x44);
+
+/// What a menu choice needs beyond the menu: playing (its controls are in `playback.rs`),
+/// marking, and the episode fetch that *Play* on a series or season comes down to.
+impl Services {
+    /// Carries out a choice from the item menu: playing the item, playing a series' or season's
+    /// next episode, marking it watched or favorite. Everything is done here except *Add to
+    /// playlist…*, which needs U8's dialog and comes back for the page to open.
+    pub fn carry_out(&mut self, action: MenuAction, item: &BaseItemDto) -> Option<MenuAction> {
+        match action {
+            // `start` only, as `main`'s menu did: the player still offers to start over.
+            MenuAction::Play { start } => {
+                self.play(
+                    item,
+                    PlayOptions {
+                        start,
+                        ..Default::default()
+                    },
+                );
+                None
+            }
+            MenuAction::UpNext => {
+                self.play_up_next(item);
+                None
+            }
+            MenuAction::Mark(mark) => {
+                self.mark(item.id.clone(), mark);
+                None
+            }
+            MenuAction::AddToPlaylist => Some(action),
+        }
+    }
+
+    /// Plays a series or season from its next episode, resuming it if it's partway there: which
+    /// episode takes a request, so it runs on tokio and [`Services::tick`] plays it.
+    pub fn play_up_next(&mut self, item: &BaseItemDto) {
+        let client = self.session.client.clone();
+        let item = item.clone();
+        let sender = self.up_next_from.clone();
+        crate::runtime::detach(async move {
+            let result = item_menu::episodes_of(&client, &item)
+                .await
+                .map(|episodes| item_menu::first_unwatched(&episodes).cloned());
+            let _ = sender.send(result);
+        });
+    }
+
+    /// Sets watched or favorite state on the server, from a menu or an item page's toggle. The
+    /// pages that show it reload when it worked (`user_data`); a failure is a toast.
+    pub fn mark(&mut self, item_id: String, mark: Mark) {
+        let client = self.session.client.clone();
+        let sender = self.marking.clone();
+        crate::runtime::detach(async move {
+            let result = match mark {
+                Mark::Played(true) => client.mark_played(&item_id).await,
+                Mark::Played(false) => client.mark_unplayed(&item_id).await,
+                Mark::Favorite(true) => client.mark_favorite(&item_id).await,
+                Mark::Favorite(false) => client.unmark_favorite(&item_id).await,
+            };
+            let _ = sender.send((mark, item_id, result));
+        });
+    }
+
+    /// The requests those actions started that have finished, as of this frame: a mark that
+    /// makes the pages reload, or the episode to play next (or why there isn't one).
+    /// `Services::tick` calls it, so it runs while the window is hidden too.
+    pub(crate) fn apply_menu_requests(&mut self) {
+        let marked: Vec<Marked> = self.marked.drain().collect();
+        for (mark, item_id, result) in marked {
+            match result {
+                // What's shown of it (a played item's resume point, a season's unwatched count)
+                // changed too: pages load again.
+                Ok(()) => {
+                    tracing::debug!(item = %item_id, ?mark, "marked");
+                    self.user_data += 1;
+                }
+                Err(err) => {
+                    let message = self.handle_error(&err);
+                    self.toast(Toast::error(message));
+                }
+            }
+        }
+        let next: Vec<UpNext> = self.up_next.drain().collect();
+        for result in next {
+            match result {
+                Ok(Some(episode)) => self.play(
+                    &episode,
+                    PlayOptions {
+                        start: item_menu::resume_point(&episode),
+                        ..Default::default()
+                    },
+                ),
+                Ok(None) => self.toast(Toast::info("Nothing here to play.")),
+                Err(err) => {
+                    let message = self.handle_error(&err);
+                    self.toast(Toast::error(message));
+                }
+            }
+        }
+    }
+}
