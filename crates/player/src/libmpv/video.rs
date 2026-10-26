@@ -1,11 +1,14 @@
 //! Video output. A render thread owns an mpv render context and publishes frames for the UI.
 //!
+//! The UI says what it can draw when the player starts ([`VideoImport`]), and the render thread
+//! only sets up an output whose frames it can show:
 //! - **GPU (Windows):** mpv renders through OpenGL ES on ANGLE (`angle.rs`, with zero-copy
-//!   hardware decoding) or desktop OpenGL (`wgl.rs`) into D3D11 textures shared with GPUI's
-//!   renderer; the UI draws them as surfaces, with no CPU copy.
-//! - **GPU (Linux):** mpv renders into exported Vulkan memory that GPUI imports (`egl.rs`).
-//! - **Software:** mpv renders into a CPU buffer that the UI uploads as an image. Used where the
-//!   GPU path isn't available.
+//!   hardware decoding) or desktop OpenGL (`wgl.rs`) into shared D3D11 textures, which the UI's
+//!   renderer opens and draws with no CPU copy.
+//! - **GPU (Linux):** mpv renders into exported Vulkan memory that the UI's Vulkan device
+//!   imports (`egl.rs`).
+//! - **Software:** mpv renders RGBA pixels into a CPU buffer that the UI uploads into a
+//!   texture. Used when the UI takes pixels only, or the GPU path isn't available.
 //!
 //! See `docs/in-app-video.md`.
 
@@ -15,6 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 use super::{Core, RenderParam, cstring};
@@ -31,7 +35,32 @@ pub(crate) const UPDATE_FRAME: u64 = 1;
 /// Rendering size used until the UI reports its size.
 const DEFAULT_TARGET: (u32, u32) = (1920, 1080);
 
-/// A frame in BGRA order with opaque alpha, tightly packed (`width * 4` bytes per row).
+/// What the UI can draw, given to the player when it starts (and passed on to the player host
+/// process), so the render thread only sets up an output whose frames the UI can show. The app
+/// reads it from its graphics adapter.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VideoImport {
+    /// Software-rendered pixels ([`Frame::Pixels`]) only: the UI's renderer can't import the
+    /// GPU paths' memory (wgpu on OpenGL, macOS for now), or its import isn't built yet.
+    #[default]
+    Pixels,
+    /// Vulkan memory exported as opaque fds, imported by the Vulkan device with this
+    /// `VkPhysicalDeviceIDProperties::deviceUUID` (Linux). The exporter must be on the same GPU.
+    VulkanMemory { device_uuid: [u8; 16] },
+    /// D3D11 textures shared through NT handles, opened by a D3D12 device on the DXGI adapter
+    /// with this LUID (Windows). The textures must be made on the same adapter.
+    D3d11Textures { adapter_luid: Luid },
+}
+
+/// A Windows adapter LUID (`LUID { LowPart, HighPart }`): which GPU, until the system restarts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Luid {
+    pub low: u32,
+    pub high: i32,
+}
+
+/// A frame in RGBA order with opaque alpha, tightly packed (`width * 4` bytes per row): what a
+/// `Rgba8Unorm` texture takes as is.
 #[derive(Debug)]
 pub struct VideoFrame {
     pub width: u32,
@@ -156,9 +185,9 @@ impl Drop for RenderThread {
 }
 
 impl VideoOutput {
-    /// Starts the render thread and waits until its render context exists (mpv needs one
-    /// before a file with video starts).
-    pub(crate) fn new(core: Arc<Core>) -> Result<(Self, RenderThread)> {
+    /// Starts the render thread, with an output whose frames the UI can take (`import`), and
+    /// waits until its render context exists (mpv needs one before a file with video starts).
+    pub(crate) fn new(core: Arc<Core>, import: VideoImport) -> Result<(Self, RenderThread)> {
         let control = Arc::new(RenderControl {
             wakeup: Wakeup::default(),
             target: AtomicU64::new(pack(DEFAULT_TARGET)),
@@ -171,7 +200,7 @@ impl VideoOutput {
             .name("mpv-render".into())
             .spawn({
                 let control = control.clone();
-                move || render_thread(&core, &control, &frames_tx, ready_tx)
+                move || render_thread(&core, &control, &frames_tx, ready_tx, import)
             })
             .map_err(Error::Spawn)?;
         *control.thread.lock().unwrap() = Some(thread);
@@ -225,41 +254,27 @@ fn pack((w, h): (u32, u32)) -> u64 {
 
 type Ready = std::sync::mpsc::Sender<Result<()>>;
 
-fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>, ready: Ready) {
-    // `TABBYFIN_VIDEO=software` forces the software path, e.g. to rule out GPU driver issues.
+fn render_thread(
+    core: &Core,
+    control: &RenderControl,
+    frames: &watch::Sender<Option<Frame>>,
+    ready: Ready,
+    import: VideoImport,
+) {
     #[cfg(any(windows, target_os = "linux"))]
-    if std::env::var("TABBYFIN_VIDEO").as_deref() != Ok("software") {
-        // On Windows, ANGLE first: it also gives zero-copy hardware decoding. Then plain WGL.
-        use super::opengl::GlRenderer;
-        #[cfg(windows)]
-        let gpu = super::angle::Angle::new(core)
-            .and_then(|angle| GlRenderer::new(core, control, angle))
-            .map(|gpu| (GpuRenderer::Angle(gpu), "ANGLE/D3D11"))
-            .or_else(|err| {
-                tracing::info!("ANGLE video output unavailable: {err}");
-                super::wgl::Wgl::new(core)
-                    .and_then(|wgl| GlRenderer::new(core, control, wgl))
-                    .map(|gpu| (GpuRenderer::Wgl(gpu), "OpenGL/D3D11 interop"))
-            });
-        #[cfg(target_os = "linux")]
-        let gpu = super::egl::EglVulkan::new(core)
-            .and_then(|egl| GlRenderer::new(core, control, egl))
-            .map(|gpu| (gpu, "OpenGL/Vulkan interop"));
-        match gpu {
-            Ok((mut gpu, kind)) => {
-                tracing::info!("video output: GPU ({kind})");
-                // Decoded frames can stay on the GPU where mpv has an interop for this context
-                // (d3d11va with ANGLE, nvdec everywhere); otherwise mpv copies them back.
-                if let Err(err) = core.set_property("hwdec", "auto-safe") {
-                    tracing::warn!("{err}");
-                }
-                let _ = ready.send(Ok(()));
-                gpu.run(core, control, frames);
-                return;
-            }
-            Err(err) => tracing::warn!("GPU video output unavailable, using software rendering: {err}"),
+    if let Some((mut gpu, kind)) = gpu_renderer(core, control, import) {
+        tracing::info!("video output: GPU ({kind})");
+        // Decoded frames can stay on the GPU where mpv has an interop for this context
+        // (d3d11va with ANGLE, nvdec everywhere); otherwise mpv copies them back.
+        if let Err(err) = core.set_property("hwdec", "auto-safe") {
+            tracing::warn!("{err}");
         }
+        let _ = ready.send(Ok(()));
+        gpu.run(core, control, frames);
+        return;
     }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let _ = import;
     match SoftwareRenderer::new(core, control) {
         Ok(mut software) => {
             tracing::info!("video output: software");
@@ -271,6 +286,47 @@ fn render_thread(core: &Core, control: &RenderControl, frames: &watch::Sender<Op
         }
     }
 }
+
+/// The GPU output for what the UI imports, or `None` for software rendering: when the UI takes
+/// pixels only, the import is for another OS, setting up the GPU path failed, or
+/// `TABBYFIN_VIDEO=software` forces software (e.g. to rule out GPU driver issues).
+#[cfg(any(windows, target_os = "linux"))]
+fn gpu_renderer(core: &Core, control: &RenderControl, import: VideoImport) -> Option<(GpuRenderer, &'static str)> {
+    use super::opengl::GlRenderer;
+
+    if std::env::var("TABBYFIN_VIDEO").as_deref() == Ok("software") {
+        return None;
+    }
+    let gpu = match import {
+        // On Windows, ANGLE first: it also gives zero-copy hardware decoding. Then plain WGL.
+        // V3 makes the textures on the adapter with `adapter_luid` and shares them as NT
+        // handles, which D3D12 opens.
+        #[cfg(windows)]
+        VideoImport::D3d11Textures { adapter_luid: _ } => super::angle::Angle::new(core)
+            .and_then(|angle| GlRenderer::new(core, control, angle))
+            .map(|gpu| (GpuRenderer::Angle(gpu), "ANGLE/D3D11"))
+            .or_else(|err| {
+                tracing::info!("ANGLE video output unavailable: {err}");
+                super::wgl::Wgl::new(core)
+                    .and_then(|wgl| GlRenderer::new(core, control, wgl))
+                    .map(|gpu| (GpuRenderer::Wgl(gpu), "OpenGL/D3D11 interop"))
+            }),
+        // V2 picks the exporter device by `device_uuid`.
+        #[cfg(target_os = "linux")]
+        VideoImport::VulkanMemory { device_uuid: _ } => super::egl::EglVulkan::new(core)
+            .and_then(|egl| GlRenderer::new(core, control, egl))
+            .map(|gpu| (gpu, "OpenGL/Vulkan interop")),
+        other => {
+            tracing::info!("no GPU video output for {other:?}");
+            return None;
+        }
+    };
+    gpu.inspect_err(|err| tracing::warn!("GPU video output unavailable, using software rendering: {err}"))
+        .ok()
+}
+
+#[cfg(target_os = "linux")]
+type GpuRenderer = super::opengl::GlRenderer<super::egl::EglVulkan>;
 
 #[cfg(windows)]
 enum GpuRenderer {
@@ -406,7 +462,7 @@ impl SoftwareRenderer {
             .resize((stride * height as usize).div_ceil(64), Aligned([0; 64]));
 
         let mut size = [width as c_int, height as c_int];
-        let format = cstring("bgr0");
+        let format = cstring("rgb0");
         let mut stride_param = stride;
         let mut params = [
             RenderParam {
@@ -443,7 +499,8 @@ impl SoftwareRenderer {
         for line in bytes.chunks_exact(stride) {
             pixels.extend_from_slice(&line[..row]);
         }
-        // "bgr0" leaves the fourth byte undefined; the UI needs it opaque.
+        // "rgb0" leaves the fourth byte undefined; the UI draws the texture with its alpha, so
+        // it has to be opaque.
         for alpha in pixels.iter_mut().skip(3).step_by(4) {
             *alpha = 255;
         }

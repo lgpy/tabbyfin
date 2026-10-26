@@ -198,10 +198,10 @@ Video plays **inside the app** through libmpv. There's no separate mpv window an
 libmpv doesn't run inside the app. `Player::spawn` starts this same executable again as `tabbyfin --player-host` (`crates/player/src/host.rs`). That process runs libmpv and the video output described above, and the app talks to it over its stdin and stdout (`remote.rs`, `wire.rs`). An mpv or GPU driver crash then only kills the player process.
 
 - **Messages:** length-prefixed JSON headers with an optional binary payload.
-  - App to host: mpv commands, properties (each answered with a reply) and the on-screen size.
+  - App to host: first `Start` with what the app's renderer can draw (`VideoImport`: pixels only, Vulkan memory for a device UUID, or D3D11 textures for a DX12 adapter LUID), which picks the host's video output; then mpv commands, properties (each answered with a reply) and the on-screen size.
   - Host to app: player events, replies and frames.
 - **Frames:**
-  - **Software:** the BGRA pixels go as the payload. Only the newest frame is sent, so a slow app skips frames instead of queueing them.
+  - **Software:** the RGBA pixels (opaque, tightly packed) go as the payload. Only the newest frame is sent, so a slow app skips frames instead of queueing them.
   - **Windows:** only the D3D11 texture's legacy share handle is sent; any process can open it.
   - **Linux:** the Vulkan memory fd of each image is passed once over a socket pair (`SCM_RIGHTS`; the host inherits its end as `TABBYFIN_PLAYER_FD`). The app keeps the newest 8 open, since GPUI duplicates an fd when it first draws it.
 - **Logging:** the host logs plain lines to stderr. The app forwards them into its own log under the `player` target.
