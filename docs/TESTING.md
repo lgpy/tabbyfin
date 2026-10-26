@@ -101,7 +101,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 - ⬜ **Wi-Fi off for 10 s and for a minute** on a laptop, with the normal cache: playback continues, or reconnects with the "Reconnecting…" notice.
 - ⬜ A **transcoded** stream (HLS) through an outage.
-- ⬜ Esc while "Reconnecting…" closes the player and doesn't start again.
+- ✅ Esc while "Reconnecting…" closes the player and doesn't start again (egui branch: Esc 0.9 s after killing the player host; no new session or host followed). On `main` Esc went to the lost session and was dropped.
 
 - ⬜ **Automatic bitrate** over a real slow link (Wi-Fi, a phone hotspot, or a remote server): the measurement in the log is plausible and playback transcodes to fit. Only a mocked 4 Mbit/s and the local 1.1 Gbit/s were tried.
 - ⬜ **HEVC transcodes** on a server with hardware HEVC encoding (only software x265 on the dev server).
@@ -153,6 +153,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Windows on NVIDIA and Intel**, and a hybrid laptop: the host's ANGLE device and GPUI must be on the same adapter for shared handles.
 - ⬜ **A release build on Windows** (no console): the host starts without a window flashing up, and its log reaches the app's log file.
 - ⬜ Quitting the app during playback leaves no `tabbyfin --player-host` process behind (Task Manager / `ps`).
+- ✅ (egui branch, Linux) Quitting during playback stops it first: the server gets the stop report and the config's `unfinished_playback` is cleared, rather than the next launch reporting it. Closing the window waits up to 3 s for that.
 
 ## 8. Minimum server version (4.6)
 
