@@ -10,7 +10,9 @@
 
 use crate::config::SavedServer;
 use crate::images::ImageCache;
+use crate::item_menu::Mark;
 use crate::session::{Session, describe_error};
+use crate::task;
 use crate::toasts::Toast;
 
 pub struct Services {
@@ -23,7 +25,14 @@ pub struct Services {
     /// What happened since the app last looked, for the app and the shell to act on. Drained
     /// every frame.
     pub events: Vec<AppEvent>,
+    /// Watched and favorite changes that finished on the server, for [`Services::tick`] to apply.
+    marked: task::Receiver<Marked>,
+    marking: task::Sender<Marked>,
 }
+
+/// A watched or favorite change, as its request finishes: what was asked for, on which item,
+/// and how it went.
+type Marked = (Mark, String, jellyfin::Result<()>);
 
 /// Something signed-in code can't handle itself, for the app or the shell.
 #[derive(Debug)]
@@ -41,11 +50,14 @@ pub enum AppEvent {
 
 impl Services {
     pub fn new(session: Session, ctx: &egui::Context) -> Self {
+        let (marking, marked) = task::channel(ctx);
         Self {
             images: ImageCache::new(session.client.clone(), ctx),
             session,
             user_data: 0,
             events: Vec::new(),
+            marked,
+            marking,
         }
     }
 
@@ -55,12 +67,48 @@ impl Services {
     /// minimised.
     pub fn tick(&mut self, _ctx: &egui::Context) {
         self.images.tick();
+        self.apply_marks();
     }
 
     /// The one hook for "this session is ending", called before another account takes over or
     /// the screen showing it is dropped: P1 stops playback here and P2 leaves a SyncPlay group.
     /// Dropping the services afterwards cancels whatever they still have running.
     pub fn end(&mut self) {}
+
+    /// Sets watched or favorite state on the server, from a card's menu. The pages that show it
+    /// reload when it worked (`user_data`); a failure is a toast. The request runs on tokio and
+    /// reports back in [`Services::tick`], so the menu doesn't have to own a task.
+    pub fn mark(&mut self, item_id: String, mark: Mark) {
+        let client = self.session.client.clone();
+        let sender = self.marking.clone();
+        crate::runtime::detach(async move {
+            let result = match mark {
+                Mark::Played(true) => client.mark_played(&item_id).await,
+                Mark::Played(false) => client.mark_unplayed(&item_id).await,
+                Mark::Favorite(true) => client.mark_favorite(&item_id).await,
+                Mark::Favorite(false) => client.unmark_favorite(&item_id).await,
+            };
+            let _ = sender.send((mark, item_id, result));
+        });
+    }
+
+    fn apply_marks(&mut self) {
+        let marked: Vec<Marked> = self.marked.drain().collect();
+        for (mark, item_id, result) in marked {
+            match result {
+                // What's shown of it (a played item's resume point, a season's unwatched count)
+                // changed too: pages load again.
+                Ok(()) => {
+                    tracing::debug!(item = %item_id, ?mark, "marked");
+                    self.user_data += 1;
+                }
+                Err(err) => {
+                    let message = self.handle_error(&err);
+                    self.toast(Toast::error(message));
+                }
+            }
+        }
+    }
 
     pub fn toast(&mut self, toast: Toast) {
         self.events.push(AppEvent::Toast(toast));
