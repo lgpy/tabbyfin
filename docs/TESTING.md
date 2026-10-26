@@ -118,6 +118,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ Also against it: an audio change during a transcode (remote command) reported `Buffering`, the member paused, and both resumed at 18.6 s after the reload; shuffle, repeat and moving an entry from the SyncPlay menu by keyboard reached it as queue updates.
 
+✅ The egui build (P2) against the scripted member: following (load, Ready, Pause, Unpause, Seek, Stop), leading (`TABBYFIN_ROUTE=play:` with `TABBYFIN_SYNCPLAY`, then Space, Space, →, Esc), joining a group that's already playing, the next episode after an episode's end, a version switch through the reload path (from a temporary hook, since the player page is U10: `Buffering`, the server had the app seek to the group's position, both resumed), switching account and quitting while in a group (the member saw the app leave), and drift catching up 0.8 s in 13 s. In WSL, check the clocks first (`docs/egui-migration.md` §6): this VM's monotonic clock ran 8% slow, which makes mpv look 8% fast to drift correction.
+
 - ⬜ A **version switch** in a group, from the player's version menu (the same reload path as the audio change, not clicked yet), and removing a queue entry.
 
 - ⬜ **With the Jellyfin web client** as the other member, in a browser against the same server:

@@ -270,6 +270,13 @@ impl NowPlaying {
         let _ = self.commands.send(command);
     }
 
+    /// Where [`NowPlaying::send`] sends, for code that sends later from tokio: SyncPlay's
+    /// scheduled commands, which mustn't wait for the UI's next frame. Sends to a session that
+    /// has ended go nowhere.
+    pub(crate) fn commands(&self) -> mpsc::UnboundedSender<UiCommand> {
+        self.commands.clone()
+    }
+
     /// The segment the skip button would skip, if one is playing.
     pub fn skippable(&self) -> Option<Segment> {
         markers::skippable(&self.segments, self.position)
