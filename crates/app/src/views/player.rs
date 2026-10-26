@@ -1,5 +1,11 @@
 //! The player page: video, controls, seek bar, menus, the skip button and up-next card. U10
-//! fills it; the steps its keys, wheel and remote commands use are here.
+//! fills it; the steps its keys, wheel and remote commands use are here, and the keys
+//! themselves ([`on_key`]).
+
+use crate::keys::Action;
+use crate::markers;
+use crate::playback::{Adjustments, UiCommand};
+use crate::services::Services;
 
 /// Seconds per seek key press (and remote rewind or fast-forward).
 pub const SEEK_STEP: f64 = 10.;
@@ -13,6 +19,89 @@ pub const PIXELS_PER_LINE: f32 = 30.;
 /// The most volume steps one wheel event makes. Windows scales a notch by the user's lines per
 /// notch, and its "one screen at a time" setting turns a notch into billions of lines.
 pub const MAX_STEPS_PER_SCROLL: f32 = 4.;
+
+/// The player's keys (`keys::Scope::Player`), acting on the running session. The shell calls
+/// this while a session is showing, until U10's player page takes it over as its `on_key`
+/// (adding what's the page's own: showing the controls after each key). Returns whether the
+/// key was used.
+pub fn on_key(action: Action, services: &mut Services, ctx: &egui::Context) -> bool {
+    let fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+    let Some(state) = services.playback.now_playing() else {
+        // Between sessions or waiting to reconnect: Esc still leaves fullscreen, then stops
+        // (cancelling a reconnect).
+        match action {
+            Action::ExitPlayer if fullscreen => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false)),
+            Action::ExitPlayer => services.control(UiCommand::Stop),
+            Action::ToggleFullscreen => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen)),
+            _ => return false,
+        }
+        return true;
+    };
+    let volume = state.volume;
+    let change_volume = |delta: f64| UiCommand::SetVolume((volume + delta).clamp(0., 100.));
+    let mut adjustments = state.adjustments;
+    match action {
+        Action::TogglePause => services.control(UiCommand::TogglePause),
+        Action::SeekForward => services.control(UiCommand::SeekBy(SEEK_STEP)),
+        Action::SeekBackward => services.control(UiCommand::SeekBy(-SEEK_STEP)),
+        Action::VolumeUp => services.control(change_volume(VOLUME_STEP)),
+        Action::VolumeDown => services.control(change_volume(-VOLUME_STEP)),
+        Action::ToggleMute => services.control(UiCommand::ToggleMute),
+        // Shift+N: the next episode, collection movie or queued item.
+        Action::NextEpisode => services.play_next(),
+        // Shift+P: the previous episode or collection movie.
+        Action::PreviousEpisode => services.play_previous(),
+        Action::NextChapter => {
+            if let Some(start) = markers::next_chapter(&state.chapters, state.position) {
+                services.control(UiCommand::SeekTo(start));
+            }
+        }
+        Action::PrevChapter => {
+            if let Some(start) = markers::prev_chapter(&state.chapters, state.position) {
+                services.control(UiCommand::SeekTo(start));
+            }
+        }
+        // Enter: skip the intro (or recap, preview…), or play the next episode from the
+        // up-next card, or start over from the resume prompt.
+        Action::Skip => {
+            if let Some(segment) = state.skippable() {
+                services.control(UiCommand::SeekTo(segment.end));
+            } else if state.show_up_next() {
+                services.play_next();
+            } else if state.resume_prompt().is_some() {
+                services.start_over();
+            }
+        }
+        Action::ToggleFullscreen => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen)),
+        // Esc: leave fullscreen first, then dismiss the up-next card, then stop playback (which
+        // closes the player).
+        Action::ExitPlayer => {
+            if fullscreen {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            } else if state.show_up_next() {
+                if let Some(state) = services.playback.now_playing_mut() {
+                    state.next_cancelled = true;
+                }
+            } else {
+                services.control(UiCommand::Stop);
+            }
+        }
+        Action::SpeedUp | Action::SpeedDown => {
+            adjustments.speed = adjustments.step_speed(action == Action::SpeedUp);
+            services.adjust(adjustments);
+        }
+        Action::SubtitleDelayUp => {
+            adjustments.subtitle_delay += Adjustments::DELAY_STEP;
+            services.adjust(adjustments);
+        }
+        Action::SubtitleDelayDown => {
+            adjustments.subtitle_delay -= Adjustments::DELAY_STEP;
+            services.adjust(adjustments);
+        }
+        _ => return false,
+    }
+    true
+}
 
 /// Turns a wheel delta (in lines, positive is scrolling up) into whole volume steps, keeping
 /// the leftover lines for the next event. One event makes at most `MAX_STEPS_PER_SCROLL`.

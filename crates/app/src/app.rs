@@ -169,7 +169,7 @@ fn restore(ctx: &egui::Context, saved: SavedServer, device_id: String) -> Task<R
 }
 
 fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Screen {
-    let mut services = Services::new(session);
+    let mut services = Services::new(ctx, session);
     let mut nav = Vec::new();
     let shell = Shell::new(&mut PageCx {
         ctx,
@@ -249,6 +249,10 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         self.placement.save_now();
+        // Signing out stops playback by dropping the services; quitting has to wait for it.
+        if let Screen::SignedIn(signed_in) = &mut self.screen {
+            signed_in.services.shut_down();
+        }
     }
 }
 
@@ -261,6 +265,8 @@ impl App {
         for event in std::mem::take(&mut signed_in.services.events) {
             match event {
                 AppEvent::Toast(toast) => self.toasts.push(toast),
+                AppEvent::PlaybackStarted => signed_in.shell.player_started(),
+                AppEvent::PlaybackEnded => signed_in.shell.player_ended(ctx),
                 AppEvent::SessionExpired => {
                     self.screen = self.session_expired();
                     ctx.request_repaint();
