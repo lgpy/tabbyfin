@@ -169,7 +169,7 @@ fn restore(ctx: &egui::Context, saved: SavedServer, device_id: String) -> Task<R
 }
 
 fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Screen {
-    let mut services = Services::new(session);
+    let mut services = Services::new(session, ctx);
     let mut nav = Vec::new();
     let shell = Shell::new(&mut PageCx {
         ctx,
