@@ -4258,6 +4258,7 @@ name = "tabbyfin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ash",
  "blurhash",
  "directories",
  "eframe",
@@ -4280,7 +4281,9 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "windows",
  "winresource",
+ "zbus",
 ]
 
 [[package]]
@@ -4452,6 +4455,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -5766,6 +5770,7 @@ dependencies = [
  "rustix 1.1.5",
  "serde",
  "serde_repr",
+ "tokio",
  "tracing",
  "uds_windows",
  "uuid",

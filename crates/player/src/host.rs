@@ -1,8 +1,9 @@
 //! The player host process: `tabbyfin --player-host`, started by [`crate::remote`].
 //!
-//! It runs libmpv and its video output exactly as the embedded backend does, takes requests on
-//! stdin and sends events, replies and frames on stdout (see [`crate::wire`]). If mpv or a GPU
-//! driver crashes, only this process dies; the app notices the closed pipe and carries on.
+//! It runs libmpv and its video output exactly as the embedded backend does, with the kind of
+//! video output the app asked for in its first message, then takes requests on stdin and sends
+//! events, replies and frames on stdout (see [`crate::wire`]). If mpv or a GPU driver crashes,
+//! only this process dies; the app notices the closed pipe and carries on.
 //! It exits when stdin closes, i.e. when the app drops the player or exits itself.
 
 use std::sync::Arc;
@@ -38,7 +39,22 @@ pub fn run() -> i32 {
 
 async fn serve() -> i32 {
     let out: Output = Arc::new(Mutex::new(BufWriter::new(tokio::io::stdout())));
-    let (player, mut events, video) = match Player::spawn_embedded().await {
+    let mut input = BufReader::new(tokio::io::stdin());
+    // What the app can draw comes first, before libmpv starts.
+    let import = match wire::read::<_, Request>(&mut input).await {
+        Ok(Some((Request::Start { import }, _))) => import,
+        Ok(Some((other, _))) => {
+            tracing::warn!("player host: expected Start, got {other:?}");
+            return 1;
+        }
+        // The app went away before starting us.
+        Ok(None) => return 0,
+        Err(err) => {
+            tracing::warn!("player host: bad request: {err}");
+            return 1;
+        }
+    };
+    let (player, mut events, video) = match Player::spawn_embedded(import).await {
         Ok(started) => started,
         Err(err) => {
             let _ = send(&out, &Message::Started(Err(WireError::from(&err))), &[]).await;
@@ -63,7 +79,6 @@ async fn serve() -> i32 {
     });
     let forward_frames = tokio::spawn(forward_frames(out.clone(), video.clone()));
 
-    let mut input = BufReader::new(tokio::io::stdin());
     loop {
         let request = match wire::read::<_, Request>(&mut input).await {
             Ok(Some((request, _))) => request,
@@ -75,6 +90,10 @@ async fn serve() -> i32 {
         };
         // In order: the app relies on properties being set before `loadfile`.
         let (id, result) = match request {
+            Request::Start { .. } => {
+                tracing::warn!("player host: started twice");
+                continue;
+            }
             Request::SetTarget { width, height } => {
                 video.set_target_size(width, height);
                 continue;

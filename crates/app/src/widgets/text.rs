@@ -1,6 +1,6 @@
 //! Text for cards and pages (titles, episode labels, times, runtimes), the poster and
 //! landscape image requests a card makes, and the loading state pages keep. The cards and
-//! shelves themselves are `widgets/card.rs` and `widgets/shelf.rs` (W1).
+//! shelves themselves are `widgets/card.rs` and `widgets/shelf.rs`.
 
 use std::time::Duration;
 
