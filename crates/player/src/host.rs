@@ -149,7 +149,7 @@ async fn forward_frames(out: Output, video: VideoOutput) {
                     tracing::warn!("player host: no fd socket for GPU frames");
                     return;
                 };
-                if let Err(err) = fds.send_once(frame.id, frame.fd) {
+                if let Err(err) = fds.send_once(frame.id, &frame.fd) {
                     tracing::warn!("player host: couldn't pass a frame's memory: {err}");
                     return;
                 }
@@ -197,18 +197,16 @@ impl FdSender {
         })
     }
 
-    fn send_once(&mut self, id: u64, fd: i32) -> std::io::Result<()> {
+    fn send_once(&mut self, id: u64, fd: &std::os::fd::OwnedFd) -> std::io::Result<()> {
         use std::io::IoSlice;
-        use std::os::fd::BorrowedFd;
+        use std::os::fd::AsFd;
 
         use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags, sendmsg};
 
         if !self.sent.insert(id) {
             return Ok(());
         }
-        // SAFETY: the render thread keeps the image's fd open while its frames are in use.
-        let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-        let fds = [fd];
+        let fds = [fd.as_fd()];
         let mut space = [std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
         let mut ancillary = SendAncillaryBuffer::new(&mut space);
         ancillary.push(SendAncillaryMessage::ScmRights(&fds));
