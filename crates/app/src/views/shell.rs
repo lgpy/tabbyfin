@@ -21,6 +21,8 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(cx: &mut PageCx) -> Self {
+        // `mut` is for the debug build's `debug_start` below.
+        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut shell = Self {
             stack: vec![views::open(Route::Home, cx)],
             update_check: Some(Task::spawn(cx.ctx, update::check())),

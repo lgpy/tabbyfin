@@ -175,6 +175,27 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Fullscreen playback**, then quit: the next launch opens windowed at the last normal bounds.
 - ⬜ A move or resize followed by **closing the window within half a second**: the new bounds are saved (closing flushes the pending save).
 
+**egui (A1)**, on the egui branch, on X11 without a window manager or compositor (the hidden `:99` display), moves and resizes made with `XMoveResizeWindow`:
+
+✅ Moving and resizing a window to 1100×650 at (300, 120) is saved to the config half a second later — the frame's top-left in physical pixels, the content size in points and `scale = 1.0` — and a restart reopens at exactly that size and position.
+
+✅ With no saved bounds the window opens centred at the default 1280×800 (on a 1920×1080 display: at (320, 140)).
+
+✅ The UI zoom doesn't leak into the placement: at 125 % a resize to 1000×600 is saved as 1000×600, a launch at 125 % reopens at the saved size, and an idle launch leaves the config file untouched (0 CPU ticks over 10 s idle).
+
+✅ A move and `WM_DELETE_WINDOW` sent in the same instant: the moved bounds are in the config after the app exits.
+
+✅ A spot saved at (5000, 200), off the monitor, is used as saved on X11: the window opens there and the config keeps it. Moving a window off screen doesn't move the window back — the window manager's job on Linux, and `docs/PLAN.md` §9 says why.
+
+✅ A launch with `window_maximized = true` on `Xvfb`: the app asks the platform to maximize once more after the window is up (once, logged at debug). `Xvfb` never maximizes, so the window is then saved as it really is, not maximized.
+
+- ⬜ **Windows, one monitor at 100 %**: the round trip as on `main` (move, resize, close within half a second, reopen), and a maximized window reopening maximized with no flicker or restore-then-maximize at launch (nothing should be sent after the first frame: no "moving the window to its saved spot" in the log).
+- ⬜ **Windows, HiDPI (one monitor at 150 %)**: the same round trip; the config's `scale` is 1.5 and `x`/`y` are physical pixels; reopening lands exactly on the saved spot without a visible move.
+- ⬜ **Windows, mixed DPI** (e.g. a 150 % laptop and a 100 % monitor, or the reverse): a window saved on the monitor whose scale differs from the one the window is created on reopens on its saved spot (the log says "moving the window to its saved spot"; one visible jump right after launch is expected); the same maximized reopens maximized on that monitor, and un-maximizing it restores it to its saved spot.
+- ⬜ **Windows, monitors changing**: a spot saved on an unplugged monitor opens the window centred ("the saved window placement is on no monitor"), one still on a second monitor reopens exactly there, one whose centre falls between monitors of different heights opens centred. Only the pure monitor rule is tested here (`cargo test -p tabbyfin window`); `become_dpi_aware` and the `EnumDisplayMonitors` path are only compiled (`cargo clippy -p tabbyfin --target x86_64-pc-windows-gnu`).
+- ⬜ **Windows, maximized at 150 %**: un-maximizing after a maximized launch restores the saved windowed size, not a size scaled by 1.5.
+- ⬜ **Linux with a real window manager (X11 and Wayland) and macOS**: a saved spot reopens as saved (Wayland: the size only), a maximized window reopens maximized (the second maximize after mapping is the fix for X11 window managers), and a window saved on a monitor that's gone still opens on screen.
+
 ## 10. Player mouse niceties (2.1.8)
 
 The development harness cannot send mouse input. The cursor hiding uses `App::hide_cursor_until_mouse_moves` (the gpui-pre patch), which the platforms restore on the next mouse move.
@@ -218,6 +239,25 @@ The development harness cannot send mouse input. The cursor hiding uses `App::hi
 - ⬜ **Switching in Settings** applies at once, without a restart, on every page.
 - ⬜ **Follow the system** on Windows, macOS and a Linux desktop, including switching the system between light and dark while the app runs.
 - ⬜ Every page in light: login, libraries (sort and filter menus), search, seasons and episodes, the SyncPlay popover, notifications.
+
+**egui (A1):**
+
+✅ `theme = "light"` in the config renders light and `"dark"` dark (Home); `text_size = 130` makes text bigger without growing the layout's fixed sizes; `text_size` unset picked up GNOME's 1.5 text scaling factor (text 1.47× measured, read and applied after the window opened rather than before it).
+
+✅ `theme = "system"` on Linux shows light when the desktop exports no `org.freedesktop.portal.Settings` (this one; the log says so), which is what `main` showed without a signal.
+
+✅ Following the desktop, against a fake `org.freedesktop.portal.Desktop` on a private session bus (`dbus-run-session`): it said dark at launch and the app opened dark; switching it to light and back to dark switched the app within a second each time. With KDE's font size raised from 10 to 15 pt (`XDG_CURRENT_DESKTOP=KDE`, a scratch `kdeglobals`) and the focus moved away from the window and back (`XSetInputFocus`), the app read the system text size again ("system text size changed scale=1.5"), drew text 1.5× larger, and stayed dark: applying the appearance again keeps the portal's scheme. The portal reads themselves (`ReadOne`, `Read` on portals before 1.15, and following a portal that answers neither) are covered by tests against fake portals on the session bus (`cargo test -p tabbyfin theme::tests::portal`), which skip where there's no session bus.
+
+✅ Zoom: Ctrl+= twice from 100 % saved `ui_zoom = 1.25`, the UI drew 1.25× larger, a restart opened at 1.25, and Ctrl+0 reset it and removed the key from the config.
+
+✅ CJK (Japanese), Arabic and Greek text render through the system font provider.
+
+Accepted on Linux: a launch with `theme = "system"` draws its first frames light until the portal answers (well under a second here), and one with the system's text size draws at 100 % until the background read lands (that read starts a process, `gsettings`, which took several seconds under load here).
+
+- ⬜ `theme = "system"` follows the system on Windows and macOS (egui/winit), switching while the app runs included; on a real GNOME and KDE desktop through the real portal, including Ubuntu 22.04's portal 1.14 (`Read` only).
+- ⬜ Settings (U9) changing the theme, the text size (to the system's included, which then reads it) and the animations while the app runs, through `AppEvent::AppearanceChanged`; nothing raises it yet.
+- ⬜ A system text size changed while the app runs on Windows (`reg`) and GNOME (`gsettings`), applied when the window gets the focus back.
+- ⬜ Animations off (`animations = false`) makes a page change, a fade or a scroll jump; only the style values are unit-tested.
 
 ## 15. Previous and next (2.1.9)
 
