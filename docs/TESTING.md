@@ -346,3 +346,15 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **Clicking** the context menu's *Play* on a series and a season card.
 - ⬜ *Shuffle* on a big series, and in a SyncPlay group.
 - ⬜ A series with **specials** placed between seasons.
+
+## 26. Cards, shelves and the item menu (W1)
+
+✅ **egui (W1)**, against 12.2, on Home's two shelves (`TABBYFIN_KEYS` only, screenshots in `W1-scratch/`): libraries as landscape cards and the newest movies and shows as poster cards, with the played badge and the progress bar from the server's user data; the cursor showing with the first arrow key and the ring following Left/Right and Down between the shelves; Enter opening the card's page and Esc coming back with the cursor where it was; an overflowing row showing the page arrows with the left one greyed out at the start (checked with the cards temporarily at 1.4× so the row didn't fit); a movie's menu ("Resume from 0:13", "Play from beginning", *Watched* unchecked, *Favorite* checked, *Add to playlist…*), opened with temporary code since the harness can't right-click; *Favorite* marked from the menu reaching the server and the page reloading with it unticked; the error state with *Retry* and the empty state, both from temporary code. An episode card ("Episode 2 · name", its name in grey and cut short) was seen on the second shelf with the episodes temporarily in its query; `views/posters.rs` (I1's page) draws the same cards.
+
+✅ **egui (W1, round 2)**, against 12.2, driving the menu's dispatcher (`Services::carry_out`) from temporary code since the harness can't right-click: *Play* on Test Movie resumed it at 0:39 and played (frames logged, 249 in 10 s, the shell's line at the bottom); *Play* on Test Show fetched its episodes and played S1:E2 from 0:37, its resume point (the "Nothing here to play." path is out of reach: the dev server's show has episodes). Stacked pages keep their own ids: the posters page's cursor worked over Home and Esc came back to Home's own cursor.
+
+- ⬜ **Right-click** opening the menu at the pointer, and *Play*, *Play for a series or season*, *Watched*, *Favorite* and *Add to playlist…* from it (U5, U6 and U8 wire the last one; until then the exemplar answers with a toast).
+- ⬜ Card text not stealing the card's click, right-click and drag (architecturally checked: with `style.interaction.selectable_labels = false` a label senses hover only, and egui's hit-test gives the click to the card under it).
+- ⬜ **A drag** sideways scrolling a shelf and not counting as a click on the card it ends on, the wheel over a shelf scrolling the page, and a click hiding the cursor.
+- ⬜ The page arrows paging by a whole row on a big shelf, and Shift+wheel scrolling one sideways.
+- ⬜ Chapter and person cards, and episode cards in a season's row (U6, U7), and cards' hover dimming with a real pointer.

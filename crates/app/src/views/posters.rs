@@ -2,25 +2,23 @@
 //! cache at work — posters with blurhash placeholders, and with `dev/fake-library.py` and
 //! `TABBYFIN_KEYS="… down*400"` the queue dropping what scrolled past and the memory budget
 //! holding. U5's library page replaces it; X3 deletes it (docs/egui-migration.md §6).
+//!
+//! Its cards are W1's (`widgets/card.rs`), so what it shows is what pages get.
 
-use egui::{Color32, Rect, Sense, Stroke, StrokeKind, Vec2};
 use jellyfin::SortOrder;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
-use crate::images::ImageCache;
 use crate::keys::{Action, Scope};
 use crate::nav::{NavRequest, Route};
 use crate::task::Task;
 use crate::views::{Page, PageCx};
-use crate::widgets::text::Load;
+use crate::widgets::text::{Load, POSTER_H, POSTER_W};
+use crate::widgets::{card, state};
 
 /// Items asked for at once: enough to scroll well past [`crate::images`]' budget (a 400×600
 /// poster is about 1 MB decoded).
 const LIMIT: u32 = 1000;
-/// Card size, as posters are on `main`.
-const POSTER_W: f32 = 150.;
-const POSTER_H: f32 = 225.;
 const GAP: f32 = 16.;
 
 pub struct PostersPage {
@@ -69,12 +67,14 @@ impl PostersPage {
     }
 
     /// Scrolls the selected row into view, keeping the scroll where the mouse left it otherwise.
+    #[allow(clippy::too_many_arguments)]
     fn scroll_to_cursor(
         cursor: &Cursor,
         offset: &mut f32,
         columns: usize,
         viewport: f32,
-        row_height: f32,
+        card_height: f32,
+        pitch: f32,
         rows: usize,
     ) {
         let Some(position) = cursor.selected() else {
@@ -83,13 +83,13 @@ impl PostersPage {
         let Some(row) = position.index.checked_div(columns) else {
             return;
         };
-        let top = row as f32 * row_height;
+        let top = row as f32 * pitch;
         if top < *offset {
             *offset = top;
-        } else if top + POSTER_H > *offset + viewport {
-            *offset = top + POSTER_H - viewport;
+        } else if top + card_height > *offset + viewport {
+            *offset = top + card_height - viewport;
         }
-        let total = rows as f32 * row_height;
+        let total = rows as f32 * pitch;
         *offset = offset.clamp(0., (total - viewport).max(0.));
     }
 }
@@ -121,22 +121,24 @@ impl Page for PostersPage {
         browse::hide_on_click(&mut self.cursor, ui);
 
         match &self.items {
-            Load::Loading => {
-                ui.centered_and_justified(|ui| ui.spinner());
-            }
+            Load::Loading => state::spinner(ui),
             Load::Failed(message) => {
-                ui.centered_and_justified(|ui| ui.label(message.as_str()));
+                if state::error(ui, message.clone()) {
+                    self.items = Load::Loading;
+                    self.loaded_at = None;
+                }
             }
-            Load::Loaded(items) if items.is_empty() => {
-                ui.centered_and_justified(|ui| ui.label("This library has no movies."));
-            }
+            Load::Loaded(items) if items.is_empty() => state::empty(ui, "This library has no movies."),
             Load::Loaded(items) => {
                 let columns = columns(ui.available_width());
                 self.columns = columns;
                 let rows = items.len().div_ceil(columns);
                 // Only the rows on screen ask for their posters, as U5's grid will: asking for
                 // everything would queue the whole library and load what nobody sees.
-                let row_height = POSTER_H + GAP;
+                let card_height = POSTER_H + card::text_height(ui);
+                // Rows are `card_height` apart plus the item spacing below; `show_rows` adds
+                // that spacing itself, so it takes the height without it.
+                let pitch = card_height + GAP;
                 // Only a key moves the page to the cursor; a wheel scroll stays where it is.
                 // (The selected card can't scroll itself into view: `show_rows` doesn't draw the
                 // rows that are off screen.)
@@ -146,7 +148,8 @@ impl Page for PostersPage {
                         &mut self.offset,
                         columns,
                         ui.available_height(),
-                        row_height,
+                        card_height,
+                        pitch,
                         rows,
                     );
                 }
@@ -154,7 +157,7 @@ impl Page for PostersPage {
                 let mut open = None;
                 let out = egui::ScrollArea::vertical()
                     .vertical_scroll_offset(self.offset)
-                    .show_rows(ui, row_height, rows, |ui, visible| {
+                    .show_rows(ui, card_height, rows, |ui, visible| {
                         for row in visible {
                             let start = row * columns;
                             let cards = &items[start..(start + columns).min(items.len())];
@@ -163,7 +166,9 @@ impl Page for PostersPage {
                                 for (column, item) in cards.iter().enumerate() {
                                     let index = start + column;
                                     let selected = self.cursor.is_selected(0, index);
-                                    let response = poster(ui, &mut cx.services.images, item, selected);
+                                    // The cursor's row was scrolled into view above; a card
+                                    // that `show_rows` doesn't draw can't scroll itself.
+                                    let response = card::poster(ui, &mut cx.services.images, item, selected);
                                     if response.clicked() {
                                         open = Some(Route::for_item(item));
                                     }
@@ -205,53 +210,4 @@ impl Browse for PostersPage {
 /// Cards per row that fit `width`.
 fn columns(width: f32) -> usize {
     (((width + GAP) / (POSTER_W + GAP)).floor() as usize).max(1)
-}
-
-/// One poster: the image once it's loaded, its blurhash meanwhile, or a plain card. Clickable,
-/// with the cursor's ring while it's selected.
-fn poster(ui: &mut egui::Ui, cache: &mut ImageCache, item: &BaseItemDto, selected: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(POSTER_W, POSTER_H), Sense::click());
-    // Twice the drawn width, so it stays sharp on a high-DPI screen; the server doesn't upscale.
-    let request = item
-        .primary_image()
-        .map(|request| request.fill_width((POSTER_W * 2.) as u32));
-    let image = request.as_ref().and_then(|request| cache.get(request));
-    let preview = match (&image, &request) {
-        // The blurhash is only a guess at what's coming, so it's for while the image loads.
-        (None, Some(request)) => request
-            .tag
-            .as_deref()
-            .and_then(|tag| item.blur_hash(request.image_type, tag))
-            .and_then(|hash| cache.placeholder(hash)),
-        _ => None,
-    };
-    let painter = ui.painter();
-    match image.as_ref().or(preview.as_ref()) {
-        Some(texture) => {
-            let uv = cover_uv(texture.size_vec2(), rect.size());
-            painter.image(texture.id(), rect, uv, Color32::WHITE);
-        }
-        None => {
-            painter.rect_filled(rect, 0., ui.visuals().extreme_bg_color);
-        }
-    }
-    if selected {
-        painter.rect_stroke(
-            rect,
-            0.,
-            Stroke::new(2., ui.visuals().selection.stroke.color),
-            StrokeKind::Inside,
-        );
-    }
-    response
-}
-
-/// The part of a texture to show so it fills the card without stretching it (cover fit).
-fn cover_uv(image: Vec2, target: Vec2) -> Rect {
-    let scale = (target.x / image.x).max(target.y / image.y);
-    let shown = target / scale;
-    Rect::from_center_size(
-        egui::pos2(0.5, 0.5),
-        Vec2::new((shown.x / image.x).clamp(0., 1.), (shown.y / image.y).clamp(0., 1.)),
-    )
 }

@@ -23,7 +23,7 @@ use crate::widgets::text::timestamp;
 
 pub struct Shell {
     /// Never empty: Home is at the bottom.
-    stack: Vec<Box<dyn Page>>,
+    stack: Vec<StackEntry>,
     update_check: Option<Task<Option<Update>>>,
     /// The player is open: from a session's start until playback ends for good (it stays
     /// through autoplay and reconnects). Where U10's player page goes on the stack; leaving it
@@ -39,12 +39,23 @@ pub struct Shell {
     accounts: Vec<SavedServer>,
 }
 
+/// A page's [`StackEntry::serial`]. Counted for the whole process rather than per shell, so a
+/// page never shares ids with an earlier one, not even with the last account's Home after a
+/// switch.
+fn next_serial() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Shell {
     pub fn new(cx: &mut PageCx) -> Self {
         // `mut` is for the debug build's `debug_start` below.
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut shell = Self {
-            stack: vec![views::open(Route::Home, cx)],
+            stack: vec![StackEntry {
+                serial: next_serial(),
+                page: views::open(Route::Home, cx),
+            }],
             update_check: Some(Task::spawn(cx.ctx, update::check())),
             player: false,
             #[cfg(debug_assertions)]
@@ -93,7 +104,12 @@ impl Shell {
         if self.player {
             egui::Panel::bottom("now_playing").show(ui, |ui| now_playing_line(ui, cx));
         }
-        egui::CentralPanel::default().show(ui, |ui| self.top_mut().show(ui, cx));
+        egui::CentralPanel::default().show(ui, |ui| {
+            // Each page's widgets and scroll areas live under its own id scope, so stacked pages
+            // can use the same names for theirs (two `"cast"` shelves, two `ScrollArea`s).
+            let entry = self.stack.last_mut().expect("the page stack is never empty");
+            ui.push_id(entry.serial, |ui| entry.page.show(ui, cx));
+        });
         self.navigate(cx);
     }
 
@@ -194,7 +210,10 @@ impl Shell {
 
     fn push(&mut self, route: Route, cx: &mut PageCx) {
         let page = views::open(route, cx);
-        self.stack.push(page);
+        self.stack.push(StackEntry {
+            serial: next_serial(),
+            page,
+        });
     }
 
     /// Closes the top page, unless it's Home.
@@ -205,11 +224,15 @@ impl Shell {
     }
 
     fn top(&self) -> &dyn Page {
-        self.stack.last().expect("the page stack is never empty").as_ref()
+        self.stack.last().expect("the page stack is never empty").page.as_ref()
     }
 
     fn top_mut(&mut self) -> &mut dyn Page {
-        self.stack.last_mut().expect("the page stack is never empty").as_mut()
+        self.stack
+            .last_mut()
+            .expect("the page stack is never empty")
+            .page
+            .as_mut()
     }
 
     /// When the update check finds a newer release, says so with a link to it.
@@ -298,6 +321,14 @@ impl Shell {
             Err(err) => tracing::error!("TABBYFIN_ROUTE: couldn't load the item to play: {err}"),
         }
     }
+}
+
+/// A page on the stack and the number that scopes its ids.
+struct StackEntry {
+    /// Different for every page ever pushed, so two pages of the same kind don't share widget
+    /// state (a shelf's scroll offset, a scroll area's position).
+    serial: u64,
+    page: Box<dyn Page>,
 }
 
 /// What's playing, where, and Stop: all the player there is until U10.
