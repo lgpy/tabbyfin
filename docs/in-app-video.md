@@ -101,6 +101,22 @@ The three GPU renderers (ANGLE, WGL, Linux EGL) share `player::libmpv::opengl`: 
    - Done for Windows and Linux. macOS uses Homebrew's libmpv for now.
 5. **macOS GPU sharing** (IOSurface), when a Mac is available for testing.
 
+## On egui (wgpu)
+
+The egui app draws with wgpu (DX12 on Windows, Vulkan or GL on Linux), so the GPUI patches above go away; `docs/egui-migration.md` §3 *Images and video* describes the app side.
+
+- **Handshake (V1):** the app tells the player what its renderer can draw when it starts it, as `player::libmpv::VideoImport`: `Pixels`, `VulkanMemory { device_uuid }` or `D3d11Textures { adapter_luid }`, read from wgpu's adapter through its hal (`widgets/video.rs`: `adapter_import`). `Player::spawn(import)` passes it to the player host as the first wire message (`Request::Start`), and the render thread only tries the GPU paths that match it: ANGLE and WGL for `D3d11Textures`, EGL/Vulkan for `VulkanMemory`, software otherwise. A GL fallback or a GPU path the app can't import yet therefore gets software frames instead of frames it can't show. Until V2 (Linux) and V3 (Windows) import GPU frames, the app always asks for `Pixels`; the log names what the adapter could take (`video: asking the player for pixels possible=…`).
+- **Software frames:** mpv renders `rgb0`, the alpha byte is forced to 255, and the pixels go tightly packed as RGBA, which is what a `Rgba8Unorm` texture takes as is (GPUI wanted BGRA). The video widget writes each frame with `queue.write_texture` into one texture per frame size, registered once with egui-wgpu (`register_native_texture`; a new size swaps the texture under the same id), and wakes the UI once per frame. Measured with debug builds, 1080p H.264 in a 1280×800 window (rendered at 1280×720), 25 s into playback (the first seconds also pay for mpv reading the file ahead):
+
+  | | App | Player host | Embedded (`TABBYFIN_PLAYER=embedded`) | GPUI's software path |
+  |---|---|---|---|---|
+  | WSL (llvmpipe) | ~148% | ~65% | ~191% | ~280% |
+  | Windows (RX 6600, `TABBYFIN_VIDEO=software`) | ~7% | ~29% | ~45% | ~54% |
+
+  Paused: 0%, since mpv renders nothing new and nothing repaints.
+- **egui repaints:** `ctx.request_repaint()` gives two UI passes per call, so the widget wakes the UI with `request_repaint_after(1 ms)`, which gives one. With the zero delay the app took about twice the CPU (~300% on WSL), drawing every frame twice.
+- **Dropping the widget** unregisters its texture at the start of the next egui pass (a small egui plugin), not at once: the pass that dropped it (playback ending) has usually drawn it already, and egui-wgpu paints that pass afterwards.
+
 ## Test loop for Windows
 
 - Build a debug cross-build from WSL with mingw. Debug GPUI compiles its shaders at runtime, so it doesn't need `fxc.exe`.

@@ -40,6 +40,19 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Placeholders for images still loading (`ImageBlurHashes`).
 blurhash = { version = "0.2", default-features = false }
 
+[target.'cfg(windows)'.dependencies]
+# Whether a saved window spot still lands on a monitor, asked of the OS before the window opens,
+# in physical pixels (`window.rs`). The same `windows` version as the player crate.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Reading wgpu's Vulkan device UUID for the player (`widgets/video.rs`). The version wgpu uses.
+ash = "0.38"
+# The desktop's colour scheme, from the XDG portal (`theme.rs`): egui and winit report no system
+# theme on Linux, and this is where `main` read it. `tokio`: the read and the signal watch are
+# awaited on the app's runtime, never on the UI thread.
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
 [build-dependencies]
 winresource = "0.1.34"
 

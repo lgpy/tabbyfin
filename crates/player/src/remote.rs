@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use crate::host::HOST_ARG;
 #[cfg(any(windows, target_os = "linux"))]
 use crate::libmpv::SharedFrame;
-use crate::libmpv::{Frame, VideoFrame, VideoOutput};
+use crate::libmpv::{Frame, VideoFrame, VideoImport, VideoOutput};
 use crate::wire::{self, Message, Request};
 use crate::{EndReason, Error, PlayerEvent, Result};
 
@@ -37,7 +37,9 @@ pub struct RemotePlayer {
 }
 
 impl RemotePlayer {
-    pub async fn spawn() -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>, VideoOutput)> {
+    /// Starts the host and tells it what the UI can draw (`import`), which picks its video
+    /// output.
+    pub async fn spawn(import: VideoImport) -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>, VideoOutput)> {
         let exe = std::env::current_exe().map_err(Error::Spawn)?;
         let mut command = Command::new(exe);
         command
@@ -57,12 +59,15 @@ impl RemotePlayer {
         #[cfg(target_os = "linux")]
         let fds = fd_socket.listen();
 
-        let stdin = child.stdin.take().ok_or(Error::Closed)?;
+        let mut stdin = BufWriter::new(child.stdin.take().ok_or(Error::Closed)?);
         let mut stdout = BufReader::new(child.stdout.take().ok_or(Error::Closed)?);
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(forward_log(stderr));
         }
 
+        if let Err(err) = wire::write(&mut stdin, &Request::Start { import }, &[]).await {
+            return Err(Error::Host(format!("the player process didn't start: {err}")));
+        }
         match wire::read::<_, Message>(&mut stdout).await {
             Ok(Some((Message::Started(Ok(())), _))) => {}
             Ok(Some((Message::Started(Err(err)), _))) => return Err(err.into()),
@@ -71,7 +76,7 @@ impl RemotePlayer {
         }
 
         let (requests, requests_rx) = mpsc::unbounded_channel();
-        tokio::spawn(write_requests(BufWriter::new(stdin), requests_rx));
+        tokio::spawn(write_requests(stdin, requests_rx));
 
         let (events_tx, events) = mpsc::unbounded_channel();
         let (frames_tx, frames) = watch::channel(None);

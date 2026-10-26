@@ -1,12 +1,15 @@
 //! Messages between the app and the player host process, over the host's stdin and stdout.
 //!
-//! Each message is a length-prefixed JSON header, then a length-prefixed payload (empty except
-//! for software frames, whose pixels it carries). Lengths are little-endian `u32`s.
+//! The app opens with [`Request::Start`], saying what its renderer can draw; the host answers
+//! with [`Message::Started`] once libmpv and a matching video output are up. Each message is a
+//! length-prefixed JSON header, then a length-prefixed payload (empty except for software
+//! frames, whose pixels it carries). Lengths are little-endian `u32`s.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crate::libmpv::VideoImport;
 use crate::{Error, PlayerEvent};
 
 /// Largest header or payload accepted (an 8K frame is about 130 MB).
@@ -15,6 +18,9 @@ const MAX_LEN: usize = 256 << 20;
 /// App to host.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Request {
+    /// The first message, once: start libmpv with a video output whose frames the app can
+    /// import. Answered with [`Message::Started`].
+    Start { import: VideoImport },
     /// An mpv command; answered with [`Message::Reply`].
     Command { id: u64, args: Vec<Value> },
     /// An mpv property; answered with [`Message::Reply`].
@@ -26,14 +32,15 @@ pub enum Request {
 /// Host to app.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
-    /// Sent once: libmpv and the video output are up, or why not.
+    /// Sent once, after [`Request::Start`]: libmpv and the video output are up, or why not.
     Started(Result<(), WireError>),
     Reply {
         id: u64,
         result: Result<(), WireError>,
     },
     Event(PlayerEvent),
-    /// A software-rendered frame; the BGRA pixels are the payload.
+    /// A software-rendered frame; the payload is its pixels as a [`crate::libmpv::VideoFrame`]
+    /// holds them (RGBA, opaque, tightly packed).
     Pixels {
         width: u32,
         height: u32,
@@ -137,6 +144,7 @@ mod tests {
 
     use super::{Message, Request, read, write};
     use crate::PlayerEvent;
+    use crate::libmpv::{Luid, VideoImport};
 
     #[tokio::test]
     async fn round_trip() {
@@ -156,6 +164,16 @@ mod tests {
             args: vec!["seek".into(), 10.into()],
         };
         write(&mut a, &request, &[]).await.unwrap();
+        let imports = [
+            VideoImport::Pixels,
+            VideoImport::VulkanMemory { device_uuid: [7; 16] },
+            VideoImport::D3d11Textures {
+                adapter_luid: Luid { low: 0x1234, high: -2 },
+            },
+        ];
+        for import in imports {
+            write(&mut a, &Request::Start { import }, &[]).await.unwrap();
+        }
         drop(a);
 
         let (message, payload): (Message, _) = read(&mut b).await.unwrap().unwrap();
@@ -165,6 +183,10 @@ mod tests {
         assert!(matches!(message, Message::Event(PlayerEvent::Position(p)) if p == Duration::from_millis(1500)));
         let (request, _): (Request, _) = read(&mut b).await.unwrap().unwrap();
         assert!(matches!(request, Request::Command { id: 7, .. }));
+        for import in imports {
+            let (request, _): (Request, _) = read(&mut b).await.unwrap().unwrap();
+            assert!(matches!(request, Request::Start { import: read } if read == import));
+        }
         assert!(read::<_, Message>(&mut b).await.unwrap().is_none());
     }
 }

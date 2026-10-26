@@ -17,7 +17,7 @@ use jellyfin::models::{
     BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType, TrickplayInfo,
 };
 use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
-use player::libmpv::{Frame, VideoOutput};
+use player::libmpv::{VideoImport, VideoOutput};
 use player::{EndReason, LoadRequest, Player, PlayerEvent};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
@@ -29,7 +29,7 @@ use crate::runtime;
 use crate::services::{AppEvent, Services};
 use crate::session::describe_error;
 use crate::syncplay::GroupRequest;
-use crate::task::{self, Deadline, Task};
+use crate::task::{self, Deadline};
 use crate::toasts::Toast;
 
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
@@ -40,8 +40,6 @@ const DEFAULT_VOLUME: f64 = 100.;
 /// How long quitting the app waits for a running session to report its stop. The next launch
 /// reports it instead if this runs out (`report_unfinished`).
 const EXIT_WAIT: Duration = Duration::from_secs(3);
-/// How often the frames arriving are logged, until the player page shows them (V1).
-const FRAME_LOG_EVERY: Duration = Duration::from_secs(10);
 
 /// What to play. Stream indexes are Jellyfin's `MediaStream.Index`; `None` leaves the choice
 /// to mpv (and the user's mpv config).
@@ -174,7 +172,7 @@ enum SessionUpdate {
     Details(Box<Details>),
     Player(PlayerEvent),
     /// `run_session` returned: the last message of a session. A panic in it is raised again on
-    /// the UI thread, as a [`Task`]'s is.
+    /// the UI thread, as a [`crate::task::Task`]'s is.
     Finished(std::thread::Result<Result<Ended, String>>),
 }
 
@@ -263,9 +261,6 @@ pub struct NowPlaying {
     /// Counts [`PlayerEvent::Restarted`]: playback resumed after loading or seeking.
     pub restarts: u64,
     commands: mpsc::UnboundedSender<UiCommand>,
-    /// Logs the video frames arriving, until V1's video widget takes them. Dropped (stopped)
-    /// with this state.
-    _frame_log: Task<()>,
 }
 
 impl NowPlaying {
@@ -397,6 +392,9 @@ pub struct PlaybackManager {
     adjustments: Adjustments,
     /// The item `adjustments` were made for; another one starts without the delays.
     adjusted_item: Option<String>,
+    /// What the window's renderer can draw, which picks the player's video output. Pixels until
+    /// the app sets it ([`PlaybackManager::set_video_import`]).
+    video_import: VideoImport,
 }
 
 /// A session from its start until its end is handled.
@@ -452,7 +450,14 @@ impl PlaybackManager {
             muted: false,
             adjustments,
             adjusted_item: None,
+            video_import: VideoImport::Pixels,
         }
+    }
+
+    /// What the window's renderer can draw (`widgets::video::import`), for the sessions started
+    /// from now on.
+    pub fn set_video_import(&mut self, import: VideoImport) {
+        self.video_import = import;
     }
 
     pub fn is_active(&self) -> bool {
@@ -523,7 +528,7 @@ impl PlaybackManager {
         self.stop = Some(stop_tx);
         self.generation += 1;
         self.active = true;
-        let (volume, muted) = (self.volume, self.muted);
+        let (volume, muted, import) = (self.volume, self.muted, self.video_import);
         if self.adjusted_item.as_ref() != Some(&item.id) {
             self.adjustments = self.adjustments.for_next_item();
             self.adjusted_item = Some(item.id.clone());
@@ -548,7 +553,16 @@ impl PlaybackManager {
                     updates: updates_tx.clone(),
                     commands: commands_rx,
                 };
-                let session = run_session(client, item, options, (volume, muted), adjustments, account, channels);
+                let session = run_session(
+                    client,
+                    item,
+                    options,
+                    (volume, muted),
+                    adjustments,
+                    account,
+                    import,
+                    channels,
+                );
                 let result = AssertUnwindSafe(session).catch_unwind().await;
                 let _ = updates_tx.send(SessionUpdate::Finished(result));
             });
@@ -932,7 +946,6 @@ impl Services {
                 let Some(running) = playback.sessions.iter().find(|s| s.generation == generation) else {
                     return;
                 };
-                let frame_log = Task::spawn(&playback.ctx, log_frames(video.clone()));
                 playback.now_playing = Some(NowPlaying {
                     session: generation,
                     item: running.item.clone(),
@@ -961,7 +974,6 @@ impl Services {
                     resumed_from: running.resumed_from,
                     restarts: 0,
                     commands: running.commands.clone(),
-                    _frame_log: frame_log,
                 });
                 self.events.push(AppEvent::PlaybackStarted);
                 self.group_playback_started();
@@ -1067,35 +1079,6 @@ impl Services {
                 self.toast(Toast::error(message));
                 self.events.push(AppEvent::PlaybackEnded);
             }
-        }
-    }
-}
-
-/// Logs the video frames arriving: the first one, then how many came every
-/// [`FRAME_LOG_EVERY`]. Stands in for the video widget until V1, without waking the UI.
-async fn log_frames(video: VideoOutput) {
-    let mut frames = video.frames();
-    let (mut first, mut count, mut since) = (true, 0u32, Instant::now());
-    while frames.changed().await.is_ok() {
-        let Some(frame) = frames.borrow_and_update().clone() else {
-            continue;
-        };
-        count += 1;
-        let kind = match &frame {
-            Frame::Pixels(pixels) => format!("{}x{} pixels", pixels.width, pixels.height),
-            Frame::Shared(_) => "a shared GPU texture".to_owned(),
-        };
-        if first {
-            first = false;
-            tracing::info!("first video frame: {kind}");
-        }
-        if since.elapsed() >= FRAME_LOG_EVERY {
-            tracing::info!(
-                frames = count,
-                "video frames in the last {}s, latest {kind}",
-                FRAME_LOG_EVERY.as_secs()
-            );
-            (count, since) = (0, Instant::now());
         }
     }
 }
@@ -1227,8 +1210,10 @@ fn subtitle_index(choice: SubtitleChoice) -> Option<i32> {
     }
 }
 
-async fn start_player() -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, VideoOutput), String> {
-    Player::spawn().await.map_err(|err| match err {
+async fn start_player(
+    import: VideoImport,
+) -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, VideoOutput), String> {
+    Player::spawn(import).await.map_err(|err| match err {
         player::Error::LibmpvUnavailable(reason) => {
             tracing::warn!("libmpv unavailable: {reason}");
             let hint = if cfg!(target_os = "macos") {
@@ -1390,6 +1375,7 @@ async fn measure_bitrate(client: &Client) -> jellyfin::Result<u64> {
 }
 
 /// Runs one playback from negotiation to the final stop report. Returns a user-facing error.
+#[allow(clippy::too_many_arguments)]
 async fn run_session(
     client: Client,
     item: BaseItemDto,
@@ -1397,6 +1383,7 @@ async fn run_session(
     (volume, muted): (f64, bool),
     adjustments: Adjustments,
     account: String,
+    import: VideoImport,
     mut channels: Channels,
 ) -> Result<Ended, String> {
     let info = client
@@ -1449,7 +1436,7 @@ async fn run_session(
             .map(|s| s.index),
     };
 
-    let (player, mut events, video) = start_player().await?;
+    let (player, mut events, video) = start_player(import).await?;
 
     // Track choices are options, so they're set before loading the file. A transcode has
     // just the chosen audio track and no embedded subtitles.

@@ -8,8 +8,9 @@
 //!
 //! - **egui**, while it's busy with keys ([`egui_wants_keys`]): a widget has focus (a text field,
 //!   or anything reached with Tab where the page lets egui's focus work), or a modal dialog, menu
-//!   or popup is open. Every key is egui's then: Tab and the arrows move focus, Space and Enter
-//!   press, Esc closes the popup or drops the focus. The code that owns such a widget reads the
+//!   or popup is open. Every key is egui's then — except the app's own ([`Scope::App`], the
+//!   zoom), which are taken first whatever holds the focus: Ctrl/Cmd with `=`, `-` and `0` type
+//!   and press nothing. The code that owns such a widget reads the
 //!   keys it uses itself (the search box's Down and Enter, a dialog's Up and Down), and a text
 //!   field that uses Up and Down stops egui moving focus with them
 //!   (`Memory::set_focus_lock_filter`).
@@ -17,19 +18,22 @@
 //!   egui's input, so egui never sees them, and the shell routes them before anything is drawn.
 //!   Keys without a binding stay with egui.
 //!
-//! The active scopes are the top page's (`Page::scope`) and the shell's. A page without the
-//! cursor (Settings) has no scope of its own, so Tab, the arrows, Space and Enter stay with egui
-//! there and its focus works as usual, while Esc and Backspace still go back.
+//! The active scopes are the top page's (`Page::scope`), the app's and the shell's. A page
+//! without the cursor (Settings) has no scope of its own, so Tab, the arrows, Space and Enter
+//! stay with egui there and its focus works as usual, while Esc and Backspace still go back.
 //!
-//! **Routing order**, for the keys the app took: the top bar while the keyboard is in it, then
-//! the page (its scope's actions), then the shell's (Back, search). Dialogs, menus and focused
-//! text fields come before all of them, through egui as above.
+//! **Routing order**, for the keys the app took: the app's own (`Scope::App`, the zoom) before
+//! anything is drawn, then the top bar while the keyboard is in it, then the page (its scope's
+//! actions), then the shell's (Back, search). Dialogs, menus and focused text fields come before
+//! all of them, through egui as above.
 
 use egui::{Key, Modifiers};
 
 /// Where a binding applies, like a key context on `main`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
+    /// Whatever is on screen, sign-in included: the app-wide keys (zoom).
+    App,
     /// The signed-in frame, under every page.
     Shell,
     /// A page with the browse cursor (`browse::Browse`).
@@ -41,6 +45,10 @@ pub enum Scope {
 /// What a bound key does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    // App.
+    ZoomIn,
+    ZoomOut,
+    ResetZoom,
     // Shell.
     Back,
     OpenSearch,
@@ -93,6 +101,11 @@ pub const BINDINGS: &[Binding] = {
     use Action::*;
     use Scope::*;
     &[
+        bind(App, Modifiers::COMMAND, Key::Equals, ZoomIn),
+        // The `+` key itself, and the keypad's.
+        bind(App, Modifiers::COMMAND, Key::Plus, ZoomIn),
+        bind(App, Modifiers::COMMAND, Key::Minus, ZoomOut),
+        bind(App, Modifiers::COMMAND, Key::Num0, ResetZoom),
         bind(Shell, Modifiers::COMMAND, Key::F, OpenSearch),
         bind(Shell, NONE, Key::Escape, Back),
         bind(Shell, NONE, Key::Backspace, Back),
@@ -163,14 +176,24 @@ pub fn egui_wants_keys(ctx: &egui::Context) -> bool {
         || egui::Popup::is_any_open(ctx)
 }
 
-/// Takes the presses bound in `scopes` out of `input`, unless egui wants the keyboard. Called
-/// from `App::raw_input_hook`, before egui sees the input. Releases stay in: egui ignores the
-/// release of a key it never saw pressed.
+/// Takes the presses bound in `scopes` out of `input`. Called from `App::raw_input_hook`, before
+/// egui sees the input. Releases stay in: egui ignores the release of a key it never saw pressed.
+///
+/// The app's own keys are taken even while egui wants the keyboard (a text field with the focus,
+/// a menu, a dialog): `main` bound them globally, and Ctrl/Cmd with `=`, `-` and `0` mean
+/// nothing to egui's widgets. Everything else waits for egui to be done with the keyboard.
 pub fn take(ctx: &egui::Context, input: &mut egui::RawInput, scopes: &[Scope]) -> Vec<Press> {
-    if scopes.is_empty() || egui_wants_keys(ctx) {
-        return Vec::new();
+    let mut taken = if scopes.contains(&Scope::App) {
+        take_bound(input, &[Scope::App])
+    } else {
+        Vec::new()
+    };
+    if egui_wants_keys(ctx) {
+        return taken;
     }
-    take_bound(input, scopes)
+    let page_scopes: Vec<Scope> = scopes.iter().copied().filter(|scope| *scope != Scope::App).collect();
+    taken.extend(take_bound(input, &page_scopes));
+    taken
 }
 
 fn take_bound(input: &mut egui::RawInput, scopes: &[Scope]) -> Vec<Press> {
@@ -199,7 +222,7 @@ fn take_bound(input: &mut egui::RawInput, scopes: &[Scope]) -> Vec<Press> {
 mod tests {
     use egui::{Event, Key, Modifiers, RawInput};
 
-    use super::{Action, BINDINGS, Press, Scope, take_bound};
+    use super::{Action, BINDINGS, Press, Scope, take, take_bound};
     use crate::browse::Move;
 
     fn press(key: Key, modifiers: Modifiers) -> Press {
@@ -259,6 +282,35 @@ mod tests {
     }
 
     #[test]
+    fn the_zoom_keys_are_command_and_minus_and_equal() {
+        let ctrl = Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let cmd = Modifiers {
+            mac_cmd: true,
+            command: true,
+            ..Default::default()
+        };
+        for modifiers in [ctrl, cmd] {
+            assert_eq!(press(Key::Equals, modifiers).action(Scope::App), Some(Action::ZoomIn));
+            // A layout where `+` is Shift and `=` still zooms in.
+            let shifted = Modifiers {
+                shift: true,
+                ..modifiers
+            };
+            assert_eq!(press(Key::Equals, shifted).action(Scope::App), Some(Action::ZoomIn));
+            assert_eq!(press(Key::Plus, modifiers).action(Scope::App), Some(Action::ZoomIn));
+            assert_eq!(press(Key::Minus, modifiers).action(Scope::App), Some(Action::ZoomOut));
+            assert_eq!(press(Key::Num0, modifiers).action(Scope::App), Some(Action::ResetZoom));
+        }
+        // No modifier, no zoom: `=` and `-` are ordinary keys elsewhere.
+        assert_eq!(press(Key::Equals, Modifiers::NONE).action(Scope::App), None);
+        assert_eq!(press(Key::Minus, Modifiers::NONE).action(Scope::App), None);
+    }
+
+    #[test]
     fn no_key_is_bound_twice_in_a_scope() {
         for (i, a) in BINDINGS.iter().enumerate() {
             for b in &BINDINGS[i + 1..] {
@@ -271,6 +323,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_zoom_is_taken_from_a_text_field_and_from_an_open_menu() {
+        let ctx = egui::Context::default();
+        // A widget with the keyboard, as after a click into a text field.
+        ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("search")));
+        assert!(super::egui_wants_keys(&ctx));
+        let ctrl = Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let mut input = RawInput {
+            events: vec![
+                key_event(Key::Equals, ctrl, true),
+                key_event(Key::Equals, ctrl, false),
+                // Tab belongs to egui while it has the focus.
+                key_event(Key::Tab, Modifiers::NONE, true),
+            ],
+            ..Default::default()
+        };
+        let taken = take(&ctx, &mut input, &[Scope::Browse, Scope::Shell, Scope::App]);
+        assert_eq!(taken, [press(Key::Equals, ctrl)]);
+        // Tab and its like stayed with egui.
+        assert!(input.events.contains(&key_event(Key::Tab, Modifiers::NONE, true)));
+        assert!(!input.events.contains(&key_event(Key::Equals, ctrl, true)));
     }
 
     #[test]
