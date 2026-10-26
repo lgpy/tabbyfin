@@ -6,7 +6,7 @@ use std::thread::JoinHandle;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use super::video::{RenderThread, VideoOutput};
+use super::video::{RenderThread, VideoImport, VideoOutput};
 use super::{Api, Core, FORMAT_DOUBLE, FORMAT_FLAG, FORMAT_INT64, RawEndFile, RawLogMessage, RawProperty, cstring};
 use crate::events::{EventTranslator, OBSERVED_PROPERTIES};
 use crate::{Error, PlayerEvent, Result};
@@ -31,7 +31,8 @@ pub struct EmbeddedPlayer {
 }
 
 impl EmbeddedPlayer {
-    pub fn spawn() -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
+    /// Starts mpv with a video output whose frames the UI can take (`import`).
+    pub fn spawn(import: VideoImport) -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
         let api = Api::load()?;
         // SAFETY: mpv_create has no preconditions.
         let mpv = unsafe { (api.create)() };
@@ -89,7 +90,7 @@ impl EmbeddedPlayer {
         }
 
         // The render context must exist before a file with video starts.
-        let (video, render_thread) = VideoOutput::new(core.clone())?;
+        let (video, render_thread) = VideoOutput::new(core.clone(), import)?;
 
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let stop = Arc::new(AtomicBool::new(false));

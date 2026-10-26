@@ -153,6 +153,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Windows on NVIDIA and Intel**, and a hybrid laptop: the host's ANGLE device and GPUI must be on the same adapter for shared handles.
 - ⬜ **A release build on Windows** (no console): the host starts without a window flashing up, and its log reaches the app's log file.
 - ⬜ Quitting the app during playback leaves no `tabbyfin --player-host` process behind (Task Manager / `ps`).
+- ✅ (egui branch, V1) Software video in the egui window through the host and embedded: Linux (WSL, llvmpipe) and Windows (RX 6600, `TABBYFIN_VIDEO=software`); resizing re-renders at the new size on both; killing the host mid-play brings the video back in a new one (Linux). GPU frames wait for V2 (Linux) and V3 (Windows), and need these checks again then.
+- ⬜ (egui branch) **macOS:** software video in the egui window (Metal), through the host.
 - ✅ (egui branch, Linux) Quitting during playback stops it first: the server gets the stop report and the config's `unfinished_playback` is cleared, rather than the next launch reporting it. Closing the window waits up to 3 s for that.
 
 ## 8. Minimum server version (4.6)
