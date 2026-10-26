@@ -10,7 +10,7 @@
 //! - The browse cursor: [`Browse`] for the keys, [`browse::reveal`] and
 //!   [`browse::hide_on_click`] while drawing.
 //! - Cards and shelves are `widgets/`, the item menu `widgets/menu.rs`; what a menu asks for is
-//!   carried out here, after the frame's drawing.
+//!   carried out here, after the frame's drawing. *Add to playlist…* opens U8's dialog.
 
 use std::collections::HashMap;
 
@@ -23,7 +23,7 @@ use crate::images::ImageCache;
 use crate::keys::{Action, Scope};
 use crate::nav::{NavRequest, Route};
 use crate::task::Task;
-use crate::toasts::Toast;
+use crate::views::dialogs::AddToPlaylist;
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::Load;
@@ -105,6 +105,8 @@ pub struct HomePage {
     /// Retry.
     loaded_at: Option<u64>,
     cursor: Cursor,
+    /// *Add to playlist…* from a card's menu, while it's open.
+    add_to_playlist: Option<AddToPlaylist>,
 }
 
 impl HomePage {
@@ -170,13 +172,25 @@ impl Page for HomePage {
             Load::Loaded(data) if data.libraries.is_empty() => {
                 state::empty(ui, "Your server has no libraries yet.");
             }
-            Load::Loaded(data) => shelves(ui, data, &mut self.cursor, cx),
+            Load::Loaded(data) => shelves(ui, data, &mut self.cursor, &mut self.add_to_playlist, cx),
+        }
+
+        if let Some(dialog) = &mut self.add_to_playlist
+            && !dialog.show(cx)
+        {
+            self.add_to_playlist = None;
         }
     }
 }
 
 /// The page's two shelves, then what they asked for.
-fn shelves(ui: &mut egui::Ui, data: &HomeData, cursor: &mut Cursor, cx: &mut PageCx) {
+fn shelves(
+    ui: &mut egui::Ui,
+    data: &HomeData,
+    cursor: &mut Cursor,
+    dialog: &mut Option<AddToPlaylist>,
+    cx: &mut PageCx,
+) {
     let mut opened = None;
     let mut chosen = None;
     let images = &mut cx.services.images;
@@ -193,15 +207,15 @@ fn shelves(ui: &mut egui::Ui, data: &HomeData, cursor: &mut Cursor, cx: &mut Pag
         cx.nav.push(NavRequest::Push(route));
     }
     if let Some((action, item)) = chosen {
-        act(action, &item, cx);
+        act(action, &item, dialog, cx);
     }
 }
 
-/// What a card's menu asked for: the services play it or mark it, and the only thing left is
-/// U8's *Add to playlist* dialog, which isn't here yet.
-fn act(action: MenuAction, item: &BaseItemDto, cx: &mut PageCx) {
+/// What a card's menu asked for: the services play it or mark it, and *Add to playlist…* opens
+/// the dialog, which this page then keeps until it's done.
+fn act(action: MenuAction, item: &BaseItemDto, dialog: &mut Option<AddToPlaylist>, cx: &mut PageCx) {
     if let Some(MenuAction::AddToPlaylist) = cx.services.carry_out(action, item) {
-        cx.services.toast(Toast::info("Add to playlist arrives with U8."));
+        *dialog = Some(AddToPlaylist::new(cx, item));
     }
 }
 

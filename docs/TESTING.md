@@ -118,6 +118,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ Also against it: an audio change during a transcode (remote command) reported `Buffering`, the member paused, and both resumed at 18.6 s after the reload; shuffle, repeat and moving an entry from the SyncPlay menu by keyboard reached it as queue updates.
 
+✅ The egui build (P2) against the scripted member: following (load, Ready, Pause, Unpause, Seek, Stop), leading (`TABBYFIN_ROUTE=play:` with `TABBYFIN_SYNCPLAY`, then Space, Space, →, Esc), joining a group that's already playing, the next episode after an episode's end, a version switch through the reload path (from a temporary hook, since the player page is U10: `Buffering`, the server had the app seek to the group's position, both resumed), switching account and quitting while in a group (the member saw the app leave), and drift catching up 0.8 s in 13 s. In WSL, check the clocks first (`docs/egui-migration.md` §6): this VM's monotonic clock ran 8% slow, which makes mpv look 8% fast to drift correction.
+
 - ⬜ A **version switch** in a group, from the player's version menu (the same reload path as the audio change, not clicked yet), and removing a queue entry.
 
 - ⬜ **With the Jellyfin web client** as the other member, in a browser against the same server:
@@ -153,6 +155,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Windows on NVIDIA and Intel**, and a hybrid laptop: the host's ANGLE device and GPUI must be on the same adapter for shared handles.
 - ⬜ **A release build on Windows** (no console): the host starts without a window flashing up, and its log reaches the app's log file.
 - ⬜ Quitting the app during playback leaves no `tabbyfin --player-host` process behind (Task Manager / `ps`).
+- ✅ (egui branch, V1) Software video in the egui window through the host and embedded: Linux (WSL, llvmpipe) and Windows (RX 6600, `TABBYFIN_VIDEO=software`); resizing re-renders at the new size on both; killing the host mid-play brings the video back in a new one (Linux). GPU frames wait for V2 (Linux) and V3 (Windows), and need these checks again then.
+- ⬜ (egui branch) **macOS:** software video in the egui window (Metal), through the host.
 - ✅ (egui branch, Linux) Quitting during playback stops it first: the server gets the stop report and the config's `unfinished_playback` is cleared, rather than the next launch reporting it. Closing the window waits up to 3 s for that.
 
 ## 8. Minimum server version (4.6)
@@ -353,7 +357,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ **egui (W1, round 2)**, against 12.2, driving the menu's dispatcher (`Services::carry_out`) from temporary code since the harness can't right-click: *Play* on Test Movie resumed it at 0:39 and played (frames logged, 249 in 10 s, the shell's line at the bottom); *Play* on Test Show fetched its episodes and played S1:E2 from 0:37, its resume point (the "Nothing here to play." path is out of reach: the dev server's show has episodes). Stacked pages keep their own ids: the posters page's cursor worked over Home and Esc came back to Home's own cursor.
 
-- ⬜ **Right-click** opening the menu at the pointer, and *Play*, *Play for a series or season*, *Watched*, *Favorite* and *Add to playlist…* from it (U5, U6 and U8 wire the last one; until then the exemplar answers with a toast).
+- ⬜ **Right-click** opening the menu at the pointer, and *Play*, *Play for a series or season*, *Watched*, *Favorite* and *Add to playlist…* from it (U5 and U6 wire it for their pages; Home's cards open U8's dialog already).
 - ⬜ Card text not stealing the card's click, right-click and drag (architecturally checked: with `style.interaction.selectable_labels = false` a label senses hover only, and egui's hit-test gives the click to the card under it).
 - ⬜ **A drag** sideways scrolling a shelf and not counting as a click on the card it ends on, the wheel over a shelf scrolling the page, and a click hiding the cursor.
 - ⬜ The page arrows paging by a whole row on a big shelf, and Shift+wheel scrolling one sideways.
@@ -366,3 +370,11 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **With a mouse**: the bar's buttons, opening the account menu by clicking the user button and a click outside closing it, and a click on the page hiding the bar's ring.
 - ⬜ **Fullscreen while playing** (Xvfb has no window manager, so fullscreen does nothing there): *closed again when the player closes by itself*.
 - ⬜ Enter or Down moving into real results and Up from their first row back to the box (U4), and Esc over another page leaving the box open with its text.
+## 28. Playlist dialogs (U8)
+
+✅ **egui (U8)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U8-scratch/`): *Add to playlist* on "Second Movie (2025)" with the dev server's three playlists, the field focused, each row with its entry count and the first one highlighted; typing "test" narrowing the list to "smoke test", "Test Playlist" and *New playlist “test”*; Down, Down, Enter on "Test Playlist" answering "Second Movie (2025) is already in Test Playlist." and closing (12.2 adds an item twice, so the dialog looks first); typing "u8 test" and Enter making that playlist with the movie in it (the server had it, private, with one entry); *Edit playlist* on it: the name filled in, the sharing read as off from the server, a longer name typed, Down to the switch (with the keyboard ring on it), Space to share, Enter saving both (the server then said `OpenAccess` true and the new name); reopening it showed the switch on; Down, Left, Enter unsharing it with the name untouched, and Down, Right, Enter sharing a second playlist; Down, Up, Space, x typing " x" into the name, which shows Up hands the keyboard back to the field; *Delete playlist…* showing the note, Esc closing it and leaving the playlist, then Enter deleting it ("Deleted u8 test renamed.", the item 404 after); adding to an existing playlist that didn't have the movie ("Added to u8 add.", the server having both entries); a second user's shared playlist answering "You can't change u8 dev2 list; it belongs to someone else." from the add dialog (which stays open) and "This playlist belongs to someone else; it can't be changed." from *Edit*. Home sat at 0 CPU ticks over 10 s once the dialogs were closed.
+
+- ⬜ **A real pointer**: right-clicking a card, *Add to playlist…* opening the dialog, clicking a playlist row, the Save, Cancel and Delete buttons, the sharing switch, and a click on the backdrop closing the dialog (the same `ModalResponse::should_close` path as Esc).
+- ⬜ A list longer than the 320 px cap scrolling, with the highlight kept on screen.
+- ⬜ The dialogs with the **server down** (the playlist list fails to load) and for an account with **no playlists** ("No playlists yet. Type a name to make one.").
+- ⬜ The dialogs from the item page's *More* menu (U6) and the playlist page (U7). Until those pages land, nothing on the keyboard opens *Edit* or *Delete*: the checks above used a temporary `TABBYFIN_DIALOG` hook in `views/home.rs`, which is not in the tree.
