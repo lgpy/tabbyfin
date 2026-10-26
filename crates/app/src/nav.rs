@@ -27,6 +27,12 @@ pub enum Route {
     },
     Search,
     Settings,
+    /// I1's debug-only check page: a library's items as posters, for the image cache
+    /// (docs/egui-migration.md §6). Removed with the page in X3.
+    #[cfg(debug_assertions)]
+    Posters {
+        id: String,
+    },
 }
 
 impl Route {
