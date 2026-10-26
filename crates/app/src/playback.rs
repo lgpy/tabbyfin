@@ -617,22 +617,37 @@ impl PlaybackManager {
         done
     }
 
-    /// Quitting the app: stops playback and waits (a little) for the stop to be reported, since
-    /// the process ends right after.
-    pub fn shut_down(&mut self) {
+    /// Quitting the app: stops playback, letting the sessions report it in the background.
+    /// Returns what [`wait_for_exit`] waits on, if a session was running.
+    pub fn stop_for_exit(&mut self) -> Option<std::sync::mpsc::Receiver<()>> {
         let running = !self.sessions.is_empty();
         let done = self.finish();
-        if running {
-            tracing::info!("stopping playback before quitting");
-            if done.recv_timeout(EXIT_WAIT).is_err() {
-                tracing::warn!("playback didn't stop in time; the next launch reports it");
-            }
+        running.then_some(done)
+    }
+}
+
+/// Waits (a little, [`EXIT_WAIT`] in all) for the sessions [`PlaybackManager::stop_for_exit`]
+/// stopped to report it, since the process ends right after.
+pub fn wait_for_exit(stopping: Vec<std::sync::mpsc::Receiver<()>>) {
+    if stopping.is_empty() {
+        return;
+    }
+    tracing::info!("stopping playback before quitting");
+    let deadline = Instant::now() + EXIT_WAIT;
+    for done in stopping {
+        if done
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .is_err()
+        {
+            tracing::warn!("playback didn't stop in time; the next launch reports it");
+            return;
         }
     }
 }
 
-/// Dropped with the signed-in session (sign-out, an expired session, switching accounts): the
-/// running sessions stop and report it in the background.
+/// Dropped with the signed-in session (after `Services::end` on sign-out, an expired session or
+/// switching accounts): the running sessions stop, if `end` didn't already, and report it in
+/// the background.
 impl Drop for PlaybackManager {
     fn drop(&mut self) {
         drop(self.finish());
