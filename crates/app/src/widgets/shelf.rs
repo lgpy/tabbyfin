@@ -1,5 +1,8 @@
 //! A titled row of cards that scrolls sideways, with a page back and forward: `main`'s shelves.
 //!
+//! `id` only has to be unique among the page's own rows and scroll areas: the shell scopes every
+//! page's ids, so two pages can both have a `"cast"` shelf and keep their scroll positions apart.
+//!
 //! The arrows show once there's more to see than fits and grey out at either end. They need the
 //! row's content and viewport widths, which egui only knows after laying it out, so they come
 //! from the last frame (as they did on `main`) and the first frame shows none.
@@ -80,7 +83,9 @@ pub fn shelf_with_gaps(
         // The closed hand `main` showed while a row was being dragged.
         .on_drag_cursor(egui::CursorIcon::Grabbing);
     if let Some(target) = target {
-        area = area.horizontal_scroll_offset(target.max(0.));
+        // Clamped here: egui would take the overshoot and spring back, which reads as the row
+        // jumping past its end.
+        area = area.horizontal_scroll_offset(target.clamp(0., (state.content - state.viewport).max(0.)));
     }
     let out = area.show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -88,12 +93,18 @@ pub fn shelf_with_gaps(
             cards(ui);
         });
     });
-    let state = State {
+    let measured = State {
         offset: out.state.clamped_offset().x,
         content: out.content_size.x,
         viewport: out.inner_rect.width(),
     };
-    ui.data_mut(|data| data.insert_temp(id, state));
+    if measured != state {
+        // The arrows were drawn from the previous frame's widths: a row that just grew, or that
+        // a key or a flung drag scrolled to an end, needs one more frame to show or grey them.
+        // Only a change asks for it, so an idle row costs nothing.
+        ui.ctx().request_repaint();
+    }
+    ui.data_mut(|data| data.insert_temp(id, measured));
 }
 
 /// A page button, small and frameless.
@@ -105,7 +116,7 @@ fn arrow(icon: egui_material_icons::MaterialIcon) -> Button<'static> {
 }
 
 /// The row's scroll offset and widths, from the last frame it was drawn.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 struct State {
     offset: f32,
     content: f32,

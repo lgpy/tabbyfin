@@ -10,8 +10,8 @@
 
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, Color32, CornerRadius, FontId, Label, Rect, Response, RichText, Sense, Stroke, StrokeKind,
-    TextFormat, TextStyle, Ui, Vec2, WidgetText, pos2, vec2,
+    Align, Align2, CornerRadius, FontId, Label, Rect, Response, RichText, Sense, Stroke, StrokeKind, TextFormat,
+    TextStyle, Ui, Vec2, WidgetText, pos2, vec2,
 };
 use egui_material_icons::FONT_FAMILY;
 use egui_material_icons::icons::ICON_CHECK;
@@ -20,6 +20,7 @@ use jellyfin::models::{BaseItemDto, BaseItemPerson, ChapterInfo, ImageType};
 
 use crate::images::ImageCache;
 use crate::item_menu::is_played;
+use crate::theme;
 use crate::widgets::image;
 use crate::widgets::text::{
     CARD_TEXT_H, LANDSCAPE_H, LANDSCAPE_W, PERSON_H, PERSON_W, POSTER_H, POSTER_W, card_text,
@@ -72,7 +73,7 @@ fn item_card(
     let (response, image) = picture(ui, cache, size, request, Some(item));
     cursor_ring(ui, image, selected);
     let (title, subtitle) = card_text(item);
-    let lines = lines(ui, image, 0.);
+    let lines = lines(ui, image, 0., GAP);
     put(ui, lines.title, line(ui, &title, 0., false));
     put(ui, lines.subtitle, line(ui, &subtitle, -2., true));
     response
@@ -84,7 +85,8 @@ pub fn episode(ui: &mut Ui, cache: &mut ImageCache, episode: &BaseItemDto, scale
     let size = vec2(LANDSCAPE_W * scale, LANDSCAPE_H * scale);
     let (response, image) = picture(ui, cache, size, landscape_image(episode).as_ref(), Some(episode));
     cursor_ring(ui, image, selected);
-    let lines = lines(ui, image, EPISODE_TITLE_STEP);
+    // `main`'s episode title had `pt_1`, a gap of its own on top of the card's: 8 px in all.
+    let lines = lines(ui, image, EPISODE_TITLE_STEP, 2. * GAP);
     put(ui, lines.title, episode_title(ui, episode));
     response
 }
@@ -106,7 +108,7 @@ pub fn chapter(
     let (response, image) = picture(ui, cache, size, request.as_ref(), None);
     cursor_ring(ui, image, selected);
     let name = chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1));
-    let lines = lines(ui, image, 0.);
+    let lines = lines(ui, image, 0., GAP);
     put(ui, lines.title, line(ui, &name, 0., false));
     put(
         ui,
@@ -146,7 +148,7 @@ pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scal
         (_, Some("Actor")) | (_, None) => String::new(),
         (_, Some(kind)) => kind_label(kind),
     };
-    let lines = lines(ui, image, 0.);
+    let lines = lines(ui, image, 0., GAP);
     put(ui, lines.title, line(ui, &person.name, 0., false));
     put(ui, lines.subtitle, line(ui, &detail, -2., true));
     response
@@ -163,12 +165,17 @@ pub fn placeholder(ui: &mut Ui) {
     );
 }
 
-/// The room a card takes under its image: a title line, a subtitle line and the gap above them,
-/// and at least `main`'s `CARD_TEXT_H`, so a grid's rows keep their height whatever the text
-/// size.
+/// The room a card takes under its image: the gap down from the image, the title, the gap
+/// between the lines and the subtitle — `main`'s `4 + 20 + 4 + 16`. `CARD_TEXT_H` is the floor,
+/// so a grid's rows keep their height whatever the text size.
 pub fn text_height(ui: &Ui) -> f32 {
     let heights = line_heights(ui, 0.);
-    CARD_TEXT_H.max(GAP + heights.title + heights.subtitle)
+    CARD_TEXT_H.max(lines_height(&heights))
+}
+
+/// The two lines and the two gaps: what [`text_height`] reserves.
+fn lines_height(heights: &LineHeights) -> f32 {
+    GAP + heights.title + GAP + heights.subtitle
 }
 
 /// A card's image, with `item`'s blurhash while it loads, its played badge and progress bar,
@@ -211,18 +218,22 @@ fn cursor_ring(ui: &Ui, image: Rect, selected: bool) {
     }
 }
 
-/// A tick in a filled circle, top right.
+/// A tick in a filled circle, 4 px in from the image's top right corner.
+///
+/// The circle is the theme's strong text colour and the tick the panel's fill, so it reads on a
+/// dark theme and a light one alike (`main`'s primary/primary-foreground pair, which egui's
+/// selection colour doesn't have).
 fn played_badge(ui: &Ui, image: Rect) {
     let radius = 8.;
-    let center = image.right_top() + vec2(-radius - 6., radius + 6.);
-    ui.painter()
-        .circle_filled(center, radius, ui.visuals().selection.bg_fill);
+    let center = image.right_top() + vec2(-4. - radius, 4. + radius);
+    let visuals = ui.visuals();
+    ui.painter().circle_filled(center, radius, visuals.strong_text_color());
     ui.painter().text(
         center,
         Align2::CENTER_CENTER,
         ICON_CHECK.codepoint,
         FontId::new(2. * radius - 4., egui::FontFamily::Name(FONT_FAMILY.into())),
-        Color32::WHITE,
+        visuals.panel_fill,
     );
 }
 
@@ -245,7 +256,7 @@ fn progress_bar(ui: &Ui, image: Rect, fraction: f32) {
     }
     let radius = CornerRadius::same(3);
     let painter = ui.painter();
-    painter.rect_filled(bar, radius, Color32::from_black_alpha(153));
+    painter.rect_filled(bar, radius, theme::over_video::TRACK);
     let filled = Rect::from_min_max(
         bar.min,
         pos2(bar.left() + bar.width() * fraction.clamp(0., 1.), bar.bottom()),
@@ -254,7 +265,7 @@ fn progress_bar(ui: &Ui, image: Rect, fraction: f32) {
     painter.rect_stroke(
         bar,
         radius,
-        Stroke::new(1., Color32::from_white_alpha(128)),
+        Stroke::new(1., theme::over_video::TRACK_OUTLINE),
         StrokeKind::Inside,
     );
 }
@@ -265,13 +276,16 @@ struct Lines {
     subtitle: Rect,
 }
 
-fn lines(ui: &Ui, image: Rect, title_step: f32) -> Lines {
+fn lines(ui: &Ui, image: Rect, title_step: f32, top_gap: f32) -> Lines {
     let heights = line_heights(ui, title_step);
-    let top = image.bottom() + GAP;
+    let top = image.bottom() + top_gap;
     let width = image.width();
     Lines {
         title: Rect::from_min_size(pos2(image.left(), top), vec2(width, heights.title)),
-        subtitle: Rect::from_min_size(pos2(image.left(), top + heights.title), vec2(width, heights.subtitle)),
+        subtitle: Rect::from_min_size(
+            pos2(image.left(), top + heights.title + GAP),
+            vec2(width, heights.subtitle),
+        ),
     }
 }
 

@@ -74,7 +74,7 @@ impl PostersPage {
         columns: usize,
         viewport: f32,
         card_height: f32,
-        row_height: f32,
+        pitch: f32,
         rows: usize,
     ) {
         let Some(position) = cursor.selected() else {
@@ -83,13 +83,13 @@ impl PostersPage {
         let Some(row) = position.index.checked_div(columns) else {
             return;
         };
-        let top = row as f32 * row_height;
+        let top = row as f32 * pitch;
         if top < *offset {
             *offset = top;
         } else if top + card_height > *offset + viewport {
             *offset = top + card_height - viewport;
         }
-        let total = rows as f32 * row_height;
+        let total = rows as f32 * pitch;
         *offset = offset.clamp(0., (total - viewport).max(0.));
     }
 }
@@ -136,7 +136,9 @@ impl Page for PostersPage {
                 // Only the rows on screen ask for their posters, as U5's grid will: asking for
                 // everything would queue the whole library and load what nobody sees.
                 let card_height = POSTER_H + card::text_height(ui);
-                let row_height = card_height + GAP;
+                // Rows are `card_height` apart plus the item spacing below; `show_rows` adds
+                // that spacing itself, so it takes the height without it.
+                let pitch = card_height + GAP;
                 // Only a key moves the page to the cursor; a wheel scroll stays where it is.
                 // (The selected card can't scroll itself into view: `show_rows` doesn't draw the
                 // rows that are off screen.)
@@ -147,7 +149,7 @@ impl Page for PostersPage {
                         columns,
                         ui.available_height(),
                         card_height,
-                        row_height,
+                        pitch,
                         rows,
                     );
                 }
@@ -155,7 +157,7 @@ impl Page for PostersPage {
                 let mut open = None;
                 let out = egui::ScrollArea::vertical()
                     .vertical_scroll_offset(self.offset)
-                    .show_rows(ui, row_height, rows, |ui, visible| {
+                    .show_rows(ui, card_height, rows, |ui, visible| {
                         for row in visible {
                             let start = row * columns;
                             let cards = &items[start..(start + columns).min(items.len())];
@@ -164,10 +166,9 @@ impl Page for PostersPage {
                                 for (column, item) in cards.iter().enumerate() {
                                     let index = start + column;
                                     let selected = self.cursor.is_selected(0, index);
+                                    // The cursor's row was scrolled into view above; a card
+                                    // that `show_rows` doesn't draw can't scroll itself.
                                     let response = card::poster(ui, &mut cx.services.images, item, selected);
-                                    if selected {
-                                        browse::reveal(&mut self.cursor, &response);
-                                    }
                                     if response.clicked() {
                                         open = Some(Route::for_item(item));
                                     }
