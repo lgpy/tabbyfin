@@ -11,8 +11,10 @@
 
 use crate::config::SavedServer;
 use crate::images::ImageCache;
+use crate::item_menu::Mark;
 use crate::playback::{self, PlaybackManager};
 use crate::session::{Session, describe_error};
+use crate::task;
 use crate::toasts::Toast;
 
 pub struct Services {
@@ -25,11 +27,26 @@ pub struct Services {
     /// What happened since the app last looked, for the app and the shell to act on. Drained
     /// every frame.
     pub events: Vec<AppEvent>,
+    /// Watched and favorite changes that finished on the server, for [`Services::tick`] to apply
+    /// (`widgets/menu.rs` starts them).
+    pub(crate) marked: task::Receiver<Marked>,
+    pub(crate) marking: task::Sender<Marked>,
+    /// A series' or season's next episode, fetched for the item menu's *Play*: `widgets/menu.rs`
+    /// plays it (or says there's nothing to play) when it arrives.
+    pub(crate) up_next: task::Receiver<UpNext>,
+    pub(crate) up_next_from: task::Sender<UpNext>,
     /// Playback sessions, the play queue and what carries over between items. Playing and the
     /// player's controls are methods on `Services` (`playback.rs`), since SyncPlay may take
     /// them over.
     pub playback: PlaybackManager,
 }
+
+/// A watched or favorite change, as its request finishes: what was asked for, on which item,
+/// and how it went.
+pub(crate) type Marked = (Mark, String, jellyfin::Result<()>);
+
+/// The episode a series or season plays next, once it's fetched.
+pub(crate) type UpNext = jellyfin::Result<Option<jellyfin::models::BaseItemDto>>;
 
 /// Something signed-in code can't handle itself, for the app or the shell.
 #[derive(Debug)]
@@ -58,12 +75,18 @@ pub enum AppEvent {
 
 impl Services {
     pub fn new(session: Session, ctx: &egui::Context) -> Self {
+        let (marking, marked) = task::channel(ctx);
+        let (up_next_from, up_next) = task::channel(ctx);
         Self {
             images: ImageCache::new(session.client.clone(), ctx),
             playback: PlaybackManager::new(ctx, session.client.clone(), session.account_key()),
             session,
             user_data: 0,
             events: Vec::new(),
+            marked,
+            marking,
+            up_next,
+            up_next_from,
         }
     }
 
@@ -73,6 +96,7 @@ impl Services {
     /// minimised.
     pub fn tick(&mut self, _ctx: &egui::Context) {
         self.images.tick();
+        self.apply_menu_requests();
         self.tick_playback();
     }
 

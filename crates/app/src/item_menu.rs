@@ -1,11 +1,11 @@
 //! What an item's menu and actions offer: played and favorite state, resume points, what can be
-//! played, marked or added to a playlist. The menu itself is `widgets/menu.rs` (W1) and the
-//! actions are on the item page (U6).
+//! played, marked or added to a playlist. The menu itself is `widgets/menu.rs` and the item
+//! page's own buttons are U6's.
 
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 use jellyfin::{Client, Ticks};
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Mark {
     Played(bool),
     Favorite(bool),

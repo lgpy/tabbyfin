@@ -42,6 +42,13 @@ pub fn apply(ctx: &egui::Context, config: &Config) {
     // own would step by 10 % and forget it between launches.
     ctx.options_mut(|options| options.zoom_with_keyboard = false);
     ctx.set_zoom_factor(config.ui_zoom.map_or(1., snap));
+    // No selectable text: `main` had none, and a card's title sits over the card's own click
+    // target, where a selectable label would take its clicks, right-clicks and drags (and show
+    // an I-beam). A truncated label still shows its full text on hover.
+    ctx.all_styles_mut(|style| style.interaction.selectable_labels = false);
+    // A press that moves further than this is a drag, not a click: `main`'s shelves used 4 px.
+    // (A shelf still scrolls along from the first pixel; only the click is withheld.)
+    ctx.options_mut(|options| options.input_options.max_click_dist = 4.);
     apply_text_size(ctx, config.text_size);
     apply_animations(ctx, config.animations.unwrap_or(true));
 }
