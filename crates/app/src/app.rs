@@ -18,6 +18,7 @@ use crate::toasts::{ToastAction, Toasts};
 use crate::views::PageCx;
 use crate::views::login::{Login, LoginEvent, Prefill};
 use crate::views::shell::Shell;
+use crate::widgets::video;
 use crate::{credentials, runtime, theme, window};
 
 /// Restoring fails with the request's error, or none when there's no stored token.
@@ -464,6 +465,9 @@ fn restore(ctx: &egui::Context, saved: SavedServer, device_id: String) -> Task<R
 
 fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> SignedIn {
     let mut services = Services::new(session, ctx);
+    services
+        .playback
+        .set_video_import(video::import(frame.wgpu_render_state()));
     let mut nav = Vec::new();
     let shell = Shell::new(&mut PageCx {
         ctx,

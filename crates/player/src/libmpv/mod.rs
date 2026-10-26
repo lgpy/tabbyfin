@@ -20,7 +20,7 @@ use std::ffi::{CStr, CString, c_char, c_double, c_int, c_void};
 use libloading::Library;
 
 pub use embedded::EmbeddedPlayer;
-pub use video::{Frame, SharedFrame, VideoFrame, VideoOutput};
+pub use video::{Frame, Luid, SharedFrame, VideoFrame, VideoImport, VideoOutput};
 
 use crate::Error;
 
