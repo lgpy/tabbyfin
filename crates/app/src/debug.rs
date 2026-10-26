@@ -237,6 +237,8 @@ impl Start {
                     _ => None,
                 },
             })),
+            // I1's image cache check page (docs/egui-migration.md §6).
+            ("posters", Some(id)) => Some(Start::Open(Route::Posters { id: id.into() })),
             _ => None,
         }
     }
@@ -333,6 +335,10 @@ mod tests {
                 ..
             }))
         ));
+        assert_eq!(
+            Start::parse("posters:ffff"),
+            Some(Start::Open(Route::Posters { id: "ffff".into() }))
+        );
         assert_eq!(Start::parse("item"), None);
         assert_eq!(Start::parse("nowhere"), None);
     }
