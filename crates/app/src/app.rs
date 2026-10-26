@@ -54,12 +54,24 @@ pub struct App {
     /// Keys `raw_input_hook` took from egui for the app (`keys.rs`), routed in the next `ui`.
     keys: Vec<Press>,
     placement: window::Placement,
+    /// The zoom in effect, as the app asked for it: `ctx.zoom_factor` only changes at the start
+    /// of the next pass, so two zoom keys in one frame would otherwise both step from the same
+    /// level.
+    zoom: f32,
+    /// The desktop's colour scheme (Linux), while the theme follows the system. Dropping it
+    /// stops following.
+    system_theme: Option<theme::SystemTheme>,
+    /// Whether the window had the focus last frame: the system text size is read again when it
+    /// gets the focus back, since no desktop tells the app it changed (`main` did the same).
+    focused: bool,
+    /// That read, while it runs.
+    text_size_check: Option<Task<f32>>,
     #[cfg(debug_assertions)]
     debug_keys: Option<crate::debug::KeyScript>,
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext, config: Config) -> Self {
+    pub fn new(cc: &eframe::CreationContext, config: Config, placement: window::Placement) -> Self {
         let ctx = &cc.egui_ctx;
         if let Some(render_state) = &cc.wgpu_render_state {
             let adapter = render_state.adapter.get_info();
@@ -72,7 +84,6 @@ impl App {
             );
         }
         egui_material_icons::initialize(ctx);
-        theme::apply(ctx, &config);
         let screen = match &config.server {
             Some(saved) => Screen::Restoring {
                 task: restore(ctx, saved.clone(), config.device_id.clone()),
@@ -86,16 +97,45 @@ impl App {
                 None,
             ))),
         };
-        Self {
-            placement: window::Placement::new(&config),
-            device_id: config.device_id,
-            saved: config.server,
+        let mut app = Self {
+            placement,
+            system_theme: None,
+            device_id: config.device_id.clone(),
+            saved: config.server.clone(),
             screen: Some(screen),
             parked: None,
             toasts: Toasts::default(),
             keys: Vec::new(),
+            zoom: 1.,
+            // The window opens with the focus, and `apply_appearance` starts the first read of
+            // the system's text size, so the first focused frame isn't a reason for another.
+            focused: true,
+            text_size_check: None,
             #[cfg(debug_assertions)]
             debug_keys: crate::debug::KeyScript::from_env(),
+        };
+        app.apply_appearance(ctx, &config);
+        app
+    }
+
+    /// Applies the config's appearance, at launch and after Settings saved a change
+    /// (`AppEvent::AppearanceChanged`): starts or stops following the desktop's colour scheme
+    /// (Linux, while the theme preference is the system's), and reads the system's text size
+    /// the first time a setting follows it.
+    fn apply_appearance(&mut self, ctx: &egui::Context, config: &Config) {
+        theme::apply(ctx, config);
+        self.zoom = theme::zoom(config);
+        if theme::follows_the_desktop(config) {
+            // `theme::apply` stood light in for the desktop's scheme; put back the one the
+            // portal already said, since a running watch only speaks up on a change.
+            self.system_theme
+                .get_or_insert_with(|| theme::SystemTheme::start(ctx))
+                .reapply(ctx);
+        } else {
+            self.system_theme = None;
+        }
+        if config.text_size.is_none() && self.text_size_check.is_none() && !theme::system_text_scale_read() {
+            self.text_size_check = Some(theme::refresh_system_text_scale(ctx));
         }
     }
 
@@ -391,11 +431,14 @@ impl App {
         }
     }
 
-    /// The scopes whose keys the app takes from egui this frame (`keys.rs`).
+    /// The scopes whose keys the app takes from egui this frame (`keys.rs`). The app's own keys
+    /// work on every screen; the shell's and its pages' only while signed in.
     fn key_scopes(&self) -> Vec<keys::Scope> {
         match self.screen.as_ref() {
-            Some(Screen::SignedIn(signed_in)) => signed_in.shell.scopes(),
-            Some(Screen::Restoring { .. } | Screen::SignIn(_)) | None => Vec::new(),
+            Some(Screen::SignedIn(signed_in)) => {
+                signed_in.shell.scopes().into_iter().chain([keys::Scope::App]).collect()
+            }
+            Some(Screen::Restoring { .. } | Screen::SignIn(_)) | None => vec![keys::Scope::App],
         }
     }
 
@@ -408,6 +451,7 @@ impl App {
         for event in events {
             match event {
                 AppEvent::Toast(toast) => self.toasts.push(toast),
+                AppEvent::AppearanceChanged => self.apply_appearance(ctx, &Config::load()),
                 AppEvent::PlaybackStarted => {
                     if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
                         signed_in.shell.player_started();
@@ -486,6 +530,12 @@ impl eframe::App for App {
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.placement.tick(ctx);
+        self.zoom = ctx.zoom_factor();
+        // The appearance belongs to the app, so it's followed on every screen.
+        if let Some(system_theme) = &mut self.system_theme {
+            system_theme.tick(ctx);
+        }
+        self.follow_system_text_size(ctx);
 
         // A finished restore swaps the screen for the sign-in form or the shell. This runs
         // here, not in `ui`, because eframe only calls `ui` while the window is visible.
@@ -543,7 +593,8 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        let keys = std::mem::take(&mut self.keys);
+        let taken = std::mem::take(&mut self.keys);
+        let keys = self.app_keys(&ctx, taken);
         match self.screen.as_mut() {
             Some(Screen::SignedIn(signed_in)) => {
                 let SignedIn { services, shell } = signed_in.as_mut();
@@ -584,5 +635,49 @@ impl eframe::App for App {
         };
         let parked = self.parked.as_mut().map(|parked| &mut parked.services);
         Services::shut_down(current.into_iter().chain(parked));
+    }
+}
+
+impl App {
+    /// Carries out the app's own keys (the zoom, which works on every screen) and hands the rest
+    /// to the page and the shell.
+    fn app_keys(&mut self, ctx: &egui::Context, keys: Vec<Press>) -> Vec<Press> {
+        let mut zoom = self.zoom;
+        let keys = keys
+            .into_iter()
+            .filter(|press| {
+                let Some(action) = press.action(keys::Scope::App) else {
+                    return true;
+                };
+                match action {
+                    keys::Action::ZoomIn => zoom = theme::step_zoom(ctx, zoom, 1),
+                    keys::Action::ZoomOut => zoom = theme::step_zoom(ctx, zoom, -1),
+                    keys::Action::ResetZoom => zoom = theme::reset_zoom(ctx, zoom),
+                    _ => return true,
+                }
+                false
+            })
+            .collect();
+        self.zoom = zoom;
+        keys
+    }
+
+    /// A text size that follows the system is read again when the window gets the focus back:
+    /// no desktop tells an app its text size changed, so after changing it in the system's
+    /// settings, coming back to the app applies it.
+    fn follow_system_text_size(&mut self, ctx: &egui::Context) {
+        let focused = ctx.input(|input| input.focused);
+        if focused && !self.focused && Config::load().text_size.is_none() {
+            self.text_size_check = Some(theme::refresh_system_text_scale(ctx));
+        }
+        self.focused = focused;
+        let Some(scale) = self.text_size_check.as_mut().and_then(Task::poll) else {
+            return;
+        };
+        self.text_size_check = None;
+        if theme::note_system_text_scale(scale) {
+            tracing::info!(scale, "system text size changed");
+            self.apply_appearance(ctx, &Config::load());
+        }
     }
 }
