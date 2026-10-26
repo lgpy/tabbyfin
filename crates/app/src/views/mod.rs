@@ -11,6 +11,8 @@ pub mod item;
 pub mod library;
 pub mod login;
 pub mod player;
+#[cfg(debug_assertions)]
+pub mod posters;
 pub mod search;
 pub mod settings;
 pub mod shell;
@@ -59,6 +61,8 @@ pub fn open(route: Route, _cx: &mut PageCx) -> Box<dyn Page> {
         Route::Person { name, .. } => Box::new(StubPage::new(name, "U5")),
         Route::Search => Box::new(StubPage::new("Search".into(), "U4")),
         Route::Settings => Box::new(StubPage::new("Settings".into(), "U9")),
+        #[cfg(debug_assertions)]
+        Route::Posters { id } => Box::new(posters::PostersPage::new(id)),
     }
 }
 
