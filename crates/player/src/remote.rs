@@ -269,12 +269,13 @@ impl FdSocket {
     }
 }
 
-/// Fds received from the host, by image id. The newest few are kept open, since GPUI imports
-/// (duplicates) an image's fd when it first draws it.
+/// Fds received from the host, by image id. The newest few are kept for frames still to come;
+/// each frame holds its own reference, so the UI can import (duplicate) the fd of any frame it
+/// has, however many images came since.
 #[cfg(target_os = "linux")]
 #[derive(Default)]
 struct FdTable {
-    fds: Mutex<Vec<(u64, std::os::fd::OwnedFd)>>,
+    fds: Mutex<Vec<(u64, Arc<std::os::fd::OwnedFd>)>>,
     arrived: tokio::sync::Notify,
 }
 
@@ -309,7 +310,7 @@ impl FdTable {
                 if let RecvAncillaryMessage::ScmRights(fds) = message {
                     for fd in fds {
                         let mut table = self.fds.lock().unwrap();
-                        table.push((id, fd));
+                        table.push((id, Arc::new(fd)));
                         if table.len() > Self::KEEP {
                             table.remove(0);
                         }
@@ -321,13 +322,12 @@ impl FdTable {
     }
 
     /// The fd for image `id`, waiting briefly for it (it travels on a separate socket).
-    async fn get(&self, id: u64) -> Option<i32> {
-        use std::os::fd::AsRawFd;
+    async fn get(&self, id: u64) -> Option<Arc<std::os::fd::OwnedFd>> {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
             let arrived = self.arrived.notified();
             if let Some((_, fd)) = self.fds.lock().unwrap().iter().find(|(i, _)| *i == id) {
-                return Some(fd.as_raw_fd());
+                return Some(fd.clone());
             }
             if tokio::time::timeout_at(deadline, arrived).await.is_err() {
                 return None;
