@@ -212,12 +212,12 @@ impl Shell {
             self.video = Some((state.session, Video::new(cx.ctx, state.video.clone(), render_state)));
         }
         let rect = ui.max_rect();
-        let shown = match &mut self.video {
+        let (shown, import_failed) = match &mut self.video {
             Some((_, video)) => {
                 video.show(ui);
-                video.has_frame()
+                (video.has_frame(), video.import_failed())
             }
-            None => false,
+            None => (false, false),
         };
         if !shown || state.is_none_or(|state| state.loading) {
             let spinner = egui::Rect::from_center_size(rect.center(), egui::vec2(48., 48.));
@@ -225,6 +225,9 @@ impl Shell {
                 spinner,
                 egui::Spinner::new().size(48.).color(over_video::MUTED_FOREGROUND),
             );
+        }
+        if import_failed {
+            cx.services.fall_back_to_pixels();
         }
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| now_playing_bar(ui, cx));
     }

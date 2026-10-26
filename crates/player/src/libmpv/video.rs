@@ -84,12 +84,14 @@ pub struct SharedFrame {
 /// to it again for the next two frames.
 ///
 /// Linux: an RGBA8, linearly tiled Vulkan image whose memory is exported as an opaque fd. A new
-/// image gets a new `id`.
+/// image gets a new `id`; the frames of one image share its fd. The fd keeps the memory alive,
+/// so a frame can be imported for as long as it's held, even after the render thread has moved
+/// on to a new ring (a resize).
 #[cfg(target_os = "linux")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SharedFrame {
     pub id: u64,
-    pub fd: i32,
+    pub fd: Arc<std::os::fd::OwnedFd>,
     pub allocation_size: u64,
     pub width: u32,
     pub height: u32,
@@ -311,9 +313,10 @@ fn gpu_renderer(core: &Core, control: &RenderControl, import: VideoImport) -> Op
                     .and_then(|wgl| GlRenderer::new(core, control, wgl))
                     .map(|gpu| (GpuRenderer::Wgl(gpu), "OpenGL/D3D11 interop"))
             }),
-        // V2 picks the exporter device by `device_uuid`.
+        // OpenGL and the exporting Vulkan device on the UI's GPU, the only one whose memory
+        // its device can import.
         #[cfg(target_os = "linux")]
-        VideoImport::VulkanMemory { device_uuid: _ } => super::egl::EglVulkan::new(core)
+        VideoImport::VulkanMemory { device_uuid } => super::egl::EglVulkan::new(core, device_uuid)
             .and_then(|egl| GlRenderer::new(core, control, egl))
             .map(|gpu| (gpu, "OpenGL/Vulkan interop")),
         other => {

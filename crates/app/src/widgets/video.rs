@@ -3,10 +3,14 @@
 //! The widget owns its textures in egui-wgpu's renderer rather than going through egui's
 //! texture manager. Software frames are written with `queue.write_texture` into one texture per
 //! frame size, registered once (egui's texture deltas would copy each frame twice more on the
-//! way). V2 and V3 add the imported GPU frames.
+//! way). GPU frames are the player's own textures, imported once per image of its ring
+//! (`vulkan.rs` on Linux; V3 adds Windows) and drawn as they are.
 //!
 //! [`import`] is what the app tells the player it can draw when it starts it, so the player
 //! only sets up a video output whose frames this widget can show.
+
+#[cfg(target_os = "linux")]
+mod vulkan;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,9 +34,30 @@ pub struct Video {
     render_state: RenderState,
     /// The texture software frames are written into, while frames keep their size.
     texture: Option<FrameTexture>,
+    /// GPU frames' textures, one per image of the player's ring, oldest first.
+    imported: Vec<Imported>,
+    /// What's drawn: the egui texture and the frame's size in pixels.
+    shown: Option<(egui::TextureId, [u32; 2])>,
+    /// A GPU frame couldn't be imported; see [`Video::import_failed`].
+    import_failed: bool,
     /// Repaints for each new frame. Dropping the widget stops it.
     _wake: Task<()>,
 }
+
+/// An imported image of the player's ring, registered with egui-wgpu.
+struct Imported {
+    /// The player's id for the image (`SharedFrame::id`).
+    image: u64,
+    /// Kept so the texture lives while egui may draw it; wgpu frees the image and its memory
+    /// after it's dropped and the GPU is done with it.
+    _texture: wgpu::Texture,
+    id: egui::TextureId,
+    size: [u32; 2],
+}
+
+/// The player renders into a ring of three images (`player::libmpv::opengl`), so that many
+/// imports are kept: each image is imported once and drawn whenever it comes round again.
+const RING: usize = 3;
 
 /// A texture for software frames of one size, registered with egui-wgpu.
 struct FrameTexture {
@@ -61,13 +86,23 @@ impl Video {
             output,
             render_state: render_state.clone(),
             texture: None,
+            imported: Vec::new(),
+            shown: None,
+            import_failed: false,
             _wake: wake,
         }
     }
 
     /// Whether a frame has arrived to draw.
     pub fn has_frame(&self) -> bool {
-        self.texture.is_some()
+        self.shown.is_some()
+    }
+
+    /// Whether a GPU frame failed to import, so nothing new will show: the session has to be
+    /// played again with software frames (`Services::fall_back_to_pixels`). Driver quirks with
+    /// shared memory can do that where the setup itself worked.
+    pub fn import_failed(&self) -> bool {
+        self.import_failed
     }
 
     /// Fills the space left in `ui` with the latest frame, letterboxed on black (contain). The
@@ -85,22 +120,78 @@ impl Video {
             let frame = self.frames.borrow_and_update().clone();
             match frame {
                 Some(Frame::Pixels(frame)) => self.upload(&frame),
-                // Only sent when asked for (`import`), which V2 and V3 do once they draw them.
-                Some(Frame::Shared(_)) => tracing::warn!("a GPU video frame, which this build can't draw yet"),
+                Some(Frame::Shared(frame)) => self.show_shared(&frame),
                 None => {}
             }
         }
 
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0., over_video::BACKDROP);
-        if let Some(texture) = &self.texture {
+        if let Some((id, size)) = self.shown {
             // On whole pixels, so a frame rendered at the window's size isn't blurred by
             // sampling between them.
-            let drawn = contain(rect, texture.size).round_to_pixels(pixels_per_point);
+            let drawn = contain(rect, size).round_to_pixels(pixels_per_point);
             let uv = egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.));
-            painter.image(texture.id, drawn, uv, egui::Color32::WHITE);
+            painter.image(id, drawn, uv, egui::Color32::WHITE);
         }
         response
+    }
+
+    /// Shows a GPU frame: its image's texture, imported the first time the image comes. A new
+    /// size means a new ring, and the old ring's textures are let go.
+    #[cfg(target_os = "linux")]
+    fn show_shared(&mut self, frame: &player::libmpv::SharedFrame) {
+        let size = [frame.width, frame.height];
+        if let Some(imported) = self.imported.iter().find(|i| i.image == frame.id) {
+            self.shown = Some((imported.id, imported.size));
+            return;
+        }
+        if self.import_failed {
+            return;
+        }
+        let RenderState { device, renderer, .. } = &self.render_state;
+        let texture = match vulkan::import(device, frame) {
+            Ok(texture) => texture,
+            Err(err) => {
+                tracing::warn!(?size, "video: couldn't import a GPU frame: {err}");
+                self.import_failed = true;
+                return;
+            }
+        };
+        if self.imported.first().is_none_or(|i| i.size != size) {
+            tracing::info!(width = frame.width, height = frame.height, "video: GPU frames");
+        }
+        // The images that won't come again: another ring's (a resize), and beyond a ring's
+        // worth, the oldest.
+        let mut stale: Vec<Imported> = self.imported.extract_if(.., |i| i.size != size).collect();
+        let over = (self.imported.len() + 1).saturating_sub(RING);
+        stale.extend(self.imported.drain(..over));
+        for imported in stale {
+            retire(&self.ctx, &self.render_state, imported.id);
+        }
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Linear: frames are scaled up when the video is smaller than the window.
+        let id = renderer
+            .write()
+            .register_native_texture(device, &view, wgpu::FilterMode::Linear);
+        self.imported.push(Imported {
+            image: frame.id,
+            _texture: texture,
+            id,
+            size,
+        });
+        self.shown = Some((id, size));
+        // Software frames don't come back within a session; their texture can go too.
+        if let Some(texture) = self.texture.take() {
+            retire(&self.ctx, &self.render_state, texture.id);
+        }
+    }
+
+    /// GPU frames are only sent where the app asks for them ([`import`]), which it doesn't yet
+    /// on this OS.
+    #[cfg(not(target_os = "linux"))]
+    fn show_shared(&mut self, _frame: &player::libmpv::SharedFrame) {
+        tracing::warn!("a GPU video frame, which this build can't draw yet");
     }
 
     /// Writes a software frame into the texture, making a new texture when the size changed
@@ -151,6 +242,7 @@ impl Video {
             self.texture = Some(FrameTexture { texture, id, size });
         }
         let Some(texture) = &self.texture else { return };
+        self.shown = Some((texture.id, size));
         // Staged now and copied before the next submit, which draws this frame.
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -172,14 +264,20 @@ impl Video {
 
 impl Drop for Video {
     fn drop(&mut self) {
-        // The texture itself goes once the GPU is done with it; its registration is ours to end,
-        // but not yet: the pass dropping the widget may have drawn it, and is painted after.
-        if let Some(texture) = self.texture.take() {
-            let renderer = self.render_state.renderer.clone();
-            let retired = self.ctx.plugin_or_default::<RetiredTextures>();
-            retired.lock().pending.push((renderer, texture.id));
+        // The textures themselves go once the GPU is done with them; their registrations are
+        // ours to end, but not yet: the pass dropping the widget may have drawn one, and is
+        // painted after.
+        let ids = self.texture.take().map(|t| t.id).into_iter();
+        for id in ids.chain(self.imported.drain(..).map(|i| i.id)) {
+            retire(&self.ctx, &self.render_state, id);
         }
     }
+}
+
+/// Ends a texture's registration with egui-wgpu at the start of the next pass ([`RetiredTextures`]).
+fn retire(ctx: &egui::Context, render_state: &RenderState, id: egui::TextureId) {
+    let retired = ctx.plugin_or_default::<RetiredTextures>();
+    retired.lock().pending.push((render_state.renderer.clone(), id));
 }
 
 /// Video textures to unregister from egui-wgpu at the start of the next pass, once the pass
@@ -213,12 +311,20 @@ fn contain(rect: egui::Rect, [width, height]: [u32; 2]) -> egui::Rect {
     egui::Rect::from_center_size(rect.center(), frame * scale)
 }
 
-/// What the player should send for this window: pixels for now. V2 (Vulkan memory) and V3
-/// (D3D11 textures) ask for what [`adapter_import`] finds, once the widget draws their frames.
+/// What the player should send for this window: Vulkan memory where wgpu runs on Vulkan and
+/// can import it (Linux), pixels otherwise. On wgpu's GL fallback that's pixels by itself, since
+/// [`adapter_import`] finds nothing to import there. V3 adds D3D11 textures (Windows).
+///
+/// The player still decides whether its GPU path is worth it: it renders pixels where its
+/// OpenGL is a software rasterizer (llvmpipe), unless `TABBYFIN_VIDEO=gpu`.
 pub fn import(render_state: Option<&RenderState>) -> VideoImport {
     let possible = render_state.map_or(VideoImport::Pixels, adapter_import);
-    tracing::info!(?possible, "video: asking the player for pixels");
-    VideoImport::Pixels
+    let import = match possible {
+        VideoImport::VulkanMemory { .. } => possible,
+        _ => VideoImport::Pixels,
+    };
+    tracing::info!(?import, ?possible, "video: what the player is asked for");
+    import
 }
 
 /// What the renderer's device could import: Vulkan memory where wgpu runs on Vulkan and the

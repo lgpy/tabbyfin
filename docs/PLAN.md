@@ -203,7 +203,7 @@ libmpv doesn't run inside the app. `Player::spawn` starts this same executable a
 - **Frames:**
   - **Software:** the RGBA pixels (opaque, tightly packed) go as the payload. Only the newest frame is sent, so a slow app skips frames instead of queueing them.
   - **Windows:** only the D3D11 texture's legacy share handle is sent; any process can open it.
-  - **Linux:** the Vulkan memory fd of each image is passed once over a socket pair (`SCM_RIGHTS`; the host inherits its end as `TABBYFIN_PLAYER_FD`). The app keeps the newest 8 open, since GPUI duplicates an fd when it first draws it.
+  - **Linux:** the Vulkan memory fd of each image is passed once over a socket pair (`SCM_RIGHTS`; the host inherits its end as `TABBYFIN_PLAYER_FD`). The app keeps the newest 8 for frames to come, and each frame holds its image's fd (`Arc<OwnedFd>`) until the UI has imported it, so it can't be closed (or its number reused) under an import.
 - **Logging:** the host logs plain lines to stderr. The app forwards them into its own log under the `player` target.
 - **Crashes:** when the host dies without having finished, the app gets `EndFile(Error(HOST_CRASHED))` and `Exited`. The session ends as *lost*, the manager starts a new session (and host) at the same position, and the user sees "The player stopped unexpectedly. Restarting it…". After three tries the error says the player keeps crashing.
 - **Lifetime:** the host exits when its stdin closes, which happens when the app drops the player or exits. It's also killed when the app drops it.
