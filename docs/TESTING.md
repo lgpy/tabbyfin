@@ -231,6 +231,8 @@ The development harness cannot send mouse input. The cursor hiding uses `App::hi
 
 ✅ With the budget lowered to 1 MB and the keep-recent window to 1 s (a local build only): leaving Home for an item page and a library, and coming back, dropped 10, 10 and 9 images, and Home's images reloaded from disk and showed correctly.
 
+✅ I1 (the egui build's image cache, checked on its temporary posters page before U5 lands): with the budget lowered to 32 MB (a local build only) and `dev/fake-library.py` on :8098 serving 10,000 posters 300 ms apart, `TABBYFIN_ROUTE=posters:<fake library id>` with `TABBYFIN_KEYS="wait down*200"` logged two trims: 39 images dropped but 281 MB left (the 10 s keep-recent rule held the rest), then 259 dropped and 32.6 MB left; the process's RSS went from 563 MB to 432 MB. Only the rows on screen asked for posters: at most 6 loads were in flight, and in a 12 s scroll past about 400 cards with a 300 ms delay only 165 were requested, the rest having scrolled out of the queue before a slot freed. After the scroll stopped, with no input at all, the trim ran on its own: 34 images dropped at 219.8 MB (the keep-recent window), 10 s later 195 more and 32.6 MB left, and the RSS fell from 501 MB to 369 MB.
+
 - ⬜ A **10k-item library**: scroll the whole grid and check the process memory levels off instead of growing, and that scrolling back up doesn't flash placeholders for long.
 - ⬜ **Long session** (an hour of browsing and playback): memory stays flat.
 

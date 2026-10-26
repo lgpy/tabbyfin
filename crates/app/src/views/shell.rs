@@ -21,6 +21,8 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(cx: &mut PageCx) -> Self {
+        // `mut` is for the debug build's `debug_start` below.
+        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut shell = Self {
             stack: vec![views::open(Route::Home, cx)],
             update_check: Some(Task::spawn(cx.ctx, update::check())),
@@ -130,7 +132,10 @@ impl Shell {
         use crate::debug::Start;
 
         match Start::from_env() {
-            Some(Start::Open(route)) => self.push(route, cx),
+            Some(Start::Open(route)) => {
+                tracing::info!("TABBYFIN_ROUTE: opening {route:?}");
+                self.push(route, cx);
+            }
             Some(Start::Search(term)) => {
                 tracing::info!("TABBYFIN_ROUTE: typing {term:?} into the search box arrives with U1");
                 self.push(Route::Search, cx);

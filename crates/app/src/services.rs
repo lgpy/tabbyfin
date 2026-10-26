@@ -6,13 +6,16 @@
 //! (playback asking SyncPlay, remote control driving playback) is a method here, which can
 //! reach every part.
 //!
-//! Still to come: `images` (I1), `playback` (P1), `syncplay` (P2), `remote` and `live` (P3).
+//! Still to come: `playback` (P1), `syncplay` (P2), `remote` and `live` (P3).
 
+use crate::images::ImageCache;
 use crate::session::{Session, describe_error};
 use crate::toasts::Toast;
 
 pub struct Services {
     pub session: Session,
+    /// Server images as egui textures (`images.rs`), with their queue and memory budget.
+    pub images: ImageCache,
     /// Bumped when the user's watch data changed elsewhere (played state, resume points,
     /// favorites). Pages remember the value they loaded at and load again when it differs.
     pub user_data: u64,
@@ -30,8 +33,9 @@ pub enum AppEvent {
 }
 
 impl Services {
-    pub fn new(session: Session) -> Self {
+    pub fn new(session: Session, ctx: &egui::Context) -> Self {
         Self {
+            images: ImageCache::new(session.client.clone(), ctx),
             session,
             user_data: 0,
             events: Vec::new(),
@@ -39,9 +43,12 @@ impl Services {
     }
 
     /// Work that has to go on whatever is on screen: draining the background channels, firing
-    /// deadlines. Runs from `App::logic` before each frame, and also while the window is
-    /// hidden, so playback keeps reporting when it's minimised.
-    pub fn tick(&mut self, _ctx: &egui::Context) {}
+    /// deadlines, uploading the images that finished loading. Runs from `App::logic` before each
+    /// frame, and also while the window is hidden, so playback keeps reporting when it's
+    /// minimised.
+    pub fn tick(&mut self, _ctx: &egui::Context) {
+        self.images.tick();
+    }
 
     pub fn toast(&mut self, toast: Toast) {
         self.events.push(AppEvent::Toast(toast));
