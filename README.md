@@ -2,7 +2,7 @@
 
 <h1 align="center">Tabbyfin</h1>
 
-A native desktop client for [Jellyfin](https://jellyfin.org), built with [egui](https://github.com/emilk/egui) through [eframe](https://github.com/emilk/egui/tree/main/crates/eframe) and drawn with [wgpu](https://wgpu.rs). Video plays inside the app with [mpv](https://mpv.io) (libmpv); on Linux and Windows its frames go to the screen from the GPU without a copy.
+A native desktop client for [Jellyfin](https://jellyfin.org), built with [egui](https://github.com/emilk/egui) through [eframe](https://github.com/emilk/egui/tree/main/crates/eframe) and drawn with [wgpu](https://wgpu.rs). Video plays inside the app with [mpv](https://mpv.io) (libmpv); on Linux and Windows the app draws its frames straight from the GPU, without copying them through the CPU.
 
 Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**; developed against 12.x.
 
