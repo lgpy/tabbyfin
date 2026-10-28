@@ -2,6 +2,7 @@
 
 What's missing and what still needs work, as of 2026-10-15. Done items are marked ✅ and kept for context.
 
+- **Egui branch: accepted differences** (X3's sweep, 2026-10-28). The egui app matches `main`'s features except for these, accepted for now: egui's default look until the restyle (`docs/egui-migration.md`, Restyle backlog), with spinners instead of the mascot loader; popups (the item menu, the player's settings menu, the Settings pickers' lists) take the pointer only, while the pickers step with Left/Right; Tab passes the top bar's buttons before the page. In WSL debug builds it idles at 0 % CPU (`main` ~0.8 %), plays software video at about 60 % of `main`'s CPU, and holds about half of `main`'s memory on a 10,000-item library.
 - `docs/PLAN.md` describes the architecture, and `docs/in-app-video.md` the video pipeline. This document only lists gaps.
 - **Priority:**
   - **P1:** needed before calling it v1.
