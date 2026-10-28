@@ -395,3 +395,20 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **With a mouse**: the bar's buttons, a click on the bar's Back leaving no keyboard in the bar, opening the account menu by clicking the user button and a click outside closing it, and a click on the page hiding the bar's ring.
 - ⬜ **Fullscreen while playing** (Xvfb has no window manager, so fullscreen does nothing there): *closed again when the player closes by itself*.
 - ⬜ U4's real results page: its `at_edge` must return `false` for Up and Shift+Tab at the first row (the shell then focuses the box), and `enter_results` `true` once it has a row. Esc over another page leaving the box open with its text.
+
+## 29. Packaging and CI (X1)
+
+✅ **egui (X1)**, on this machine and in Docker:
+
+- The Linux release binary needs only `libc`, `libm` and `libgcc_s` at link time; the windowing libraries, the Vulkan loader and libmpv are all `dlopen`ed, so `dpkg-shlibdeps`'s `$auto` misses them and `crates/app/Cargo.toml` names them explicitly: `libmpv2`, `libvulkan1`, `libwayland-client0`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libx11-6`, `libx11-xcb1`, `libxcursor1`, `libxi6`.
+- A clean Ubuntu 24.04 container with only `build-essential` and `pkg-config` compiles the app (`cargo check -p tabbyfin --locked`): eframe/winit need no `-dev` packages, because those libraries are loaded at runtime. CI's Linux job installs the same two packages.
+- `packaging/package.sh x86_64-unknown-linux-gnu dist` builds the `.tar.gz` and `.deb`; both now carry `THIRD_PARTY.md` (the `.deb` under `/usr/share/doc/tabbyfin/`).
+- The `.deb` installs in a clean Ubuntu 24.04 container (pulling `libmpv2` 0.37, Mesa, and the windowing libraries) and starts under Xvfb with an empty config dir, choosing Mesa's llvmpipe Vulkan adapter.
+- The AppImage builds in the Ubuntu 22.04 container (`mise run package:appimage`) and starts in a clean Ubuntu 24.04 container once the windowing libraries winit loads are installed; without `libxkbcommon-x11` it panics in `xkbcommon-dl`, which is expected for an AppImage that relies on the system's windowing stack.
+- The Flatpak builds and installs (`mise run package:flatpak`). Running it under this harness's Xvfb fails before the window: Xvfb listens on an abstract X11 socket, which Flatpak can't share with the sandbox. That isn't a packaging result; its real-desktop checks stay in §7.
+- `mise run flatpak:sources` regenerates `packaging/flatpak/cargo-sources.json` with no changes after the egui dependency changes.
+- `cargo build -p tabbyfin --target x86_64-pc-windows-gnu` (what `dev/win-run.sh` builds) succeeds; the release MSVC package itself is CI's.
+
+- ⬜ The **GitHub Actions jobs**: this branch isn't pushed (X1 must not push), so `mise run ci:build` couldn't run; the same steps passed locally.
+- ⬜ The `.deb`, AppImage and Flatpak on a **real desktop with a GPU** (the list in §7), and the Windows and macOS packages from CI.
+- ⬜ **Playback** from those packaged builds; the checks above only opened the sign-in screen.

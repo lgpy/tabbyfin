@@ -29,10 +29,10 @@ trap "chown -R $OWNER /src/target/appimage /src/$OUT" EXIT
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # Build dependencies (docs/PLAN.md §8), libmpv1 (mpv 0.34; the app also takes libmpv.so.1)
-# to bundle, and file, which linuxdeploy uses.
+# to bundle, and file, which linuxdeploy uses. The windowing and Vulkan libraries are loaded at
+# runtime and stay out of the bundle, so no -dev packages are needed either.
 apt-get install -y -qq --no-install-recommends curl ca-certificates build-essential pkg-config \
-  libmpv1 libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
-  libfontconfig-dev libfreetype-dev libssl-dev file >/dev/null
+  libmpv1 file >/dev/null
 export CARGO_HOME=/src/target/appimage/cargo RUSTUP_HOME=/src/target/appimage/rustup
 [[ -x "$CARGO_HOME/bin/cargo" ]] || curl -fsSL https://sh.rustup.rs | sh -s -- -y -q --profile minimal \
   --default-toolchain "$RUST" --no-modify-path

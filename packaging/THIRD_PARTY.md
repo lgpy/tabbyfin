@@ -13,6 +13,22 @@ Tabbyfin plays video with **libmpv**, the library form of mpv, running inside th
 
 **Source code:** https://github.com/mpv-player/mpv. The shinchiro build records the exact mpv commit in its file name.
 
+## The UI (all packages)
+
+The UI and renderer are the Rust **egui** stack, statically linked into the app:
+[egui](https://github.com/emilk/egui) (`egui`, `eframe`, `egui-wgpu`, `epaint`) and
+[wgpu](https://wgpu.rs), under MIT OR Apache-2.0, plus `egui_material_icons`
+(https://github.com/lucasmerlin/hello_egui), under MIT. The exact versions are in `Cargo.lock`.
+
+The binary embeds egui's default fonts and the Material Symbols icons:
+
+| Files | Project | License |
+|---|---|---|
+| `Ubuntu-Light.ttf` | Ubuntu font family, https://design.ubuntu.com/font | Ubuntu Font Licence 1.0 |
+| `Hack-Regular.ttf` | Hack, https://sourcefoundry.org/hack | MIT (Bitstream Vera License for the glyphs it inherits) |
+| `egui-icons.ttf`, a subset of emoji-icon-font | https://github.com/jslegers/emoji-icon-font | MIT |
+| `MaterialSymbolsRounded-Regular.ttf`, `MaterialSymbolsRounded_Filled-Regular.ttf` | Material Symbols, https://fonts.google.com/icons | Apache-2.0 |
+
 ## ANGLE (Windows)
 
 The Windows package also includes **ANGLE** (`libEGL.dll`, `libGLESv2.dll`), which runs OpenGL ES on Direct3D 11. mpv draws through it so hardware-decoded video stays on the GPU. It's MSYS2's build (https://packages.msys2.org/base/mingw-w64-angleproject), pinned in `packaging/angle.lock`, along with the MinGW runtime DLLs it needs. Their license texts are in `licenses/`.
