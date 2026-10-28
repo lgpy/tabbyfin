@@ -1,9 +1,20 @@
 //! What an item's menu and actions offer: played and favorite state, resume points, what can be
 //! played, marked or added to a playlist. The menu itself is `widgets/menu.rs` and the item
 //! page's own buttons are U6's.
+//!
+//! It also carries the item page's playlist edits to the server: the page changes its rows at
+//! once and queues the change here, and [`Services`] sends them one at a time in the order they
+//! were made, whatever page is on top (they used to be the page's own tasks, which stopped when
+//! the page was left and only ran while it was drawn).
+
+use std::collections::VecDeque;
 
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 use jellyfin::{Client, Ticks};
+
+use crate::services::Services;
+use crate::task;
+use crate::toasts::Toast;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Mark {
@@ -100,11 +111,127 @@ pub fn can_mark(item: &BaseItemDto) -> bool {
     can_add_to_playlist(item) || item.kind == BaseItemKind::BoxSet
 }
 
+/// A change to a playlist's entries, by entry id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlaylistEdit {
+    Move { entry_id: String, to: usize },
+    Remove { entry_id: String },
+}
+
+/// One playlist edit's outcome, as its request finishes: the playlist it was for, and how it
+/// went.
+pub(crate) type EditDone = (String, jellyfin::Result<()>);
+
+/// The playlist changes on their way to the server: in the order they were made, one request at
+/// a time, from `Services::tick` whatever page is on top. The item page shows its edits at once
+/// and asks [`Services::playlist_edits_pending`] whether its playlist still has any, instead of
+/// holding the requests itself.
+pub(crate) struct PlaylistEdits {
+    /// Edits waiting, oldest first, with the playlist each is for.
+    queue: VecDeque<(String, PlaylistEdit)>,
+    /// The playlist whose edit is out now, if one is.
+    sending: Option<String>,
+    /// What finished requests reported, for `Services::tick` to drain.
+    done: task::Receiver<EditDone>,
+    done_from: task::Sender<EditDone>,
+}
+
+impl PlaylistEdits {
+    pub(crate) fn new(ctx: &egui::Context) -> Self {
+        let (done_from, done) = task::channel(ctx);
+        Self {
+            queue: VecDeque::new(),
+            sending: None,
+            done,
+            done_from,
+        }
+    }
+
+    /// Queues an edit; the page has shown it already.
+    pub(crate) fn push(&mut self, playlist_id: String, edit: PlaylistEdit) {
+        self.queue.push_back((playlist_id, edit));
+    }
+
+    /// Whether `playlist_id` still has an edit out or waiting.
+    pub(crate) fn pending(&self, playlist_id: &str) -> bool {
+        self.sending.as_deref() == Some(playlist_id) || self.queue.iter().any(|(id, _)| id == playlist_id)
+    }
+
+    /// Drops what hasn't gone for `playlist_id`: the server refused one of its edits, and the
+    /// page shows the server's order again.
+    pub(crate) fn clear(&mut self, playlist_id: &str) {
+        self.queue.retain(|(id, _)| id != playlist_id);
+    }
+}
+
+impl Services {
+    /// Queues a change to a playlist, which the page has shown already. A queued edit goes as
+    /// soon as the one before it is done and the next [`Services::tick`] runs, so moves land in
+    /// the order they were made even when the user leaves the page or minimises the window.
+    pub fn edit_playlist(&mut self, playlist_id: String, edit: PlaylistEdit) {
+        self.playlist_edits.push(playlist_id, edit);
+        self.send_next_playlist_edit();
+    }
+
+    /// Whether edits for `playlist_id` are still on their way: the page doesn't load over them
+    /// until they're done (the last one bumps `user_data`, which loads it again).
+    pub fn playlist_edits_pending(&self, playlist_id: &str) -> bool {
+        self.playlist_edits.pending(playlist_id)
+    }
+
+    /// Sends the oldest queued edit, unless one is still out. The result comes back through the
+    /// channel and [`Services::tick`] starts the next one.
+    fn send_next_playlist_edit(&mut self) {
+        if self.playlist_edits.sending.is_some() {
+            return;
+        }
+        let Some((playlist_id, edit)) = self.playlist_edits.queue.pop_front() else {
+            return;
+        };
+        self.playlist_edits.sending = Some(playlist_id.clone());
+        let client = self.session.client.clone();
+        let sender = self.playlist_edits.done_from.clone();
+        crate::runtime::detach(async move {
+            let result = match edit {
+                PlaylistEdit::Move { entry_id, to } => client.move_playlist_entry(&playlist_id, &entry_id, to).await,
+                PlaylistEdit::Remove { entry_id } => client.remove_from_playlist(&playlist_id, &[entry_id]).await,
+            };
+            let _ = sender.send((playlist_id, result));
+        });
+    }
+
+    /// A finished edit: the next queued one goes, and a playlist whose edits ran dry loads
+    /// again, for its new runtime and to match what the server ended up with. A refusal drops
+    /// the rest of that playlist's edits, says why, and loads it too.
+    pub(crate) fn tick_playlist_edits(&mut self) {
+        let done: Vec<EditDone> = self.playlist_edits.done.drain().collect();
+        for (playlist_id, result) in done {
+            self.playlist_edits.sending = None;
+            if let Err(err) = result {
+                self.playlist_edits.clear(&playlist_id);
+                let message = match err {
+                    jellyfin::Error::Forbidden => {
+                        "This playlist belongs to someone else; it can't be changed.".to_owned()
+                    }
+                    err => self.handle_error(&err),
+                };
+                self.toast(Toast::error(message));
+            }
+            self.send_next_playlist_edit();
+            // The page waits while more of its edits are pending, so the bump reaches it once
+            // its queue is dry.
+            if !self.playlist_edits.pending(&playlist_id) {
+                self.user_data += 1;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use jellyfin::models::BaseItemDto;
 
-    use super::first_unwatched;
+    use super::{PlaylistEdit, PlaylistEdits, first_unwatched};
 
     fn episode(id: &str, season: i32, played: bool) -> BaseItemDto {
         serde_json::from_value(serde_json::json!({
@@ -145,5 +272,61 @@ mod tests {
         let watched = [episode("special", 0, false), episode("a", 1, true)];
         assert_eq!(pick(&watched), Some("a"));
         assert_eq!(pick(&[episode("special", 0, false)]), Some("special"));
+    }
+
+    fn move_edit(entry_id: &str, to: usize) -> PlaylistEdit {
+        PlaylistEdit::Move {
+            entry_id: entry_id.into(),
+            to,
+        }
+    }
+
+    fn remove(entry_id: &str) -> PlaylistEdit {
+        PlaylistEdit::Remove {
+            entry_id: entry_id.into(),
+        }
+    }
+
+    #[test]
+    fn queued_edits_keep_the_order_they_were_made_in() {
+        let mut edits = PlaylistEdits::new(&egui::Context::default());
+        edits.push("one".into(), move_edit("a", 1));
+        edits.push("two".into(), remove("b"));
+        edits.push("one".into(), move_edit("c", 0));
+        assert!(edits.pending("one"));
+        assert!(edits.pending("two"));
+        assert!(!edits.pending("three"));
+
+        // Oldest first, whichever playlist it's for.
+        let queued: Vec<(String, PlaylistEdit)> = edits.queue.drain(..).collect();
+        assert_eq!(
+            queued,
+            vec![
+                ("one".into(), move_edit("a", 1)),
+                ("two".into(), remove("b")),
+                ("one".into(), move_edit("c", 0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_refusal_drops_only_that_playlists_edits() {
+        let mut edits = PlaylistEdits::new(&egui::Context::default());
+        edits.push("one".into(), move_edit("a", 1));
+        edits.push("two".into(), remove("b"));
+        edits.push("one".into(), move_edit("c", 0));
+        edits.sending = Some("two".into());
+
+        // The refusal came for "one"; its queued edits go, the others stay, and an edit already
+        // out keeps counting as pending until its result is in.
+        edits.clear("one");
+        assert!(!edits.pending("one"));
+        assert!(edits.pending("two"));
+        let queued: Vec<(String, PlaylistEdit)> = edits.queue.drain(..).collect();
+        assert_eq!(queued, vec![("two".into(), remove("b"))]);
+
+        edits.sending = Some("one".into());
+        edits.clear("one");
+        assert!(edits.pending("one"));
     }
 }
