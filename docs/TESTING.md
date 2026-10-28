@@ -27,6 +27,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ With a **real keyboard**: the ring appears on the first arrow key, a mouse click hides it.
 ✅ Top bar and library toolbar by keyboard: Up from Home's first row into the top bar and back down (the cursor returns to its card), the account menu's highlight, a SyncPlay group created and the menu reopened with Leave highlighted, Esc closing the menu then the top bar; the library's Show stepped to Unwatched and *Clear filters*, the cursor staying in the toolbar.
 
+✅ **egui (U3)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U3-scratch/`): Down walks Home's shelves and the page scrolls the whole shelf into view, downwards and back up (`home-keys4.png`, `home-keys-up.png`); Enter on the first card opened Collections and Esc came back to Home with the ring on the same card (`home-enter-stub.png`, `home-back.png`).
+
 ✅ The account menu is a gpui-kit `PopupMenu`: Enter on the user button opens it, Down highlights the accounts, *Add account…* and *Sign out*, Enter on *Add account…* shows sign-in, and Esc closes it with the keyboard back on the user button.
 
 - ⬜ With a real keyboard: the top bar after mouse use (a click elsewhere hides its ring), and the account menu switching to another saved account.
@@ -331,6 +333,11 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 - ⬜ Changing **Settings → Home** in the web client, then reloading Home here (a restart, or anything that refreshes Home).
 - ⬜ **10.11**: the same preferences.
+
+✅ **egui (U3)**, against 12.2 (`U3-scratch/home-default.png`) and 10.11 (`U3-scratch/home-1011.png`, `home-1011-favorites.png`): the default order drew My Media, Continue Watching (Next Up was empty, so it had no shelf) and then Favorites; with `homesection0`–`2` set through the display preferences API (and put back afterwards) to Next Up, Continue Watching and My Media, Home drew Continue Watching, My Media and Favorites last, without Latest (`home-prefs.png`); Home's cards are 1.2× the other pages' with 24 px gaps between them; on 10.11, with Test Movie favorited, Favorites came just before Latest Shows, and unfavoriting it through the API while the app ran made the shelf go away without a restart (the watch-data refresh, `U3-scratch/home-1011-reloaded.png`); idle CPU on Home was 0 ticks over 10 s.
+
+- ⬜ The **Latest** shelves against 12.2: this dev server's `/Items/Latest` answers `[]` for every library (so does the captured fixture), so they were only seen on 10.11 (Latest Shows; Latest Movies was empty there and had no shelf). `LatestItemsExcludes` is untested for the same reason.
+- ⬜ The empty state's line with an account that has **no libraries** (the same `state::empty` widget W1 checked).
 
 ## 22. Item page extras (3.7)
 
