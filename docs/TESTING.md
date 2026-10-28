@@ -591,7 +591,9 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 **egui (R7)**, against the 12.2 dev server (`TABBYFIN_ROUTE`, `TABBYFIN_KEYS`, screenshots in `R7-scratch/`), next to `main`'s own build (`X3-scratch/main`) on the same hidden display. The sign-in form was shot from a copy of `config-template` with no accounts or saved server and a fresh `device_id`.
 
-✅ The sign-in form is centred in the window, as `main`'s was, in dark (`signin-dark.png` against `main-signin-dark.png`) and light (`signin-light.png` against `main-signin-light.png`): the 380-point column's middle is the window's middle, and its steps grow around the centre.
+✅ The sign-in form is centred in the window, as `main`'s was, in dark (`signin-fixed-dark.png` against `main-signin-dark.png`) and light (`signin-fixed-light.png` against `main-signin-light.png`): the 380-point column's middle is the window's middle, and its steps grow around the centre.
+
+✅ A form taller than the window scrolls instead of being cut off: 150 % text, 800×500, eight saved accounts. The address field, which has the keyboard at launch, is scrolled into view; two Tabs reach the saved accounts and scroll back to the top (`signin-tall-150-tab-top.png`), and tabbing round to the address field again reveals it at the bottom with *Connect* (`signin-tall-150-tab-end.png`). `ui_tests/login.rs` checks the same tall form headless: the focused field, then a Tabbed-to saved account, are on screen.
 
 ✅ Card titles and subtitles are left-aligned one-line labels under the image, cut short when they don't fit: Home's landscape cards (`home-dark.png`, `home-light.png` against `main-home-*.png`), a library's poster grid (`library-dark.png`, `library-light.png` against `main-library-*.png`), a season's episode rows (`season-dark.png`, `season-light.png` against `main-season-*.png`) and a series' open season's episode cards (`item-episodes-dark.png`). The episode card's "Episode N" and its muted name are the same line, as on `main`.
 
