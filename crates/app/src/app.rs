@@ -18,8 +18,11 @@ use crate::toasts::{ToastAction, Toasts};
 use crate::views::PageCx;
 use crate::views::login::{Login, LoginEvent, Prefill};
 use crate::views::shell::Shell;
-use crate::widgets::video;
+use crate::widgets::{self, video};
 use crate::{credentials, runtime, theme, window};
+
+/// The mascot's size while the saved session is restored, as on `main`.
+const RESTORING_MASCOT: f32 = 160.;
 
 /// Restoring fails with the request's error, or none when there's no stored token.
 type Restored = Result<Session, Option<jellyfin::Error>>;
@@ -656,8 +659,15 @@ impl eframe::App for App {
                 egui::CentralPanel::default().show(ui, |ui| login.show(ui, &ctx));
             }
             Some(Screen::Restoring { .. }) | None => {
+                // The mascot, as `main`'s restoring screen had it.
                 egui::CentralPanel::default().show(ui, |ui| {
-                    ui.centered_and_justified(|ui| ui.spinner());
+                    ui.scope_builder(
+                        egui::UiBuilder::new().layout(egui::Layout::top_down(egui::Align::Center)),
+                        |ui| {
+                            ui.add_space(((ui.available_height() - RESTORING_MASCOT) * 0.5).max(0.));
+                            widgets::mascot::loader(ui, RESTORING_MASCOT);
+                        },
+                    );
                 });
             }
         }
