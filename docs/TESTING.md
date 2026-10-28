@@ -355,8 +355,14 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ Against 12.2: Test Movie's page shows its genres, studio and tag, a Trailer button, Extras (Trailer, Making of Test Movie) and, with Second Movie unwatched, More like this (Second Movie). Selecting the featurette with the keyboard played it. The setup's metadata step works on 10.11 too.
 
-- ⬜ A **remote trailer** (a library with real metadata): the button opens it in the browser.
-- ⬜ A series' extras and similar shows; extras with their own images.
+✅ **egui (U6)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U6-scratch/`): Test Movie's page with the backdrop fading into the background, the poster, its genres, studio and tags, and the actions (Play, Trailer, Watched filled green and pressed, Favorite filled red and pressed, More) beside the title (`item-movie.png`); the Version picker under the header stepping 1080p → 720p with Right (`item-version-720.png`) and cycling with Enter (`item-version-final.png`); the Chapters shelf (`item-scrolled-chapters.png`) and the cursor moving on to Extras (`item-scrolled-extras.png`); More opening with the keyboard's highlight and *Add to playlist…* opening U8's dialog (`item-more-menu.png`, `item-add-dialog.png`); a playlist's More menu with *Edit…* and the separated *Delete playlist…*, and *Edit…* opening its dialog (`item-playlist-more2.png`, `item-playlist-edit2.png`); More like this (Second Movie) as a 1.2× poster card on `dev2`'s page, where everything was unplayed and the toggles were unlit (`item-dev2-similar2.png`); Watched marked through the page and shown filled at once, then unmarked again (`item-dev2-top.png`, `item-dev2-unmarked.png`); and the refused mark: behind a local proxy that answers 500 for `/UserPlayedItems` and `/UserFavoriteItems` (not stopping the shared server), Watched showed the change at once and a frame later was back with "The server returned an error (500)." (`item-refused-mark2.png`). Choosing 4K HEVC on the page and pressing Play opened the player on that version (`item-play-4k.png`), and Enter on the "Episode" chapter started the session at 0:10 (checked with `GET /Sessions`: position 20 s ten seconds in); the page reloaded on watch data changed elsewhere, the heart filling in when the API favorited the movie while it was open (`item-userdata-before.png`, `item-userdata-after.png`); in an 820×600 window the actions moved under the title (`item-narrow2.png`). Idle CPU on the page was 0 ticks over 10 s.
+
+✅ **egui (U6, round 2)**: the backdrop is asked for at a fixed `fillWidth=1280` (a proxy's request log; twice the 1280 px it was drawn at would have been 2560), so resizing doesn't refetch it; a Watched mark refused while another item's page was on top was taken back on Back — pressing Watched again sent a `POST` (`/UserPlayedItems`), not the `DELETE` a still-played page would have sent (the refusing proxy sat on the mark for 1.2 s so the refusal landed while the first page was off screen); Ctrl+F with the More menu open closed the menu and opened the top bar's search box (`r2-ctrl-f-debug.png`); *Shuffle* on Test Show started playing S02E01 after Esc had already gone Back, checked with `GET /Sessions`. Tab while the version list is open is covered by a unit test (the list needs a click to open).
+
+- ⬜ The **Cast & crew** shelf: this dev server's items have no people (the captured 12.2 fixture does), so the shelf didn't draw. Person cards were checked in W1.
+- ⬜ Right-clicking a season, *More like this* card or episode row, and clicking the version list or the More menu (the pointer paths).
+- ⬜ The **remote trailer** and a series' extras (unchanged from above).
+- ⬜ A **refusal with the server down** rather than a 500: the same `Services::refused_marks` path (the delayed proxy covered the off-screen case), but a real outage also fails the requests the page might otherwise make.
 
 ## 23. Update notice (5.5)
 
@@ -380,9 +386,14 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ Against 12.2: Test Show (S1:E1 watched, S1:E2 partway) shows *Resume S1:E2*, *Play from beginning* and *Shuffle*; Enter on it resumed S01E02 at its position.
 
+✅ **egui (U6)**, against 12.2: Test Show's page shows *Resume S1:E1* (this dev account's S1:E1 now has a resume point), *Play from beginning*, *Shuffle*, Watched and Favorite, named after the episode it plays (`item-series.png`). The children rows (seasons, episodes) are U7's.
+
+✅ **egui (U6, round 2)**: *Shuffle* on Test Show (`dev2`) fetched all six episodes, then played one of them (S02E01) even though Esc had already gone Back to Home when it arrived; the episode's user data was put back afterwards.
+
 - ⬜ **Clicking** the context menu's *Play* on a series and a season card.
 - ⬜ *Shuffle* on a big series, and in a SyncPlay group.
 - ⬜ A series with **specials** placed between seasons.
+- ⬜ A **season's** page (its Play and Shuffle): U7 draws the seasons and episodes, but the page's actions already load its children.
 
 ## 26. Cards, shelves and the item menu (W1)
 
@@ -394,7 +405,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ Card text not stealing the card's click, right-click and drag (architecturally checked: with `style.interaction.selectable_labels = false` a label senses hover only, and egui's hit-test gives the click to the card under it).
 - ⬜ **A drag** sideways scrolling a shelf and not counting as a click on the card it ends on, the wheel over a shelf scrolling the page, and a click hiding the cursor.
 - ⬜ The page arrows paging by a whole row on a big shelf, and Shift+wheel scrolling one sideways.
-- ⬜ Chapter and person cards, and episode cards in a season's row (U6, U7), and cards' hover dimming with a real pointer.
+- ⬜ Person cards and episode cards in a season's row (U7), and cards' hover dimming with a real pointer. Chapter cards and their cursor were checked in U6 (`TESTING.md` §22).
 
 ## 27. Playlist dialogs (U8)
 
@@ -403,7 +414,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **A real pointer**: right-clicking a card, *Add to playlist…* opening the dialog, clicking a playlist row, the Save, Cancel and Delete buttons, the sharing switch, and a click on the backdrop closing the dialog (the same `ModalResponse::should_close` path as Esc).
 - ⬜ A list longer than the 320 px cap scrolling, with the highlight kept on screen.
 - ⬜ The dialogs with the **server down** (the playlist list fails to load) and for an account with **no playlists** ("No playlists yet. Type a name to make one.").
-- ⬜ The dialogs from the item page's *More* menu (U6) and the playlist page (U7). Until those pages land, nothing on the keyboard opens *Edit* or *Delete*: the checks above used a temporary `TABBYFIN_DIALOG` hook in `views/home.rs`, which is not in the tree.
+- ⬜ The dialogs from the **playlist page** (U7); the item page's *More* menu opened *Add to playlist…* on a movie and *Edit…* on a playlist with U6 (`TESTING.md` §22, screenshots in `U6-scratch/`). Until those pages landed, nothing on the keyboard opened *Edit* or *Delete*: the checks above used a temporary `TABBYFIN_DIALOG` hook in `views/home.rs`, which is not in the tree.
 
 ## 28. Top bar and search (U1)
 

@@ -75,11 +75,14 @@ pub trait Page {
 }
 
 /// The page for `route`.
-pub fn open(route: Route, _cx: &mut PageCx) -> Box<dyn Page> {
+pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
     match route {
         Route::Home => Box::new(home::HomePage::default()),
         Route::Library { name, .. } => Box::new(StubPage::new(name, "U5")),
-        Route::Item { name, .. } => Box::new(StubPage::new(name, "U6")),
+        Route::Item { id, name } => {
+            let marks_seen = cx.services.refused_marks.sequence();
+            Box::new(item::ItemPage::new(id, name, marks_seen))
+        }
         Route::Person { name, .. } => Box::new(StubPage::new(name, "U5")),
         Route::Search => Box::new(search::SearchPage::default()),
         Route::Settings => Box::new(StubPage::new("Settings".into(), "U9")),
