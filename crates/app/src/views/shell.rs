@@ -7,11 +7,13 @@
 //! on the right the search box, SyncPlay (U2 fills its panel), Settings and the account menu.
 //! The keyboard walks it: Up past a page's first row moves into the bar, Left and Right move
 //! along, Enter presses, Down or Esc goes back to the page with its cursor where it was. The
-//! account menu is drawn and driven here too, since egui's buttons don't take keyboard focus.
+//! account menu is drawn and driven here too: its keys are read before egui's focus pass can
+//! hand them to a button or card behind it.
 //!
 //! The search box is the bar's only text field: typing opens the results page (or comes back
 //! to it from a page opened from them), clearing it closes them, and Enter or Down moves into
-//! the results; Esc gives the keyboard back to the page.
+//! the results, which hand Up and Shift+Tab back to the box; Esc gives the keyboard back to the
+//! page.
 //!
 //! While a playback session shows, the player takes the window: no top bar, the video filling
 //! the window with a bar over it saying what's playing, and the player's keys working, until
@@ -28,7 +30,7 @@ use egui_material_icons::icons::{ICON_ARROW_BACK, ICON_CHECK, ICON_GROUPS, ICON_
 
 use crate::browse::Move;
 use crate::config::{Config, SavedServer};
-use crate::keys::{Action, Press, Scope};
+use crate::keys::{self, Action, Press, Scope};
 use crate::nav::{NavRequest, Route};
 use crate::playback;
 use crate::services::AppEvent;
@@ -83,13 +85,26 @@ fn bar_items(can_go_back: bool) -> &'static [BarItem] {
     if can_go_back { &BAR } else { &BAR_WITHOUT_BACK }
 }
 
+/// Where `item` sits among `items`: its own place, or the place of the first item to its right
+/// in the bar's order when it has left the bar (Back on the first page), so a step from it
+/// lands next to where it was rather than starting over.
+fn bar_position(items: &[BarItem], item: BarItem) -> usize {
+    let order = |item: BarItem| BAR.iter().position(|entry| *entry == item).unwrap_or(0);
+    let target = order(item);
+    items
+        .iter()
+        .position(|entry| order(*entry) >= target)
+        .unwrap_or(items.len().saturating_sub(1))
+}
+
 /// One step along `items` from `current`: Left and Right stop at either end, and without a
 /// current item this is where the keyboard enters the bar. `main`'s `focus_top_bar` started on
 /// Back, or on Search when there was nowhere to go back to.
 fn bar_step(items: &[BarItem], current: Option<BarItem>, step: i32) -> Option<BarItem> {
-    let index = current
-        .and_then(|item| items.iter().position(|entry| *entry == item))
-        .unwrap_or(0) as i32;
+    if items.is_empty() {
+        return None;
+    }
+    let index = current.map_or(0, |item| bar_position(items, item)) as i32;
     let last = items.len() as i32 - 1;
     items.get((index + step).clamp(0, last) as usize).copied()
 }
@@ -136,10 +151,9 @@ pub struct Shell {
     search_open: bool,
     /// The box takes the keyboard when it draws next (opened from the bar, Ctrl+F or a route).
     want_search_focus: bool,
-    /// The box had the keyboard when the last frame ended. egui drops a text field's focus on
-    /// Escape before the frame's UI runs (`Focus::begin_pass`), but the app's key routing ran
-    /// even earlier and saw the focus, so the box's own keys are read on this, not
-    /// `Memory::has_focus`.
+    /// The box had the keyboard when the last frame ended: what this frame's key routing saw
+    /// (`keys::take` runs before egui changes the focus). The box's own keys are read on this
+    /// rather than `Memory::has_focus`, which later events in the frame could have changed.
     search_focused: bool,
     /// The entry the account menu's keyboard highlights (`None` when a click opened it, until
     /// an arrow key picks one). Whether the menu is open is egui's popup memory's, so egui keeps
@@ -252,6 +266,13 @@ impl Shell {
     /// A key the app took, in the routing order: the top bar while the keyboard is in it, then
     /// the page, then the shell's own.
     fn on_key(&mut self, press: Press, cx: &mut PageCx) {
+        // An item the bar lost with a page (Back on the first page) can't keep the keyboard.
+        if self
+            .bar_key
+            .is_some_and(|item| !bar_items(self.can_go_back()).contains(&item))
+        {
+            self.bar_key = None;
+        }
         if self.player {
             if let Some(action) = press.action(Scope::Player)
                 && player::on_key(action, cx.services, cx.ctx)
@@ -283,10 +304,18 @@ impl Shell {
             if page.on_key(action, cx) {
                 return;
             }
-            // Up past the page's first row moves into the top bar.
-            if let Action::Move(Move::Up) = action {
-                self.enter_top_bar();
-                return;
+            match action {
+                // The results page hands Up and Shift+Tab from its first row back to the box.
+                Action::Move(Move::Up | Move::PrevSection) if self.top_is_search() => {
+                    self.focus_search(cx);
+                    return;
+                }
+                // Up past the page's first row moves into the top bar.
+                Action::Move(Move::Up) => {
+                    self.enter_top_bar();
+                    return;
+                }
+                _ => {}
             }
         }
         if let Some(action) = press.action(Scope::Shell) {
@@ -347,6 +376,54 @@ impl Shell {
         }
     }
 
+    /// The account menu's keys, which egui keeps while its popup is open: Tab stays in the
+    /// menu, Backspace and Alt+Left close it like Esc, Ctrl/Cmd+F closes it and opens the box,
+    /// Up and Down move its highlight, Enter picks. Read before anything in the bar draws, so
+    /// egui's focus pass can't hand the keyboard to a button or card behind the menu (Enter
+    /// would then press that as well); the popup itself only draws its rows.
+    fn account_menu_keys(&mut self, cx: &mut PageCx) {
+        if !egui::Popup::is_id_open(cx.ctx, account_menu_id()) {
+            return;
+        }
+        let ctx = cx.ctx;
+        // Tab and the arrows queued an egui focus move in its focus pass; cancel it before any
+        // widget behind the menu can take the focus (Enter would then press that as well).
+        fn cancel_focus(ctx: &egui::Context) {
+            ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        }
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Tab) | keys::take_exact(ctx, Modifiers::SHIFT, Key::Tab) {
+            cancel_focus(ctx);
+        }
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Backspace)
+            | keys::take_exact(ctx, Modifiers::ALT, Key::ArrowLeft)
+        {
+            egui::Popup::close_id(ctx, account_menu_id());
+            self.account_highlight = None;
+            return;
+        }
+        if keys::take_exact(ctx, Modifiers::COMMAND, Key::F) {
+            egui::Popup::close_id(ctx, account_menu_id());
+            self.account_highlight = None;
+            self.focus_search(cx);
+            return;
+        }
+        let count = self.accounts.len() + 2;
+        let down = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowDown);
+        let up = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowUp);
+        if down | up {
+            let step = if down { 1 } else { -1 };
+            self.account_highlight = menu_step(self.account_highlight, step, count);
+            cancel_focus(ctx);
+        }
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Enter)
+            && let Some(index) = self.account_highlight
+        {
+            egui::Popup::close_id(ctx, account_menu_id());
+            self.account_highlight = None;
+            self.choose_account(index, cx);
+        }
+    }
+
     /// Opens the account menu, loading the saved accounts as `main` did when its menu opened.
     /// From the keyboard the first entry is highlighted; from a click the first arrow key
     /// picks one.
@@ -357,11 +434,13 @@ impl Shell {
         ctx.request_repaint();
     }
 
-    /// Puts the keyboard in the search box, opening it if it's the button.
+    /// Puts the keyboard in the search box, opening it if it's the button. The page's cursor
+    /// goes, so Esc back to the page shows it where it was instead of moving it a row.
     fn focus_search(&mut self, cx: &mut PageCx) {
         self.search_open = true;
         self.want_search_focus = true;
         self.bar_key = None;
+        self.top_mut().hide_cursor();
         cx.ctx.request_repaint();
     }
 
@@ -399,6 +478,11 @@ impl Shell {
             .rposition(|entry| matches!(entry.route, Route::Search))
     }
 
+    /// Whether the results page is the one on top.
+    fn top_is_search(&self) -> bool {
+        self.search_page() == Some(self.stack.len() - 1)
+    }
+
     /// Whether the box is in the bar rather than the search button (it stays while it has
     /// text, as on `main`).
     fn search_shown(&self) -> bool {
@@ -431,23 +515,24 @@ impl Shell {
     }
 
     /// The search box's keys, which egui's `TextEdit` would otherwise take: Esc gives the
-    /// keyboard back, Enter and Down move into the results. Read before the box draws, so they
-    /// don't also move its caret.
+    /// keyboard back, Enter and Down move into the results, and Tab stays in the box. Read
+    /// before the box draws, so they don't also move its caret. Modifiers match exactly: Shift
+    /// or Alt with a key is the widget's own (Alt+Down mustn't open the results).
     fn search_box_keys(&mut self, cx: &mut PageCx) {
         if !self.search_shown() || !self.search_focused {
             return;
         }
-        if cx
-            .ctx
-            .input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
-        {
+        let ctx = cx.ctx;
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Escape) {
             self.escape_search(cx);
             return;
         }
-        let enter = cx.ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-        let down = cx
-            .ctx
-            .input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown));
+        // Tab is swallowed: handing it to egui would move the focus to a button behind the box
+        // and the app would lose the keyboard (the box's filter keeps egui from taking it).
+        keys::take_exact(ctx, Modifiers::NONE, Key::Tab);
+        keys::take_exact(ctx, Modifiers::SHIFT, Key::Tab);
+        let enter = keys::take_exact(ctx, Modifiers::NONE, Key::Enter);
+        let down = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowDown);
         if enter || down {
             self.enter_search_results(cx);
         }
@@ -456,7 +541,7 @@ impl Shell {
     /// Esc in the search box: over the results, closes them and clears the box, back to the
     /// page they were opened from; over another page, back to that page, as on `main`.
     fn escape_search(&mut self, cx: &mut PageCx) {
-        if self.search_page() == Some(self.stack.len() - 1) {
+        if self.top_is_search() {
             self.stack.pop();
             self.search_text.clear();
             self.search_open = false;
@@ -468,10 +553,12 @@ impl Shell {
         }
     }
 
-    /// Enter or Down in the search box: into the results when they have something to move
-    /// onto, and back to the page when there are none, as on `main`.
+    /// Enter or Down in the search box. With the results on top it asks them to take the
+    /// keyboard (`Page::enter_results`); if they have nothing to move onto yet (still
+    /// searching, or nothing found) the box keeps it. With no results page on top (the box
+    /// over another page) the keyboard goes back to that page instead, as on `main`.
     fn enter_search_results(&mut self, cx: &mut PageCx) {
-        if self.search_page() == Some(self.stack.len() - 1) {
+        if self.top_is_search() {
             let took = self.stack.last_mut().is_some_and(|entry| entry.page.enter_results(cx));
             if took {
                 cx.ctx
@@ -487,6 +574,7 @@ impl Shell {
     /// buttons on the right, and the open search box between them.
     fn top_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         self.search_box_keys(cx);
+        self.account_menu_keys(cx);
         let can_go_back = self.can_go_back();
         let keyboard = self.bar_key;
         let box_shown = self.search_shown();
@@ -535,6 +623,9 @@ impl Shell {
                 if can_go_back {
                     let back = bar_button(ui, ICON_ARROW_BACK, "Back", keyboard == Some(BarItem::Back), false);
                     if back.clicked() {
+                        // A mouse click leaves no keyboard in the bar, as on `main` going back
+                        // focused the page.
+                        self.bar_key = None;
                         cx.nav.push(NavRequest::Back);
                     }
                 }
@@ -572,6 +663,7 @@ impl Shell {
                     in_group,
                 );
                 if syncplay.clicked() {
+                    self.bar_key = None;
                     self.syncplay_notice(cx);
                 }
                 if !box_shown {
@@ -630,18 +722,20 @@ impl Shell {
         let id = account_menu_id();
         let was_open = egui::Popup::is_id_open(ui.ctx(), id);
         if response.clicked() {
+            // A click leaves no keyboard in the bar (the menu's keys are `account_menu_keys`').
+            self.bar_key = None;
             if was_open {
                 egui::Popup::close_id(ui.ctx(), id);
                 self.account_highlight = None;
             } else {
                 self.accounts = Config::load().accounts;
                 self.account_highlight = None;
-                self.bar_key = None;
                 egui::Popup::open_id(ui.ctx(), id);
             }
         }
 
-        let mut highlight = self.account_highlight;
+        // The rows only answer the pointer; the keyboard comes through `account_menu_keys`
+        // (egui's focus pass would otherwise hand it to a button or card behind the menu).
         let mut chosen = None;
         let current = cx.services.session.account_key();
         if egui::Popup::is_id_open(ui.ctx(), id) {
@@ -651,38 +745,23 @@ impl Shell {
                 .align(RectAlign::BOTTOM_END)
                 .width(ACCOUNT_MENU_W)
                 .show(|ui| {
-                    // egui's buttons don't take keyboard focus, so the menu moves its own
-                    // highlight: Up and Down wrap round, Enter picks, Esc closes.
-                    let count = self.accounts.len() + 2;
-                    let down = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown));
-                    let up = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowUp));
-                    let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-                    if down {
-                        highlight = menu_step(highlight, 1, count);
-                    }
-                    if up {
-                        highlight = menu_step(highlight, -1, count);
-                    }
-                    if enter {
-                        chosen = highlight;
-                    }
                     for (index, account) in self.accounts.iter().enumerate() {
                         let checked = account.credential_account() == current;
-                        if account_entry(ui, checked, &account.label(), highlight == Some(index)).clicked() {
+                        let entry = account_entry(ui, checked, &account.label(), self.account_highlight == Some(index));
+                        if entry.clicked() {
                             chosen = Some(index);
                         }
                     }
                     ui.separator();
                     let actions = self.accounts.len();
-                    if account_entry(ui, false, "Add account…", highlight == Some(actions)).clicked() {
+                    if account_entry(ui, false, "Add account…", self.account_highlight == Some(actions)).clicked() {
                         chosen = Some(actions);
                     }
-                    if account_entry(ui, false, "Sign out", highlight == Some(actions + 1)).clicked() {
+                    if account_entry(ui, false, "Sign out", self.account_highlight == Some(actions + 1)).clicked() {
                         chosen = Some(actions + 1);
                     }
                 });
         }
-        self.account_highlight = highlight;
         if let Some(index) = chosen {
             egui::Popup::close_id(ui.ctx(), id);
             self.account_highlight = None;
@@ -730,18 +809,33 @@ impl Shell {
                     .max_rect(rect)
                     .layout(Layout::left_to_right(Align::Center)),
                 |ui| {
+                    // The box locks the focus keys: egui must neither move the keyboard on
+                    // Tab nor drop it on Esc before the box reads Esc (`search_box_keys`), or
+                    // the app would stop getting keys until something was clicked.
                     ui.add(
                         egui::TextEdit::singleline(&mut self.search_text)
                             .id(Id::unique(SEARCH_ID))
                             .hint_text("Search")
                             .desired_width(rect.width())
-                            .margin(egui::Margin::symmetric(8, 6)),
+                            .margin(egui::Margin::symmetric(8, 6))
+                            .event_filter(egui::EventFilter {
+                                tab: true,
+                                horizontal_arrows: true,
+                                vertical_arrows: true,
+                                escape: true,
+                            }),
                     )
                 },
             )
             .inner;
         if std::mem::take(&mut self.want_search_focus) {
             response.request_focus();
+        }
+        // A click into the box takes the keyboard as `focus_search` does: the bar's keyboard
+        // and the page's cursor go, so leaving the box doesn't land on either.
+        if response.gained_focus() {
+            self.bar_key = None;
+            self.top_mut().hide_cursor();
         }
         self.search_focused = ui.ctx().memory(|memory| memory.has_focus(Id::unique(SEARCH_ID)));
         if response.changed() {
@@ -790,7 +884,7 @@ impl Shell {
         for request in std::mem::take(cx.nav) {
             match request {
                 NavRequest::Push(route) => self.push(route, cx),
-                NavRequest::Back => self.back(),
+                NavRequest::Back => self.back(cx),
             }
         }
         // The new top page draws on the next frame.
@@ -807,14 +901,17 @@ impl Shell {
     }
 
     /// Closes the top page, unless it's Home. Leaving the results clears the box they were
-    /// for, as on `main`.
-    fn back(&mut self) {
+    /// for; coming back to them (from an item opened there) puts the keyboard in the box again,
+    /// as `main` did.
+    fn back(&mut self, cx: &mut PageCx) {
         if self.stack.len() > 1
             && let Some(entry) = self.stack.pop()
             && matches!(entry.route, Route::Search)
         {
             self.search_text.clear();
             self.search_open = false;
+        } else if self.top_is_search() {
+            self.focus_search(cx);
         }
     }
 
@@ -1009,11 +1106,13 @@ fn initial(name: &str) -> String {
 }
 
 /// The app icon at the start of the bar: the 128 px copy rather than the 512 px one the
-/// packages ship, as `main` had it.
+/// packages ship, as `main` used it, resized once to twice the 32 px it's drawn at. egui-wgpu
+/// uploads one mip level (I1), so a 128 px texture drawn at 32 px would alias.
 fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let pixels = image::load_from_memory_with_format(include_bytes!("../../assets/logo.png"), image::ImageFormat::Png)
         .ok()?
         .into_rgba8();
+    let pixels = image::imageops::resize(&pixels, 64, 64, image::imageops::FilterType::Lanczos3);
     let size = [pixels.width() as usize, pixels.height() as usize];
     let image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_raw());
     Some(ctx.load_texture("logo", image, egui::TextureOptions::LINEAR))
@@ -1082,9 +1181,18 @@ mod tests {
         assert_eq!(bar_step(items, Some(BarItem::Account), 1), Some(BarItem::Account));
         assert_eq!(bar_step(items, Some(BarItem::Search), 1), Some(BarItem::SyncPlay));
         assert_eq!(bar_step(items, Some(BarItem::SyncPlay), -1), Some(BarItem::Search));
-        // The bar's item that left with a page (Settings, say) starts over at the first.
-        let items = bar_items(false);
-        assert_eq!(bar_step(items, Some(BarItem::Back), 0), Some(BarItem::Search));
+    }
+
+    #[test]
+    fn a_missing_item_steps_from_its_nearest_place() {
+        // Back left the bar with the first page; Search is where it was.
+        let without_back = bar_items(false);
+        assert_eq!(bar_step(without_back, Some(BarItem::Back), 0), Some(BarItem::Search));
+        // A hole in the middle (not possible today, but the bar's order decides): Settings
+        // gone, Account is the nearest place, not the bar's first item.
+        let hole = [BarItem::Search, BarItem::Account];
+        assert_eq!(bar_step(&hole, Some(BarItem::Settings), 0), Some(BarItem::Account));
+        assert_eq!(bar_step(&[], Some(BarItem::Back), 0), None);
     }
 
     #[test]

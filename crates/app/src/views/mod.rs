@@ -55,9 +55,20 @@ pub trait Page {
     /// Enter or Down in the search box: the results page takes the keyboard. Returns whether
     /// it did, i.e. whether there is something to put the cursor on; otherwise the box keeps
     /// the keyboard, as a search still running or with no results does.
+    ///
+    /// The results page has the box's keys around it too: the shell focuses the box whenever
+    /// the results come back on top (Back from one of their pages), and an Up or Shift+Tab the
+    /// results page leaves unused at its first row goes back into the box rather than the top
+    /// bar, as `main`'s search page did (`at_edge`). U4's page only has to return `true` here
+    /// when it has a first row to move onto.
     fn enter_results(&mut self, _cx: &mut PageCx) -> bool {
         false
     }
+
+    /// Takes the page's keyboard cursor off screen, for the top bar or the search box taking
+    /// the keyboard: the next Down on the page shows it where it was. Pages with a cursor
+    /// (`browse::Browse`) hide theirs; pages without one do nothing.
+    fn hide_cursor(&mut self) {}
 
     /// Draws the page and handles its input. Results of the page's tasks are polled here too.
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx);
