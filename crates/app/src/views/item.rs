@@ -264,6 +264,21 @@ struct OpenSeason {
     episodes: Load<Vec<BaseItemDto>>,
 }
 
+/// The band of a season the keyboard just opened, and what its reveal still has to do: it's
+/// scrolled into view as it opens, and again when its episodes are there, since the loaded band
+/// is taller than the spinner's line and the first scroll would leave its cards' bottoms below
+/// the fold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BandReveal {
+    /// The band has just opened: bring its spinner (or its episodes, if they were that quick)
+    /// into view.
+    Opening,
+    /// The spinner is in view and the episodes are on their way.
+    Waiting,
+    /// The episodes arrived (or their failure did), so the band is at its final height.
+    Loaded,
+}
+
 /// What a playlist entry's buttons (or Alt+Up, Alt+Down and Delete) do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EntryAction {
@@ -290,6 +305,10 @@ pub struct ItemPage {
     columns: usize,
     /// A series' season whose episodes show in a band under the seasons.
     open_season: Option<OpenSeason>,
+    /// A band the page still has to scroll into view, set by Enter on a season card: the band
+    /// opens below the fold at the default window size, so without this the key looks like a
+    /// no-op until the next one.
+    reveal_band: Option<BandReveal>,
     /// The open season's episodes request; the next season's replaces it, which cancels it.
     episodes: Option<Task<jellyfin::Result<jellyfin::models::QueryResult<BaseItemDto>>>>,
     /// The More menu's highlight while the keyboard is on it (`None` when a click opened it,
@@ -322,6 +341,7 @@ impl ItemPage {
             cursor: Cursor::default(),
             columns: 1,
             open_season: None,
+            reveal_band: None,
             episodes: None,
             more_highlight: None,
             more_requested: false,
@@ -401,21 +421,26 @@ impl ItemPage {
         }
     }
 
-    /// Opens `season`'s episodes under the seasons, or closes them if they're open.
-    fn toggle_season(&mut self, season: &BaseItemDto, cx: &mut PageCx) {
-        if self.open_season.as_ref().is_some_and(|open| open.id == season.id) {
-            self.open_season = None;
-            // Its episodes aren't shown any more, so their request goes with them.
-            self.episodes = None;
-        } else {
+    /// Opens `season`'s episodes under the seasons, or closes them if they're open. Returns
+    /// whether it opened them.
+    fn toggle_season(&mut self, season: &BaseItemDto, cx: &mut PageCx) -> bool {
+        let opened = !self.open_season.as_ref().is_some_and(|open| open.id == season.id);
+        if opened {
             self.open_season = Some(OpenSeason {
                 id: season.id.clone(),
                 name: season.name.clone(),
                 episodes: Load::Loading,
             });
             self.load_episodes(cx);
+        } else {
+            self.open_season = None;
+            // Its episodes aren't shown any more, so their request goes with them.
+            self.episodes = None;
+            // A band that isn't drawn has nothing left to reveal.
+            self.reveal_band = None;
         }
         cx.ctx.request_repaint();
+        opened
     }
 
     /// Fetches the open season's episodes, unless another season opens meanwhile (its request
@@ -870,6 +895,9 @@ impl ItemPage {
                     ui.add_space(BOTTOM_PADDING);
 
                     if moved {
+                        // A key moved the cursor: its card comes into view, and a band that
+                        // was still waiting for its reveal has been left behind.
+                        self.reveal_band = None;
                         target = match selected {
                             Some(position) if position.section == ACTIONS => Some((header, Some(Align::TOP))),
                             Some(position) if position.section == PICKERS => pickers.map(|rect| (rect, None)),
@@ -894,6 +922,20 @@ impl ItemPage {
                             Some(position) if position.section == EXTRAS => extras_row.map(|rect| (rect, None)),
                             Some(position) if position.section == SIMILAR => similar_row.map(|rect| (rect, None)),
                             _ => None,
+                        };
+                    } else if let Some(reveal) = self.reveal_band
+                        && let Some(band) = episodes_row
+                        && reveal != BandReveal::Waiting
+                    {
+                        // Enter opened a season: the least scroll that shows its row with the
+                        // band, once as it opens and once more when its episodes arrive (the
+                        // loaded band is taller than the spinner's line).
+                        target = Some((band_reveal(children_row, band, ui.clip_rect().height()), None));
+                        // The loaded band gets a reveal of its own when its episodes arrive.
+                        self.reveal_band = if reveal == BandReveal::Opening {
+                            Some(BandReveal::Waiting)
+                        } else {
+                            None
                         };
                     }
                     if let Some((rect, align)) = target {
@@ -924,6 +966,8 @@ impl ItemPage {
             cx.nav.push(NavRequest::Push(route));
         }
         if let Some(season) = asked.season {
+            // A click leaves the band where it opens, as on `main`: only the keyboard's Enter
+            // scrolls to it, and a click that moved the page under the pointer would surprise.
             self.toggle_season(&season, cx);
         }
         if let Some((index, action)) = asked.entry {
@@ -1014,6 +1058,17 @@ fn grid_columns(available: f32) -> usize {
 /// `rect` with `gap` points added above it, for a scroll that leaves the section's gap.
 fn with_gap_above(rect: Rect, gap: f32) -> Rect {
     Rect::from_min_max(pos2(rect.left(), rect.top() - gap), rect.max)
+}
+
+/// What a season the keyboard just opened scrolls to: the union of the season's row and its
+/// episodes band, so the least scroll shows which season opened and its episodes (`None`
+/// rather than `TOP`, as the children's heading is revealed). A window too short to hold both
+/// shows the band alone, with the section's gap above it, as a move onto the band does.
+fn band_reveal(row: Option<Rect>, band: Rect, visible: f32) -> Rect {
+    match row.map(|row| row.union(band)) {
+        Some(union) if union.height() <= visible => union,
+        _ => with_gap_above(band, SECTION_GAP),
+    }
 }
 
 /// A series' seasons (or a collection's items) as poster cards in rows of `columns`, the open
@@ -2048,6 +2103,11 @@ impl Page for ItemPage {
                     Err(err) => Load::Failed(cx.services.handle_error(&err)),
                 };
             }
+            // The band's height is final now, so the reveal that waited for the episodes can
+            // scroll it into view with its season's row.
+            if self.reveal_band == Some(BandReveal::Waiting) {
+                self.reveal_band = Some(BandReveal::Loaded);
+            }
         }
         // Marks the server refused: take back what the page showed ahead of it, however long
         // ago the refusal came.
@@ -2171,7 +2231,11 @@ impl Browse for ItemPage {
                 if let Some(child) = data.children.get(position.index) {
                     if child.kind == BaseItemKind::Season {
                         let child = child.clone();
-                        self.toggle_season(&child, cx);
+                        // The band opens below the fold at the default window size: the key
+                        // brings it into view, as a move onto the band would.
+                        if self.toggle_season(&child, cx) {
+                            self.reveal_band = Some(BandReveal::Opening);
+                        }
                     } else {
                         cx.nav.push(NavRequest::Push(Route::for_item(child)));
                     }
@@ -2307,11 +2371,14 @@ async fn similar(client: &Client, item: &BaseItemDto) -> Vec<BaseItemDto> {
 
 #[cfg(test)]
 mod tests {
-    use egui::{Event, Key, Modifiers};
+    use egui::{Event, Key, Modifiers, Rect, pos2};
     use jellyfin::Ticks;
     use jellyfin::models::BaseItemDto;
 
-    use super::{CHILDREN, EntryAction, ItemAction, ItemData, ItemPage, item_actions, menu_search_key, step_highlight};
+    use super::{
+        CHILDREN, EntryAction, ItemAction, ItemData, ItemPage, band_reveal, item_actions, menu_search_key,
+        step_highlight,
+    };
     use crate::browse::{self, Position, Section};
     use crate::item_menu::{Mark, PlaylistEdit, is_favorite, is_played};
     use crate::keys::Action;
@@ -2632,6 +2699,22 @@ mod tests {
                 index: 1,
             })
         );
+    }
+
+    /// A season the keyboard opened scrolls to its row and its band, unless the window is too
+    /// short for both, which shows the band alone.
+    #[test]
+    fn an_opened_bands_reveal_shows_its_season_row_with_the_band() {
+        let row = Rect::from_min_max(pos2(0., 100.), pos2(400., 350.));
+        let band = Rect::from_min_max(pos2(0., 374.), pos2(1000., 574.));
+        // Room for both: the union, so the least scroll shows the season's row and its band.
+        assert_eq!(band_reveal(Some(row), band, 600.), row.union(band));
+        let band_alone = Rect::from_min_max(pos2(0., 350.), pos2(1000., 574.));
+        // A window too short for the two shows the band with the gap above it, as a move onto
+        // the band does.
+        assert_eq!(band_reveal(Some(row), band, 300.), band_alone);
+        // And the same when there's no row to hold in view.
+        assert_eq!(band_reveal(None, band, 600.), band_alone);
     }
 
     #[test]
