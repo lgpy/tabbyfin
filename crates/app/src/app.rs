@@ -449,6 +449,9 @@ impl App {
             Some(Screen::SignedIn(signed_in)) => std::mem::take(&mut signed_in.services.events),
             _ => return,
         };
+        // The window's fullscreen state only updates next frame, so two toggles in one frame
+        // would both read the old state; later toggles flip what the earlier ones asked for.
+        let mut fullscreen = None;
         for event in events {
             match event {
                 AppEvent::Toast(toast) => self.toasts.push(toast),
@@ -462,6 +465,16 @@ impl App {
                     if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
                         signed_in.shell.player_ended(ctx);
                     }
+                }
+                // Remote control's ToggleFullscreen: the window is the app's, and this runs for
+                // the signed-in session only; a parked session's request is dropped in
+                // `App::logic` like its other screen-changing events.
+                AppEvent::ToggleFullscreen => {
+                    let now =
+                        fullscreen.unwrap_or_else(|| ctx.input(|input| input.viewport().fullscreen).unwrap_or(false));
+                    fullscreen = Some(!now);
+                    tracing::debug!(fullscreen = !now, "remote fullscreen");
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!now));
                 }
                 // The screen changes; what's left of this frame's events would belong to the
                 // session that just ended.
@@ -579,10 +592,13 @@ impl eframe::App for App {
                 #[allow(unreachable_patterns)]
                 match event {
                     AppEvent::Toast(toast) => self.toasts.push(toast),
+                    // A fullscreen request is about the window at that moment, not one to
+                    // replay later: it would leave the window fullscreen over whatever is up.
                     AppEvent::SessionExpired
                     | AppEvent::SignOut
                     | AppEvent::SwitchAccount(_)
-                    | AppEvent::AddAccount => {}
+                    | AppEvent::AddAccount
+                    | AppEvent::ToggleFullscreen => {}
                     other => kept.push(other),
                 }
             }
