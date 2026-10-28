@@ -23,10 +23,9 @@
 
 use std::time::Duration;
 
-use egui::text::LayoutJob;
 use egui::{
     Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Id, Layout, Margin, Rect, RectAlign, Response, RichText,
-    Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, Vec2, pos2, vec2,
+    Sense, Stroke, StrokeKind, TextStyle, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -757,13 +756,13 @@ impl PlayerPage {
         );
 
         if let Some(response) = &chapters_button {
-            self.chapters_menu(response, view, cx);
+            self.chapters_menu(ui, response, view, cx);
         }
         if let Some(response) = &settings_button {
-            self.settings_menu(response, view, cx);
+            self.settings_menu(ui, response, view, cx);
         }
         if let Some(response) = &versions_button {
-            self.versions_menu(response, view, cx);
+            self.versions_menu(ui, response, view, cx);
         }
     }
 
@@ -1000,7 +999,7 @@ impl PlayerPage {
 
     /// The chapters list: each chapter's image (when the server extracted them), name and start,
     /// the current one highlighted. A click seeks there and closes the menu.
-    fn chapters_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
+    fn chapters_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
         let Some(menu) = &view.chapters else { return };
         let mut chosen = None;
         egui::Popup::menu(response)
@@ -1010,8 +1009,10 @@ impl PlayerPage {
             .align_alternatives(&[])
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .width(CHAPTERS_W)
+            .width(CHAPTERS_W + 24.)
+            .frame(menu_frame(ui))
             .show(|ui| {
+                ui.set_width(CHAPTERS_W);
                 egui::ScrollArea::vertical().max_height(CHAPTERS_MAX_H).show(ui, |ui| {
                     for chapter in &menu.rows {
                         let request = chapter.image_tag.as_ref().map(|tag| ImageRequest {
@@ -1022,15 +1023,12 @@ impl PlayerPage {
                         let (rect, row) =
                             ui.allocate_exact_size(vec2(ui.available_width(), CHAPTER_THUMB_H + 8.), Sense::CLICK);
                         let current = menu.current == Some(chapter.index);
+                        let tokens = theme::tokens_of(ui);
                         if current {
-                            ui.painter()
-                                .rect_filled(rect, CornerRadius::same(6), theme::tokens_of(ui).accent);
+                            ui.painter().rect_filled(rect, CornerRadius::same(8), tokens.accent);
                         } else if row.hovered() {
-                            ui.painter().rect_filled(
-                                rect,
-                                CornerRadius::same(6),
-                                ui.visuals().widgets.hovered.weak_bg_fill,
-                            );
+                            // `main`'s chapter row hovered with the muted fill.
+                            ui.painter().rect_filled(rect, CornerRadius::same(8), tokens.muted);
                         }
                         let image =
                             Rect::from_min_size(rect.min + vec2(4., 4.), vec2(CHAPTER_THUMB_W, CHAPTER_THUMB_H));
@@ -1043,15 +1041,15 @@ impl PlayerPage {
                             pos2(image.right() + 12., image.top() + 2.),
                             Align2::LEFT_TOP,
                             name,
-                            TextStyle::Body.resolve(ui.style()),
-                            ui.visuals().text_color(),
+                            theme::text::font(ui, "sm"),
+                            tokens.foreground,
                         );
                         ui.painter().text(
                             pos2(image.right() + 12., image.top() + 24.),
                             Align2::LEFT_TOP,
                             timestamp(chapter.start),
-                            TextStyle::Small.resolve(ui.style()),
-                            over_video::MUTED_FOREGROUND,
+                            theme::text::font(ui, "xs"),
+                            tokens.muted_foreground,
                         );
                         if row.clicked() {
                             chosen = Some(chapter.start);
@@ -1067,7 +1065,7 @@ impl PlayerPage {
 
     /// The settings menu: audio, subtitle and general tabs, with the tracks, the delays, the
     /// subtitle size and the speeds.
-    fn settings_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
+    fn settings_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
         let Some(menu) = &view.settings else { return };
         let mut tab = self.settings_tab;
         let mut chosen_audio = None;
@@ -1081,17 +1079,15 @@ impl PlayerPage {
             .align_alternatives(&[])
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .width(SETTINGS_W)
+            .width(SETTINGS_W + 24.)
+            .frame(menu_frame(ui))
             .show(|ui| {
-                ui.set_min_width(SETTINGS_W - 16.);
-                ui.horizontal(|ui| {
-                    for choice in SettingsTab::ALL {
-                        if menu_button(ui, choice.label(), tab == choice).clicked() {
-                            tab = choice;
-                        }
-                    }
-                });
-                ui.add_space(6.);
+                ui.set_width(SETTINGS_W);
+                if let Some(choice) = settings_tabs(ui, tab) {
+                    tab = choice;
+                }
+                ui.add_space(8.);
+                ui.spacing_mut().item_spacing.y = 8.;
                 match tab {
                     SettingsTab::Audio => {
                         section_label(ui, "Track");
@@ -1157,17 +1153,20 @@ impl PlayerPage {
                     }
                     SettingsTab::General => {
                         ui.horizontal(|ui| {
-                            ui.add_sized(vec2(110., 22.), egui::Label::new("Speed"));
+                            ui.spacing_mut().item_spacing.x = 4.;
+                            ui.add_sized(
+                                vec2(110., 24.),
+                                egui::Label::new(RichText::new("Speed").font(theme::text::font(ui, "sm"))),
+                            );
                             if menu.in_group {
-                                ui.label(RichText::new("Normal in SyncPlay").color(over_video::MUTED_FOREGROUND));
-                            } else {
-                                for &speed in &Adjustments::SPEEDS {
-                                    let current = (speed - adjustments.speed).abs() < 1e-6;
-                                    if menu_button(ui, format!("{speed}×"), current).clicked() {
-                                        adjustments.speed = speed;
-                                        adjusted = true;
-                                    }
-                                }
+                                ui.label(
+                                    RichText::new("Normal in SyncPlay")
+                                        .small()
+                                        .color(over_video::MUTED_FOREGROUND),
+                                );
+                            } else if let Some(speed) = speed_group(ui, adjustments.speed) {
+                                adjustments.speed = speed;
+                                adjusted = true;
                             }
                         });
                     }
@@ -1178,8 +1177,11 @@ impl PlayerPage {
                     SettingsTab::General => Some("Keys: [ and ] change the speed."),
                 };
                 if let Some(hint) = hint {
-                    ui.add_space(4.);
-                    ui.label(RichText::new(hint).small().color(over_video::MUTED_FOREGROUND));
+                    ui.label(
+                        RichText::new(hint)
+                            .font(theme::text::font(ui, "xs"))
+                            .color(over_video::MUTED_FOREGROUND),
+                    );
                 }
             });
         self.settings_tab = tab;
@@ -1197,7 +1199,7 @@ impl PlayerPage {
 
     /// The version picker's menu: the item's versions, the playing one checked. Another version
     /// restarts the stream at the current position.
-    fn versions_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
+    fn versions_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
         if !egui::Popup::is_id_open(cx.ctx, versions_id()) {
             return;
         }
@@ -1210,10 +1212,11 @@ impl PlayerPage {
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .width(240.)
+            .frame(menu_frame(ui))
             .show(|ui| {
                 for version in &view.versions {
                     let current = version.id == view.source_id;
-                    if menu_button(ui, &version.name, current).clicked() {
+                    if check_row(ui, &version.name, current).clicked() {
                         chosen = Some(version.id.clone());
                     }
                 }
@@ -1647,11 +1650,157 @@ fn label_badge(ui: &mut egui::Ui, text: impl Into<String>) {
         });
 }
 
-/// A button of the settings menu's tabs and speeds, and its tracks: selected when it's the
-/// current choice, and never focusable.
-fn menu_button(ui: &mut egui::Ui, text: impl Into<String>, selected: bool) -> Response {
-    let button = egui::Button::new(RichText::new(text.into()).small()).sense(Sense::CLICK);
-    ui.add(theme::selected(ui, selected, button))
+/// The frame a player menu draws in: `main`'s popover surface (gpui-kit's `popover_style`), with
+/// its 12-point inset and its soft shadow, rather than egui's thinner popup frame.
+fn menu_frame(ui: &egui::Ui) -> egui::Frame {
+    let tokens = theme::tokens_of(ui);
+    egui::Frame::new()
+        .fill(tokens.popover)
+        .stroke(Stroke::new(1., tokens.border))
+        .corner_radius(CornerRadius::same(tokens.radius))
+        .inner_margin(Margin::same(12))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 4],
+            blur: 4,
+            spread: 0,
+            color: Color32::from_black_alpha(26),
+        })
+}
+
+/// The settings menu's tabs: `main`'s segmented tab bar, a track with the selected tab in the
+/// popover's own colour on it. Returns the tab clicked.
+fn settings_tabs(ui: &mut egui::Ui, current: SettingsTab) -> Option<SettingsTab> {
+    let tokens = theme::tokens_of(ui);
+    let mut chosen = None;
+    egui::Frame::new()
+        .fill(tokens.tab_bar)
+        .corner_radius(CornerRadius::same(tokens.radius))
+        .inner_margin(Margin::symmetric(3, 0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.x = 2.;
+            ui.horizontal(|ui| {
+                for tab in SettingsTab::ALL {
+                    if segmented_tab(ui, tab.label(), tab == current).clicked() {
+                        chosen = Some(tab);
+                    }
+                }
+            });
+        });
+    chosen
+}
+
+/// One tab of [`settings_tabs`]: 24 points high, its label at `text_sm` with 10 points either
+/// side, and an 18-point pill in the background colour behind the selected one.
+fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let color = if selected {
+        tokens.foreground
+    } else {
+        tokens.tab_foreground
+    };
+    let font = theme::text::font(ui, "sm");
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 20., 24.), Sense::CLICK);
+    let painter = ui.painter();
+    if selected {
+        let pill = Rect::from_center_size(rect.center(), vec2(rect.width(), 18.));
+        painter.rect_filled(pill, CornerRadius::same(tokens.radius - 2), tokens.background);
+    }
+    painter.galley(rect.center() - galley.size() / 2., galley, color);
+    response
+}
+
+/// The speed choices, as `main`'s segmented outline toggle group: 24-point segments joined into
+/// one outlined control, the chosen one filled with the accent. Returns the speed clicked.
+fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
+    let tokens = theme::tokens_of(ui);
+    let font = theme::text::font(ui, "sm");
+    let labels: Vec<String> = Adjustments::SPEEDS.iter().map(|speed| format!("{speed}×")).collect();
+    let widths: Vec<f32> = labels
+        .iter()
+        .map(|label| {
+            let galley = ui
+                .painter()
+                .layout_no_wrap(label.clone(), font.clone(), tokens.foreground);
+            (galley.size().x + 8.).max(24.)
+        })
+        .collect();
+    let total: f32 = widths.iter().sum();
+    let (rect, _) = ui.allocate_exact_size(vec2(total, 24.), Sense::CLICK);
+    let mut chosen = None;
+    let mut left = rect.left();
+    for (index, &speed) in Adjustments::SPEEDS.iter().enumerate() {
+        let segment = Rect::from_min_size(pos2(left, rect.top()), vec2(widths[index], rect.height()));
+        let response = ui.interact(segment, ui.scope_id().with(("player_speed", index)), Sense::CLICK);
+        let selected = (speed - current).abs() < 1e-6;
+        let fill = if selected {
+            tokens.accent
+        } else if response.hovered() {
+            ghost_hover(ui)
+        } else {
+            tokens.background
+        };
+        let last = index + 1 == widths.len();
+        ui.painter().rect_filled(
+            segment,
+            CornerRadius {
+                nw: if index == 0 { tokens.radius } else { 0 },
+                sw: if index == 0 { tokens.radius } else { 0 },
+                ne: if last { tokens.radius } else { 0 },
+                se: if last { tokens.radius } else { 0 },
+            },
+            fill,
+        );
+        let color = if selected {
+            tokens.accent_foreground
+        } else {
+            tokens.foreground
+        };
+        let galley = ui.painter().layout_no_wrap(labels[index].clone(), font.clone(), color);
+        ui.painter()
+            .galley(segment.center() - galley.size() / 2., galley, color);
+        if response.clicked() {
+            chosen = Some(speed);
+        }
+        left += widths[index];
+    }
+    // One outline around the joined segments, with a divider between them.
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(tokens.radius),
+        Stroke::new(1., tokens.border),
+        StrokeKind::Inside,
+    );
+    let mut x = rect.left();
+    for width in widths.iter().take(widths.len().saturating_sub(1)) {
+        x += width;
+        ui.painter().line_segment(
+            [pos2(x, rect.top()), pos2(x, rect.bottom())],
+            Stroke::new(1., tokens.border),
+        );
+    }
+    chosen
+}
+
+/// A small ghost button, as `main`'s settings steppers used: 24 points high, 8 either side of
+/// its label, the accent under the pointer.
+fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let font = theme::text::font(ui, "sm");
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, tokens.foreground);
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 16., 24.), Sense::CLICK);
+    let fill = if response.is_pointer_button_down_on() {
+        tokens.accent
+    } else if response.hovered() {
+        ghost_hover(ui)
+    } else {
+        Color32::TRANSPARENT
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(tokens.radius), fill);
+    painter.galley(rect.center() - galley.size() / 2., galley, tokens.foreground);
+    response
 }
 
 /// The version picker's button: a small select with the playing version's name and a caret, as
@@ -1693,34 +1842,37 @@ fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
 
 /// A small heading inside a settings tab.
 fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).small().color(over_video::MUTED_FOREGROUND));
+    ui.label(
+        RichText::new(text)
+            .font(theme::text::font(ui, "xs"))
+            .color(over_video::MUTED_FOREGROUND),
+    );
 }
 
 /// A settings value with its step buttons; `None` unless one was pressed.
 fn stepper(ui: &mut egui::Ui, label: &str, value: String, down: &str, up: &str) -> Option<Step> {
     let mut step = None;
     ui.horizontal(|ui| {
-        ui.add_sized(vec2(110., 22.), egui::Label::new(RichText::new(label).small()));
-        if push_button(ui, down) {
+        ui.spacing_mut().item_spacing.x = 4.;
+        ui.add_sized(
+            vec2(110., 24.),
+            egui::Label::new(RichText::new(label).font(theme::text::font(ui, "sm"))),
+        );
+        if small_button(ui, down).clicked() {
             step = Some(Step::Down);
         }
         ui.add_sized(
-            vec2(56., 22.),
-            egui::Label::new(RichText::new(value).small().monospace()),
+            vec2(56., 24.),
+            egui::Label::new(RichText::new(value).font(theme::text::font(ui, "sm"))),
         );
-        if push_button(ui, up) {
+        if small_button(ui, up).clicked() {
             step = Some(Step::Up);
         }
-        if push_button(ui, "Reset") {
+        if small_button(ui, "Reset").clicked() {
             step = Some(Step::Reset);
         }
     });
     step
-}
-
-fn push_button(ui: &mut egui::Ui, text: &str) -> bool {
-    ui.add(egui::Button::new(RichText::new(text).small()).sense(Sense::CLICK))
-        .clicked()
 }
 
 /// A settings tab's list of tracks to pick from, the selected one checked. A plain list rather
@@ -1749,37 +1901,38 @@ fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], sele
     chosen
 }
 
-/// A track row: a check in a fixed slot (so the labels line up), then the name.
+/// A track row: a check in a fixed slot (so the labels line up), then the name. The row itself
+/// has no fill when it's the selected track (only the check marks it), and the accent under the
+/// pointer, as `main`'s list had it.
 fn check_row(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
-    let body = TextStyle::Body.resolve(ui.style());
-    let color = ui.visuals().text_color();
-    let mut job = LayoutJob::default();
-    job.append(
+    let tokens = theme::tokens_of(ui);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), TRACK_ROW_H), Sense::CLICK);
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, CornerRadius::same(8), tokens.accent);
+    }
+    let mut check = theme::text::font(ui, "sm");
+    check.family = ICON_CHECK.font_family();
+    let slot = Rect::from_min_size(pos2(rect.left() + 8., rect.top()), vec2(16., rect.height()));
+    painter.text(
+        slot.center(),
+        Align2::CENTER_CENTER,
         ICON_CHECK.codepoint,
-        0.,
-        TextFormat {
-            font_id: crate::theme::text::icon(ui, ICON_CHECK.font_family()),
-            color: if selected { color } else { Color32::TRANSPARENT },
-            ..Default::default()
+        check,
+        if selected {
+            tokens.foreground
+        } else {
+            Color32::TRANSPARENT
         },
     );
-    job.append(
-        &format!("  {label}"),
-        0.,
-        TextFormat {
-            font_id: body,
-            color,
-            ..Default::default()
-        },
+    let font = theme::text::font(ui, "sm");
+    let galley = painter.layout_no_wrap(label.to_owned(), font, tokens.foreground);
+    painter.galley(
+        pos2(slot.right() + 8., rect.center().y - galley.size().y / 2.),
+        galley,
+        tokens.foreground,
     );
-    ui.add_sized(
-        vec2(ui.available_width(), TRACK_ROW_H),
-        theme::selected(
-            ui,
-            selected,
-            egui::Button::new(egui::WidgetText::LayoutJob(job.into())).sense(Sense::CLICK),
-        ),
-    )
+    response
 }
 
 /// The text's width at the small style's size, for laying out the top bar.
