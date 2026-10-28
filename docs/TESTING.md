@@ -298,7 +298,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ `theme = "system"` follows the system on Windows and macOS (egui/winit), switching while the app runs included; on a real GNOME and KDE desktop through the real portal, including Ubuntu 22.04's portal 1.14 (`Read` only).
 - ⬜ Settings (U9) changing the theme, the text size (to the system's included, which then reads it) and the animations while the app runs, through `AppEvent::AppearanceChanged`; nothing raises it yet.
 - ⬜ A system text size changed while the app runs on Windows (`reg`) and GNOME (`gsettings`), applied when the window gets the focus back.
-- ⬜ Animations off (`animations = false`) makes a page change or a fade jump; only the style values are unit-tested. A shelf's arrow jump and the wheel's instant step are covered (`ui_tests/shelf.rs`'s `with_animations_off_the_arrow_jumps`, `smooth_scroll.rs`'s wheel tests); R2's page entry and fades aren't yet.
+- ✅ Animations off (`animations = false`) draws every page entry, fade, pop and slide at its end state at once (R2, §34), and the shelf's arrow jumps and the wheel steps at once (R5). The setting being switched while the app runs is still untested (§32's list).
 
 ## 15. Previous and next (2.1.9)
 
@@ -542,3 +542,21 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **The card title's baseline** and the action buttons' centred icon and label at 90 % and 150 % zoom.
 - ⬜ **With a mouse**: a primary button's hover and press (the sign-in form's *Connect*, the item page's *Resume*), and a picker's open list highlighting its current choice with the theme's `accent` (the list is pointer-only, §32).
 - ⬜ **A checked settings switch** in the light theme on a white page (the box is `secondary` with a foreground tick, not `main`'s black box with a white tick — egui draws both the checked and unchecked box from one colour).
+
+## 34. Animations (R2)
+
+**egui (R2)**, against the 12.2 dev server (`TABBYFIN_ROUTE`, `TABBYFIN_KEYS`, screenshots in `R2-scratch/`).
+
+✅ Home's entry at real speed, recorded at 30 fps and picked apart frame by frame (`home-entry.mp4`, `r2-home-entry-mid.png`): the page fades and rises in, the shelves come in one after another ("My Media" readable while "Continue Watching" is still faint), and the library posters fade in over their blurhash previews as they load. The stills `r2-home-stagger.png` and `r2-home-rest.png` show the stagger and the end state.
+
+✅ With `animations = false` in the config (`r2-home-off.png`, `home-off2.mp4`): the same frame has the page, both shelves and their images at full brightness at once, with no fade or stagger, and Home is idle at 0 CPU ticks over 10 s.
+
+✅ Animations on: Home is idle at 0 CPU ticks over 10 s once the entry is over (nothing repaints for a finished animation).
+
+✅ The player (`player-flow2.mp4`, `r2-player-controls-fade.png`, `r2-player-prompt-slide.png`): the top and bottom bars fade in as the player opens, and the Skip intro prompt slides in from the right while it fades. `r2-player-upnext-slide.png` and `r2-player-upnext-rest.png` show the up-next card part way through its fade/slide and at rest (reached by seeking into the credits), and `r2-player-resume.png` the "Resumed from 0:20" card after Shift+N (`play_from_resume`), which is where the resume prompt appears. The mid-animation stills were taken with the durations scaled ×10 (not committed): `import` and a 30 fps screen grab can't reliably land inside 220–420 ms on this box.
+
+✅ The item page's Watched toggle pops its icon as it turns on (`r2-item-toggle.png`, Tab then Right/Right to the toggle, Enter), and a season's episodes band rises in when it opens (Enter on a season: `r2-item-band-fade.png` part way, `r2-item-band.png` at rest, the page scrolled to it).
+
+- ⬜ **The motion at 60 Hz on a real GPU and display**, with a real mouse showing the player's controls again after the 3 s hide (the fade replays on hidden → shown; the keys reach the same path).
+- ⬜ **The pop from a click** on Watched and Favorite (the keys' Enter goes through the page's `activate`; a click sets the same `asked.action`).
+- ⬜ **The prompt while it slides over real video**: every mid-slide still was caught over the loader or before a frame arrived, since the dev media is a test pattern.
