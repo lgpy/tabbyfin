@@ -269,6 +269,11 @@ pub struct Tokens {
 
     /// Menus, popups and dialogs.
     pub popover: Color32,
+    /// A segmented tab bar's track (gpui-kit's `tab_bar.segmented.background`), with the selected
+    /// tab drawn in [`Self::background`] on top of it.
+    pub tab_bar: Color32,
+    /// A tab's label while it isn't selected (gpui-kit's `tab.foreground`).
+    pub tab_foreground: Color32,
     /// A dialog's scrim, which `main`'s dialogs and sheets drew the page under.
     pub overlay: Color32,
 
@@ -308,6 +313,8 @@ impl Tokens {
         info: Color32::from_rgb(0x06, 0xb6, 0xd4),
         red: Color32::from_rgb(0xdc, 0x26, 0x26),
         popover: Color32::from_rgb(0xff, 0xff, 0xff),
+        tab_bar: Color32::from_rgb(0xf5, 0xf5, 0xf5),
+        tab_foreground: Color32::from_rgb(0x40, 0x40, 0x40),
         overlay: Color32::from_rgba_premultiplied(0, 0, 0, 13),
         radius: 10,
         radius_lg: 12,
@@ -341,10 +348,24 @@ impl Tokens {
         info: Color32::from_rgb(0x22, 0xd3, 0xee),
         red: Color32::from_rgb(0xf8, 0x71, 0x71),
         popover: Color32::from_rgb(0x0a, 0x0a, 0x0a),
+        tab_bar: Color32::from_rgb(0x17, 0x17, 0x17),
+        tab_foreground: Color32::from_rgb(0xd4, 0xd4, 0xd4),
         overlay: Color32::from_rgba_premultiplied(0, 0, 0, 51),
         radius: 10,
         radius_lg: 12,
     };
+
+    /// The fill of an input or a select, gpui-kit's `input_background`: in the dark theme the
+    /// `input` colour at 70 %, so the surface behind it shows through; in the light theme the
+    /// background itself. The player's version picker reads it, over the picture.
+    pub fn input_background(&self) -> Color32 {
+        if self.dark {
+            let [r, g, b, _] = self.input.to_srgba_unmultiplied();
+            Color32::from_rgba_unmultiplied(r, g, b, 179)
+        } else {
+            self.background
+        }
+    }
 }
 
 /// The tokens the theme `visuals` draws in: the light or dark set, by its `dark_mode`. The player
@@ -934,6 +955,15 @@ mod tests {
         assert_eq!(Tokens::LIGHT.background, egui::Color32::WHITE);
         assert_eq!(Tokens::DARK.primary, egui::Color32::from_rgb(0xfa, 0xfa, 0xfa));
         assert_eq!(Tokens::LIGHT.primary, egui::Color32::from_rgb(0x17, 0x17, 0x17));
+        // The player's menu reads these two: gpui-kit's segmented tab bar.
+        assert_eq!(Tokens::LIGHT.tab_bar, egui::Color32::from_rgb(0xf5, 0xf5, 0xf5));
+        assert_eq!(Tokens::DARK.tab_bar, egui::Color32::from_rgb(0x17, 0x17, 0x17));
+        assert_eq!(Tokens::DARK.tab_foreground, egui::Color32::from_rgb(0xd4, 0xd4, 0xd4));
+        // gpui-kit's `input_background`: the input colour at 70 % in dark, the background in
+        // light.
+        assert_eq!(Tokens::LIGHT.input_background(), Tokens::LIGHT.background);
+        let dark = Tokens::DARK.input_background();
+        assert_eq!(dark.to_srgba_unmultiplied(), [0x2f, 0x2f, 0x2f, 179]);
         assert_eq!(tokens(&egui::Visuals::dark()), &Tokens::DARK);
         assert_eq!(tokens(&egui::Visuals::light()), &Tokens::LIGHT);
     }
@@ -1213,6 +1243,17 @@ pub mod over_video {
 
     /// Chapter marks on the seek bar and the preview's outline: white at 60 %.
     pub const MARK: Color32 = Color32::from_rgba_premultiplied(153, 153, 153, 153);
+
+    /// The unfilled part of the seek and volume sliders: white at 20 %, gpui-kit's slider bar
+    /// behind its fill.
+    pub const SEEK_TRACK: Color32 = Color32::from_rgba_premultiplied(51, 51, 51, 51);
+
+    /// The ring around a slider's thumb: white at 50 %.
+    pub const THUMB_RING: Color32 = Color32::from_rgba_premultiplied(128, 128, 128, 128);
+
+    /// A slider's thumb, inside its ring: gpui-kit's `slider.thumb.background` in the dark theme,
+    /// which is what `main`'s player drew whichever theme was chosen.
+    pub const THUMB: Color32 = Color32::from_rgb(0x0a, 0x0a, 0x0a);
 
     /// Behind a card's progress bar, over its image. Dark against the fill, with a light outline
     /// ([`TRACK_OUTLINE`]) so the bar's full length still shows on dark images.
