@@ -5,18 +5,26 @@
 //!
 //! The arrows show once there's more to see than fits and grey out at either end. They need the
 //! row's content and viewport widths, which egui only knows after laying it out, so they come
-//! from the last frame (as they did on `main`) and the first frame shows none.
+//! from the last frame (as they did on `main`) and the first frame shows none. An arrow glides
+//! the row a page over, as `main`'s `glide_by` did: a second click while it moves aims further,
+//! and with the animations setting off it jumps.
 //!
-//! `main`'s `rail_drag.rs` and `smooth_scroll.rs` aren't needed: egui's [`ScrollArea`] drags its
-//! contents with the mouse, and a drag never counts as a click on the card it ends on. The wheel
-//! keeps scrolling the page rather than the row (egui only scrolls the one enabled direction
-//! with Shift), as on `main`; the arrows jump instead of gliding until R5.
+//! The row is `main`'s `rail_drag.rs` on egui: the wheel keeps scrolling the page (the row takes
+//! none of it), a press and a move drags the row with the mouse and the closed hand shows while
+//! it moves, a drag doesn't open the card it ends on, and the row follows the pointer 1:1 and
+//! stops with it (no egui coasting after the release, no rubber band past the ends, which `main`
+//! had neither of). The keyboard's `scroll_to_me` still brings a card into view, through egui's
+//! own scroll animation.
 
 use std::hash::Hash;
 
 use egui::containers::scroll_area::{DragScroll, ScrollBarVisibility, ScrollSource};
+use egui::style::KineticScrollStyle;
 use egui::{Align, Button, Layout, Rect, RichText, ScrollArea, Ui};
 use egui_material_icons::icons::{ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT};
+
+use crate::smooth_scroll::Glide;
+use crate::theme;
 
 /// A titled row of cards, with the space between its cards and under its title given (Home's
 /// shelves are wider apart than the item pages'). Returns the row's rectangle, for a page that
@@ -33,12 +41,15 @@ pub fn shelf_with_gaps(
     // (its title and cards together), as `main`'s `browse::reveal` scrolled a whole section.
     let top = ui.cursor().min;
     let id = ui.make_persistent_id(id);
-    let state: State = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+    let mut state: State = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+    let now = ui.input(|input| input.time);
+    let animations = theme::animations(ui.ctx());
     // One page is what shows at once, so no card is ever skipped.
     let page = state.viewport;
+    let max = (state.content - state.viewport).max(0.);
     let arrows = Arrows::of(state);
-    // Where an arrow asks the row to go; `None` leaves it where the mouse or keys left it.
-    let mut target = None;
+    // How far an arrow asks the row to go this frame.
+    let mut distance = 0.;
     ui.horizontal(|ui| {
         // As tall as the arrows, so the row keeps its height when they hide.
         ui.set_min_height(ui.spacing().interact_size.y);
@@ -49,13 +60,13 @@ pub fn shelf_with_gaps(
             }
             let next = ui.add_enabled(!arrows.at_end, arrow(ICON_CHEVRON_RIGHT));
             if next.clicked() {
-                target = Some(state.offset + page);
+                distance = page;
             }
             next.on_hover_text("Scroll right")
                 .on_disabled_hover_text("Scroll right");
             let previous = ui.add_enabled(!arrows.at_start, arrow(ICON_CHEVRON_LEFT));
             if previous.clicked() {
-                target = Some(state.offset - page);
+                distance = -page;
             }
             previous
                 .on_hover_text("Scroll left")
@@ -64,38 +75,88 @@ pub fn shelf_with_gaps(
     });
     ui.add_space(title_gap);
 
+    // `main`'s glide: a click starts one (or aims a running one further), and each frame of one
+    // moves the row on. `main` also stopped when something else had scrolled the row since its
+    // last step (`glide.last_set`); that check comes after the area is drawn, where egui has
+    // applied a drag or the keyboard.
+    let mut jump = None;
+    if distance != 0. {
+        if animations {
+            match &mut state.glide {
+                Some(glide) if glide.last_set == state.offset => glide.aim(distance, max),
+                _ => state.glide = Some(Glide::new(state.offset, distance, max, now)),
+            }
+        } else {
+            // `main` jumped with reduced motion (the animations setting).
+            state.glide = None;
+            jump = Some((state.offset + distance).clamp(0., max));
+        }
+    } else if !animations {
+        state.glide = None;
+    }
+    let mut offset = jump;
+    if let Some(glide) = &mut state.glide {
+        let (next, done) = glide.step(now);
+        offset = Some(next.clamp(0., max));
+        if done {
+            state.glide = None;
+        }
+    }
+
     let mut area = ScrollArea::horizontal()
         .id_salt(id)
         .auto_shrink([false, true])
         // The arrows show where the row is, as on `main`; a bar under every shelf would not.
         .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-        // `main`'s rail dragging: a press on the row and a move scrolls it with the mouse.
+        // `main`'s rail dragging: a press on the row and a move scrolls it with the mouse. The
+        // wheel is the page's, as on `main`, where the row undid the sideways scroll GPUI gave
+        // it.
         .scroll_source(ScrollSource {
             drag: DragScroll::Always,
-            ..Default::default()
+            mouse_wheel: false,
+            scroll_bar: false,
         })
         // The closed hand `main` showed while a row was being dragged.
         .on_drag_cursor(egui::CursorIcon::Grabbing);
-    if let Some(target) = target {
+    if let Some(offset) = offset {
         // Clamped here: egui would take the overshoot and spring back, which reads as the row
         // jumping past its end.
-        area = area.horizontal_scroll_offset(target.clamp(0., (state.content - state.viewport).max(0.)));
+        area = area.horizontal_scroll_offset(offset);
     }
+    // The row follows the pointer 1:1 and stops with it, as `main`'s rail drag did: no coasting
+    // after a release, no rubber band past the ends (which are egui's defaults).
+    let kinetic = ui.style().spacing.scroll.kinetic;
+    ui.style_mut().spacing.scroll.kinetic = KineticScrollStyle {
+        decay_time: 0.,
+        rubber_band: false,
+        ..kinetic
+    };
     let out = area.show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             cards(ui);
         });
     });
-    let measured = State {
+    ui.style_mut().spacing.scroll.kinetic = kinetic;
+    let mut measured = State {
         offset: out.state.clamped_offset().x,
         content: out.content_size.x,
         viewport: out.inner_rect.width(),
+        glide: state.glide,
     };
-    if measured != state {
+    if measured
+        .glide
+        .is_some_and(|glide| (glide.last_set - measured.offset).abs() > 0.01)
+    {
+        // A drag, a scroll bar or the keyboard's reveal moved the row: the glide stops there, as
+        // `main`'s did when the offset wasn't the one it had set.
+        measured.glide = None;
+    }
+    if measured != state || measured.glide.is_some() {
         // The arrows were drawn from the previous frame's widths: a row that just grew, or that
         // a key or a flung drag scrolled to an end, needs one more frame to show or grey them.
-        // Only a change asks for it, so an idle row costs nothing.
+        // A running glide needs each frame too. Only a change or a glide asks for it, so an idle
+        // row costs nothing.
         ui.ctx().request_repaint();
     }
     ui.data_mut(|data| data.insert_temp(id, measured));
@@ -121,6 +182,8 @@ struct State {
     offset: f32,
     content: f32,
     viewport: f32,
+    /// The arrows' glide, while it runs.
+    glide: Option<Glide>,
 }
 
 /// Which page arrows to draw: none when the cards fit, and each one greyed out at its end.
@@ -151,6 +214,7 @@ mod tests {
             offset,
             content,
             viewport,
+            ..Default::default()
         })
     }
 

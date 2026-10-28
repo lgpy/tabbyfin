@@ -19,7 +19,7 @@ use crate::views::PageCx;
 use crate::views::login::{Login, LoginEvent, Prefill};
 use crate::views::shell::Shell;
 use crate::widgets::{self, video};
-use crate::{credentials, runtime, theme, window};
+use crate::{credentials, runtime, smooth_scroll, theme, window};
 
 /// The mascot's size while the saved session is restored, as on `main`.
 const RESTORING_MASCOT: f32 = 160.;
@@ -547,6 +547,15 @@ fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Si
 
 impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // egui eases a wheel step over frames whatever the animations setting says; `main`'s
+        // reduced motion scrolled it at once (`smooth_scroll.rs`).
+        if !theme::animations(ctx) {
+            let options = ctx.options(|options| options.input_options);
+            let height = raw_input
+                .screen_rect
+                .map_or_else(|| ctx.content_rect().height(), |rect| rect.height());
+            smooth_scroll::instant_wheel(raw_input, &options, height);
+        }
         // A press injected into a pass that doesn't run `ui` (eframe's logic-only passes, for a
         // window the compositor won't show) lands in no frame of its own: eframe hands that
         // input to the next pass, so the presses bunch up and lose the script's timing. They

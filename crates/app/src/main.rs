@@ -20,6 +20,7 @@ mod remote;
 mod runtime;
 mod services;
 mod session;
+mod smooth_scroll;
 mod syncplay;
 mod task;
 mod theme;
