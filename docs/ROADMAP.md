@@ -174,7 +174,7 @@ The GPUI UI was replaced in place: `crates/app` is an eframe app drawn with wgpu
 
 - **Done:** the foundation (services, tasks, keys, toasts, the window and theme), the pages (Home, search, libraries with sort and filters, the item page with its children and playlist editing, Settings, the player), sign-in and accounts, SyncPlay, remote control and the websocket, Linux and Windows GPU video, packaging and CI, `egui_kittest` UI tests, and the parity sweep with its fixes. `docs/egui-migration.md` has the task list and what each task settled.
 - **What stayed the same:** `crates/jellyfin`, the player crate and its host process, the config file and where tokens live, every dev knob, and Jellyfin 10.11 as the minimum.
-- **What's different:** egui's default look, pointer-only menus except where the shell or a page reads their keys, and Tab reaching the top bar's buttons before the page. All three are in the accepted differences above.
+- **What's different:** `main`'s look with egui doing the drawing (the theme tokens and text styles, and the mascot loader, are back; the animations, the search box's motion, the player's overlay polish and a few layout details are R2–R7), pointer-only menus except where the shell or a page reads their keys, and Tab reaching the top bar's buttons before the page. All of it is in the accepted differences above.
 - **What's still open:** the same hardware and release-build checks as before (`docs/TESTING.md`), now against the egui build.
 
 ### Restyle backlog
