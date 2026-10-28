@@ -38,6 +38,7 @@ pub mod item;
 pub mod library;
 pub mod login;
 pub mod settings;
+pub mod shelf;
 pub mod toasts;
 
 /// How long a test waits for a server answer or a page before it fails.
