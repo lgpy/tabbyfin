@@ -1362,11 +1362,13 @@ impl Shell {
                             let hit = Rect::from_center_size(center, vec2(icon_size + 8., icon_size + 8.));
                             let button = ui.interact(hit, Id::unique("top_bar_search_clear"), Sense::CLICK);
                             button.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), "Clear search"));
+                            // gpui-kit's text button: the foreground at 90 % at rest, and the
+                            // foreground under the pointer.
                             let tokens = theme::tokens_of(ui);
                             let color = if button.hovered() {
                                 tokens.foreground
                             } else {
-                                tokens.muted_foreground
+                                tokens.foreground.gamma_multiply(0.9)
                             };
                             ui.painter()
                                 .text(center, Align2::CENTER_CENTER, ICON_CLOSE.codepoint, icon, color);
