@@ -16,17 +16,20 @@
 //! keys are `keys::Scope::Player`, routed by the shell; the shell's Back stops playback. The
 //! menus are pointer-only (egui's popups take no keys), and every widget here is non-focusable
 //! (`Sense::CLICK` without `FOCUSABLE`, U8's rule for its dialogs): a Tab that gave egui the
-//! focus would take every key from the player (`keys.rs`).
+//! focus would take every key from the player (`keys.rs`). So none of them draws a focus ring:
+//! the player's widgets are clicked, not tabbed to, and Tab stays the app's. They do register
+//! AccessKit info (`Response::widget_info`), so a screen reader — and the headless tests that
+//! query by label — sees each button's name, a tab's or row's selected state, and a slider's
+//! value, even though no keyboard focus ever lands on them.
 //!
 //! Auto-skip and the clock's "time left" are config settings read when the page opens; the clock
 //! saves its choice when clicked.
 
 use std::time::Duration;
 
-use egui::text::LayoutJob;
 use egui::{
     Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Id, Layout, Margin, Rect, RectAlign, Response, RichText,
-    Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, Vec2, pos2, vec2,
+    Sense, Stroke, StrokeKind, TextStyle, Ui, UiBuilder, Vec2, WidgetInfo, accesskit::Role, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -70,7 +73,14 @@ const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 /// The top bar's height: its padding and a control button.
 const TOP_BAR_H: f32 = 2. * PADDING + CONTROL;
 const PADDING: f32 = 16.;
-const SEEK_H: f32 = 20.;
+/// The gap between a bar's controls, `main`'s `gap_3`.
+const GAP: f32 = theme::SPACE.md;
+/// The seek bar's row: gpui-kit's slider track is 24 points high around its track.
+const SEEK_H: f32 = 24.;
+/// The slider track inside that row, and its thumb: a 16-point circle with a 1-point ring.
+const TRACK_H: f32 = 6.;
+const THUMB_R: f32 = 8.;
+const THUMB_RING: f32 = 1.;
 /// The bottom bar's height: its top padding, the seek bar, the gap below it, the controls and
 /// the bottom padding.
 const BOTTOM_BAR_H: f32 = 32. + SEEK_H + 8. + PLAY_CONTROL + PADDING;
@@ -78,10 +88,12 @@ const BOTTOM_BAR_H: f32 = 32. + SEEK_H + 8. + PLAY_CONTROL + PADDING;
 const CONTROL: f32 = 40.;
 const PLAY_CONTROL: f32 = 48.;
 const CONTROL_ICON: f32 = 0.52;
+/// The volume slider's width, and the row it sits in (a slider's 24-point track).
 const VOLUME_W: f32 = 96.;
+const VOLUME_H: f32 = 24.;
 /// The version picker: a small select, 140 points wide as `main`'s was.
 const VERSION_W: f32 = 140.;
-const VERSION_H: f32 = 28.;
+const VERSION_H: f32 = 24.;
 /// The chapter marks' height, and the width of the seek-bar preview thumbnail.
 const CHAPTER_MARK_H: f32 = 8.;
 const PREVIEW_W: f32 = 192.;
@@ -290,6 +302,7 @@ impl PlayerPage {
                 .max_rect(inner)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
                 if control_button(ui, ICON_ARROW_BACK, "Back (Esc)").clicked() {
                     self.exit(cx);
                 }
@@ -610,16 +623,14 @@ impl PlayerPage {
         // buttons, drawn after it, still get theirs.
         ui.interact(rect, Id::unique("player_top_bar"), Sense::CLICK);
         let badges = view.badges();
-        let badge_w: f32 = badges
-            .iter()
-            .map(|text| text_width(ui, text) + 16. + ui.spacing().item_spacing.x)
-            .sum();
+        let badge_w: f32 = badges.iter().map(|text| text_width(ui, text) + 16. + GAP).sum();
         let inner = rect.shrink2(vec2(PADDING, 0.));
         ui.scope_builder(
             UiBuilder::new()
                 .max_rect(inner)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
                 if control_button(ui, ICON_ARROW_BACK, "Back (Esc)").clicked() {
                     self.exit(cx);
                 }
@@ -652,6 +663,7 @@ impl PlayerPage {
                 .max_rect(row)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
                 let tip = if view.paused { "Play (Space)" } else { "Pause (Space)" };
                 let icon = if view.paused { ICON_PLAY_ARROW } else { ICON_PAUSE };
                 if sized_control(ui, icon, PLAY_CONTROL, tip, false).clicked() {
@@ -674,6 +686,8 @@ impl PlayerPage {
                     self.show_controls();
                 }
                 self.volume_slider(ui, view, cx);
+                // `main`'s `ml_2` on the clock, on top of the bar's gap.
+                ui.add_space(8.);
                 let clock = ui.add(
                     egui::Label::new(RichText::new(&view.time).small())
                         .sense(Sense::CLICK)
@@ -696,6 +710,7 @@ impl PlayerPage {
                 .max_rect(row)
                 .layout(Layout::right_to_left(Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
                 let fullscreen = fullscreen(ui.ctx());
                 let icon = if fullscreen {
                     ICON_FULLSCREEN_EXIT
@@ -745,13 +760,13 @@ impl PlayerPage {
         );
 
         if let Some(response) = &chapters_button {
-            self.chapters_menu(response, view, cx);
+            self.chapters_menu(ui, response, view, cx);
         }
         if let Some(response) = &settings_button {
-            self.settings_menu(response, view, cx);
+            self.settings_menu(ui, response, view, cx);
         }
         if let Some(response) = &versions_button {
-            self.versions_menu(response, view, cx);
+            self.versions_menu(ui, response, view, cx);
         }
     }
 
@@ -763,12 +778,14 @@ impl PlayerPage {
         };
         let response = ui.allocate_rect(rect, Sense::CLICK | Sense::DRAG);
         let shown = self.scrub.unwrap_or(view.position);
+        // A slider to AccessKit, in seconds; the player's keys and the pointer are how it moves.
+        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), shown.as_secs_f64(), "Seek"));
         let fraction = (shown.as_secs_f64() / duration.as_secs_f64()).clamp(0., 1.) as f32;
-        let track = Rect::from_center_size(rect.center(), vec2(rect.width(), 5.));
+        let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
-        painter.rect_filled(track, CornerRadius::same(2), over_video::SURFACE_SUBTLE);
+        painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
-        painter.rect_filled(filled, CornerRadius::same(2), over_video::FOREGROUND);
+        painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::FOREGROUND);
         for mark in &view.chapter_marks {
             let x = track.left() + track.width() * mark;
             let half = CHAPTER_MARK_H / 2.;
@@ -777,10 +794,7 @@ impl PlayerPage {
                 Stroke::new(2., over_video::MARK),
             );
         }
-        let hover = response.hover_pos();
-        if hover.is_some() || response.dragged() {
-            painter.circle_filled(pos2(filled.right(), track.center().y), 6., over_video::FOREGROUND);
-        }
+        slider_thumb(painter, pos2(filled.right(), track.center().y));
 
         // Dragging: the bar follows the pointer. The seek goes out when the button comes up, so
         // playback doesn't fight the bar.
@@ -796,6 +810,7 @@ impl PlayerPage {
             self.show_controls();
         }
 
+        let hover = response.hover_pos();
         let Some(pos) = hover else { return };
         let offset = (pos.x - rect.left()).clamp(0., rect.width());
         let time = time_at(rect, duration, rect.left() + offset);
@@ -808,10 +823,18 @@ impl PlayerPage {
         let max = (rect.width() - half).max(half);
         let center_x = rect.left() + offset.clamp(half, max);
         let painter = ui.painter();
+        // `main`'s v_flex sat 18 points above the seek row's bottom, i.e. the time just over the
+        // track and the thumbnail above the time.
+        let galley = painter.layout_no_wrap(timestamp(time), theme::text::font(ui, "xs"), over_video::FOREGROUND);
+        let time_h = galley.size().y;
+        let label = Rect::from_min_size(
+            pos2(center_x - galley.size().x / 2. - 4., rect.top() + 6. - time_h),
+            galley.size() + vec2(8., 0.),
+        );
         if let Some((texture, aspect)) = preview {
             let height = PREVIEW_W / aspect;
             let image = Rect::from_min_size(
-                pos2(center_x - PREVIEW_W / 2., rect.top() - 6. - height),
+                pos2(center_x - PREVIEW_W / 2., label.top() - 4. - height),
                 vec2(PREVIEW_W, height),
             );
             painter.image(
@@ -827,11 +850,6 @@ impl PlayerPage {
                 StrokeKind::Outside,
             );
         }
-        let galley = painter.layout_no_wrap(timestamp(time), FontId::proportional(12.), over_video::FOREGROUND);
-        let label = Rect::from_center_size(
-            pos2(center_x, rect.top() - 6. - galley.size().y / 2.),
-            galley.size() + vec2(8., 4.),
-        );
         painter.rect_filled(label, CornerRadius::same(4), over_video::SURFACE);
         painter.galley(label.center() - galley.size() / 2., galley, over_video::FOREGROUND);
     }
@@ -839,19 +857,21 @@ impl PlayerPage {
     /// The volume slider: a drag bar from 0 to 100, as `main`'s slider was. egui's `Slider` is
     /// focusable, which would let Tab take the player's keys from it.
     fn volume_slider(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
-        let (rect, response) = ui.allocate_exact_size(vec2(VOLUME_W, PLAY_CONTROL), Sense::CLICK | Sense::DRAG);
+        let (rect, response) = ui.allocate_exact_size(vec2(VOLUME_W, VOLUME_H), Sense::CLICK | Sense::DRAG);
         let volume = if self.adjusting_volume {
             self.volume
         } else {
             view.volume
         };
+        // A slider to AccessKit, in percent.
+        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), volume, "Volume"));
         let fraction = (volume / 100.).clamp(0., 1.) as f32;
-        let track = Rect::from_center_size(rect.center(), vec2(rect.width(), 4.));
+        let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
-        painter.rect_filled(track, CornerRadius::same(2), over_video::SURFACE_SUBTLE);
+        painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
-        painter.rect_filled(filled, CornerRadius::same(2), over_video::FOREGROUND);
-        painter.circle_filled(pos2(filled.right(), track.center().y), 5., over_video::FOREGROUND);
+        painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::FOREGROUND);
+        slider_thumb(painter, pos2(filled.right(), track.center().y));
 
         let pressed = response.is_pointer_button_down_on();
         let released = response.clicked() || response.drag_stopped();
@@ -927,9 +947,7 @@ impl PlayerPage {
                     ui.set_opacity(alpha);
                 }
                 if let Some(segment) = view.skippable {
-                    let button =
-                        egui::Button::new(icon_text(ui, ICON_SKIP_NEXT, segment.kind.skip_label())).sense(Sense::CLICK);
-                    if ui.add(button).clicked() {
+                    if prompt_button(ui, ButtonKind::Large, Some(ICON_SKIP_NEXT), segment.kind.skip_label()).clicked() {
                         cx.services.control(UiCommand::SeekTo(segment.end));
                     }
                 } else if view.show_up_next {
@@ -940,11 +958,12 @@ impl PlayerPage {
                         .corner_radius(CornerRadius::same(12))
                         .inner_margin(Margin::same(12))
                         .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.x = GAP;
                             ui.horizontal(|ui| {
-                                ui.label(format!("Resumed from {}", timestamp(from)));
-                                let start_over = egui::Button::new(icon_text(ui, ICON_RESTART_ALT, "Start over"))
-                                    .sense(Sense::CLICK);
-                                if ui.add(start_over).clicked() {
+                                ui.label(RichText::new(format!("Resumed from {}", timestamp(from))).small());
+                                if prompt_button(ui, ButtonKind::Primary, Some(ICON_RESTART_ALT), "Start over")
+                                    .clicked()
+                                {
                                     cx.services.start_over();
                                 }
                             });
@@ -961,9 +980,12 @@ impl PlayerPage {
             .corner_radius(CornerRadius::same(12))
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
-                ui.set_width(UP_NEXT_W);
+                // `main`'s `w(320)` is the card's width with its padding, and gpui boxes that way.
+                ui.set_width(UP_NEXT_W - 2. * 12.);
+                ui.spacing_mut().item_spacing = vec2(8., 8.);
                 ui.label(RichText::new("Up next").small().color(over_video::MUTED_FOREGROUND));
-                ui.add(egui::Label::new(RichText::new(label)).truncate());
+                let name = theme::text::font(ui, "base");
+                ui.add(egui::Label::new(RichText::new(label).font(name)).truncate());
                 if view.autoplay
                     && let Some(remaining) = view.remaining
                 {
@@ -971,11 +993,10 @@ impl PlayerPage {
                     ui.label(RichText::new(text).small().color(over_video::MUTED_FOREGROUND));
                 }
                 ui.horizontal(|ui| {
-                    let play = egui::Button::new(icon_text(ui, ICON_PLAY_ARROW, "Play now")).sense(Sense::CLICK);
-                    if ui.add(play).clicked() {
+                    if prompt_button(ui, ButtonKind::Primary, Some(ICON_PLAY_ARROW), "Play now").clicked() {
                         cx.services.play_next();
                     }
-                    if ui.add(egui::Button::new("Cancel").sense(Sense::CLICK)).clicked()
+                    if prompt_button(ui, ButtonKind::Ghost, None, "Cancel").clicked()
                         && let Some(state) = cx.services.playback.now_playing_mut()
                     {
                         state.next_cancelled = true;
@@ -986,7 +1007,7 @@ impl PlayerPage {
 
     /// The chapters list: each chapter's image (when the server extracted them), name and start,
     /// the current one highlighted. A click seeks there and closes the menu.
-    fn chapters_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
+    fn chapters_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
         let Some(menu) = &view.chapters else { return };
         let mut chosen = None;
         egui::Popup::menu(response)
@@ -996,8 +1017,10 @@ impl PlayerPage {
             .align_alternatives(&[])
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .width(CHAPTERS_W)
+            .width(CHAPTERS_W + 24.)
+            .frame(menu_frame(ui))
             .show(|ui| {
+                ui.set_width(CHAPTERS_W);
                 egui::ScrollArea::vertical().max_height(CHAPTERS_MAX_H).show(ui, |ui| {
                     for chapter in &menu.rows {
                         let request = chapter.image_tag.as_ref().map(|tag| ImageRequest {
@@ -1008,36 +1031,38 @@ impl PlayerPage {
                         let (rect, row) =
                             ui.allocate_exact_size(vec2(ui.available_width(), CHAPTER_THUMB_H + 8.), Sense::CLICK);
                         let current = menu.current == Some(chapter.index);
-                        if current {
-                            ui.painter()
-                                .rect_filled(rect, CornerRadius::same(6), theme::tokens_of(ui).accent);
-                        } else if row.hovered() {
-                            ui.painter().rect_filled(
-                                rect,
-                                CornerRadius::same(6),
-                                ui.visuals().widgets.hovered.weak_bg_fill,
-                            );
-                        }
-                        let image =
-                            Rect::from_min_size(rect.min + vec2(4., 4.), vec2(CHAPTER_THUMB_W, CHAPTER_THUMB_H));
-                        crate::widgets::image::show(ui, &mut cx.services.images, image, request.as_ref(), None, 4);
+                        let tokens = theme::tokens_of(ui);
                         let name = chapter
                             .name
                             .clone()
                             .unwrap_or_else(|| format!("Chapter {}", chapter.index + 1));
+                        let start = timestamp(chapter.start);
+                        // The row's name for a screen reader: the chapter and when it starts.
+                        row.widget_info(|| {
+                            WidgetInfo::selected(Role::Button, ui.is_enabled(), current, format!("{name}, {start}"))
+                        });
+                        if current {
+                            ui.painter().rect_filled(rect, CornerRadius::same(8), tokens.accent);
+                        } else if row.hovered() {
+                            // `main`'s chapter row hovered with the muted fill.
+                            ui.painter().rect_filled(rect, CornerRadius::same(8), tokens.muted);
+                        }
+                        let image =
+                            Rect::from_min_size(rect.min + vec2(4., 4.), vec2(CHAPTER_THUMB_W, CHAPTER_THUMB_H));
+                        crate::widgets::image::show(ui, &mut cx.services.images, image, request.as_ref(), None, 4);
                         ui.painter().text(
                             pos2(image.right() + 12., image.top() + 2.),
                             Align2::LEFT_TOP,
                             name,
-                            TextStyle::Body.resolve(ui.style()),
-                            ui.visuals().text_color(),
+                            theme::text::font(ui, "sm"),
+                            tokens.foreground,
                         );
                         ui.painter().text(
                             pos2(image.right() + 12., image.top() + 24.),
                             Align2::LEFT_TOP,
-                            timestamp(chapter.start),
-                            TextStyle::Small.resolve(ui.style()),
-                            over_video::MUTED_FOREGROUND,
+                            start,
+                            theme::text::font(ui, "xs"),
+                            tokens.muted_foreground,
                         );
                         if row.clicked() {
                             chosen = Some(chapter.start);
@@ -1053,7 +1078,7 @@ impl PlayerPage {
 
     /// The settings menu: audio, subtitle and general tabs, with the tracks, the delays, the
     /// subtitle size and the speeds.
-    fn settings_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
+    fn settings_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
         let Some(menu) = &view.settings else { return };
         let mut tab = self.settings_tab;
         let mut chosen_audio = None;
@@ -1067,17 +1092,15 @@ impl PlayerPage {
             .align_alternatives(&[])
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .width(SETTINGS_W)
+            .width(SETTINGS_W + 24.)
+            .frame(menu_frame(ui))
             .show(|ui| {
-                ui.set_min_width(SETTINGS_W - 16.);
-                ui.horizontal(|ui| {
-                    for choice in SettingsTab::ALL {
-                        if menu_button(ui, choice.label(), tab == choice).clicked() {
-                            tab = choice;
-                        }
-                    }
-                });
-                ui.add_space(6.);
+                ui.set_width(SETTINGS_W);
+                if let Some(choice) = settings_tabs(ui, tab) {
+                    tab = choice;
+                }
+                ui.add_space(8.);
+                ui.spacing_mut().item_spacing.y = 8.;
                 match tab {
                     SettingsTab::Audio => {
                         section_label(ui, "Track");
@@ -1143,17 +1166,20 @@ impl PlayerPage {
                     }
                     SettingsTab::General => {
                         ui.horizontal(|ui| {
-                            ui.add_sized(vec2(110., 22.), egui::Label::new("Speed"));
+                            ui.spacing_mut().item_spacing.x = 4.;
+                            ui.add_sized(
+                                vec2(110., 24.),
+                                egui::Label::new(RichText::new("Speed").font(theme::text::font(ui, "sm"))),
+                            );
                             if menu.in_group {
-                                ui.label(RichText::new("Normal in SyncPlay").color(over_video::MUTED_FOREGROUND));
-                            } else {
-                                for &speed in &Adjustments::SPEEDS {
-                                    let current = (speed - adjustments.speed).abs() < 1e-6;
-                                    if menu_button(ui, format!("{speed}×"), current).clicked() {
-                                        adjustments.speed = speed;
-                                        adjusted = true;
-                                    }
-                                }
+                                ui.label(
+                                    RichText::new("Normal in SyncPlay")
+                                        .small()
+                                        .color(over_video::MUTED_FOREGROUND),
+                                );
+                            } else if let Some(speed) = speed_group(ui, adjustments.speed) {
+                                adjustments.speed = speed;
+                                adjusted = true;
                             }
                         });
                     }
@@ -1164,8 +1190,11 @@ impl PlayerPage {
                     SettingsTab::General => Some("Keys: [ and ] change the speed."),
                 };
                 if let Some(hint) = hint {
-                    ui.add_space(4.);
-                    ui.label(RichText::new(hint).small().color(over_video::MUTED_FOREGROUND));
+                    ui.label(
+                        RichText::new(hint)
+                            .font(theme::text::font(ui, "xs"))
+                            .color(over_video::MUTED_FOREGROUND),
+                    );
                 }
             });
         self.settings_tab = tab;
@@ -1183,7 +1212,7 @@ impl PlayerPage {
 
     /// The version picker's menu: the item's versions, the playing one checked. Another version
     /// restarts the stream at the current position.
-    fn versions_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
+    fn versions_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
         if !egui::Popup::is_id_open(cx.ctx, versions_id()) {
             return;
         }
@@ -1196,10 +1225,11 @@ impl PlayerPage {
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .width(240.)
+            .frame(menu_frame(ui))
             .show(|ui| {
                 for version in &view.versions {
                     let current = version.id == view.source_id;
-                    if menu_button(ui, &version.name, current).clicked() {
+                    if check_row(ui, &version.name, current).clicked() {
                         chosen = Some(version.id.clone());
                     }
                 }
@@ -1499,19 +1529,24 @@ fn toggle_fullscreen(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen(ctx)));
 }
 
-/// A control-bar button: an icon in a square, with the keyboard's ring when its menu is open.
-/// Not focusable: egui's focus would take every key from the player (`keys.rs`), as U8's dialogs
-/// avoid for their buttons.
+/// A control-bar button: an icon in a square, filled with the accent while its menu is open and
+/// half of it under the pointer, as gpui-kit's ghost button is. Not focusable: egui's focus would
+/// take every key from the player (`keys.rs`), as U8's dialogs avoid for their buttons. Its
+/// AccessKit name is the tooltip's text without the key hint, so a screen reader reads "Back"
+/// rather than "Back (Esc)".
 fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str, active: bool) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::CLICK);
+    let name = tooltip.split(" (").next().unwrap_or(tooltip);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), name));
+    let tokens = theme::tokens_of(ui);
     let fill = if active {
-        over_video::SURFACE_SUBTLE
+        tokens.accent
     } else if response.hovered() {
-        over_video::SURFACE
+        ghost_hover(ui)
     } else {
         Color32::TRANSPARENT
     };
-    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+    ui.painter().rect_filled(rect, CornerRadius::same(tokens.radius), fill);
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -1522,68 +1557,301 @@ fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str
     response.on_hover_text(tooltip)
 }
 
+/// `main`'s ghost button under the pointer: gpui-kit's accent at half strength in the dark theme,
+/// which is what the player draws in either theme.
+fn ghost_hover(ui: &egui::Ui) -> Color32 {
+    let [r, g, b, _] = theme::tokens_of(ui).accent.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, 128)
+}
+
+/// A slider's thumb, as gpui-kit draws one: a 16-point circle whose 1-point ring is the bar's
+/// colour at half strength around a dark middle.
+fn slider_thumb(painter: &egui::Painter, center: egui::Pos2) {
+    painter.circle_filled(center, THUMB_R, over_video::THUMB_RING);
+    painter.circle_filled(center, THUMB_R - THUMB_RING, over_video::THUMB);
+}
+
 fn control_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str) -> Response {
     sized_control(ui, icon, CONTROL, tooltip, false)
 }
 
-/// A button with an icon before its label, in the prompt's cards.
-fn icon_text(ui: &egui::Ui, icon: MaterialIcon, text: &str) -> egui::WidgetText {
-    let body = TextStyle::Body.resolve(ui.style());
-    let mut job = LayoutJob::default();
-    job.append(
-        icon.codepoint,
-        0.,
-        TextFormat {
-            font_id: FontId::new(body.size + 4., icon.font_family()),
-            color: over_video::FOREGROUND,
-            ..Default::default()
+/// How a prompt's button is painted, as gpui-kit's variants are: `main`'s large default button
+/// (Skip intro), a primary one (Play now, Start over) and a ghost one (Cancel).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ButtonKind {
+    Large,
+    Primary,
+    Ghost,
+}
+
+/// A button of the player's prompt, as gpui-kit draws one: 32 points high with `main`'s padding,
+/// radius and icon size (24 in the large one, 16 otherwise). Drawn by the page rather than as an
+/// `egui::Button` for those measurements, and so it can't take the keyboard.
+fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>, label: &str) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let (padding, gap, text, icon_size) = match kind {
+        ButtonKind::Large => (12., 8., theme::text::font(ui, "base"), 24.),
+        _ => (10., 8., theme::text::font(ui, "sm"), 16.),
+    };
+    let (fg, fill, stroke, hover, pressed) = match kind {
+        ButtonKind::Large => (
+            tokens.foreground,
+            tokens.button,
+            tokens.input,
+            tokens.button_hover,
+            tokens.button_active,
+        ),
+        ButtonKind::Primary => (
+            tokens.primary_foreground,
+            tokens.primary,
+            tokens.primary,
+            tokens.primary_hover,
+            tokens.primary_hover,
+        ),
+        ButtonKind::Ghost => (
+            tokens.foreground,
+            Color32::TRANSPARENT,
+            Color32::TRANSPARENT,
+            ghost_hover(ui),
+            tokens.accent,
+        ),
+    };
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), text, fg);
+    let mut width = galley.size().x + 2. * padding;
+    if icon.is_some() {
+        width += icon_size + gap;
+    }
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 32.), Sense::CLICK);
+    let fill = if response.is_pointer_button_down_on() {
+        pressed
+    } else if response.hovered() {
+        hover
+    } else {
+        fill
+    };
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        CornerRadius::same(tokens.radius),
+        fill,
+        if stroke == Color32::TRANSPARENT {
+            Stroke::NONE
+        } else {
+            Stroke::new(1., stroke)
         },
+        StrokeKind::Inside,
     );
-    job.append(
-        &format!("  {text}"),
-        0.,
-        TextFormat {
-            font_id: body,
-            color: over_video::FOREGROUND,
-            ..Default::default()
-        },
-    );
-    egui::WidgetText::LayoutJob(job.into())
+    let mut left = rect.left() + padding;
+    if let Some(icon) = icon {
+        painter.text(
+            pos2(left, rect.center().y),
+            Align2::LEFT_CENTER,
+            icon.codepoint,
+            FontId::new(icon_size, icon.font_family()),
+            fg,
+        );
+        left += icon_size + gap;
+    }
+    painter.galley(pos2(left, rect.center().y - galley.size().y / 2.), galley, fg);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), label));
+    response
 }
 
 /// A small label in the player's bars (SyncPlay, Transcoding, the speed).
 fn label_badge(ui: &mut egui::Ui, text: impl Into<String>) {
     egui::Frame::new()
         .fill(over_video::SURFACE_SUBTLE)
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(8, 2))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(8, 0))
         .show(ui, |ui| {
-            ui.label(RichText::new(text.into()).small());
+            ui.label(RichText::new(text.into()).small().color(over_video::MUTED_FOREGROUND));
         });
 }
 
-/// A button of the settings menu's tabs and speeds, and its tracks: selected when it's the
-/// current choice, and never focusable.
-fn menu_button(ui: &mut egui::Ui, text: impl Into<String>, selected: bool) -> Response {
-    let button = egui::Button::new(RichText::new(text.into()).small()).sense(Sense::CLICK);
-    ui.add(theme::selected(ui, selected, button))
+/// The frame a player menu draws in: `main`'s popover surface (gpui-kit's `popover_style`), with
+/// its 12-point inset and its soft shadow, rather than egui's thinner popup frame.
+fn menu_frame(ui: &egui::Ui) -> egui::Frame {
+    let tokens = theme::tokens_of(ui);
+    egui::Frame::new()
+        .fill(tokens.popover)
+        .stroke(Stroke::new(1., tokens.border))
+        .corner_radius(CornerRadius::same(tokens.radius))
+        .inner_margin(Margin::same(12))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 4],
+            blur: 4,
+            spread: 0,
+            color: Color32::from_black_alpha(26),
+        })
+}
+
+/// The settings menu's tabs: `main`'s segmented tab bar, a track with the selected tab in the
+/// popover's own colour on it. Returns the tab clicked.
+fn settings_tabs(ui: &mut egui::Ui, current: SettingsTab) -> Option<SettingsTab> {
+    let tokens = theme::tokens_of(ui);
+    let mut chosen = None;
+    egui::Frame::new()
+        .fill(tokens.tab_bar)
+        .corner_radius(CornerRadius::same(tokens.radius))
+        .inner_margin(Margin::symmetric(3, 0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.x = 2.;
+            ui.horizontal(|ui| {
+                for tab in SettingsTab::ALL {
+                    if segmented_tab(ui, tab.label(), tab == current).clicked() {
+                        chosen = Some(tab);
+                    }
+                }
+            });
+        });
+    chosen
+}
+
+/// One tab of [`settings_tabs`]: 24 points high, its label at `text_sm` with 10 points either
+/// side, and an 18-point pill in the background colour behind the selected one. A selectable tab
+/// to AccessKit, with its selected state, though not keyboard-focusable like the rest of the
+/// player's widgets.
+fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let color = if selected {
+        tokens.foreground
+    } else {
+        tokens.tab_foreground
+    };
+    let font = theme::text::font(ui, "sm");
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 20., 24.), Sense::CLICK);
+    response.widget_info(|| WidgetInfo::selected(Role::Tab, ui.is_enabled(), selected, text));
+    let painter = ui.painter();
+    if selected {
+        let pill = Rect::from_center_size(rect.center(), vec2(rect.width(), 18.));
+        painter.rect_filled(pill, CornerRadius::same(tokens.radius - 2), tokens.background);
+    }
+    painter.galley(rect.center() - galley.size() / 2., galley, color);
+    response
+}
+
+/// The speed choices, as `main`'s segmented outline toggle group: 24-point segments joined into
+/// one outlined control, the chosen one filled with the accent. Returns the speed clicked. Each
+/// segment is a radio button to AccessKit with its selected state; the group's own rect only
+/// senses hover, so it can't take a click or focus meant for a segment.
+fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
+    let tokens = theme::tokens_of(ui);
+    let font = theme::text::font(ui, "sm");
+    let labels: Vec<String> = Adjustments::SPEEDS.iter().map(|speed| format!("{speed}×")).collect();
+    let widths: Vec<f32> = labels
+        .iter()
+        .map(|label| {
+            let galley = ui
+                .painter()
+                .layout_no_wrap(label.clone(), font.clone(), tokens.foreground);
+            (galley.size().x + 8.).max(24.)
+        })
+        .collect();
+    let total: f32 = widths.iter().sum();
+    let (rect, _) = ui.allocate_exact_size(vec2(total, 24.), Sense::hover());
+    let mut chosen = None;
+    let mut left = rect.left();
+    for (index, &speed) in Adjustments::SPEEDS.iter().enumerate() {
+        let segment = Rect::from_min_size(pos2(left, rect.top()), vec2(widths[index], rect.height()));
+        let response = ui.interact(segment, ui.scope_id().with(("player_speed", index)), Sense::CLICK);
+        let selected = (speed - current).abs() < 1e-6;
+        response.widget_info(|| WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected, &labels[index]));
+        let fill = if selected {
+            tokens.accent
+        } else if response.hovered() {
+            ghost_hover(ui)
+        } else {
+            tokens.background
+        };
+        let last = index + 1 == widths.len();
+        ui.painter().rect_filled(
+            segment,
+            CornerRadius {
+                nw: if index == 0 { tokens.radius } else { 0 },
+                sw: if index == 0 { tokens.radius } else { 0 },
+                ne: if last { tokens.radius } else { 0 },
+                se: if last { tokens.radius } else { 0 },
+            },
+            fill,
+        );
+        let color = if selected {
+            tokens.accent_foreground
+        } else {
+            tokens.foreground
+        };
+        let galley = ui.painter().layout_no_wrap(labels[index].clone(), font.clone(), color);
+        ui.painter()
+            .galley(segment.center() - galley.size() / 2., galley, color);
+        if response.clicked() {
+            chosen = Some(speed);
+        }
+        left += widths[index];
+    }
+    // One outline around the joined segments, with a divider between them.
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(tokens.radius),
+        Stroke::new(1., tokens.border),
+        StrokeKind::Inside,
+    );
+    let mut x = rect.left();
+    for width in widths.iter().take(widths.len().saturating_sub(1)) {
+        x += width;
+        ui.painter().line_segment(
+            [pos2(x, rect.top()), pos2(x, rect.bottom())],
+            Stroke::new(1., tokens.border),
+        );
+    }
+    chosen
+}
+
+/// A small ghost button, as `main`'s settings steppers used: 24 points high, 8 either side of
+/// its label, the accent under the pointer.
+fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let font = theme::text::font(ui, "sm");
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, tokens.foreground);
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 16., 24.), Sense::CLICK);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), text));
+    let fill = if response.is_pointer_button_down_on() {
+        tokens.accent
+    } else if response.hovered() {
+        ghost_hover(ui)
+    } else {
+        Color32::TRANSPARENT
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(tokens.radius), fill);
+    painter.galley(rect.center() - galley.size() / 2., galley, tokens.foreground);
+    response
 }
 
 /// The version picker's button: a small select with the playing version's name and a caret, as
 /// `main`'s was. Drawn by the page (not an egui widget) so it can't take the keyboard.
 fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(VERSION_W, VERSION_H), Sense::CLICK);
+    // A combo box to AccessKit, as egui's own is: the name is its value, "Version" its label.
+    response.widget_info(|| {
+        let mut info = WidgetInfo::new(Role::ComboBox);
+        info.enabled = ui.is_enabled();
+        info.label = Some("Version".to_owned());
+        info.current_text_value = Some(name.to_owned());
+        info
+    });
+    let tokens = theme::tokens_of(ui);
     let painter = ui.painter().clone();
     let fill = if response.hovered() {
-        over_video::SURFACE
+        tokens.muted
     } else {
-        Color32::TRANSPARENT
+        tokens.input_background()
     };
     painter.rect(
         rect,
-        CornerRadius::same(4),
+        CornerRadius::same(tokens.radius),
         fill,
-        Stroke::new(1., over_video::MARK),
+        Stroke::new(1., tokens.input),
         StrokeKind::Inside,
     );
     let caret = 14.;
@@ -1607,34 +1875,37 @@ fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
 
 /// A small heading inside a settings tab.
 fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).small().color(over_video::MUTED_FOREGROUND));
+    ui.label(
+        RichText::new(text)
+            .font(theme::text::font(ui, "xs"))
+            .color(over_video::MUTED_FOREGROUND),
+    );
 }
 
 /// A settings value with its step buttons; `None` unless one was pressed.
 fn stepper(ui: &mut egui::Ui, label: &str, value: String, down: &str, up: &str) -> Option<Step> {
     let mut step = None;
     ui.horizontal(|ui| {
-        ui.add_sized(vec2(110., 22.), egui::Label::new(RichText::new(label).small()));
-        if push_button(ui, down) {
+        ui.spacing_mut().item_spacing.x = 4.;
+        ui.add_sized(
+            vec2(110., 24.),
+            egui::Label::new(RichText::new(label).font(theme::text::font(ui, "sm"))),
+        );
+        if small_button(ui, down).clicked() {
             step = Some(Step::Down);
         }
         ui.add_sized(
-            vec2(56., 22.),
-            egui::Label::new(RichText::new(value).small().monospace()),
+            vec2(56., 24.),
+            egui::Label::new(RichText::new(value).font(theme::text::font(ui, "sm"))),
         );
-        if push_button(ui, up) {
+        if small_button(ui, up).clicked() {
             step = Some(Step::Up);
         }
-        if push_button(ui, "Reset") {
+        if small_button(ui, "Reset").clicked() {
             step = Some(Step::Reset);
         }
     });
     step
-}
-
-fn push_button(ui: &mut egui::Ui, text: &str) -> bool {
-    ui.add(egui::Button::new(RichText::new(text).small()).sense(Sense::CLICK))
-        .clicked()
 }
 
 /// A settings tab's list of tracks to pick from, the selected one checked. A plain list rather
@@ -1663,37 +1934,40 @@ fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], sele
     chosen
 }
 
-/// A track row: a check in a fixed slot (so the labels line up), then the name.
+/// A track row: a check in a fixed slot (so the labels line up), then the name. The row itself
+/// has no fill when it's the selected track (only the check marks it), and the accent under the
+/// pointer, as `main`'s list had it. A radio button to AccessKit, with its selected state: one
+/// track of the list plays at a time.
 fn check_row(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
-    let body = TextStyle::Body.resolve(ui.style());
-    let color = ui.visuals().text_color();
-    let mut job = LayoutJob::default();
-    job.append(
+    let tokens = theme::tokens_of(ui);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), TRACK_ROW_H), Sense::CLICK);
+    response.widget_info(|| WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected, label));
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, CornerRadius::same(8), tokens.accent);
+    }
+    let mut check = theme::text::font(ui, "sm");
+    check.family = ICON_CHECK.font_family();
+    let slot = Rect::from_min_size(pos2(rect.left() + 8., rect.top()), vec2(16., rect.height()));
+    painter.text(
+        slot.center(),
+        Align2::CENTER_CENTER,
         ICON_CHECK.codepoint,
-        0.,
-        TextFormat {
-            font_id: crate::theme::text::icon(ui, ICON_CHECK.font_family()),
-            color: if selected { color } else { Color32::TRANSPARENT },
-            ..Default::default()
+        check,
+        if selected {
+            tokens.foreground
+        } else {
+            Color32::TRANSPARENT
         },
     );
-    job.append(
-        &format!("  {label}"),
-        0.,
-        TextFormat {
-            font_id: body,
-            color,
-            ..Default::default()
-        },
+    let font = theme::text::font(ui, "sm");
+    let galley = painter.layout_no_wrap(label.to_owned(), font, tokens.foreground);
+    painter.galley(
+        pos2(slot.right() + 8., rect.center().y - galley.size().y / 2.),
+        galley,
+        tokens.foreground,
     );
-    ui.add_sized(
-        vec2(ui.available_width(), TRACK_ROW_H),
-        theme::selected(
-            ui,
-            selected,
-            egui::Button::new(egui::WidgetText::LayoutJob(job.into())).sense(Sense::CLICK),
-        ),
-    )
+    response
 }
 
 /// The text's width at the small style's size, for laying out the top bar.
@@ -1762,9 +2036,123 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, VOLUME_STEP, delay_text, scroll_steps, time_at,
-        wheel_notches,
+        CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, SETTINGS_W, SettingsTab,
+        VOLUME_STEP, check_row, delay_text, menu_frame, scroll_steps, settings_id, settings_tabs, sized_control,
+        time_at, toggle_menu, wheel_notches,
     };
+
+    /// The menu's painted widgets still say what they are to assistive technology: an open
+    /// settings menu's tabs and track rows expose their labels and their selected state through
+    /// AccessKit, and an AccessKit click still picks one, even though none of them is
+    /// keyboard-focusable (the player's keys are `keys.rs`'s, not egui's).
+    #[test]
+    fn an_open_menu_exposes_its_tabs_and_rows() {
+        use egui::accesskit::{Role, Toggled};
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::{NodeT as _, Queryable as _};
+
+        struct Menu {
+            tab: SettingsTab,
+            track: usize,
+        }
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(480., 320.))
+            .allow_missing_glyphs()
+            .with_accessibility_check(false)
+            .with_context_setup(|ctx| {
+                egui_material_icons::initialize(ctx);
+                crate::theme::apply(ctx, &crate::config::Config::default());
+            })
+            .build_ui_state(
+                |ui, menu: &mut Menu| {
+                    let trigger = sized_control(ui, ICON_SETTINGS, CONTROL, "Playback settings", true);
+                    if trigger.clicked() {
+                        // As the player's own triggers do: a popup remembered by id is toggled
+                        // by the page rather than by `Popup::menu`'s click handling.
+                        toggle_menu(ui.ctx(), settings_id());
+                    }
+                    egui::Popup::menu(&trigger)
+                        .id(settings_id())
+                        .open_memory(None::<egui::SetOpenCommand>)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .width(SETTINGS_W + 24.)
+                        .frame(menu_frame(ui))
+                        .show(|ui| {
+                            ui.set_width(SETTINGS_W);
+                            if let Some(choice) = settings_tabs(ui, menu.tab) {
+                                menu.tab = choice;
+                            }
+                            if check_row(ui, "English - AAC - Mono - Default", menu.track == 0).clicked() {
+                                menu.track = 0;
+                            }
+                            if check_row(ui, "Japanese - AAC - Mono", menu.track == 1).clicked() {
+                                menu.track = 1;
+                            }
+                        });
+                },
+                Menu {
+                    tab: SettingsTab::Audio,
+                    track: 0,
+                },
+            );
+        harness.step();
+
+        // The trigger is a labelled button; its tooltip's key hint isn't part of the name.
+        let trigger = harness.get_by_label("Playback settings");
+        assert_eq!(trigger.accesskit_node().role(), Role::Button);
+        trigger.click();
+        // A frame per queued event (hover, press, release), then one for the menu to draw: its
+        // AccessKit nodes are registered with its first full frame.
+        harness.step();
+        harness.step();
+
+        // The open menu's tab bar: each tab's name, exactly one selected.
+        let audio = harness.get_by_label("Audio");
+        assert_eq!(audio.accesskit_node().role(), Role::Tab);
+        assert_eq!(audio.accesskit_node().toggled(), Some(Toggled::True));
+        assert_eq!(
+            harness.get_by_label("Subtitles").accesskit_node().toggled(),
+            Some(Toggled::False)
+        );
+        // Its track rows: the playing one checked, the others not.
+        let english = harness.get_by_label("English - AAC - Mono - Default");
+        assert_eq!(english.accesskit_node().role(), Role::RadioButton);
+        assert_eq!(english.accesskit_node().toggled(), Some(Toggled::True));
+        assert_eq!(
+            harness.get_by_label("Japanese - AAC - Mono").accesskit_node().toggled(),
+            Some(Toggled::False)
+        );
+
+        // An AccessKit click on a tab and then on a row still selects it, and the menu reports it.
+        harness.get_by_label("Subtitles").click();
+        harness.step();
+        harness.step();
+        assert_eq!(harness.state().tab, SettingsTab::Subtitles);
+        assert_eq!(
+            harness.get_by_label("Audio").accesskit_node().toggled(),
+            Some(Toggled::False)
+        );
+        assert_eq!(
+            harness.get_by_label("Subtitles").accesskit_node().toggled(),
+            Some(Toggled::True)
+        );
+        harness.get_by_label("Japanese - AAC - Mono").click();
+        harness.step();
+        harness.step();
+        assert_eq!(harness.state().track, 1);
+        assert_eq!(
+            harness
+                .get_by_label("English - AAC - Mono - Default")
+                .accesskit_node()
+                .toggled(),
+            Some(Toggled::False)
+        );
+        assert_eq!(
+            harness.get_by_label("Japanese - AAC - Mono").accesskit_node().toggled(),
+            Some(Toggled::True)
+        );
+    }
 
     #[test]
     fn the_controls_are_up_on_the_players_first_frame() {
