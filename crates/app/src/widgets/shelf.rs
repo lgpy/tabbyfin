@@ -15,7 +15,7 @@
 use std::hash::Hash;
 
 use egui::containers::scroll_area::{DragScroll, ScrollBarVisibility, ScrollSource};
-use egui::{Align, Button, Layout, RichText, ScrollArea, Ui};
+use egui::{Align, Button, Layout, Rect, RichText, ScrollArea, Ui};
 use egui_material_icons::icons::{ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT};
 
 use crate::widgets::text::CARD_GAP;
@@ -23,9 +23,10 @@ use crate::widgets::text::CARD_GAP;
 /// How far under its title a row's cards start (`main`'s `shelf`).
 const TITLE_GAP: f32 = 16.;
 
-/// A titled row of cards, [`CARD_GAP`] apart.
-pub fn shelf(ui: &mut Ui, id: impl Hash + std::fmt::Debug, title: &str, cards: impl FnOnce(&mut Ui)) {
-    shelf_with_gaps(ui, id, title, CARD_GAP, TITLE_GAP, cards);
+/// A titled row of cards, [`CARD_GAP`] apart. Returns the row's rectangle, for a page that
+/// scrolls its shelves into view as the keyboard cursor moves onto them.
+pub fn shelf(ui: &mut Ui, id: impl Hash + std::fmt::Debug, title: &str, cards: impl FnOnce(&mut Ui)) -> Rect {
+    shelf_with_gaps(ui, id, title, CARD_GAP, TITLE_GAP, cards)
 }
 
 /// [`shelf`] with a different space between the cards and under the title (Home's shelves are
@@ -37,7 +38,10 @@ pub fn shelf_with_gaps(
     gap: f32,
     title_gap: f32,
     cards: impl FnOnce(&mut Ui),
-) {
+) -> Rect {
+    // The row's top before the title takes its place: a page scrolls the whole row into view
+    // (its title and cards together), as `main`'s `browse::reveal` scrolled a whole section.
+    let top = ui.cursor().min;
     let id = ui.make_persistent_id(id);
     let state: State = ui.data(|data| data.get_temp(id)).unwrap_or_default();
     // One page is what shows at once, so no card is ever skipped.
@@ -105,6 +109,12 @@ pub fn shelf_with_gaps(
         ui.ctx().request_repaint();
     }
     ui.data_mut(|data| data.insert_temp(id, measured));
+    // The row's own height, not its viewport's: the viewport is clipped to what's on screen, so
+    // a row half below the page's edge would look like it ends at the edge and never scroll.
+    Rect::from_min_max(
+        top,
+        egui::pos2(ui.max_rect().right(), out.inner_rect.top() + out.content_size.y),
+    )
 }
 
 /// A page button, small and frameless.
