@@ -5,15 +5,15 @@
 //! nothing is shared through globals or `Rc<RefCell<…>>`. Code that needs two parts at once
 //! (playback asking SyncPlay, remote control driving playback) is a method here, which can
 //! reach every part; each part's module adds its own `impl Services` block (playback's
-//! controls are in `playback.rs`, SyncPlay's in `syncplay.rs`).
-//!
-//! Still to come: `remote` (P3), and the rest of `live` (P3).
+//! controls are in `playback.rs`, SyncPlay's in `syncplay.rs`, remote control's in
+//! `remote.rs`).
 
 use crate::config::SavedServer;
 use crate::images::ImageCache;
 use crate::item_menu::Mark;
 use crate::live::Live;
 use crate::playback::{self, PlaybackManager};
+use crate::remote::Remote;
 use crate::session::{Session, describe_error};
 use crate::syncplay::SyncPlay;
 use crate::task;
@@ -44,9 +44,13 @@ pub struct Services {
     /// The SyncPlay group this session is in, its queue, and the panel's requests. What
     /// involves playback is on `Services` (`syncplay.rs`).
     pub syncplay: SyncPlay,
-    /// The session websocket, which feeds SyncPlay (and, with P3, remote control and
-    /// watch-data refreshes).
+    /// The session websocket, which feeds SyncPlay, remote control and the watch-data
+    /// refresh.
     pub live: Live,
+    /// Remote control from other clients: the fetched items of a `Play` request, until
+    /// `tick_remote` places them (playing and the controls are methods on `Services`,
+    /// `remote.rs`).
+    pub remote: Remote,
 }
 
 /// A watched or favorite change, as its request finishes: what was asked for, on which item,
@@ -79,6 +83,9 @@ pub enum AppEvent {
     /// the player. Not sent between an episode and the next one it autoplays, nor while waiting
     /// to reconnect.
     PlaybackEnded,
+    /// Another client asked for fullscreen (remote control's `ToggleFullscreen`): the app owns
+    /// the window, so it carries this out.
+    ToggleFullscreen,
 }
 
 impl Services {
@@ -90,6 +97,7 @@ impl Services {
             playback: PlaybackManager::new(ctx, session.client.clone(), session.account_key()),
             syncplay: SyncPlay::new(session.client.clone(), ctx),
             live: Live::connect(session.client.clone(), ctx),
+            remote: Remote::new(session.client.clone(), ctx),
             session,
             user_data: 0,
             events: Vec::new(),
@@ -102,13 +110,14 @@ impl Services {
 
     /// Work that has to go on whatever is on screen: draining the background channels, firing
     /// deadlines, uploading the images that finished loading. Runs from `App::logic` before each
-    /// frame, and also while the window is hidden, so playback keeps reporting when it's
-    /// minimised.
+    /// frame, and also while the window is hidden, so playback keeps reporting, the websocket
+    /// keeps refreshing pages and remote control keeps working when it's minimised.
     pub fn tick(&mut self, _ctx: &egui::Context) {
         self.images.tick();
         self.apply_menu_requests();
         self.tick_playback();
         self.tick_live();
+        self.tick_remote();
         self.tick_syncplay();
     }
 

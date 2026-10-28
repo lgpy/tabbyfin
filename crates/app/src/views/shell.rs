@@ -94,7 +94,9 @@ impl Shell {
     /// fullscreen.
     pub fn player_ended(&mut self, ctx: &egui::Context) {
         self.video = None;
-        if std::mem::take(&mut self.player) && ctx.input(|i| i.viewport().fullscreen).unwrap_or(false) {
+        if std::mem::take(&mut self.player) {
+            // `viewport().fullscreen` is a frame stale (a request applies at the next pass), so
+            // ask for windowed unconditionally; a windowed window ignores it.
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
         }
         ctx.request_repaint();
