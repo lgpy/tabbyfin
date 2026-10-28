@@ -334,9 +334,15 @@ fn show_shelves(
     let selected = cursor.selected();
     let mut target = None;
     egui::ScrollArea::vertical().show(ui, |ui| {
-        // `main`'s `px_6` and `py_6`: the shelves keep clear of the window's edges.
+        // `main`'s `py_6`: the page keeps clear of the window's top and bottom edges, and each
+        // shelf is inset `px_6` itself, so its row scrolls to the window's edge.
         egui::Frame::NONE
-            .inner_margin(egui::Margin::same(PAGE_PADDING as i8))
+            .inner_margin(egui::Margin {
+                left: 0,
+                right: 0,
+                top: PAGE_PADDING as i8,
+                bottom: PAGE_PADDING as i8,
+            })
             .show(ui, |ui| {
                 let images = &mut cx.services.images;
                 for (index, row) in rows.iter().enumerate() {
@@ -344,7 +350,7 @@ fn show_shelves(
                         ui.add_space(SHELF_GAP);
                     }
                     let shelf = motion::enter(ui, ("shelf", row.id), motion::shelf_delay(index), |ui| {
-                        shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, |ui| {
+                        shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, shelf::PADDING, |ui| {
                             cards(
                                 ui,
                                 row.items,

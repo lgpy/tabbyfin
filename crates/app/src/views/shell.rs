@@ -25,10 +25,11 @@
 //! the video and its controls filling it, and the player's keys working. Going back stops
 //! playback; the player closing leaves fullscreen.
 
+use egui::accesskit::Role;
 use egui::text::LayoutJob;
 use egui::{
     Align, Align2, Color32, CornerRadius, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText, Sense,
-    Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, vec2,
+    Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, WidgetInfo, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -1305,6 +1306,8 @@ impl Shell {
         let icon = text::icon(ui, ICON_SEARCH.font_family());
         let icon_size = icon.size;
         let text_inset = (10. + icon_size + 6.).round() as i8;
+        let clear_inset = (10. + icon_size + 6.).round() as i8;
+        let mut clear_clicked = false;
         let response = ui
             .scope_builder(
                 UiBuilder::new()
@@ -1320,6 +1323,9 @@ impl Shell {
                     // Tab nor drop it on Esc before the box reads Esc (`search_box_keys`), or
                     // the app would stop getting keys until something was clicked.
                     motion::faded(ui, opacity, |ui| {
+                        // `main`'s field was `cleanable`: a clear button at its right end while
+                        // it had text, which leaves the text room as the prefix icon does.
+                        let clear = !self.search_text.is_empty();
                         let response = ui.add(
                             egui::TextEdit::singleline(&mut self.search_text)
                                 .id(Id::unique(SEARCH_ID))
@@ -1329,7 +1335,7 @@ impl Shell {
                                 // and below it, and the icon's room on the left.
                                 .margin(egui::Margin {
                                     left: text_inset,
-                                    right: 10,
+                                    right: if clear { clear_inset } else { 10 },
                                     top: 9,
                                     bottom: 9,
                                 })
@@ -1345,14 +1351,40 @@ impl Shell {
                             egui::pos2(rect.left() + 10. + icon_size / 2., rect.center().y),
                             Align2::CENTER_CENTER,
                             ICON_SEARCH.codepoint,
-                            icon,
+                            icon.clone(),
                             theme::tokens_of(ui).muted_foreground,
                         );
+                        if clear {
+                            let center = egui::pos2(rect.right() - 10. - icon_size / 2., rect.center().y);
+                            // Not focusable (R6's rule for painted controls): a Tab that gave egui
+                            // the keyboard would take the box's keys. Its AccessKit name says what
+                            // it does.
+                            let hit = Rect::from_center_size(center, vec2(icon_size + 8., icon_size + 8.));
+                            let button = ui.interact(hit, Id::unique("top_bar_search_clear"), Sense::CLICK);
+                            button.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), "Clear search"));
+                            // gpui-kit's text button: the foreground at 90 % at rest, and the
+                            // foreground under the pointer.
+                            let tokens = theme::tokens_of(ui);
+                            let color = if button.hovered() {
+                                tokens.foreground
+                            } else {
+                                tokens.foreground.gamma_multiply(0.9)
+                            };
+                            ui.painter()
+                                .text(center, Align2::CENTER_CENTER, ICON_CLOSE.codepoint, icon, color);
+                            clear_clicked = button.clicked();
+                        }
                         response
                     })
                 },
             )
             .inner;
+        // Clearing keeps the keyboard in the box, as `main`'s clear button did; the results
+        // close through `search_changed` from the empty text, as clearing with the keyboard does.
+        if clear_clicked {
+            self.search_text.clear();
+            self.want_search_focus = true;
+        }
         if std::mem::take(&mut self.want_search_focus) {
             response.request_focus();
         }
@@ -1363,11 +1395,12 @@ impl Shell {
             self.top_mut().hide_cursor();
         }
         self.search_focused = ui.ctx().memory(|memory| memory.has_focus(Id::unique(SEARCH_ID)));
-        if response.changed() {
+        if response.changed() || clear_clicked {
             self.search_changed(cx);
         }
-        // Closed, the box goes once it has nothing left to show, as `main`'s did on blur.
-        if response.lost_focus() && self.search_text.trim().is_empty() {
+        // Closed, the box goes once it has nothing left to show, as `main`'s did on blur. A
+        // clear click is the one way to empty it without leaving it.
+        if !clear_clicked && response.lost_focus() && self.search_text.trim().is_empty() {
             self.close_search(cx.ctx);
         }
         if highlighted && !focused {

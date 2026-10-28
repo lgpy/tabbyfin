@@ -26,15 +26,25 @@ use egui_material_icons::icons::{ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT};
 use crate::smooth_scroll::Glide;
 use crate::theme;
 
+/// A shelf's side padding, `main`'s `px_6`: the page adds none of its own, so the row can
+/// scroll a card to the window's edge. Item pages that already inset their content pass 0.
+pub const PADDING: f32 = 24.;
+/// Under the row, `main`'s `pb_2`, so the cards keep clear of the next shelf.
+const BOTTOM_PADDING: f32 = 8.;
+/// The title row's height, `main`'s `min_h_6`, so the shelf keeps it when the arrows hide.
+const TITLE_H: f32 = 24.;
+
 /// A titled row of cards, with the space between its cards and under its title given (Home's
-/// shelves are wider apart than the item pages'). Returns the row's rectangle, for a page that
-/// scrolls its shelves into view as the keyboard cursor moves onto them.
+/// shelves are wider apart than the item pages'), inset `padding` from the page's edges. Returns
+/// the row's rectangle, for a page that scrolls its shelves into view as the keyboard cursor
+/// moves onto them.
 pub fn shelf_with_gaps(
     ui: &mut Ui,
     id: impl Hash + std::fmt::Debug,
     title: &str,
     gap: f32,
     title_gap: f32,
+    padding: f32,
     cards: impl FnOnce(&mut Ui),
 ) -> Rect {
     // The row's top before the title takes its place: a page scrolls the whole row into view
@@ -44,19 +54,26 @@ pub fn shelf_with_gaps(
     let mut state: State = ui.data(|data| data.get_temp(id)).unwrap_or_default();
     let now = ui.input(|input| input.time);
     let animations = theme::animations(ui.ctx());
-    // One page is what shows at once, so no card is ever skipped.
-    let page = state.viewport;
+    // One page is what shows at once, so no card is ever skipped. The arrows move what shows
+    // between the row's side paddings, as `main`'s did.
+    let page = (state.viewport - 2. * padding).max(0.);
     let max = (state.content - state.viewport).max(0.);
     let arrows = Arrows::of(state);
     // How far an arrow asks the row to go this frame.
     let mut distance = 0.;
     ui.horizontal(|ui| {
         // As tall as the arrows, so the row keeps its height when they hide.
-        ui.set_min_height(ui.spacing().interact_size.y);
+        ui.set_min_height(TITLE_H);
+        if padding > 0. {
+            ui.add_space(padding);
+        }
         ui.label(RichText::new(title).heading().strong());
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if !arrows.shown {
                 return;
+            }
+            if padding > 0. {
+                ui.add_space(padding);
             }
             let next = ui.add_enabled(!arrows.at_end, arrow(ICON_CHEVRON_RIGHT));
             if next.clicked() {
@@ -132,10 +149,16 @@ pub fn shelf_with_gaps(
         ..kinetic
     };
     let out = area.show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            cards(ui);
-        });
+        // `main`'s `px_6` is inside the row, so a card scrolls to the window's edge and the
+        // arrows' page is what shows between the paddings.
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(padding as i8, 0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    cards(ui);
+                });
+            });
     });
     ui.style_mut().spacing.scroll.kinetic = kinetic;
     let mut measured = State {
@@ -160,12 +183,11 @@ pub fn shelf_with_gaps(
         ui.ctx().request_repaint();
     }
     ui.data_mut(|data| data.insert_temp(id, measured));
+    // `main`'s `pb_2` under the row.
+    ui.add_space(BOTTOM_PADDING);
     // The row's own height, not its viewport's: the viewport is clipped to what's on screen, so
     // a row half below the page's edge would look like it ends at the edge and never scroll.
-    Rect::from_min_max(
-        top,
-        egui::pos2(ui.max_rect().right(), out.inner_rect.top() + out.content_size.y),
-    )
+    Rect::from_min_max(top, egui::pos2(ui.max_rect().right(), ui.min_rect().bottom()))
 }
 
 /// A page button, small and frameless.
