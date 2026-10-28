@@ -328,7 +328,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ## 19. Subtitle appearance (4.2)
 
-✅ Linux, libmpv 0.37, with a config set to yellow and a dark box: the embedded SRT showed yellow on a translucent box. The settings page shows the three pickers.
+✅ Linux, libmpv 0.37, with a config set to yellow and a dark box: the embedded SRT showed yellow on a translucent box. The settings page shows the three pickers, and each steps with Left and Right once Tab has focused it (U9 round 2: the size went 100 % → 125 % and back to 75 %, the colour White → Yellow and the style Outline → Dark box, each in the config), the list itself staying pointer-only.
 
 - ⬜ **Windows** (the bundled 0.38+ libmpv, which takes `sub-border-style`): box and outline both look right.
 - ⬜ Changing the **size** in Settings, then in the player's menu: both agree afterwards.
@@ -483,3 +483,22 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **Window resize** with the cursor in the grid (the column count changes), and zoom.
 - ⬜ A page request that fails mid-library and is retried after its rows scroll out and back, and the error state's *Retry*.
 - ⬜ Picking sort and filter on **10.11 with a bigger library**, and the resolution choices on 10.11 for HD and SD.
+
+## 32. Settings (U9)
+
+**egui (U9)**, against the 12.2 dev server, keyboard only (`TABBYFIN_KEYS`, screenshots in `U9-scratch/`).
+
+✅ The page (`settings-bar-toggle.png`, and `TABBYFIN_ROUTE=settings`): the six groups — Appearance, Playback, Subtitles, Storage, Account, About — each with its icon, its intro where `main` had one, and its options with their description and the `key · unset: value` line under them, the pickers 220 px wide on the right. Opened from the top bar's Settings button (Up twice, Right twice, Enter) and Esc going back to Home (`settings-back.png`); the theme and text size applied at once (light in `settings-pick-1.png` at 90 %, dark at 150 % in `settings-pick-last.png`); the lower groups, Account (dev on tabbyfin dev, `http://localhost:8096/`, Jellyfin 12.2.0) and About (0.1.0) in `settings-lower.png` and `settings-about.png`, scrolled for the screenshot with a temporary offset that isn't in the tree.
+
+✅ Every option writes `main`'s config key and value, checked against the TOML: `theme = "light" | "dark" | "system"`, `text_size = 90…150` (the key dropped for the system's), `animations`, `autoplay_next_episode`, `auto_skip_intro`, `prefer_hevc` and `check_for_updates` as `true`/`false`, `subtitle_color = "white" | "yellow"`, `subtitle_style = "outline" | "box"`, `subtitle_scale` (dropped at 1.0), and `automatic_bitrate` with `max_streaming_bitrate` in bits per second (dropped for *No limit*, kept when *Automatic* is picked). The flags were flipped with Tab and Space (`settings-flags.png`: animations, autoplay, skip intros, HEVC and the update check, each in the file).
+
+✅ **Round 2, the pickers' keys** (`r2-*.png`): Tab to a picker, then Left and Right step its value, stopping at the ends, and each step is the same save a click makes. Theme `dark` → Left → `light` (applied at once, `r2-theme-left.png`) → Left → `system`, and Right at the end leaves `dark`; text size from the system's → Right → `90` → Right → `100`, and Left at the first choice writes nothing; max streaming bitrate *No limit* → Right → `max_streaming_bitrate = 120000000` with `automatic_bitrate = false` (`r2-bitrate-120.png`, the picker reading "120 Mbit/s") → Left → *No limit* again, and Left from there → `automatic_bitrate = true` with no cap; subtitle colour White → Right → `yellow`, style Outline → Right → `box`, size 100 % → Right → `1.25` → Left → `0.75` → Left → still `0.75` (the ends). With no picker focused, Right and Left write nothing, and Right on a focused switch does nothing either.
+
+✅ *Clear* deleted `cache/images` (a file planted in it was gone) and said "Image cache cleared." (`settings-cleared.png`). *Open folder* with no `xdg-open` on `PATH` said "Couldn't open the logs folder (…)" (`settings-openlogs-error.png`); here `xdg-open` exits 0 without opening anything (the display has no file manager), so that path reports nothing, as `main`'s `open_with_system` didn't.
+
+- ⬜ **With a mouse**: opening each picker's list and choosing from it (the list takes no keys — Tab and Left/Right are the keyboard path), the switches, *Clear* and *Open folder*. Left and Right while a list is open are egui's, not the picker's.
+- ⬜ **Following the system** for the text size (the option showing the system's percentage) and a system change while the app runs; the animations switch visibly, not just in the file.
+- ⬜ **Windows and macOS**: the text-size sources, the log folder, `explorer` and `open`.
+- ⬜ **Subtitle size from Settings while a session runs**: the picker calls `set_subtitle_scale`, which the running session follows (only the write was checked here).
+
+*Harness note:* an occluded window on this window-manager-less display gets logic-only passes from eframe, and a key injected by `TABBYFIN_KEYS` in one of those passes is lost — which is what made the first round-2 runs miss a step now and then. Those runs keep the test window at the display's top-left and larger than any other task's (1600×1000 at 0,0) and raise it before each key, which made them repeatable (five out of five after that). A real window with the keyboard focus can't lose keys this way.

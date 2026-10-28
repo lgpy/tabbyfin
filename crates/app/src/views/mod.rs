@@ -100,7 +100,7 @@ pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
         }
         Route::Person { id, name } => Box::new(library::LibraryPage::new(cx, library::Source::Person { id }, name)),
         Route::Search => Box::new(search::SearchPage::default()),
-        Route::Settings => Box::new(StubPage::new("Settings".into(), "U9")),
+        Route::Settings => Box::new(settings::SettingsPage::new()),
         #[cfg(debug_assertions)]
         Route::Posters { id } => Box::new(posters::PostersPage::new(id)),
     }
