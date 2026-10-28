@@ -1,12 +1,18 @@
 //! Detail page for a movie, series, season or episode, and for collections and playlists
 //! (whose entries can be reordered and removed here). The page, its header, actions, pickers and
-//! shelves are U6's; its seasons, episodes and playlist entries are U7's, which fills the two
-//! empty cursor sections left for them here.
+//! shelves are U6's; its seasons, the open season's episodes and playlist entries are U7's.
 //!
 //! The page follows `views/home.rs`: data loads through a [`Task`] polled in `show` and what's on
 //! screen stays until new data arrives, the page loads again when `services.user_data` moves on,
 //! the browse cursor moves over its sections, and what the drawing asked for is carried out
 //! after the frame.
+//!
+//! A series shows its seasons as a grid, and the season chosen opens its episodes in a band
+//! under them; a season's page and a playlist's list their children as rows with the image,
+//! heading, runtime, three lines of overview and the Watched toggle. A playlist's rows also move
+//! and remove their entry: on screen at once, then on the server one edit at a time in the order
+//! they were made. The queue is the services' (`item_menu.rs`), so leaving the page doesn't lose
+//! an edit on its way.
 //!
 //! Watched and Favorite show at once and go back if the server refuses: the services remember
 //! the refusal in a numbered log (`Services::refused_marks`) and the page takes the change back
@@ -18,13 +24,13 @@
 
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, Color32, CornerRadius, FontId, Id, Label, Layout, Margin, Rect, RectAlign, Response, RichText,
-    Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, WidgetText, pos2, vec2,
+    Align, Align2, Color32, CornerRadius, Direction, FontId, Id, Label, Layout, Margin, Rect, RectAlign, Response,
+    RichText, Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, WidgetText, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_DROP_DOWN, ICON_DELETE, ICON_EDIT, ICON_MORE_HORIZ, ICON_MOVIE, ICON_OPEN_IN_NEW, ICON_PLAY_ARROW,
-    ICON_PLAYLIST_ADD, ICON_REPLAY, ICON_SHUFFLE,
+    ICON_ARROW_DOWNWARD, ICON_ARROW_DROP_DOWN, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_DELETE, ICON_EDIT, ICON_MORE_HORIZ,
+    ICON_MOVIE, ICON_OPEN_IN_NEW, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY, ICON_SHUFFLE,
 };
 use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ItemField, ItemSortBy, MediaSourceInfo};
 use jellyfin::{Client, ItemsQuery, Ticks};
@@ -32,7 +38,8 @@ use jellyfin::{Client, ItemsQuery, Ticks};
 use crate::browse::{self, Browse, Cursor, Position, Section};
 use crate::images::ImageCache;
 use crate::item_menu::{
-    Mark, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played, resume_point,
+    Mark, PlaylistEdit, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played,
+    resume_point,
 };
 use crate::keys::{self, Action, Scope};
 use crate::nav::{NavRequest, Route};
@@ -42,7 +49,10 @@ use crate::toasts::Toast;
 use crate::views::dialogs::{AddToPlaylist, DeletePlaylist, EditPlaylist};
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction, RefusedMarks};
-use crate::widgets::text::{CARD_GAP, Load, episode_label, runtime_text, timestamp};
+use crate::widgets::text::{
+    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, runtime_text,
+    timestamp,
+};
 use crate::widgets::{card, image, shelf, state};
 
 /// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
@@ -208,7 +218,7 @@ const PICKER_LABEL_W: f32 = 90.;
 const SECTION_GAP: f32 = 24.;
 const PAGE_PADDING: f32 = 24.;
 const BOTTOM_PADDING: f32 = 32.;
-/// Cast & crew and "More like this": larger cards, further apart, like Home's.
+/// Cast & crew, "More like this" and the seasons: larger cards, further apart, like Home's.
 const BIG_CARD_SCALE: f32 = 1.2;
 const BIG_CARD_GAP: f32 = 24.;
 /// Between a shelf's title and its cards.
@@ -221,17 +231,46 @@ const ACTION_RING_GAP: f32 = 3.;
 /// The More menu's width.
 const MENU_W: f32 = 220.;
 
-/// Cursor sections, top to bottom, as on `main`. The children rows and the open season's
-/// episodes are U7's; until then their sections are empty, so the cursor skips them.
+/// A row of a season's episodes or a playlist's entries, as `main` drew it: its image, the text
+/// beside it, then the Watched toggle (and, in a playlist, the entry's buttons).
+const ROW_PAD: f32 = 8.;
+const ROW_GAP: f32 = 16.;
+/// Between the heading, the runtime line and the overview.
+const ROW_LINE_GAP: f32 = 4.;
+const ENTRY_BUTTON: f32 = 28.;
+const WATCHED_SIZE: f32 = 32.;
+/// How many lines of an entry's overview show, as `main`'s `line_clamp(3)`.
+const OVERVIEW_ROWS: usize = 3;
+/// The band the open season's episodes sit in, tinted like `main`'s `muted` at 35 %.
+const BAND_ALPHA: u8 = 89;
+
+/// Cursor sections, top to bottom, as on `main`.
 const ACTIONS: usize = 0;
 /// The version picker; Left and Right change it.
 const PICKERS: usize = 1;
 const CHAPTERS: usize = 2;
+/// A series' seasons grid, or a season's or playlist's rows.
 const CHILDREN: usize = 3;
+/// The open season's episodes.
 const EPISODES: usize = 4;
 const PEOPLE: usize = 5;
 const EXTRAS: usize = 6;
 const SIMILAR: usize = 7;
+
+/// A series' season opened on its page, and its episodes once loaded.
+struct OpenSeason {
+    id: String,
+    name: String,
+    episodes: Load<Vec<BaseItemDto>>,
+}
+
+/// What a playlist entry's buttons (or Alt+Up, Alt+Down and Delete) do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EntryAction {
+    Up,
+    Down,
+    Remove,
+}
 
 pub struct ItemPage {
     /// The top bar's title: the route's name until the item loads.
@@ -246,6 +285,13 @@ pub struct ItemPage {
     /// more than one (`selected_version`).
     version: usize,
     cursor: Cursor,
+    /// Season cards per row from the last frame: the keys use the layout the page last showed,
+    /// since the column count only comes out of its width.
+    columns: usize,
+    /// A series' season whose episodes show in a band under the seasons.
+    open_season: Option<OpenSeason>,
+    /// The open season's episodes request; the next season's replaces it, which cancels it.
+    episodes: Option<Task<jellyfin::Result<jellyfin::models::QueryResult<BaseItemDto>>>>,
     /// The More menu's highlight while the keyboard is on it (`None` when a click opened it,
     /// until an arrow key picks one).
     more_highlight: Option<usize>,
@@ -274,6 +320,9 @@ impl ItemPage {
             loaded_at: None,
             version: 0,
             cursor: Cursor::default(),
+            columns: 1,
+            open_season: None,
+            episodes: None,
             more_highlight: None,
             more_requested: false,
             marks_seen,
@@ -286,6 +335,11 @@ impl ItemPage {
     /// Fetches the item again. What's on screen stays up until the new data arrives; a load
     /// still running is replaced, which cancels it.
     fn reload(&mut self, cx: &mut PageCx) {
+        // A reload in the middle of playlist edits would show the playlist half-edited; the
+        // services bump `user_data` when its last edit is done, which loads it again.
+        if cx.services.playlist_edits_pending(&self.item_id) {
+            return;
+        }
         self.loaded_at = Some(cx.services.user_data);
         let client = cx.services.session.client.clone();
         let item_id = self.item_id.clone();
@@ -324,14 +378,19 @@ impl ItemPage {
         cx.services.mark(item_id, change);
     }
 
-    /// Shows `change` on each copy of the item on the page, or with `undo`, takes it back from
-    /// those still showing it.
+    /// Shows `change` on each copy of the item on the page (itself, a child or an episode of
+    /// the open season), or with `undo`, takes it back from those still showing it.
     fn show_mark(&mut self, item_id: &str, change: Mark, undo: bool) {
         let Load::Loaded(data) = &mut self.data else {
             return;
         };
+        let episodes = match self.open_season.as_mut().map(|season| &mut season.episodes) {
+            Some(Load::Loaded(episodes)) => Some(episodes),
+            _ => None,
+        };
         for item in std::iter::once(&mut data.item)
             .chain(data.children.iter_mut())
+            .chain(episodes.into_iter().flatten())
             .filter(|item| item.id == item_id)
         {
             if !undo {
@@ -340,6 +399,145 @@ impl ItemPage {
                 change.undone().apply(item);
             }
         }
+    }
+
+    /// Opens `season`'s episodes under the seasons, or closes them if they're open.
+    fn toggle_season(&mut self, season: &BaseItemDto, cx: &mut PageCx) {
+        if self.open_season.as_ref().is_some_and(|open| open.id == season.id) {
+            self.open_season = None;
+            // Its episodes aren't shown any more, so their request goes with them.
+            self.episodes = None;
+        } else {
+            self.open_season = Some(OpenSeason {
+                id: season.id.clone(),
+                name: season.name.clone(),
+                episodes: Load::Loading,
+            });
+            self.load_episodes(cx);
+        }
+        cx.ctx.request_repaint();
+    }
+
+    /// Fetches the open season's episodes, unless another season opens meanwhile (its request
+    /// replaces this one, which cancels it).
+    fn load_episodes(&mut self, cx: &mut PageCx) {
+        let Some(open) = &self.open_season else {
+            return;
+        };
+        let client = cx.services.session.client.clone();
+        let series_id = self.item_id.clone();
+        let season_id = open.id.clone();
+        self.episodes = Some(Task::spawn(cx.ctx, async move {
+            client
+                .episodes(&series_id, Some(&season_id), &[ItemField::Overview])
+                .await
+        }));
+    }
+
+    /// The open season's episodes, once loaded.
+    fn open_episodes(&self) -> &[BaseItemDto] {
+        match self.open_season.as_ref().map(|open| &open.episodes) {
+            Some(Load::Loaded(episodes)) => episodes,
+            _ => &[],
+        }
+    }
+
+    /// The children's layout: a series' or collection's cards in the grid last shown, and a
+    /// season's or playlist's entries one per row.
+    fn children_section(&self, data: &ItemData) -> Section {
+        match data.item.kind {
+            BaseItemKind::Series | BaseItemKind::BoxSet => Section::grid(data.children.len(), self.columns),
+            BaseItemKind::Season | BaseItemKind::Playlist => Section::grid(data.children.len(), 1),
+            _ => Section::row(0),
+        }
+    }
+
+    /// Moves or removes a playlist entry on screen (its highlight following it), ready to be
+    /// sent to the server. `None` when there's nothing to do: not a playlist, an end of the
+    /// list, or an entry the server didn't give an id.
+    fn move_entry(&mut self, index: usize, action: EntryAction) -> Option<PlaylistEdit> {
+        let Load::Loaded(data) = &mut self.data else {
+            return None;
+        };
+        if data.item.kind != BaseItemKind::Playlist || index >= data.children.len() {
+            return None;
+        }
+        let entry_id = data.children[index].playlist_item_id.clone()?;
+        let to = match action {
+            EntryAction::Up if index > 0 => index - 1,
+            EntryAction::Down if index + 1 < data.children.len() => index + 1,
+            EntryAction::Up | EntryAction::Down => return None,
+            EntryAction::Remove => {
+                data.children.remove(index);
+                // The cursor stays on the row that took this one's place.
+                let len = data.children.len();
+                if self.cursor.is_selected(CHILDREN, index) && len > 0 {
+                    self.cursor.show_at(Position {
+                        section: CHILDREN,
+                        index: index.min(len - 1),
+                    });
+                }
+                return Some(PlaylistEdit::Remove { entry_id });
+            }
+        };
+        let entry = data.children.remove(index);
+        data.children.insert(to, entry);
+        if self.cursor.is_selected(CHILDREN, index) {
+            self.cursor.show_at(Position {
+                section: CHILDREN,
+                index: to,
+            });
+        }
+        Some(PlaylistEdit::Move { entry_id, to })
+    }
+
+    /// Moves or removes a playlist entry: on screen right away, then on the server. The services
+    /// queue it (they send them one at a time in order, whatever page is on top).
+    fn edit_entry(&mut self, index: usize, action: EntryAction, cx: &mut PageCx) {
+        let Some(edit) = self.move_entry(index, action) else {
+            return;
+        };
+        cx.services.edit_playlist(self.item_id.clone(), edit);
+    }
+
+    /// What Alt+Up, Alt+Down and Delete do to a playlist's highlighted entry.
+    fn entry_action(action: Action) -> Option<EntryAction> {
+        match action {
+            Action::MoveEntryUp => Some(EntryAction::Up),
+            Action::MoveEntryDown => Some(EntryAction::Down),
+            Action::RemoveEntry => Some(EntryAction::Remove),
+            _ => None,
+        }
+    }
+
+    /// The children rows' keys: W toggles the highlighted entry watched, and a playlist's entries
+    /// also move and remove. Returns whether the page used the key.
+    fn children_key(&mut self, action: Action, cx: &mut PageCx) -> bool {
+        let Some(position) = self.cursor.selected() else {
+            return false;
+        };
+        if position.section != CHILDREN {
+            return false;
+        }
+        let Load::Loaded(data) = &self.data else {
+            return false;
+        };
+        if action == Action::ToggleWatched {
+            let Some(child) = data.children.get(position.index) else {
+                return false;
+            };
+            let (id, played) = (child.id.clone(), is_played(child));
+            self.set_played(id, !played, cx);
+            return true;
+        }
+        if data.item.kind != BaseItemKind::Playlist {
+            return false;
+        }
+        let Some(action) = Self::entry_action(action) else {
+            return false;
+        };
+        self.edit_entry(position.index, action, cx);
+        true
     }
 
     /// Takes back what this page showed ahead of the server for every mark it was refused since
@@ -588,11 +786,22 @@ impl ItemPage {
     fn show_content(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         let more_id = more_menu_id(ui);
         let versions_id = versions_menu_id(ui);
+        // The season cards' column count comes from the page's width, which the padded content
+        // area has; the keys then use the layout the page last showed.
+        let columns = grid_columns((ui.available_width() - 2. * PAGE_PADDING).max(1.));
+        self.columns = columns;
         let Load::Loaded(data) = &self.data else {
             return;
         };
         let actions = item_actions(&data.item, data.up_next.as_ref());
         let version = self.version;
+        let open = self.open_season.as_ref().map(|season| season.id.clone());
+        // Rows of cards only for a series' seasons and a collection's items; the rows under a
+        // season's or playlist's heading are one per line.
+        let children_columns = match data.item.kind {
+            BaseItemKind::Series | BaseItemKind::BoxSet => columns,
+            _ => 1,
+        };
         let moved = self.cursor.take_reveal();
         let selected = self.cursor.selected();
         let images = &mut cx.services.images;
@@ -622,6 +831,27 @@ impl ItemPage {
                         ui.add_space(SECTION_GAP);
                         chapters_row = Some(chapters_shelf(ui, data, moved, cursor, images, &mut asked));
                     }
+                    let mut children_title = None;
+                    let mut children_row = None;
+                    if let Some(title) = children_heading(data) {
+                        ui.add_space(SECTION_GAP);
+                        children_title = Some(ui.label(RichText::new(title).heading().strong()).rect);
+                        ui.add_space(12.);
+                        children_row = match data.item.kind {
+                            BaseItemKind::Series | BaseItemKind::BoxSet => {
+                                season_rows(ui, data, columns, open.as_deref(), cursor, images, &mut asked)
+                            }
+                            _ => {
+                                let playlist = data.item.kind == BaseItemKind::Playlist;
+                                entry_rows(ui, data, playlist, cursor, images, &mut asked)
+                            }
+                        };
+                    }
+                    let mut episodes_row = None;
+                    if let Some(open) = &self.open_season {
+                        ui.add_space(SECTION_GAP);
+                        episodes_row = Some(episodes_band(ui, open, moved, cursor, images, &mut asked));
+                    }
                     let mut people_row = None;
                     if !data.item.people.is_empty() {
                         ui.add_space(SECTION_GAP);
@@ -644,6 +874,22 @@ impl ItemPage {
                             Some(position) if position.section == ACTIONS => Some((header, Some(Align::TOP))),
                             Some(position) if position.section == PICKERS => pickers.map(|rect| (rect, None)),
                             Some(position) if position.section == CHAPTERS => chapters_row.map(|rect| (rect, None)),
+                            // The heading comes into view with their first row, as `main`'s
+                            // reveal scrolled the title and then the row: the least scroll
+                            // that shows both, rather than pushing the header away.
+                            Some(position) if position.section == CHILDREN => children_row.map(|row| {
+                                let first_row = position.index / children_columns.max(1) == 0;
+                                let rect = match children_title {
+                                    Some(title) if first_row => title.union(row),
+                                    _ => row,
+                                };
+                                (rect, None)
+                            }),
+                            // The band with its gap, scrolled as little as shows it: a short
+                            // window keeps the seasons above in view.
+                            Some(position) if position.section == EPISODES => {
+                                episodes_row.map(|rect| (with_gap_above(rect, SECTION_GAP), None))
+                            }
                             Some(position) if position.section == PEOPLE => people_row.map(|rect| (rect, None)),
                             Some(position) if position.section == EXTRAS => extras_row.map(|rect| (rect, None)),
                             Some(position) if position.section == SIMILAR => similar_row.map(|rect| (rect, None)),
@@ -676,6 +922,15 @@ impl ItemPage {
         }
         if let Some(route) = asked.open {
             cx.nav.push(NavRequest::Push(route));
+        }
+        if let Some(season) = asked.season {
+            self.toggle_season(&season, cx);
+        }
+        if let Some((index, action)) = asked.entry {
+            self.edit_entry(index, action, cx);
+        }
+        if let Some((item_id, played)) = asked.played {
+            self.set_played(item_id, played, cx);
         }
         if let Some(start) = asked.play_from {
             self.play(Some(start), cx);
@@ -735,6 +990,374 @@ fn chapters_shelf(
     })
 }
 
+/// The heading over the item's children: a series' seasons, a collection's items, a season's
+/// episodes or a playlist's entries, as on `main`. Nothing when there are none.
+fn children_heading(data: &ItemData) -> Option<&'static str> {
+    if data.children.is_empty() {
+        return None;
+    }
+    Some(match data.item.kind {
+        BaseItemKind::Series => "Seasons",
+        BaseItemKind::BoxSet => "In this collection",
+        BaseItemKind::Playlist => "Playlist",
+        _ => "Episodes",
+    })
+}
+
+/// Poster cards at [`BIG_CARD_SCALE`] that fit `available` points in a row, [`BIG_CARD_GAP`]
+/// between them: `main`'s count for a series' seasons.
+fn grid_columns(available: f32) -> usize {
+    let card = POSTER_W * BIG_CARD_SCALE;
+    (((available + BIG_CARD_GAP) / (card + BIG_CARD_GAP)).floor() as usize).max(1)
+}
+
+/// `rect` with `gap` points added above it, for a scroll that leaves the section's gap.
+fn with_gap_above(rect: Rect, gap: f32) -> Rect {
+    Rect::from_min_max(pos2(rect.left(), rect.top() - gap), rect.max)
+}
+
+/// A series' seasons (or a collection's items) as poster cards in rows of `columns`, the open
+/// season highlighted like the cursor's. A season card opens its episodes here; a collection's
+/// items open their pages. Right-clicking one gives the item menu, as on `main`. Returns the
+/// row holding the cursor, for the page to scroll into view with its heading.
+#[allow(clippy::too_many_arguments)]
+fn season_rows(
+    ui: &mut Ui,
+    data: &ItemData,
+    columns: usize,
+    open: Option<&str>,
+    cursor: &mut Cursor,
+    images: &mut ImageCache,
+    asked: &mut Asked,
+) -> Option<Rect> {
+    let columns = columns.max(1);
+    let selected_row = cursor
+        .selected()
+        .filter(|position| position.section == CHILDREN)
+        .map(|position| position.index / columns);
+    let mut row_rect = None;
+    for (row, children) in data.children.chunks(columns).enumerate() {
+        let drawn = ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = BIG_CARD_GAP;
+            for (column, child) in children.iter().enumerate() {
+                let index = row * columns + column;
+                let is_open = open == Some(child.id.as_str());
+                let selected = cursor.is_selected(CHILDREN, index);
+                let response = card::poster_scaled(ui, images, child, BIG_CARD_SCALE, selected || is_open);
+                if response.clicked() {
+                    if child.kind == BaseItemKind::Season {
+                        asked.season = Some(child.clone());
+                    } else {
+                        asked.open = Some(Route::for_item(child));
+                    }
+                }
+                if let Some(action) = menu::item_menu(&response, child) {
+                    asked.menu = Some((action, child.clone()));
+                }
+            }
+        });
+        if selected_row == Some(row) {
+            row_rect = Some(drawn.response.rect);
+        }
+        ui.add_space(BIG_CARD_GAP);
+    }
+    row_rect
+}
+
+/// A season's episodes or a playlist's entries, one row each: its image, its heading and
+/// runtime, three lines of overview, the Watched toggle and, in a playlist, the entry's buttons.
+/// A click (or Enter) opens the item; the toggle and the buttons don't, as on `main`. Returns
+/// the row holding the cursor, for the page to scroll into view with the heading.
+fn entry_rows(
+    ui: &mut Ui,
+    data: &ItemData,
+    playlist: bool,
+    cursor: &mut Cursor,
+    images: &mut ImageCache,
+    asked: &mut Asked,
+) -> Option<Rect> {
+    let len = data.children.len();
+    let mut selected_rect = None;
+    for (index, entry) in data.children.iter().enumerate() {
+        let selected = cursor.is_selected(CHILDREN, index);
+        let response = entry_row(ui, entry, index, len, playlist, selected, images, asked);
+        if selected {
+            selected_rect = Some(response.rect);
+            ui.painter().rect_stroke(
+                response.rect,
+                CornerRadius::same(8),
+                Stroke::new(3., ui.visuals().strong_text_color()),
+                StrokeKind::Inside,
+            );
+        }
+        if response.clicked() {
+            asked.open = Some(Route::for_item(entry));
+        }
+        if let Some(action) = menu::item_menu(&response, entry) {
+            asked.menu = Some((action, entry.clone()));
+        }
+    }
+    selected_rect
+}
+
+/// One row of [`entry_rows`]. Returns the row's response, which covers the whole row; the
+/// Watched toggle and the entry buttons are added after it, so they take the clicks on them.
+#[allow(clippy::too_many_arguments)]
+fn entry_row(
+    ui: &mut Ui,
+    entry: &BaseItemDto,
+    index: usize,
+    len: usize,
+    playlist: bool,
+    selected: bool,
+    images: &mut ImageCache,
+    asked: &mut Asked,
+) -> Response {
+    let body = TextStyle::Body.resolve(ui.style());
+    let small_size = (body.size - 2.).max(6.);
+    let small = FontId::new(small_size, body.family.clone());
+    let heading_font = FontId::new(body.size, body.family.clone());
+    let weak = ui.visuals().weak_text_color();
+    let width = ui.available_width();
+    let inner_width = width - 2. * ROW_PAD;
+    // The entry buttons, and the gap between them and the Watched toggle.
+    let buttons_w = if playlist { 3. * ENTRY_BUTTON + ROW_GAP } else { 0. };
+    let text_width = (inner_width - LANDSCAPE_W - 2. * ROW_GAP - buttons_w - WATCHED_SIZE).max(1.);
+    let overview = entry
+        .overview
+        .as_deref()
+        .filter(|text| !text.is_empty())
+        .map(|text| overview_galley(ui, text, text_width));
+    let heading_h = ui.fonts_mut(|fonts| fonts.row_height(&heading_font));
+    let runtime_h = ui.fonts_mut(|fonts| fonts.row_height(&small));
+    let mut text_h = heading_h + ROW_LINE_GAP + runtime_h;
+    if let Some(galley) = &overview {
+        text_h += ROW_LINE_GAP + galley.size().y;
+    }
+    let height = LANDSCAPE_H.max(text_h) + 2. * ROW_PAD;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    if selected || ui.rect_contains_pointer(rect) {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(8), ui.visuals().widgets.inactive.weak_bg_fill);
+    }
+    let inner = rect.shrink(ROW_PAD);
+    // The row's content goes in a Ui of its own, so that placing the toggle and the buttons in
+    // their rects moves that Ui's cursor rather than the page's (`scope_builder` would
+    // otherwise leave the page's cursor inside the row, and the next one would overlap it).
+    let mut row = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
+    let image_rect = Rect::from_min_size(inner.min, vec2(LANDSCAPE_W, LANDSCAPE_H));
+    image::show(
+        &row,
+        images,
+        image_rect,
+        landscape_image(entry).as_ref(),
+        Some(entry),
+        image::RADIUS,
+    );
+
+    // The text beside the image: episodes read "S1:E2 · Name"; a movie in a playlist its name,
+    // and the year on the line below.
+    let (name, episode_line) = card_text(entry);
+    let is_episode = entry.kind == BaseItemKind::Episode;
+    let heading = if is_episode { episode_line } else { name };
+    let runtime = [
+        entry
+            .production_year
+            .filter(|_| !is_episode)
+            .map(|year| year.to_string()),
+        entry.run_time_ticks.map(runtime_text),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ");
+    // A very narrow window (or a big zoom) can leave nothing beside the image; the column keeps
+    // a point rather than turning the rect inside out.
+    let text_left = image_rect.right() + ROW_GAP;
+    let text_rect = Rect::from_min_max(
+        pos2(text_left, inner.top()),
+        pos2(
+            (inner.right() - buttons_w - WATCHED_SIZE - ROW_GAP).max(text_left + 1.),
+            inner.bottom(),
+        ),
+    );
+    let mut text_ui = row.new_child(
+        UiBuilder::new()
+            .max_rect(text_rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    text_ui.spacing_mut().item_spacing.y = ROW_LINE_GAP;
+    text_ui.add(Label::new(RichText::new(&heading).font(heading_font).strong()).truncate());
+    if !runtime.is_empty() {
+        text_ui.add(Label::new(RichText::new(&runtime).font(small).color(weak)).truncate());
+    }
+    if let Some(galley) = overview {
+        text_ui.add(Label::new(galley).selectable(false));
+    }
+
+    // The Watched toggle at the row's right end, pressed while watched like the page's own.
+    let played = is_played(entry);
+    let watched_rect = Rect::from_min_size(
+        pos2(inner.right() - WATCHED_SIZE, inner.top()),
+        vec2(WATCHED_SIZE, WATCHED_SIZE),
+    );
+    let toggle = row
+        .scope_builder(UiBuilder::new().max_rect(watched_rect), |ui| {
+            ui.add(
+                egui::Button::new(menu::played_icon(played))
+                    .selected(played)
+                    .sense(Sense::CLICK)
+                    .min_size(vec2(WATCHED_SIZE, WATCHED_SIZE)),
+            )
+        })
+        .inner
+        .on_hover_text("Watched (W)");
+    if toggle.clicked() {
+        // Don't open the item underneath.
+        asked.played = Some((entry.id.clone(), !played));
+    }
+
+    if playlist {
+        // Up, Down and Remove, left to right, as on `main`; added right to left here.
+        let buttons = [
+            (EntryAction::Remove, ICON_CLOSE, "Remove from playlist (Delete)"),
+            (EntryAction::Down, ICON_ARROW_DOWNWARD, "Move down (Alt+Down)"),
+            (EntryAction::Up, ICON_ARROW_UPWARD, "Move up (Alt+Up)"),
+        ];
+        let mut right = inner.right() - WATCHED_SIZE - ROW_GAP;
+        for (action, icon, tooltip) in buttons {
+            right -= ENTRY_BUTTON;
+            let enabled = match action {
+                EntryAction::Up => index > 0,
+                EntryAction::Down => index + 1 < len,
+                EntryAction::Remove => true,
+            };
+            let at = Rect::from_min_size(
+                pos2(right, inner.top() + (WATCHED_SIZE - ENTRY_BUTTON) * 0.5),
+                vec2(ENTRY_BUTTON, ENTRY_BUTTON),
+            );
+            let button = row
+                .scope_builder(UiBuilder::new().max_rect(at), |ui| {
+                    ui.add_enabled(
+                        enabled,
+                        egui::Button::new(icon.outlined().rich_text().size(18.))
+                            .frame(false)
+                            .sense(Sense::CLICK)
+                            .min_size(vec2(ENTRY_BUTTON, ENTRY_BUTTON)),
+                    )
+                })
+                .inner
+                .on_hover_text(tooltip)
+                .on_disabled_hover_text(tooltip);
+            if button.clicked() {
+                asked.entry = Some((index, action));
+            }
+        }
+    }
+    response
+}
+
+/// `text` wrapped to `width`, cut off after [`OVERVIEW_ROWS`] lines with an ellipsis, as
+/// `main`'s `line_clamp(3)` did. Laid out here rather than through a `Label`: a label replaces
+/// the job's wrapping, and with it the row limit.
+fn overview_galley(ui: &Ui, text: &str, width: f32) -> std::sync::Arc<egui::Galley> {
+    let body = TextStyle::Body.resolve(ui.style());
+    let mut job = LayoutJob::default();
+    job.append(
+        text,
+        0.,
+        TextFormat {
+            font_id: FontId::new((body.size - 2.).max(6.), body.family),
+            color: ui.visuals().text_color(),
+            ..Default::default()
+        },
+    );
+    job.wrap.max_width = width;
+    job.wrap.max_rows = OVERVIEW_ROWS;
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+/// The open season's episodes, as a band under the seasons: the season's name, then its episode
+/// cards, a spinner while they load or a line when there are none. Returns the band's rectangle,
+/// for the cursor scrolling it into view.
+fn episodes_band(
+    ui: &mut Ui,
+    open: &OpenSeason,
+    moved: bool,
+    cursor: &mut Cursor,
+    images: &mut ImageCache,
+    asked: &mut Asked,
+) -> Rect {
+    let top = ui.cursor().min;
+    // The band's background goes under what's drawn in it, but its height is only known once
+    // it's drawn: a placeholder takes its place in the layer and is filled in at the end.
+    let background = ui.painter().add(egui::Shape::Noop);
+    egui::Frame::NONE
+        .inner_margin(Margin {
+            left: PAGE_PADDING as i8,
+            right: PAGE_PADDING as i8,
+            top: 16,
+            bottom: 16,
+        })
+        .show(ui, |ui| match &open.episodes {
+            Load::Loaded(episodes) if !episodes.is_empty() => {
+                // Keyed by the season: each season's row starts at its first episode.
+                shelf::shelf_with_gaps(
+                    ui,
+                    ("season-episodes", open.id.as_str()),
+                    &open.name,
+                    BIG_CARD_GAP,
+                    SHELF_TITLE_GAP,
+                    |ui| {
+                        for (index, episode) in episodes.iter().enumerate() {
+                            let selected = cursor.is_selected(EPISODES, index);
+                            let response = card::episode(ui, images, episode, BIG_CARD_SCALE, selected);
+                            if selected && moved {
+                                response.scroll_to_me(None);
+                            }
+                            if response.clicked() {
+                                asked.open = Some(Route::for_item(episode));
+                            }
+                            if let Some(action) = menu::item_menu(&response, episode) {
+                                asked.menu = Some((action, episode.clone()));
+                            }
+                        }
+                    },
+                );
+            }
+            Load::Loaded(_) => band_note(ui, "No episodes in this season.", false),
+            Load::Loading => band_note(ui, "", true),
+            Load::Failed(message) => band_note(ui, message, false),
+        });
+    let rect = Rect::from_min_max(
+        pos2(ui.clip_rect().left(), top.y),
+        pos2(ui.clip_rect().right(), ui.cursor().min.y),
+    );
+    let muted = ui.visuals().widgets.inactive.weak_bg_fill;
+    let band = Color32::from_rgba_unmultiplied(muted.r(), muted.g(), muted.b(), BAND_ALPHA);
+    ui.painter()
+        .set(background, egui::Shape::rect_filled(rect, CornerRadius::ZERO, band));
+    // `main`'s `mb_6`: room between the band and the shelf under it.
+    ui.add_space(SECTION_GAP);
+    rect
+}
+
+/// A line in the episodes band at the height the cards would take: a spinner while they load,
+/// or a message.
+fn band_note(ui: &mut Ui, message: &str, spinner: bool) {
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), LANDSCAPE_H),
+        Layout::centered_and_justified(Direction::LeftToRight),
+        |ui| {
+            if spinner {
+                ui.spinner();
+            } else {
+                ui.label(RichText::new(message).color(ui.visuals().weak_text_color()));
+            }
+        },
+    );
+}
+
 /// What the page's drawing asked for this frame, carried out once the page is drawn.
 #[derive(Default)]
 struct Asked {
@@ -748,6 +1371,12 @@ struct Asked {
     open: Option<Route>,
     /// A card's context menu was used.
     menu: Option<(MenuAction, BaseItemDto)>,
+    /// A season card was clicked: its episodes open under the seasons, or close.
+    season: Option<BaseItemDto>,
+    /// A playlist entry's buttons were used: move or remove the entry at the index.
+    entry: Option<(usize, EntryAction)>,
+    /// An entry's Watched toggle was pressed: the item and the state to show.
+    played: Option<(String, bool)>,
     /// The More button's response, which its menu hangs from.
     more: Option<Response>,
     /// The version picker's response, which its menu hangs from.
@@ -1370,6 +1999,11 @@ impl Page for ItemPage {
     }
 
     fn on_key(&mut self, action: Action, cx: &mut PageCx) -> bool {
+        // The children rows' own keys come before the cursor's, as `main`'s `on_key_down` did:
+        // W is a letter, not a move.
+        if self.children_key(action, cx) {
+            return true;
+        }
         browse::on_key(self, action, cx)
     }
 
@@ -1388,14 +2022,31 @@ impl Page for ItemPage {
         }
         if let Some(result) = self.loading.as_mut().and_then(Task::poll) {
             self.loading = None;
-            match result {
-                Ok(data) => {
-                    if !data.item.name.is_empty() {
-                        self.name = data.item.name.clone();
+            // An edit in flight would be overwritten by what the server had before it: the
+            // playlist shows its edits until the last one bumps `user_data`.
+            if !cx.services.playlist_edits_pending(&self.item_id) {
+                match result {
+                    Ok(data) => {
+                        if !data.item.name.is_empty() {
+                            self.name = data.item.name.clone();
+                        }
+                        self.data = Load::Loaded(data);
+                        // Its episodes' watched state and progress may have changed too.
+                        if self.open_season.is_some() {
+                            self.load_episodes(cx);
+                        }
                     }
-                    self.data = Load::Loaded(data);
+                    Err(err) => self.data = Load::Failed(cx.services.handle_error(&err)),
                 }
-                Err(err) => self.data = Load::Failed(cx.services.handle_error(&err)),
+            }
+        }
+        if let Some(result) = self.episodes.as_mut().and_then(Task::poll) {
+            self.episodes = None;
+            if let Some(open) = &mut self.open_season {
+                open.episodes = match result {
+                    Ok(episodes) => Load::Loaded(episodes.items),
+                    Err(err) => Load::Failed(cx.services.handle_error(&err)),
+                };
             }
         }
         // Marks the server refused: take back what the page showed ahead of it, however long
@@ -1448,8 +2099,8 @@ impl Browse for ItemPage {
         &mut self.cursor
     }
 
-    /// The sections in the order they appear on the page. The children rows and the open
-    /// season's episodes are U7's, and empty until then, so the cursor skips them.
+    /// The sections in the order they appear on the page: a series' or collection's children as
+    /// the grid last shown, and the open season's episodes as a row.
     fn sections(&self) -> Vec<Section> {
         let Load::Loaded(data) = &self.data else {
             return Vec::new();
@@ -1460,8 +2111,8 @@ impl Browse for ItemPage {
             Section::row(actions),
             Section::grid(pickers, 1),
             Section::row(chapters(&data.item).len()),
-            Section::row(0),
-            Section::row(0),
+            self.children_section(data),
+            Section::row(self.open_episodes().len()),
             Section::row(data.item.people.len()),
             Section::row(data.extras.len()),
             Section::row(data.similar.len()),
@@ -1514,7 +2165,23 @@ impl Browse for ItemPage {
                     cx.nav.push(NavRequest::Push(Route::for_item(item)));
                 }
             }
-            // U7's rows.
+            // A season card opens its episodes under the seasons; a collection's card, a
+            // season's episode and a playlist's entry open their pages.
+            CHILDREN => {
+                if let Some(child) = data.children.get(position.index) {
+                    if child.kind == BaseItemKind::Season {
+                        let child = child.clone();
+                        self.toggle_season(&child, cx);
+                    } else {
+                        cx.nav.push(NavRequest::Push(Route::for_item(child)));
+                    }
+                }
+            }
+            EPISODES => {
+                if let Some(episode) = self.open_episodes().get(position.index) {
+                    cx.nav.push(NavRequest::Push(Route::for_item(episode)));
+                }
+            }
             _ => {}
         }
     }
@@ -1644,8 +2311,10 @@ mod tests {
     use jellyfin::Ticks;
     use jellyfin::models::BaseItemDto;
 
-    use super::{ItemAction, ItemData, ItemPage, item_actions, menu_search_key, step_highlight};
-    use crate::item_menu::{Mark, is_favorite, is_played};
+    use super::{CHILDREN, EntryAction, ItemAction, ItemData, ItemPage, item_actions, menu_search_key, step_highlight};
+    use crate::browse::{self, Position, Section};
+    use crate::item_menu::{Mark, PlaylistEdit, is_favorite, is_played};
+    use crate::keys::Action;
     use crate::nav::NavRequest;
     use crate::widgets::menu::{REFUSED_MARKS_KEPT, RefusedMarks};
     use crate::widgets::text::Load;
@@ -1851,5 +2520,127 @@ mod tests {
         assert_eq!(step_highlight(None, 1, 3), Some(0));
         assert_eq!(step_highlight(None, -1, 3), Some(2));
         assert_eq!(step_highlight(Some(0), 1, 0), None);
+    }
+
+    /// A page whose item is of `kind`, with `children` under it.
+    fn page_with_children(kind: &str, children: Vec<BaseItemDto>) -> ItemPage {
+        let item: BaseItemDto = serde_json::from_value(serde_json::json!({
+            "Id": "item",
+            "Name": "Item",
+            "Type": kind,
+        }))
+        .expect("item");
+        let mut page = ItemPage::new("item".into(), "Item".into(), 0);
+        page.data = Load::Loaded(ItemData {
+            item,
+            children,
+            extras: Vec::new(),
+            similar: Vec::new(),
+            up_next: None,
+        });
+        page
+    }
+
+    /// A playlist entry, whose entry id is its item id (as Jellyfin 12.2 gives them).
+    fn entry(id: &str) -> BaseItemDto {
+        serde_json::from_value(serde_json::json!({
+            "Id": id,
+            "Name": id.to_uppercase(),
+            "Type": "Movie",
+            "PlaylistItemId": id,
+        }))
+        .expect("entry")
+    }
+
+    fn data(page: &ItemPage) -> &ItemData {
+        match &page.data {
+            Load::Loaded(data) => data,
+            _ => panic!("the page should be loaded"),
+        }
+    }
+
+    fn order(page: &ItemPage) -> Vec<&str> {
+        data(page).children.iter().map(|entry| entry.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_series_lays_its_seasons_out_in_the_grid_last_shown() {
+        let mut page = page_with_children("Series", vec![entry("s1"), entry("s2"), entry("s3"), entry("s4")]);
+        page.columns = 3;
+        assert_eq!(page.children_section(data(&page)), Section::grid(4, 3));
+        // A season's episodes and a playlist's entries are one per row, so Up and Down walk
+        // them.
+        let season = page_with_children("Season", vec![entry("e1"), entry("e2")]);
+        assert_eq!(season.children_section(data(&season)), Section::grid(2, 1));
+        let playlist = page_with_children("Playlist", vec![entry("a")]);
+        assert_eq!(playlist.children_section(data(&playlist)), Section::grid(1, 1));
+        // Nothing under a movie.
+        let movie = page_with_children("Movie", Vec::new());
+        assert_eq!(movie.children_section(data(&movie)), Section::row(0));
+    }
+
+    #[test]
+    fn a_playlist_entry_follows_its_move_and_stops_at_the_ends() {
+        let mut page = page_with_children("Playlist", vec![entry("a"), entry("b"), entry("c")]);
+        // Down from the top swaps the first two, and the change carries the entry's id.
+        assert_eq!(
+            page.move_entry(0, EntryAction::Down),
+            Some(PlaylistEdit::Move {
+                entry_id: "a".into(),
+                to: 1,
+            })
+        );
+        assert_eq!(order(&page), ["b", "a", "c"]);
+        // At either end there's nothing to send.
+        assert_eq!(page.move_entry(0, EntryAction::Up), None);
+        assert_eq!(page.move_entry(2, EntryAction::Down), None);
+        assert_eq!(order(&page), ["b", "a", "c"]);
+
+        // A highlighted entry's cursor follows it, and the move brings it back into view.
+        page.cursor.show_at(Position {
+            section: CHILDREN,
+            index: 1,
+        });
+        page.cursor.take_reveal();
+        assert_eq!(
+            page.move_entry(1, EntryAction::Down),
+            Some(PlaylistEdit::Move {
+                entry_id: "a".into(),
+                to: 2,
+            })
+        );
+        assert_eq!(order(&page), ["b", "c", "a"]);
+        assert_eq!(
+            page.cursor.selected(),
+            Some(Position {
+                section: CHILDREN,
+                index: 2,
+            })
+        );
+        assert!(page.cursor.take_reveal());
+
+        // Removing it leaves the cursor on the row that takes its place.
+        assert_eq!(
+            page.move_entry(2, EntryAction::Remove),
+            Some(PlaylistEdit::Remove { entry_id: "a".into() })
+        );
+        assert_eq!(order(&page), ["b", "c"]);
+        assert_eq!(
+            page.cursor.selected(),
+            Some(Position {
+                section: CHILDREN,
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn only_a_playlists_entries_take_the_row_keys() {
+        assert_eq!(ItemPage::entry_action(Action::MoveEntryUp), Some(EntryAction::Up));
+        assert_eq!(ItemPage::entry_action(Action::MoveEntryDown), Some(EntryAction::Down));
+        assert_eq!(ItemPage::entry_action(Action::RemoveEntry), Some(EntryAction::Remove));
+        // W toggles watched, on any children row; the move keys are the playlist's alone.
+        assert_eq!(ItemPage::entry_action(Action::ToggleWatched), None);
+        assert_eq!(ItemPage::entry_action(Action::Move(browse::Move::Up)), None);
     }
 }

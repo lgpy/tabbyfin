@@ -55,6 +55,12 @@ pub enum Action {
     // Browse.
     Move(crate::browse::Move),
     Activate,
+    /// The item page's rows: W toggles the highlighted one watched.
+    ToggleWatched,
+    /// A playlist's highlighted entry: Alt+Up, Alt+Down and Delete move and remove it.
+    MoveEntryUp,
+    MoveEntryDown,
+    RemoveEntry,
     // Player.
     TogglePause,
     SeekForward,
@@ -117,6 +123,11 @@ pub const BINDINGS: &[Binding] = {
         bind(Browse, NONE, Key::Tab, Move(Move::NextSection)),
         bind(Browse, Modifiers::SHIFT, Key::Tab, Move(Move::PrevSection)),
         bind(Browse, NONE, Key::Enter, Activate),
+        // The item page's rows (`views/item.rs`); other pages leave these unused.
+        bind(Browse, NONE, Key::W, ToggleWatched),
+        bind(Browse, Modifiers::ALT, Key::ArrowUp, MoveEntryUp),
+        bind(Browse, Modifiers::ALT, Key::ArrowDown, MoveEntryDown),
+        bind(Browse, NONE, Key::Delete, RemoveEntry),
         bind(Player, NONE, Key::Space, TogglePause),
         bind(Player, NONE, Key::ArrowRight, SeekForward),
         bind(Player, NONE, Key::ArrowLeft, SeekBackward),
@@ -297,6 +308,35 @@ mod tests {
         assert_eq!(press(Key::F, ctrl).action(Scope::Shell), Some(Action::OpenSearch));
         assert_eq!(press(Key::F, cmd).action(Scope::Shell), Some(Action::OpenSearch));
         assert_eq!(press(Key::F, Modifiers::NONE).action(Scope::Shell), None);
+    }
+
+    #[test]
+    fn the_item_pages_row_keys_are_the_browsers_alone() {
+        assert_eq!(
+            press(Key::W, Modifiers::NONE).action(Scope::Browse),
+            Some(Action::ToggleWatched)
+        );
+        assert_eq!(
+            press(Key::ArrowUp, Modifiers::ALT).action(Scope::Browse),
+            Some(Action::MoveEntryUp)
+        );
+        assert_eq!(
+            press(Key::ArrowDown, Modifiers::ALT).action(Scope::Browse),
+            Some(Action::MoveEntryDown)
+        );
+        assert_eq!(
+            press(Key::Delete, Modifiers::NONE).action(Scope::Browse),
+            Some(Action::RemoveEntry)
+        );
+        // Plain Up stays the cursor's, and Alt+Up isn't Up.
+        assert_eq!(
+            press(Key::ArrowUp, Modifiers::NONE).action(Scope::Browse),
+            Some(Action::Move(Move::Up))
+        );
+        // The rows' keys are the browsing pages' alone.
+        assert_eq!(press(Key::W, Modifiers::NONE).action(Scope::Player), None);
+        assert_eq!(press(Key::Delete, Modifiers::NONE).action(Scope::Shell), None);
+        assert_eq!(press(Key::W, Modifiers::NONE).action(Scope::Shell), None);
     }
 
     #[test]

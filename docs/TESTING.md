@@ -58,6 +58,10 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ *Edit* on a playlist by keyboard: renamed, shared with everyone (the server's `OpenAccess`), and the `smoke` example checks private creation, rename and sharing on both versions.
 
+✅ **egui (U7, round 2)**, against 12.2 through a local proxy that holds playlist requests for 2.5 s: two Deletes on Test Playlist (S02E01, then S01E01) followed by Esc 1.5 s before the first request left — the page was gone, and both edits still reached the server in order (`/Playlists/…/Items` ended as [Second Movie]); the same with a `dev2`-owned playlist: the refused Delete answered after Back, Home showed "This playlist belongs to someone else; it can't be changed." and the server's order was unchanged (`r2-refused-after-back.png`). A refused move on an open page still reloads it to the server's order with the toast (`r2-refused.png`). Five Alt+Ups 30 ms apart still end in the order shown after the page's reload (`r2-playlist-order.png`). Down into a playlist's first entry or a collection's first card keeps the page's header in view (`r2-playlist-order.png`, `r2-collection.png`), and Tab into an open season's band scrolls just enough to show the band with the seasons above still there (`r2-band.png`).
+
+✅ **egui (U7)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U7-scratch/`): fast repeated moves on a playlist end in the order shown, checked with a reload — five Alt+Up presses 30 ms apart on the third of three entries moved it to the top, the page reloaded to the server's order (`playlist-alt-up5.png`; `/Playlists/…/Items` gave S01E01, Second Movie, S02E01), and two Alt+Down presses on the first entry did the same downwards earlier (`playlist-after-move.png`); Delete removed the highlighted movie and left the cursor on the row that took its place (`playlist-delete.png`); a `dev2`-owned playlist shared with `dev` refused Alt+Down with "This playlist belongs to someone else; it can't be changed." and the page reloaded showing the server's order unchanged (`playlist-refused-toast.png`, the toast logged too). The rows carry the image, "S1:E2 · name" (or the movie's name with the year on the runtime line), three lines of overview and the Watched toggle; the entry buttons and tooltips are there but pointer-only.
+
 ✅ The item page's *More* menu by keyboard: Enter on *More* opens it (a `PopupMenu` in a controlled popover, since `DropdownMenu` only opens on a click); on a playlist it holds *Edit…* and, past a separator, *Delete playlist…*; on a movie *Add to playlist…*, whose dialog opens with the keyboard in its list. *Watched* and *Favorite* are `Toggle`s, pressed while on (a favorite movie shows *Favorite* filled).
 
 ✅ The context menu's contents and commands, built in place of the *More* menu by temporary code (the harness can't right-click): on a resumable movie *Resume from 0:29*, *Play from beginning*, *Watched*, *Favorite* (checked) and *Add to playlist…*; Enter on *Watched* marked it on the server and the page's toggle turned on. Home, the library grid and search lay out as before with the menus attached.
@@ -66,7 +70,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ With the mouse: clicking a speed (and the checked one, which stays), *Shuffle* and *Repeat* cycling off, all, one.
 - ⬜ **Context menus with a real mouse**: right-click on a Home card, a library poster, a search result, a season and an episode row; *Add to playlist…* opens its dialog with the keyboard in it; a library or person card has no menu.
 
-- ⬜ **Playlist editing with the mouse**: the entry buttons, clicking a playlist in the *Add to playlist* dialog, and quick repeated moves landing in the server's order. As a second user (dev2), adding to dev's playlist or deleting it gives the "belongs to someone else" message.
+- ⬜ **Playlist editing with the mouse**: the entry buttons (move up, move down, remove) and clicking a playlist in the *Add to playlist* dialog. Quick repeated moves landing in the server's order were checked by keyboard (U7, below); as a second user (dev2), adding to dev's playlist or deleting it gives the "belongs to someone else" message (the U7 entry below checks the edit side).
 - ⬜ **Collections and playlists** from a real library (TMDb collections, a long playlist): *Play all* and *Shuffle* go through the whole list, the up-next card names the next entry, and playing something else ends the queue.
 - ⬜ *Play all* while in a SyncPlay group plays the list for the whole group.
 
@@ -390,12 +394,14 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ **egui (U6)**, against 12.2: Test Show's page shows *Resume S1:E1* (this dev account's S1:E1 now has a resume point), *Play from beginning*, *Shuffle*, Watched and Favorite, named after the episode it plays (`item-series.png`). The children rows (seasons, episodes) are U7's.
 
+✅ **egui (U7)**, against 12.2, keyboard only (`U7-scratch/`): Test Show's page shows "Seasons" as two 1.2× poster cards with their played badges (`series-top.png`); Enter on Season 1 (after Down, Tab) opens its episodes in the tinted band under the seasons, S1:E1 marked with the cursor (`series-open.png`); Tab moves into the band and Enter opens the episode's page (`episode-open.png`); Enter again on the open season closes the band (`season-closed.png`); the season's own page lists its episodes as rows with "S1:E1 · Test Show S01E01", the runtime and the Watched toggle (`season-rows.png`); W on its first row unmarked it watched on the server and the toggle and page button followed (`season-w.png`); unmarking S01E02 through the API (`/UserPlayedItems`, in place of another client) reloaded the page and its band, the season card then saying "1 unwatched" and the S01E02 badge gone (`series-band-after.png`); the overview clamps to three lines with an ellipsis (a temporary string in `entry_row`, reverted; `season-overview-clamp-crop.png`); a test collection lists its two movies under "In this collection" (`collection.png`). Idle CPU on the page with the band open was 0 ticks over 10 s.
+
 ✅ **egui (U6, round 2)**: *Shuffle* on Test Show (`dev2`) fetched all six episodes, then played one of them (S02E01) even though Esc had already gone Back to Home when it arrived; the episode's user data was put back afterwards.
 
 - ⬜ **Clicking** the context menu's *Play* on a series and a season card.
 - ⬜ *Shuffle* on a big series, and in a SyncPlay group.
 - ⬜ A series with **specials** placed between seasons.
-- ⬜ A **season's** page (its Play and Shuffle): U7 draws the seasons and episodes, but the page's actions already load its children.
+- ⬜ A **season's** page's Play and Shuffle (U6's actions); U7 draws its rows (above).
 
 ## 26. Cards, shelves and the item menu (W1)
 
@@ -407,7 +413,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ Card text not stealing the card's click, right-click and drag (architecturally checked: with `style.interaction.selectable_labels = false` a label senses hover only, and egui's hit-test gives the click to the card under it).
 - ⬜ **A drag** sideways scrolling a shelf and not counting as a click on the card it ends on, the wheel over a shelf scrolling the page, and a click hiding the cursor.
 - ⬜ The page arrows paging by a whole row on a big shelf, and Shift+wheel scrolling one sideways.
-- ⬜ Person cards and episode cards in a season's row (U7), and cards' hover dimming with a real pointer. Chapter cards and their cursor were checked in U6 (`TESTING.md` §22).
+- ⬜ Person cards; episode cards in a season's row were drawn with U7 (§25) but not clicked, and cards' hover dimming still needs a real pointer. Chapter cards and their cursor were checked in U6 (`TESTING.md` §22).
 
 ## 27. Playlist dialogs (U8)
 

@@ -10,7 +10,7 @@
 
 use crate::config::SavedServer;
 use crate::images::ImageCache;
-use crate::item_menu::Mark;
+use crate::item_menu::{Mark, PlaylistEdits};
 use crate::live::Live;
 use crate::playback::{self, PlaybackManager};
 use crate::remote::Remote;
@@ -56,6 +56,10 @@ pub struct Services {
     /// The session websocket, which feeds SyncPlay, remote control and the watch-data
     /// refresh.
     pub live: Live,
+    /// The item page's playlist changes on their way to the server, one at a time in the order
+    /// they were made (`item_menu.rs`). Queued behind the services so they carry on whatever
+    /// page is on top.
+    pub playlist_edits: PlaylistEdits,
     /// Remote control from other clients: the fetched items of a `Play` request, until
     /// `tick_remote` places them (playing and the controls are methods on `Services`,
     /// `remote.rs`).
@@ -111,6 +115,7 @@ impl Services {
             syncplay: SyncPlay::new(session.client.clone(), ctx),
             live: Live::connect(session.client.clone(), ctx),
             remote: Remote::new(session.client.clone(), ctx),
+            playlist_edits: PlaylistEdits::new(ctx),
             session,
             user_data: 0,
             events: Vec::new(),
@@ -131,6 +136,7 @@ impl Services {
     pub fn tick(&mut self, _ctx: &egui::Context) {
         self.images.tick();
         self.apply_menu_requests();
+        self.tick_playlist_edits();
         self.tick_playback();
         self.tick_live();
         self.tick_remote();
