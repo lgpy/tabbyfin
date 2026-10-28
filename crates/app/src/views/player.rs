@@ -70,7 +70,14 @@ const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 /// The top bar's height: its padding and a control button.
 const TOP_BAR_H: f32 = 2. * PADDING + CONTROL;
 const PADDING: f32 = 16.;
-const SEEK_H: f32 = 20.;
+/// The gap between a bar's controls, `main`'s `gap_3`.
+const GAP: f32 = theme::SPACE.md;
+/// The seek bar's row: gpui-kit's slider track is 24 points high around its track.
+const SEEK_H: f32 = 24.;
+/// The slider track inside that row, and its thumb: a 16-point circle with a 1-point ring.
+const TRACK_H: f32 = 6.;
+const THUMB_R: f32 = 8.;
+const THUMB_RING: f32 = 1.;
 /// The bottom bar's height: its top padding, the seek bar, the gap below it, the controls and
 /// the bottom padding.
 const BOTTOM_BAR_H: f32 = 32. + SEEK_H + 8. + PLAY_CONTROL + PADDING;
@@ -78,10 +85,12 @@ const BOTTOM_BAR_H: f32 = 32. + SEEK_H + 8. + PLAY_CONTROL + PADDING;
 const CONTROL: f32 = 40.;
 const PLAY_CONTROL: f32 = 48.;
 const CONTROL_ICON: f32 = 0.52;
+/// The volume slider's width, and the row it sits in (a slider's 24-point track).
 const VOLUME_W: f32 = 96.;
+const VOLUME_H: f32 = 24.;
 /// The version picker: a small select, 140 points wide as `main`'s was.
 const VERSION_W: f32 = 140.;
-const VERSION_H: f32 = 28.;
+const VERSION_H: f32 = 24.;
 /// The chapter marks' height, and the width of the seek-bar preview thumbnail.
 const CHAPTER_MARK_H: f32 = 8.;
 const PREVIEW_W: f32 = 192.;
@@ -290,6 +299,7 @@ impl PlayerPage {
                 .max_rect(inner)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
                 if control_button(ui, ICON_ARROW_BACK, "Back (Esc)").clicked() {
                     self.exit(cx);
                 }
@@ -610,16 +620,14 @@ impl PlayerPage {
         // buttons, drawn after it, still get theirs.
         ui.interact(rect, Id::unique("player_top_bar"), Sense::CLICK);
         let badges = view.badges();
-        let badge_w: f32 = badges
-            .iter()
-            .map(|text| text_width(ui, text) + 16. + ui.spacing().item_spacing.x)
-            .sum();
+        let badge_w: f32 = badges.iter().map(|text| text_width(ui, text) + 16. + GAP).sum();
         let inner = rect.shrink2(vec2(PADDING, 0.));
         ui.scope_builder(
             UiBuilder::new()
                 .max_rect(inner)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
                 if control_button(ui, ICON_ARROW_BACK, "Back (Esc)").clicked() {
                     self.exit(cx);
                 }
@@ -652,6 +660,7 @@ impl PlayerPage {
                 .max_rect(row)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
                 let tip = if view.paused { "Play (Space)" } else { "Pause (Space)" };
                 let icon = if view.paused { ICON_PLAY_ARROW } else { ICON_PAUSE };
                 if sized_control(ui, icon, PLAY_CONTROL, tip, false).clicked() {
@@ -674,6 +683,8 @@ impl PlayerPage {
                     self.show_controls();
                 }
                 self.volume_slider(ui, view, cx);
+                // `main`'s `ml_2` on the clock, on top of the bar's gap.
+                ui.add_space(8.);
                 let clock = ui.add(
                     egui::Label::new(RichText::new(&view.time).small())
                         .sense(Sense::CLICK)
@@ -696,6 +707,7 @@ impl PlayerPage {
                 .max_rect(row)
                 .layout(Layout::right_to_left(Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
                 let fullscreen = fullscreen(ui.ctx());
                 let icon = if fullscreen {
                     ICON_FULLSCREEN_EXIT
@@ -764,11 +776,11 @@ impl PlayerPage {
         let response = ui.allocate_rect(rect, Sense::CLICK | Sense::DRAG);
         let shown = self.scrub.unwrap_or(view.position);
         let fraction = (shown.as_secs_f64() / duration.as_secs_f64()).clamp(0., 1.) as f32;
-        let track = Rect::from_center_size(rect.center(), vec2(rect.width(), 5.));
+        let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
-        painter.rect_filled(track, CornerRadius::same(2), over_video::SURFACE_SUBTLE);
+        painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
-        painter.rect_filled(filled, CornerRadius::same(2), over_video::FOREGROUND);
+        painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::FOREGROUND);
         for mark in &view.chapter_marks {
             let x = track.left() + track.width() * mark;
             let half = CHAPTER_MARK_H / 2.;
@@ -777,10 +789,7 @@ impl PlayerPage {
                 Stroke::new(2., over_video::MARK),
             );
         }
-        let hover = response.hover_pos();
-        if hover.is_some() || response.dragged() {
-            painter.circle_filled(pos2(filled.right(), track.center().y), 6., over_video::FOREGROUND);
-        }
+        slider_thumb(painter, pos2(filled.right(), track.center().y));
 
         // Dragging: the bar follows the pointer. The seek goes out when the button comes up, so
         // playback doesn't fight the bar.
@@ -796,6 +805,7 @@ impl PlayerPage {
             self.show_controls();
         }
 
+        let hover = response.hover_pos();
         let Some(pos) = hover else { return };
         let offset = (pos.x - rect.left()).clamp(0., rect.width());
         let time = time_at(rect, duration, rect.left() + offset);
@@ -808,10 +818,18 @@ impl PlayerPage {
         let max = (rect.width() - half).max(half);
         let center_x = rect.left() + offset.clamp(half, max);
         let painter = ui.painter();
+        // `main`'s v_flex sat 18 points above the seek row's bottom, i.e. the time just over the
+        // track and the thumbnail above the time.
+        let galley = painter.layout_no_wrap(timestamp(time), theme::text::font(ui, "xs"), over_video::FOREGROUND);
+        let time_h = galley.size().y;
+        let label = Rect::from_min_size(
+            pos2(center_x - galley.size().x / 2. - 4., rect.top() + 6. - time_h),
+            galley.size() + vec2(8., 0.),
+        );
         if let Some((texture, aspect)) = preview {
             let height = PREVIEW_W / aspect;
             let image = Rect::from_min_size(
-                pos2(center_x - PREVIEW_W / 2., rect.top() - 6. - height),
+                pos2(center_x - PREVIEW_W / 2., label.top() - 4. - height),
                 vec2(PREVIEW_W, height),
             );
             painter.image(
@@ -827,11 +845,6 @@ impl PlayerPage {
                 StrokeKind::Outside,
             );
         }
-        let galley = painter.layout_no_wrap(timestamp(time), FontId::proportional(12.), over_video::FOREGROUND);
-        let label = Rect::from_center_size(
-            pos2(center_x, rect.top() - 6. - galley.size().y / 2.),
-            galley.size() + vec2(8., 4.),
-        );
         painter.rect_filled(label, CornerRadius::same(4), over_video::SURFACE);
         painter.galley(label.center() - galley.size() / 2., galley, over_video::FOREGROUND);
     }
@@ -839,19 +852,19 @@ impl PlayerPage {
     /// The volume slider: a drag bar from 0 to 100, as `main`'s slider was. egui's `Slider` is
     /// focusable, which would let Tab take the player's keys from it.
     fn volume_slider(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
-        let (rect, response) = ui.allocate_exact_size(vec2(VOLUME_W, PLAY_CONTROL), Sense::CLICK | Sense::DRAG);
+        let (rect, response) = ui.allocate_exact_size(vec2(VOLUME_W, VOLUME_H), Sense::CLICK | Sense::DRAG);
         let volume = if self.adjusting_volume {
             self.volume
         } else {
             view.volume
         };
         let fraction = (volume / 100.).clamp(0., 1.) as f32;
-        let track = Rect::from_center_size(rect.center(), vec2(rect.width(), 4.));
+        let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
-        painter.rect_filled(track, CornerRadius::same(2), over_video::SURFACE_SUBTLE);
+        painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
-        painter.rect_filled(filled, CornerRadius::same(2), over_video::FOREGROUND);
-        painter.circle_filled(pos2(filled.right(), track.center().y), 5., over_video::FOREGROUND);
+        painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::FOREGROUND);
+        slider_thumb(painter, pos2(filled.right(), track.center().y));
 
         let pressed = response.is_pointer_button_down_on();
         let released = response.clicked() || response.drag_stopped();
@@ -1499,19 +1512,20 @@ fn toggle_fullscreen(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen(ctx)));
 }
 
-/// A control-bar button: an icon in a square, with the keyboard's ring when its menu is open.
-/// Not focusable: egui's focus would take every key from the player (`keys.rs`), as U8's dialogs
-/// avoid for their buttons.
+/// A control-bar button: an icon in a square, filled with the accent while its menu is open and
+/// half of it under the pointer, as gpui-kit's ghost button is. Not focusable: egui's focus would
+/// take every key from the player (`keys.rs`), as U8's dialogs avoid for their buttons.
 fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str, active: bool) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::CLICK);
+    let tokens = theme::tokens_of(ui);
     let fill = if active {
-        over_video::SURFACE_SUBTLE
+        tokens.accent
     } else if response.hovered() {
-        over_video::SURFACE
+        ghost_hover(ui)
     } else {
         Color32::TRANSPARENT
     };
-    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+    ui.painter().rect_filled(rect, CornerRadius::same(tokens.radius), fill);
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -1520,6 +1534,20 @@ fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str
         over_video::FOREGROUND,
     );
     response.on_hover_text(tooltip)
+}
+
+/// `main`'s ghost button under the pointer: gpui-kit's accent at half strength in the dark theme,
+/// which is what the player draws in either theme.
+fn ghost_hover(ui: &egui::Ui) -> Color32 {
+    let [r, g, b, _] = theme::tokens_of(ui).accent.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, 128)
+}
+
+/// A slider's thumb, as gpui-kit draws one: a 16-point circle whose 1-point ring is the bar's
+/// colour at half strength around a dark middle.
+fn slider_thumb(painter: &egui::Painter, center: egui::Pos2) {
+    painter.circle_filled(center, THUMB_R, over_video::THUMB_RING);
+    painter.circle_filled(center, THUMB_R - THUMB_RING, over_video::THUMB);
 }
 
 fn control_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str) -> Response {
@@ -1555,10 +1583,10 @@ fn icon_text(ui: &egui::Ui, icon: MaterialIcon, text: &str) -> egui::WidgetText 
 fn label_badge(ui: &mut egui::Ui, text: impl Into<String>) {
     egui::Frame::new()
         .fill(over_video::SURFACE_SUBTLE)
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(8, 2))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(8, 0))
         .show(ui, |ui| {
-            ui.label(RichText::new(text.into()).small());
+            ui.label(RichText::new(text.into()).small().color(over_video::MUTED_FOREGROUND));
         });
 }
 
@@ -1573,17 +1601,18 @@ fn menu_button(ui: &mut egui::Ui, text: impl Into<String>, selected: bool) -> Re
 /// `main`'s was. Drawn by the page (not an egui widget) so it can't take the keyboard.
 fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(VERSION_W, VERSION_H), Sense::CLICK);
+    let tokens = theme::tokens_of(ui);
     let painter = ui.painter().clone();
     let fill = if response.hovered() {
-        over_video::SURFACE
+        tokens.muted
     } else {
-        Color32::TRANSPARENT
+        tokens.input_background()
     };
     painter.rect(
         rect,
-        CornerRadius::same(4),
+        CornerRadius::same(tokens.radius),
         fill,
-        Stroke::new(1., over_video::MARK),
+        Stroke::new(1., tokens.input),
         StrokeKind::Inside,
     );
     let caret = 14.;
