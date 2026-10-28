@@ -8,6 +8,7 @@
 //! badge, the progress bar, dimming under the pointer and the cursor's ring. Titles and
 //! subtitles are cut short when they don't fit, and the sizes follow A1's text size.
 
+use egui::emath::GuiRounding as _;
 use egui::text::LayoutJob;
 use egui::{
     Align, Align2, CornerRadius, FontId, Label, Rect, Response, Sense, Stroke, StrokeKind, TextFormat, Ui, Vec2,
@@ -335,12 +336,17 @@ fn episode_title(ui: &Ui, episode: &BaseItemDto) -> WidgetText {
 /// justifies its widget, which stretched a title across the card's width; `main`'s lines sat at
 /// the card's left edge and kept their length.
 fn put(ui: &mut Ui, rect: Rect, text: WidgetText) {
+    // Whole pixels, so the text is crisp and egui's debug "Unaligned" overlay stays off.
+    let rect = rect.round_ui();
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(rect)
             .layout(egui::Layout::top_down(Align::Min)),
         |ui| {
             ui.add(Label::new(text).truncate());
+            // The card allocated the line's whole width; without this the scope would report
+            // only the label's width and pull the row's next card back under this one.
+            ui.expand_to_include_rect(rect);
         },
     );
 }
