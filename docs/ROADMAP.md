@@ -189,6 +189,7 @@ Starting from egui's default look, in this order. Marked ✅ where it has landed
 | R4 | **Search box** | P3 | S | Opening out of its button and closing back. |
 | R5 | **Scroll feel** | P3 | M | Wheel smoothing and shelf glide; today a drag-scrollable row shows the grabbing cursor and coasts or rubber-bands on release. |
 | R6 | **Player overlay polish** | P3 | S | Gradients, button sizes and icon sizes of the player's bars and menus. |
+| R7 | **Layout details** | P3 | S | What R1 left of `main`'s layout: the sign-in form centred in the window, Home's shelf padding, the search box's prefix icon, and card titles left-aligned under their images. |
 
 ---
 
