@@ -45,6 +45,8 @@ use crate::keys::{self, Action, Scope};
 use crate::nav::{NavRequest, Route};
 use crate::playback::PlayOptions;
 use crate::task::Task;
+use crate::theme;
+use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::dialogs::{AddToPlaylist, DeletePlaylist, EditPlaylist};
 use crate::views::{Page, PageCx};
@@ -225,6 +227,8 @@ const BIG_CARD_GAP: f32 = 24.;
 const SHELF_TITLE_GAP: f32 = 16.;
 const ACTION_SIZE: f32 = 48.;
 const ACTION_ICON: f32 = 24.;
+/// The item's title, `main`'s fixed 40-point `text_size` (it didn't follow the text size).
+const TITLE_SIZE: f32 = 40.;
 /// Between the action buttons, whose cursor rings take 3 px on each side.
 const ACTION_GAP: f32 = 16.;
 const ACTION_RING_GAP: f32 = 3.;
@@ -1141,7 +1145,7 @@ fn entry_rows(
             ui.painter().rect_stroke(
                 response.rect,
                 CornerRadius::same(8),
-                Stroke::new(3., ui.visuals().strong_text_color()),
+                Stroke::new(3., theme::tokens_of(ui).foreground),
                 StrokeKind::Inside,
             );
         }
@@ -1168,11 +1172,10 @@ fn entry_row(
     images: &mut ImageCache,
     asked: &mut Asked,
 ) -> Response {
-    let body = TextStyle::Body.resolve(ui.style());
-    let small_size = (body.size - 2.).max(6.);
-    let small = FontId::new(small_size, body.family.clone());
-    let heading_font = FontId::new(body.size, body.family.clone());
-    let weak = ui.visuals().weak_text_color();
+    // `main`'s rows: a `text_base` heading with `text_sm` under it.
+    let small = text::font(ui, "sm");
+    let heading_font = text::font(ui, "base");
+    let weak = theme::tokens_of(ui).muted_foreground;
     let width = ui.available_width();
     let inner_width = width - 2. * ROW_PAD;
     // The entry buttons, and the gap between them and the Watched toggle.
@@ -1193,7 +1196,7 @@ fn entry_row(
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     if selected || ui.rect_contains_pointer(rect) {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), ui.visuals().widgets.inactive.weak_bg_fill);
+            .rect_filled(rect, CornerRadius::same(8), theme::tokens_of(ui).accent);
     }
     let inner = rect.shrink(ROW_PAD);
     // The row's content goes in a Ui of its own, so that placing the toggle and the buttons in
@@ -1258,12 +1261,13 @@ fn entry_row(
     );
     let toggle = row
         .scope_builder(UiBuilder::new().max_rect(watched_rect), |ui| {
-            ui.add(
-                egui::Button::new(menu::played_icon(played))
-                    .selected(played)
+            ui.add(theme::selected(
+                ui,
+                played,
+                egui::Button::new(menu::played_icon(ui, played))
                     .sense(Sense::CLICK)
                     .min_size(vec2(WATCHED_SIZE, WATCHED_SIZE)),
-            )
+            ))
         })
         .inner
         .on_hover_text("Watched (W)");
@@ -1316,14 +1320,13 @@ fn entry_row(
 /// `main`'s `line_clamp(3)` did. Laid out here rather than through a `Label`: a label replaces
 /// the job's wrapping, and with it the row limit.
 fn overview_galley(ui: &Ui, text: &str, width: f32) -> std::sync::Arc<egui::Galley> {
-    let body = TextStyle::Body.resolve(ui.style());
     let mut job = LayoutJob::default();
     job.append(
         text,
         0.,
         TextFormat {
-            font_id: FontId::new((body.size - 2.).max(6.), body.family),
-            color: ui.visuals().text_color(),
+            font_id: self::text::font(ui, "sm"),
+            color: theme::tokens_of(ui).foreground,
             ..Default::default()
         },
     );
@@ -1388,7 +1391,7 @@ fn episodes_band(
         pos2(ui.clip_rect().left(), top.y),
         pos2(ui.clip_rect().right(), ui.cursor().min.y),
     );
-    let muted = ui.visuals().widgets.inactive.weak_bg_fill;
+    let muted = theme::tokens_of(ui).muted;
     let band = Color32::from_rgba_unmultiplied(muted.r(), muted.g(), muted.b(), BAND_ALPHA);
     ui.painter()
         .set(background, egui::Shape::rect_filled(rect, CornerRadius::ZERO, band));
@@ -1407,7 +1410,7 @@ fn band_note(ui: &mut Ui, message: &str, spinner: bool) {
             if spinner {
                 ui.spinner();
             } else {
-                ui.label(RichText::new(message).color(ui.visuals().weak_text_color()));
+                ui.label(RichText::new(message).color(theme::tokens_of(ui).muted_foreground));
             }
         },
     );
@@ -1487,14 +1490,13 @@ fn header(
 /// studios, the synopsis and the tags.
 fn info_column(ui: &mut Ui, data: &ItemData, actions: &[ItemAction], selected: Option<Position>, asked: &mut Asked) {
     let item = &data.item;
-    let body = TextStyle::Body.resolve(ui.style());
-    let small = body.size - 2.;
-    let weak = ui.visuals().weak_text_color();
+    let weak = theme::tokens_of(ui).muted_foreground;
     ui.spacing_mut().item_spacing.y = 8.;
     if matches!(item.kind, BaseItemKind::Episode | BaseItemKind::Season)
         && let Some(series) = &item.series_name
     {
-        ui.label(RichText::new(series).size(small).color(weak));
+        // `main`'s series line took the body size; the lines under the title are `text_sm`.
+        ui.label(RichText::new(series).font(text::font(ui, "base")).color(weak));
     }
 
     let episode = data
@@ -1503,7 +1505,8 @@ fn info_column(ui: &mut Ui, data: &ItemData, actions: &[ItemAction], selected: O
         .map(episode_label)
         .filter(|label| !label.is_empty());
     let actions_width = actions_width(ui, data, actions, episode.as_deref());
-    let title_font = FontId::new(body.size * 2.5, body.family.clone());
+    // `main`'s 40-point title: a fixed size, so the text size setting doesn't move the header.
+    let title_font = FontId::new(TITLE_SIZE, text::font(ui, "base").family);
     let available = ui.available_width();
     let gap = 16.;
     if available >= TITLE_MIN_W + gap + actions_width {
@@ -1526,14 +1529,18 @@ fn info_column(ui: &mut Ui, data: &ItemData, actions: &[ItemAction], selected: O
 
     let meta = meta_line(item);
     if !meta.is_empty() {
-        ui.label(RichText::new(meta).size(small).color(weak));
+        ui.label(RichText::new(meta).font(text::font(ui, "sm")).color(weak));
     }
     if !item.genres.is_empty() {
-        ui.label(RichText::new(item.genres.join(", ")).size(small).color(weak));
+        ui.label(
+            RichText::new(item.genres.join(", "))
+                .font(text::font(ui, "sm"))
+                .color(weak),
+        );
     }
     if !item.studios.is_empty() {
         let studios: Vec<&str> = item.studios.iter().map(|studio| studio.name.as_str()).collect();
-        ui.label(RichText::new(studios.join(", ")).size(small).color(weak));
+        ui.label(RichText::new(studios.join(", ")).font(text::font(ui, "sm")).color(weak));
     }
     if let Some(overview) = &item.overview
         && !overview.is_empty()
@@ -1541,7 +1548,8 @@ fn info_column(ui: &mut Ui, data: &ItemData, actions: &[ItemAction], selected: O
         ui.add_space(8.);
         ui.scope(|ui| {
             ui.set_max_width(820.);
-            ui.add(Label::new(overview.clone()).wrap());
+            // The synopsis is `main`'s `text_base`, a step above the meta lines.
+            ui.add(Label::new(RichText::new(overview.clone()).font(text::font(ui, "base"))).wrap());
         });
     }
     if !item.tags.is_empty() {
@@ -1552,11 +1560,12 @@ fn info_column(ui: &mut Ui, data: &ItemData, actions: &[ItemAction], selected: O
                 ui.spacing_mut().item_spacing = vec2(4., 4.);
                 for tag in &item.tags {
                     egui::Frame::NONE
-                        .fill(ui.visuals().widgets.inactive.weak_bg_fill)
-                        .corner_radius(CornerRadius::same(6))
+                        .fill(theme::tokens_of(ui).muted)
+                        // `main`'s `rounded_lg`, 8 points.
+                        .corner_radius(CornerRadius::same(8))
                         .inner_margin(Margin::symmetric(8, 2))
                         .show(ui, |ui| {
-                            ui.label(RichText::new(tag).size(small).color(weak));
+                            ui.label(RichText::new(tag).font(text::font(ui, "xs")).color(weak));
                         });
                 }
             });
@@ -1686,11 +1695,11 @@ fn actions_row(
                 });
             let response = match action {
                 ItemAction::TogglePlayed => {
-                    let icon = menu::played_icon(played).size(ACTION_ICON);
+                    let icon = menu::played_icon(ui, played).size(ACTION_ICON);
                     toggle(ui, icon, played, "Watched")
                 }
                 ItemAction::ToggleFavorite => {
-                    let icon = menu::favorite_icon(favorite).size(ACTION_ICON);
+                    let icon = menu::favorite_icon(ui, favorite).size(ACTION_ICON);
                     toggle(ui, icon, favorite, "Favorite")
                 }
                 _ => {
@@ -1706,7 +1715,7 @@ fn actions_row(
                 ui.painter().rect_stroke(
                     response.rect.expand(ACTION_RING_GAP),
                     CornerRadius::same(8),
-                    Stroke::new(2., ui.visuals().strong_text_color()),
+                    Stroke::new(2., theme::tokens_of(ui).foreground),
                     StrokeKind::Outside,
                 );
             }
@@ -1721,10 +1730,11 @@ fn actions_row(
 /// page's keys are the browse cursor's (`keys.rs`).
 fn action_button(ui: &Ui, look: &ActionLook) -> egui::Button<'static> {
     let body = TextStyle::Button.resolve(ui.style());
+    let tokens = theme::tokens_of(ui);
     let color = if look.primary {
-        ui.visuals().panel_fill
+        tokens.primary_foreground
     } else {
-        ui.visuals().text_color()
+        tokens.foreground
     };
     let mut job = LayoutJob::default();
     job.append(
@@ -1751,25 +1761,30 @@ fn action_button(ui: &Ui, look: &ActionLook) -> egui::Button<'static> {
         .sense(Sense::CLICK)
         .min_size(vec2(ACTION_SIZE, ACTION_SIZE));
     if look.primary {
-        button.fill(ui.visuals().strong_text_color()).stroke(Stroke::NONE)
+        button.fill(tokens.primary).stroke(Stroke::NONE)
     } else {
         button
     }
 }
 
-/// Watched and Favorite: pressed while on, with the icon filled in.
+/// Watched and Favorite: pressed while on (the theme's accent behind it, as `main`'s checked
+/// toggles had), with the icon filled in green or red.
 fn toggle(ui: &mut Ui, icon: RichText, on: bool, tooltip: &str) -> Response {
-    let button = egui::Button::new(icon)
+    let mut button = egui::Button::new(icon)
         .selected(on)
         .sense(Sense::CLICK)
         .min_size(vec2(ACTION_SIZE, ACTION_SIZE));
+    if on {
+        // A selected button paints itself with the selection colour; `main`'s toggles used the
+        // accent, and the icon keeps its own green or red.
+        button = button.fill(theme::tokens_of(ui).accent);
+    }
     ui.add(button).on_hover_text(tooltip)
 }
 
 /// The version label's column and the picker, when the item has more than one version.
 fn pickers_row(ui: &mut Ui, data: &ItemData, selected: Option<Position>, version: usize, asked: &mut Asked) -> Rect {
     let top = ui.cursor().min;
-    let body = TextStyle::Body.resolve(ui.style());
     let sources = &data.item.media_sources;
     let current = version.min(sources.len() - 1);
     ui.horizontal(|ui| {
@@ -1779,8 +1794,8 @@ fn pickers_row(ui: &mut Ui, data: &ItemData, selected: Option<Position>, version
             label.left_center(),
             Align2::LEFT_CENTER,
             "Version",
-            FontId::new(body.size - 2., body.family.clone()),
-            ui.visuals().weak_text_color(),
+            text::font(ui, "sm"),
+            theme::tokens_of(ui).muted_foreground,
         );
         let ringed = selected
             == Some(Position {
@@ -1798,12 +1813,13 @@ fn pickers_row(ui: &mut Ui, data: &ItemData, selected: Option<Position>, version
 /// the list of versions; the keyboard changes the choice on the cursor instead.
 fn picker(ui: &mut Ui, name: &str, ringed: bool) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(PICKER_W, PICKER_H), Sense::CLICK);
+    let tokens = theme::tokens_of(ui);
     let fill = if response.hovered() {
-        ui.visuals().widgets.hovered.weak_bg_fill
+        tokens.accent
     } else {
-        ui.visuals().widgets.inactive.weak_bg_fill
+        tokens.button
     };
-    let stroke = Stroke::new(1., ui.visuals().widgets.inactive.bg_stroke.color);
+    let stroke = Stroke::new(1., tokens.input);
     ui.painter()
         .rect(rect, CornerRadius::same(6), fill, stroke, StrokeKind::Inside);
     let caret = 16.;
@@ -1822,13 +1838,13 @@ fn picker(ui: &mut Ui, name: &str, ringed: bool) -> Response {
         Align2::CENTER_CENTER,
         ICON_ARROW_DROP_DOWN.codepoint,
         FontId::new(caret, ICON_ARROW_DROP_DOWN.font_family()),
-        ui.visuals().weak_text_color(),
+        theme::tokens_of(ui).muted_foreground,
     );
     if ringed {
         ui.painter().rect_stroke(
             rect.expand(ACTION_RING_GAP),
             CornerRadius::same(8),
-            Stroke::new(2., ui.visuals().strong_text_color()),
+            Stroke::new(2., theme::tokens_of(ui).foreground),
             StrokeKind::Outside,
         );
     }
@@ -1926,7 +1942,7 @@ fn similar_shelf(
 
 /// Fades the backdrop into the page's background at its bottom, as `main`'s gradient did.
 fn fade_to_background(ui: &Ui, band: Rect) {
-    let background = ui.visuals().panel_fill;
+    let background = theme::tokens_of(ui).background;
     // `main`'s first stop: the background at 30 %, so the image shows through at the top.
     let top = Color32::from_rgba_unmultiplied(background.r(), background.g(), background.b(), 77);
     let mut mesh = egui::Mesh::default();
@@ -1943,14 +1959,14 @@ fn fade_to_background(ui: &Ui, band: Rect) {
 /// keyboard's ring while it's highlighted.
 fn menu_row(ui: &mut Ui, icon: Option<MaterialIcon>, label: &str, highlighted: bool) -> Response {
     let body = TextStyle::Button.resolve(ui.style());
-    let color = ui.visuals().text_color();
+    let color = theme::tokens_of(ui).foreground;
     let mut job = LayoutJob::default();
     if let Some(icon) = icon {
         job.append(
             icon.codepoint,
             0.,
             TextFormat {
-                font_id: FontId::new(body.size + 2., icon.font_family()),
+                font_id: text::icon(ui, icon.font_family()),
                 color,
                 ..Default::default()
             },
@@ -1977,7 +1993,7 @@ fn menu_row(ui: &mut Ui, icon: Option<MaterialIcon>, label: &str, highlighted: b
         ui.painter().rect_stroke(
             response.rect,
             CornerRadius::same(4),
-            Stroke::new(1.5, ui.visuals().selection.stroke.color),
+            Stroke::new(1.5, theme::tokens_of(ui).foreground),
             StrokeKind::Inside,
         );
     }

@@ -18,7 +18,7 @@
 use std::collections::VecDeque;
 
 use egui::text::LayoutJob;
-use egui::{Button, Color32, FontId, Response, RichText, TextFormat, TextStyle, Ui, WidgetText};
+use egui::{Button, Response, RichText, TextFormat, Ui, WidgetText};
 use egui_material_icons::icons::{ICON_CHECK, ICON_CHECK_CIRCLE, ICON_FAVORITE, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD};
 
 use jellyfin::models::{BaseItemDto, BaseItemKind};
@@ -26,6 +26,8 @@ use jellyfin::models::{BaseItemDto, BaseItemKind};
 use crate::item_menu::{self, Mark, can_add_to_playlist, can_mark, is_favorite, is_playable, is_played, resume_point};
 use crate::playback::PlayOptions;
 use crate::services::{Marked, Services, Shuffled, UpNext};
+use crate::theme;
+use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::item::shuffle;
 use crate::widgets::text::timestamp;
@@ -112,19 +114,19 @@ pub fn entries(ui: &mut Ui, item: &BaseItemDto) -> Option<MenuAction> {
     chosen
 }
 
-/// Watched's icon: a check, filled in green once it's watched.
-pub fn played_icon(played: bool) -> RichText {
+/// Watched's icon: a check, filled in green once it's watched (`main`'s `success`).
+pub fn played_icon(ui: &Ui, played: bool) -> RichText {
     if played {
-        ICON_CHECK_CIRCLE.rich_text().color(SUCCESS)
+        ICON_CHECK_CIRCLE.rich_text().color(theme::tokens_of(ui).success)
     } else {
         ICON_CHECK.outlined().rich_text()
     }
 }
 
-/// Favorite's icon: a heart, filled in red once it's a favorite.
-pub fn favorite_icon(favorite: bool) -> RichText {
+/// Favorite's icon: a heart, filled in red once it's a favorite (`main`'s base red).
+pub fn favorite_icon(ui: &Ui, favorite: bool) -> RichText {
     if favorite {
-        ICON_FAVORITE.rich_text().color(RED)
+        ICON_FAVORITE.rich_text().color(theme::tokens_of(ui).red)
     } else {
         ICON_FAVORITE.outlined().rich_text()
     }
@@ -132,14 +134,14 @@ pub fn favorite_icon(favorite: bool) -> RichText {
 
 /// A menu entry with `icon` before its label, as `main`'s menu items had.
 fn icon_entry(ui: &mut Ui, icon: egui_material_icons::MaterialIcon, label: &str) -> Response {
-    let body = TextStyle::Body.resolve(ui.style());
-    let color = ui.visuals().text_color();
+    let icon_font = text::icon(ui, icon.font_family());
+    let color = theme::tokens_of(ui).foreground;
     let mut job = LayoutJob::default();
     job.append(
         icon.codepoint,
         0.,
         TextFormat {
-            font_id: FontId::new(body.size + 2., icon.font_family()),
+            font_id: icon_font,
             color,
             ..Default::default()
         },
@@ -148,18 +150,13 @@ fn icon_entry(ui: &mut Ui, icon: egui_material_icons::MaterialIcon, label: &str)
         &format!("  {label}"),
         0.,
         TextFormat {
-            font_id: body,
+            font_id: text::font(ui, "base"),
             color,
             ..Default::default()
         },
     );
     ui.add(Button::new(WidgetText::LayoutJob(job.into())))
 }
-
-/// `main`'s green and red for the filled watched and favorite icons (gpui-kit's theme colours);
-/// R1 brings the theme's own tokens.
-const SUCCESS: Color32 = Color32::from_rgb(0x2e, 0xc4, 0x6e);
-const RED: Color32 = Color32::from_rgb(0xef, 0x44, 0x44);
 
 /// How many refused marks the services remember. A page left off screen catches up with the
 /// newest ones (it takes back each refusal once); past this many the page is showing data the

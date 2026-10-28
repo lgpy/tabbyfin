@@ -16,7 +16,7 @@ pub fn spinner(ui: &mut Ui) {
 pub fn message(ui: &mut Ui, message: impl Into<String>) {
     let message = message.into();
     ui.centered_and_justified(|ui| {
-        ui.label(RichText::new(message).color(ui.visuals().weak_text_color()));
+        ui.label(RichText::new(message).color(crate::theme::tokens_of(ui).muted_foreground));
     });
 }
 
@@ -38,7 +38,7 @@ pub fn error(ui: &mut Ui, message: impl Into<String>) -> bool {
     let mut retry = false;
     ui.vertical_centered(|ui| {
         ui.add_space(((ui.available_height() - height) * 0.5).max(0.));
-        ui.label(RichText::new(message).color(ui.visuals().weak_text_color()));
+        ui.label(RichText::new(message).color(crate::theme::tokens_of(ui).muted_foreground));
         ui.add_space(gap);
         retry = ui.button("Retry").clicked();
     });

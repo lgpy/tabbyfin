@@ -25,8 +25,8 @@
 
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, Color32, CornerRadius, FontId, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText,
-    Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, vec2,
+    Align, Align2, Color32, CornerRadius, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText, Sense,
+    Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -44,19 +44,20 @@ use crate::services::AppEvent;
 use crate::session::Session;
 use crate::syncplay::SyncPlay;
 use crate::task::Task;
-use crate::theme::over_video;
+use crate::theme::{self, over_video, text};
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::{self, Page, PageCx, player};
 
 /// The bar's height, inside the panel's own margin.
-const BAR_H: f32 = 52.;
+/// `main`'s bar: 72 points tall, 40-point buttons with 24-point icons.
+const BAR_H: f32 = 72.;
 /// The size of the bar's buttons, and of the slot each takes (so the right-hand side lines up
 /// whatever the icon is).
-const BAR_BUTTON: f32 = 36.;
-const BAR_ICON: f32 = 20.;
+const BAR_BUTTON: f32 = 40.;
+const BAR_ICON: f32 = 24.;
 /// The app icon's size in the bar.
-const LOGO: f32 = 32.;
+const LOGO: f32 = 40.;
 /// The open search box's width, when the window has room for it.
 const SEARCH_BOX_W: f32 = 400.;
 /// The search box's id: it gives its focus back when the keyboard leaves it.
@@ -320,14 +321,20 @@ impl Shell {
                 .frame(egui::Frame::NONE.fill(over_video::BACKDROP))
                 .show(ui, |ui| player.show(ui, cx));
         } else {
-            egui::Panel::top("top_bar").show(ui, |ui| self.top_bar(ui, cx));
-            egui::CentralPanel::default().show(ui, |ui| {
-                // Each page's widgets and scroll areas live under its own id scope, so stacked
-                // pages can use the same names for theirs (two `"cast"` shelves, two
-                // `ScrollArea`s).
-                let entry = self.stack.last_mut().expect("the page stack is never empty");
-                ui.push_id(entry.serial, |ui| entry.page.show(ui, cx));
-            });
+            // `main`'s bar keeps its contents 24 points from the window's edges; the pages own
+            // their own 24 (or less, for a grid's own padding), so the panel adds none.
+            egui::Panel::top("top_bar")
+                .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(24, 0)))
+                .show(ui, |ui| self.top_bar(ui, cx));
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
+                .show(ui, |ui| {
+                    // Each page's widgets and scroll areas live under its own id scope, so stacked
+                    // pages can use the same names for theirs (two `"cast"` shelves, two
+                    // `ScrollArea`s).
+                    let entry = self.stack.last_mut().expect("the page stack is never empty");
+                    ui.push_id(entry.serial, |ui| entry.page.show(ui, cx));
+                });
         }
         self.navigate(cx);
     }
@@ -851,7 +858,8 @@ impl Shell {
                         cx.nav.push(NavRequest::Back);
                     }
                 }
-                ui.add(egui::Label::new(RichText::new(title).heading().strong()).truncate());
+                // `main`'s bar title: `text_xl` semibold.
+                ui.add(egui::Label::new(RichText::new(title).font(text::font(ui, "xl")).strong()).truncate());
             },
         );
 
@@ -926,19 +934,21 @@ impl Shell {
             None => name.clone(),
         };
         let (rect, response) = ui.allocate_exact_size(vec2(BAR_BUTTON, BAR_BUTTON), Sense::click());
+        // `main`'s avatar: `muted` behind the initial in the foreground colour.
+        let tokens = theme::tokens_of(ui);
         let fill = if response.hovered() {
-            ui.visuals().widgets.hovered.weak_bg_fill
+            tokens.accent
         } else {
-            ui.visuals().widgets.inactive.weak_bg_fill
+            tokens.muted
         };
         let center = rect.center();
-        ui.painter().circle_filled(center, 14., fill);
+        ui.painter().circle_filled(center, 16., fill);
         ui.painter().text(
             center,
             Align2::CENTER_CENTER,
             initial(&name),
-            FontId::proportional(16.),
-            ui.visuals().strong_text_color(),
+            text::font(ui, "base"),
+            tokens.foreground,
         );
         if highlighted {
             ring(ui, &response);
@@ -1054,7 +1064,7 @@ impl Shell {
         let state = &cx.services.syncplay;
         let highlight = self.syncplay_highlight.as_ref().map(|highlight| &highlight.entry);
         let mut chosen = None;
-        let muted = ui.visuals().weak_text_color();
+        let muted = theme::tokens_of(ui).muted_foreground;
         match &state.group {
             Some(group) => {
                 ui.label(RichText::new(&group.group_name).strong());
@@ -1069,11 +1079,12 @@ impl Shell {
                 if let Some(entry) = group_queue(ui, state, highlight, scroll) {
                     chosen = Some(entry);
                 }
-                let leave = ui.add(
-                    egui::Button::new("Leave group")
-                        .selected(matches!(highlight, Some(MenuEntry::LeaveGroup)))
-                        .sense(Sense::CLICK),
+                let leave = theme::selected(
+                    ui,
+                    matches!(highlight, Some(MenuEntry::LeaveGroup)),
+                    egui::Button::new("Leave group").sense(Sense::CLICK),
                 );
+                let leave = ui.add(leave);
                 if leave.clicked() {
                     chosen = Some(MenuEntry::LeaveGroup);
                 }
@@ -1094,15 +1105,14 @@ impl Shell {
                     // the panel.
                     ui.horizontal(|ui| {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let join = ui.add(
-                                egui::Button::new("Join")
-                                    .small()
-                                    .selected(matches!(
-                                        highlight,
-                                        Some(MenuEntry::JoinGroup(id)) if id == &group.group_id
-                                    ))
-                                    .sense(Sense::CLICK),
-                            );
+                            let join = ui.add(theme::selected(
+                                ui,
+                                matches!(
+                                    highlight,
+                                    Some(MenuEntry::JoinGroup(id)) if id == &group.group_id
+                                ),
+                                egui::Button::new("Join").small().sense(Sense::CLICK),
+                            ));
                             if join.clicked() {
                                 chosen = Some(MenuEntry::JoinGroup(group.group_id.clone()));
                             }
@@ -1118,11 +1128,11 @@ impl Shell {
                         });
                     });
                 }
-                let new_group = ui.add(
-                    egui::Button::new("New group")
-                        .selected(matches!(highlight, Some(MenuEntry::NewGroup)))
-                        .sense(Sense::CLICK),
-                );
+                let new_group = ui.add(theme::selected(
+                    ui,
+                    matches!(highlight, Some(MenuEntry::NewGroup)),
+                    egui::Button::new("New group").sense(Sense::CLICK),
+                ));
                 if new_group.clicked() {
                     chosen = Some(MenuEntry::NewGroup);
                 }
@@ -1150,7 +1160,9 @@ impl Shell {
                             .id(Id::unique(SEARCH_ID))
                             .hint_text("Search")
                             .desired_width(rect.width())
-                            .margin(egui::Margin::symmetric(8, 6))
+                            // `main`'s 40-point field: a `text_sm` line with 10 points above
+                            // and below it.
+                            .margin(egui::Margin::symmetric(10, 9))
                             .event_filter(egui::EventFilter {
                                 tab: true,
                                 horizontal_arrows: true,
@@ -1342,9 +1354,12 @@ struct StackEntry {
 /// A top-bar icon button: every item takes the same slot, with the keyboard's ring around it
 /// while the bar's keyboard is on it.
 fn bar_button(ui: &mut Ui, icon: MaterialIcon, tooltip: &str, highlighted: bool, selected: bool) -> Response {
+    // No frame at rest, as `main`'s ghost buttons had; the pointer and the keyboard's ring show
+    // where the button is.
     let button = egui::Button::new(icon.rich_text().size(BAR_ICON))
         .min_size(vec2(BAR_BUTTON, BAR_BUTTON))
-        .selected(selected);
+        .frame_when_inactive(false);
+    let button = theme::selected(ui, selected, button);
     let response = ui.add(button).on_hover_text(tooltip);
     if highlighted {
         ring(ui, &response);
@@ -1463,7 +1478,7 @@ fn group_status(state: GroupState) -> &'static str {
 fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scroll: bool) -> Option<MenuEntry> {
     let queue = state.queue.as_ref().filter(|queue| !queue.playlist.is_empty())?;
     let mut chosen = None;
-    let muted = ui.visuals().weak_text_color();
+    let muted = theme::tokens_of(ui).muted_foreground;
     ui.add_space(4.);
     ui.label(RichText::new("Queue").small().color(muted));
     ui.horizontal(|ui| {
@@ -1505,7 +1520,7 @@ fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scr
                     .inner_margin(egui::Margin::symmetric(4, 1))
                     .corner_radius(CornerRadius::same(4))
                     .fill(if highlighted {
-                        ui.visuals().selection.bg_fill
+                        theme::tokens_of(ui).accent
                     } else {
                         Color32::TRANSPARENT
                     });
@@ -1557,16 +1572,16 @@ fn toggle_button(ui: &mut Ui, icon: MaterialIcon, label: &str, on: bool) -> Resp
     // A selected button paints its text with the selection's stroke, so the icon and label take
     // that colour with it (a `LayoutJob` keeps its own colour where a `RichText` is recoloured).
     let color = if on {
-        ui.visuals().selection.stroke.color
+        theme::tokens_of(ui).accent_foreground
     } else {
-        ui.visuals().text_color()
+        theme::tokens_of(ui).foreground
     };
     let mut job = LayoutJob::default();
     job.append(
         icon.codepoint,
         0.,
         TextFormat {
-            font_id: FontId::new(body.size + 2., icon.font_family()),
+            font_id: text::icon(ui, icon.font_family()),
             color,
             ..Default::default()
         },
@@ -1580,12 +1595,13 @@ fn toggle_button(ui: &mut Ui, icon: MaterialIcon, label: &str, on: bool) -> Resp
             ..Default::default()
         },
     );
-    ui.add(
+    ui.add(theme::selected(
+        ui,
+        on,
         egui::Button::new(egui::WidgetText::LayoutJob(job.into()))
             .small()
-            .selected(on)
             .sense(Sense::CLICK),
-    )
+    ))
 }
 
 /// A small icon-only button in a queue row, disabled at the ends of the queue.
@@ -1627,7 +1643,7 @@ fn ring(ui: &Ui, response: &Response) {
     ui.painter().rect_stroke(
         response.rect.expand(1.),
         CornerRadius::same(4),
-        Stroke::new(1.5, ui.visuals().selection.stroke.color),
+        Stroke::new(1.5, theme::tokens_of(ui).foreground),
         StrokeKind::Outside,
     );
 }
@@ -1636,14 +1652,14 @@ fn ring(ui: &Ui, response: &Response) {
 /// keyboard's highlight around it while the keyboard is on it.
 fn account_entry(ui: &mut Ui, checked: bool, label: &str, highlighted: bool) -> Response {
     let body = TextStyle::Body.resolve(ui.style());
-    let color = ui.visuals().text_color();
+    let color = theme::tokens_of(ui).foreground;
     let mut job = LayoutJob::default();
     // An unchecked row keeps the check's room, so the labels line up.
     job.append(
         ICON_CHECK.codepoint,
         0.,
         TextFormat {
-            font_id: FontId::new(body.size + 2., ICON_CHECK.font_family()),
+            font_id: text::icon(ui, ICON_CHECK.font_family()),
             color: if checked { color } else { Color32::TRANSPARENT },
             ..Default::default()
         },
@@ -1657,12 +1673,12 @@ fn account_entry(ui: &mut Ui, checked: bool, label: &str, highlighted: bool) -> 
             ..Default::default()
         },
     );
-    let response = ui.add(egui::Button::new(egui::WidgetText::LayoutJob(job.into())).frame(false));
+    let response = ui.add(egui::Button::new(egui::WidgetText::LayoutJob(job.into())).frame_when_inactive(false));
     if highlighted {
         ui.painter().rect_stroke(
             response.rect,
             CornerRadius::same(4),
-            Stroke::new(1.5, ui.visuals().selection.stroke.color),
+            Stroke::new(1.5, theme::tokens_of(ui).foreground),
             StrokeKind::Inside,
         );
     }

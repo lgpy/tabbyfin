@@ -16,6 +16,8 @@ use jellyfin::{Client, ClientInfo, Error, MIN_SUPPORTED_VERSION};
 use crate::config::SavedServer;
 use crate::session::{self, Session, describe_error};
 use crate::task::{self, Deadline, Receiver, Sender, Task};
+use crate::theme;
+use crate::theme::text;
 
 /// How long to keep retrying while the server reports that it is starting up.
 const STARTUP_WAIT: Duration = Duration::from_secs(120);
@@ -231,8 +233,13 @@ impl Login {
     }
 
     fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.label(egui::RichText::new("Tabbyfin").heading());
-        ui.label(egui::RichText::new("Sign in to your Jellyfin server").weak());
+        // `main`'s sign-in: a `text_2xl` title over a `text_sm` line in the muted colour.
+        ui.label(egui::RichText::new("Tabbyfin").font(text::font(ui, "2xl")).strong());
+        ui.label(
+            egui::RichText::new("Sign in to your Jellyfin server")
+                .font(text::font(ui, "sm"))
+                .color(theme::tokens_of(ui).muted_foreground),
+        );
         ui.add_space(12.0);
         if let Some(error) = self.error.clone() {
             error_box(ui, &error);
@@ -461,7 +468,7 @@ impl Login {
             ui.add_space(4.0);
         }
 
-        ui.label("Server address");
+        field_label(ui, "Server address");
         let address = ui.add(
             egui::TextEdit::singleline(&mut self.url)
                 .id(Field::Server.id())
@@ -475,15 +482,16 @@ impl Login {
         }
         let entered = address.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            let connect = ui.add_enabled(!self.busy, egui::Button::new("Connect"));
-            if self.busy {
-                ui.spinner();
-            }
-            if connect.clicked() || entered {
-                self.on_connect(ctx);
-            }
-        });
+        // `main`'s form: the step's button under the field, the width of the form.
+        let width = ui.available_width();
+        let connect = theme::primary_button(ui, "Connect");
+        let connect = ui.add_enabled(!self.busy, connect.min_size(egui::vec2(width, 0.)));
+        if self.busy {
+            ui.spinner();
+        }
+        if connect.clicked() || entered {
+            self.on_connect(ctx);
+        }
     }
 
     fn credentials_step(&mut self, ui: &mut egui::Ui, info: &PublicSystemInfo, ctx: &egui::Context) {
@@ -504,7 +512,7 @@ impl Login {
         });
         ui.add_space(8.0);
 
-        ui.label("Username");
+        field_label(ui, "Username");
         let username = ui.add(
             egui::TextEdit::singleline(&mut self.username)
                 .id(Field::Username.id())
@@ -518,7 +526,7 @@ impl Login {
         let username_entered = username.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         ui.add_space(4.0);
 
-        ui.label("Password");
+        field_label(ui, "Password");
         let mut password_entered = false;
         ui.horizontal(|ui| {
             let password = ui.add(
@@ -556,19 +564,22 @@ impl Login {
         }
         ui.add_space(8.0);
 
-        ui.horizontal(|ui| {
-            let sign_in = ui.add_enabled(!self.busy, egui::Button::new("Sign in"));
-            if self.busy {
-                ui.spinner();
-            }
-            let quick_connect = ui.add_enabled(!self.busy, egui::Button::new("Use Quick Connect"));
-            if quick_connect.clicked() {
-                self.start_quick_connect(ctx);
-            }
-            if sign_in.clicked() || password_entered {
-                self.sign_in(ctx);
-            }
-        });
+        let width = ui.available_width();
+        let sign_in = theme::primary_button(ui, "Sign in");
+        let sign_in = ui.add_enabled(!self.busy, sign_in.min_size(egui::vec2(width, 0.)));
+        if self.busy {
+            ui.spinner();
+        }
+        if sign_in.clicked() || password_entered {
+            self.sign_in(ctx);
+        }
+        let quick_connect = ui.add_enabled(
+            !self.busy,
+            egui::Button::new("Use Quick Connect").min_size(egui::vec2(width, 0.)),
+        );
+        if quick_connect.clicked() {
+            self.start_quick_connect(ctx);
+        }
     }
 
     fn quick_connect_step(&mut self, ui: &mut egui::Ui, code: &str) {
@@ -587,12 +598,22 @@ impl Login {
     }
 }
 
+/// A field's name above it, as `main`'s `field_label` had it: `text_sm` in the muted colour.
+fn field_label(ui: &mut egui::Ui, label: &str) {
+    ui.label(
+        egui::RichText::new(label)
+            .font(text::font(ui, "sm"))
+            .color(theme::tokens_of(ui).muted_foreground),
+    );
+}
+
 /// A boxed line in the theme's error colour, so it reads as more than body text.
 fn error_box(ui: &mut egui::Ui, message: &str) {
-    let color = ui.visuals().error_fg_color;
+    let tokens = theme::tokens_of(ui);
+    let color = tokens.danger;
     egui::Frame::new()
         .stroke(egui::Stroke::new(1.0, color))
-        .corner_radius(4.0)
+        .corner_radius(tokens.radius)
         .inner_margin(8.0)
         .show(ui, |ui| {
             ui.colored_label(color, message);
