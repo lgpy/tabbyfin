@@ -1762,9 +1762,24 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, SEEK_STEP, VOLUME_STEP, delay_text, scroll_steps, time_at,
+        MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, VOLUME_STEP, delay_text, scroll_steps, time_at,
         wheel_notches,
     };
+
+    #[test]
+    fn the_controls_are_up_on_the_players_first_frame() {
+        // `new` reads the player's settings from the config, so it needs a directory of its own.
+        let _config = crate::ui_tests::ConfigDir::new("player-first-frame");
+        let page = PlayerPage::new();
+        // The page opens with them up (and the timer running), so the first session shows them
+        // on its first frame; `controls_appeared` is what starts their fade there.
+        assert!(page.controls_visible);
+        assert!(page.controls_appeared);
+        assert!(
+            page.controls_since.is_none(),
+            "the fade starts on the first frame drawn"
+        );
+    }
 
     // `main`'s input gave three lines per notch and its tests counted those lines; egui gives
     // one line per notch, so the same tests count notches.
