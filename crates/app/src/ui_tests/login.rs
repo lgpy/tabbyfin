@@ -58,6 +58,37 @@ fn login_harness(make: impl FnOnce(&egui::Context) -> Login + 'static) -> egui_k
     build_harness(egui::vec2(800., 700.), LoginRun::new(make), |ui, state| state.show(ui))
 }
 
+/// A form taller than its window: eight saved accounts at 150 % text, 800×400.
+fn tall_login_harness() -> egui_kittest::Harness<'static, LoginRun> {
+    let accounts = (0..8)
+        .map(|index| SavedServer {
+            url: "http://localhost:8096/".into(),
+            server_id: "a93d3c61bce64f4d8e8456ddf14de713".into(),
+            user_id: format!("user-{index}"),
+            username: format!("user{index}"),
+            server_name: Some("tabbyfin dev".into()),
+        })
+        .collect();
+    egui_kittest::Harness::builder()
+        .with_size(egui::vec2(800., 400.))
+        .allow_missing_glyphs()
+        .with_accessibility_check(false)
+        .with_context_setup(|ctx| {
+            egui_material_icons::initialize(ctx);
+            crate::theme::apply(
+                ctx,
+                &crate::config::Config {
+                    text_size: Some(150),
+                    ..Default::default()
+                },
+            );
+        })
+        .build_ui_state(
+            |ui, state: &mut LoginRun| state.show(ui),
+            LoginRun::new(move |ctx| Login::new(ctx, "ui-test-device".into(), accounts, false, None)),
+        )
+}
+
 /// Server address, then the credentials, then a session: each step draws the next, and the
 /// username and password reach the sign-in request as they were typed.
 #[test]
@@ -297,4 +328,36 @@ fn a_saved_account_is_offered_and_chosen() {
         Some(LoginEvent::UseAccount(chosen)) => assert_eq!(chosen, &account),
         _ => panic!("choosing a saved account didn't ask to use it"),
     }
+}
+
+/// A form taller than the window scrolls the field the keyboard lands in into view: the
+/// address field has the focus on the first frame, as it does at launch.
+#[test]
+fn a_tall_form_reveals_the_focused_field() {
+    let mut ui = tall_login_harness();
+    ui.step();
+    ui.step();
+    let field = ui.get_by_role(Role::TextInput);
+    assert!(field.is_focused(), "the address field takes the keyboard");
+    assert!(
+        field.rect().top() >= 0. && field.rect().bottom() <= 400.,
+        "the focused field is on screen: {:?}",
+        field.rect()
+    );
+    // Tab goes on to Connect and then the saved accounts; the form scrolls back up to them.
+    for _ in 0..2 {
+        ui.key_press(egui::Key::Tab);
+        ui.step();
+    }
+    // The scroll target animates over the next frames.
+    for _ in 0..20 {
+        ui.step();
+    }
+    let account = ui.get_by_label("user0 on tabbyfin dev");
+    assert!(account.is_focused(), "Tab reached the first saved account");
+    assert!(
+        account.rect().top() >= 0. && account.rect().bottom() <= 400.,
+        "the newly focused account is on screen: {:?}",
+        account.rect()
+    );
 }
