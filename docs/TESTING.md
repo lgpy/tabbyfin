@@ -586,3 +586,20 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **The tab-switch animation** (gpui-kit's sliding pill) isn't ported: the pill moves with the click, at once.
 - ⬜ **The icon glyphs** stay the Material ones (a gear for Settings, a list for Chapters), as R1 settled; only their sizes and colours match `main`'s Lucide icons.
 - ⬜ A **10.11** server and real GPU frames under the overlay: the video path there is V1–V3's.
+
+## 36. Layout details (R7)
+
+**egui (R7)**, against the 12.2 dev server (`TABBYFIN_ROUTE`, `TABBYFIN_KEYS`, screenshots in `R7-scratch/`), next to `main`'s own build (`X3-scratch/main`) on the same hidden display. The sign-in form was shot from a copy of `config-template` with no accounts or saved server and a fresh `device_id`.
+
+✅ The sign-in form is centred in the window, as `main`'s was, in dark (`signin-dark.png` against `main-signin-dark.png`) and light (`signin-light.png` against `main-signin-light.png`): the 380-point column's middle is the window's middle, and its steps grow around the centre.
+
+✅ Card titles and subtitles are left-aligned one-line labels under the image, cut short when they don't fit: Home's landscape cards (`home-dark.png`, `home-light.png` against `main-home-*.png`), a library's poster grid (`library-dark.png`, `library-light.png` against `main-library-*.png`), a season's episode rows (`season-dark.png`, `season-light.png` against `main-season-*.png`) and a series' open season's episode cards (`item-episodes-dark.png`). The episode card's "Episode N" and its muted name are the same line, as on `main`.
+
+✅ Home's shelves carry `main`'s `px_6` on the title row and the scrolling row, its `pb_2` under the row and its 24-point title row, with the page keeping only its `py_6` (`home-*.png` against `main-home-*.png`); the item page's shelves keep their own 24-point frame inset and gain the 8 points under each row.
+
+✅ The search box shows a clear (×) button at its right end while it has text (`search-dark.png`, `search-light.png`, against `main-search-dark.png`, `main-search-light.png`), and only then; the field leaves it the room `main`'s prefix icon takes on the left. The button names itself to AccessKit ("Clear search") and stays non-focusable, so Tab still belongs to the field.
+
+✅ The shelf UI test (`cargo test -p tabbyfin ui_tests::shelf`) now checks that an arrow's page is the viewport less both side paddings, as `main`'s `glide_by` distance was, and the rest of `mise run ci` is green.
+
+- ⬜ **With a mouse**: the clear button's click (it clears the text, closes the results and keeps the keyboard in the box), its hover colour, and the pointer on Home's arrows after the padding moved into the row.
+- ⬜ The grid, shelves and card lines at **other text sizes and zoom** (the room under a card and the shelf's title row are fixed, the lines scale).
