@@ -859,6 +859,7 @@ impl Shell {
             match request {
                 NavRequest::Push(route) => self.push(route, cx),
                 NavRequest::Back => self.back(cx),
+                NavRequest::OpenSearch => self.focus_search(cx),
             }
         }
         // The new top page draws on the next frame.
