@@ -334,7 +334,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 - The shell keeps a stack of `Box<dyn Page>` and each page's `Route` next to it (`StackEntry`), so Settings' toggle and the results page are found by route rather than by downcasting. Pages stay alive while stacked, so Back keeps their state. The top one is drawn in a `CentralPanel` under the top bar.
 - `views::open(route, cx)` makes the page for a route. Pages navigate by pushing `NavRequest::Push(route)` / `Back` into `cx.nav`; the shell applies them after drawing and requests a repaint, so the new page shows at once.
 - Loading (see `views/home.rs`): a page keeps a `Load<T>` (`widgets/text.rs`), an `Option<Task<…>>` and `loaded_at: Option<u64>`. `show` starts a load when `loaded_at != Some(services.user_data)` — the first load, Retry (`None`) and watch data changing elsewhere — then polls the task; what's on screen stays until new data arrives. A page under others doesn't reload in the background: it catches up when it's back on top. Owners keep a generation counter (library pages, playback sessions) and drop results for an older one.
-- While a page loads it shows the mascot (`widgets/mascot.rs`): `main`'s jellycat, every outline tessellated once with `lyon_tessellation` into an `egui::Mesh` and posed per frame (egui fills convex paths only, and these are concave). R3 has the rest.
+- While a page loads it shows the mascot (`widgets/mascot.rs`): `main`'s jellycat, every outline tessellated once with `lyon_tessellation` into an `egui::Mesh` and posed per frame (egui fills convex paths only, and these are concave). What R3 settled about it is at the end of `docs/egui-migration.md`'s [restyle backlog](egui-migration.md#briefs).
 
 ### Top bar
 
@@ -349,7 +349,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 - Long-lived streams (a playback session's updates, the websocket) are a `task::channel`: `Sender::send` requests a repaint after each send, `Receiver::drain` takes everything without waiting. `Services::tick` drains them.
 - Timers (controls hiding, the search debounce, SyncPlay's drift checks, saving the window placement, reconnects) are a `task::Deadline`: `set(after)` starts or restarts it, `cancel()` stops it, `fire(ctx)` returns true once when it's due and otherwise asks for a repaint for the remaining time. No thread sleeps on the UI side. A deadline is only as punctual as the frames, so what must happen at an exact time (SyncPlay's scheduled commands) waits on tokio instead.
 - `Services::tick` runs from `App::logic`, which eframe also calls while the window is hidden whenever a repaint was requested, so playback and the sign-in form's requests carry on while the window is minimised.
-- Idle CPU stays near zero: nothing requests a repaint every frame except while something moves (video, an animation, a loader).
+- Idle CPU stays near zero: nothing requests a repaint every frame except while something moves (video, an animation, a loader). A drawn mascot is one of the moving things: it asks for a frame every 33 ms for as long as it's on screen, as `main`'s animation frames did — the loader while a page loads, the player's loader, and the confused one on an empty page, which keeps a page with nothing on it repainting until it has content (about 63 % of one core at 30 fps on this GPU-less WSL box, where `main`'s animation frames cost about 3.5 cores; nothing measurable on a real GPU).
 
 ### Keyboard
 
