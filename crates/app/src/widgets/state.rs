@@ -21,7 +21,7 @@ pub fn spinner(ui: &mut Ui) {
 pub fn message(ui: &mut Ui, message: impl Into<String>) {
     let message = message.into();
     ui.centered_and_justified(|ui| {
-        ui.label(RichText::new(message).color(ui.visuals().weak_text_color()));
+        ui.label(RichText::new(message).color(crate::theme::tokens_of(ui).muted_foreground));
     });
 }
 
@@ -33,7 +33,7 @@ pub fn empty(ui: &mut Ui, message: impl Into<String>) {
     centred(ui, mascot::PAGE + GAP + line, |ui| {
         mascot::confused(ui, mascot::PAGE);
         ui.add_space(GAP);
-        ui.label(RichText::new(message).color(ui.visuals().weak_text_color()));
+        ui.label(RichText::new(message).color(crate::theme::tokens_of(ui).muted_foreground));
     });
 }
 
@@ -47,7 +47,7 @@ pub fn error(ui: &mut Ui, message: impl Into<String>) -> bool {
     let height = line + gap + ui.spacing().interact_size.y + 2. * ui.spacing().item_spacing.y;
     let mut retry = false;
     centred(ui, height, |ui| {
-        ui.label(RichText::new(message).color(ui.visuals().weak_text_color()));
+        ui.label(RichText::new(message).color(crate::theme::tokens_of(ui).muted_foreground));
         ui.add_space(gap);
         retry = ui.button("Retry").clicked();
     });

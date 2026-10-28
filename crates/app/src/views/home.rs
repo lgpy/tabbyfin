@@ -333,32 +333,35 @@ fn show_shelves(
     let selected = cursor.selected();
     let mut target = None;
     egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.add_space(PAGE_PADDING);
-        let images = &mut cx.services.images;
-        for (index, row) in rows.iter().enumerate() {
-            if index > 0 {
-                ui.add_space(SHELF_GAP);
-            }
-            let shelf = shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, |ui| {
-                cards(
-                    ui,
-                    row.items,
-                    index,
-                    row.landscape,
-                    moved,
-                    &mut *cursor,
-                    &mut *images,
-                    &mut asked,
-                );
+        // `main`'s `px_6` and `py_6`: the shelves keep clear of the window's edges.
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::same(PAGE_PADDING as i8))
+            .show(ui, |ui| {
+                let images = &mut cx.services.images;
+                for (index, row) in rows.iter().enumerate() {
+                    if index > 0 {
+                        ui.add_space(SHELF_GAP);
+                    }
+                    let shelf = shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, |ui| {
+                        cards(
+                            ui,
+                            row.items,
+                            index,
+                            row.landscape,
+                            moved,
+                            &mut *cursor,
+                            &mut *images,
+                            &mut asked,
+                        );
+                    });
+                    if moved && selected.is_some_and(|position| position.section == index) {
+                        target = Some(shelf);
+                    }
+                }
+                if let Some(rect) = target {
+                    ui.scroll_to_rect(rect, None);
+                }
             });
-            if moved && selected.is_some_and(|position| position.section == index) {
-                target = Some(shelf);
-            }
-        }
-        ui.add_space(PAGE_PADDING);
-        if let Some(rect) = target {
-            ui.scroll_to_rect(rect, None);
-        }
     });
     if let Some(route) = asked.open {
         cx.nav.push(NavRequest::Push(route));

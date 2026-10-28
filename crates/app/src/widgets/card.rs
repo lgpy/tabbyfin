@@ -10,8 +10,8 @@
 
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, CornerRadius, FontId, Label, Rect, Response, RichText, Sense, Stroke, StrokeKind, TextFormat,
-    TextStyle, Ui, Vec2, WidgetText, pos2, vec2,
+    Align, Align2, CornerRadius, FontId, Label, Rect, Response, Sense, Stroke, StrokeKind, TextFormat, Ui, Vec2,
+    WidgetText, pos2, vec2,
 };
 use egui_material_icons::FONT_FAMILY;
 use egui_material_icons::icons::ICON_CHECK;
@@ -21,6 +21,7 @@ use jellyfin::models::{BaseItemDto, BaseItemPerson, ChapterInfo, ImageType};
 use crate::images::ImageCache;
 use crate::item_menu::is_played;
 use crate::theme;
+use crate::theme::text;
 use crate::widgets::image;
 use crate::widgets::text::{
     CARD_TEXT_H, LANDSCAPE_H, LANDSCAPE_W, PERSON_H, PERSON_W, POSTER_H, POSTER_W, card_text,
@@ -29,9 +30,6 @@ use crate::widgets::text::{
 
 /// Between a card's image and its title, and between its lines (`main`'s `gap_1`).
 const GAP: f32 = 4.;
-/// Episode cards' titles are one step bigger than other cards' (`main`'s `text_base` against
-/// `text_sm`).
-const EPISODE_TITLE_STEP: f32 = 2.;
 
 /// A poster-shaped card.
 pub fn poster(ui: &mut Ui, cache: &mut ImageCache, item: &BaseItemDto, selected: bool) -> Response {
@@ -73,9 +71,9 @@ fn item_card(
     let (response, image) = picture(ui, cache, size, request, Some(item));
     cursor_ring(ui, image, selected);
     let (title, subtitle) = card_text(item);
-    let lines = lines(ui, image, 0., GAP);
-    put(ui, lines.title, line(ui, &title, 0., false));
-    put(ui, lines.subtitle, line(ui, &subtitle, -2., true));
+    let lines = lines(ui, image, "sm", "xs", GAP);
+    put(ui, lines.title, line(ui, &title, "sm", false));
+    put(ui, lines.subtitle, line(ui, &subtitle, "xs", true));
     response
 }
 
@@ -86,7 +84,7 @@ pub fn episode(ui: &mut Ui, cache: &mut ImageCache, episode: &BaseItemDto, scale
     let (response, image) = picture(ui, cache, size, landscape_image(episode).as_ref(), Some(episode));
     cursor_ring(ui, image, selected);
     // `main`'s episode title had `pt_1`, a gap of its own on top of the card's: 8 px in all.
-    let lines = lines(ui, image, EPISODE_TITLE_STEP, 2. * GAP);
+    let lines = lines(ui, image, "base", "xs", 2. * GAP);
     put(ui, lines.title, episode_title(ui, episode));
     response
 }
@@ -108,12 +106,12 @@ pub fn chapter(
     let (response, image) = picture(ui, cache, size, request.as_ref(), None);
     cursor_ring(ui, image, selected);
     let name = chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1));
-    let lines = lines(ui, image, 0., GAP);
-    put(ui, lines.title, line(ui, &name, 0., false));
+    let lines = lines(ui, image, "sm", "xs", GAP);
+    put(ui, lines.title, line(ui, &name, "sm", false));
     put(
         ui,
         lines.subtitle,
-        line(ui, &timestamp(chapter.start_position_ticks.into()), -2., true),
+        line(ui, &timestamp(chapter.start_position_ticks.into()), "xs", true),
     );
     response
 }
@@ -133,13 +131,13 @@ pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scal
             .filter_map(|word| word.chars().next())
             .take(2)
             .collect();
-        let font = FontId::new(24. * scale, TextStyle::Body.resolve(ui.style()).family);
+        // `main`'s `text_2xl`, whatever the card's scale, and it grows with the text size.
         ui.painter().text(
             image.center(),
             Align2::CENTER_CENTER,
             initials,
-            font,
-            ui.visuals().weak_text_color(),
+            text::font(ui, "2xl"),
+            theme::tokens_of(ui).muted_foreground,
         );
     }
     cursor_ring(ui, image, selected);
@@ -148,9 +146,9 @@ pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scal
         (_, Some("Actor")) | (_, None) => String::new(),
         (_, Some(kind)) => kind_label(kind),
     };
-    let lines = lines(ui, image, 0., GAP);
-    put(ui, lines.title, line(ui, &person.name, 0., false));
-    put(ui, lines.subtitle, line(ui, &detail, -2., true));
+    let lines = lines(ui, image, "sm", "xs", GAP);
+    put(ui, lines.title, line(ui, &person.name, "sm", false));
+    put(ui, lines.subtitle, line(ui, &detail, "xs", true));
     response
 }
 
@@ -161,7 +159,7 @@ pub fn placeholder(ui: &mut Ui) {
     ui.painter().rect_filled(
         Rect::from_min_size(rect.min, vec2(POSTER_W, POSTER_H)),
         image::RADIUS,
-        ui.visuals().faint_bg_color,
+        theme::tokens_of(ui).muted,
     );
 }
 
@@ -169,7 +167,7 @@ pub fn placeholder(ui: &mut Ui) {
 /// between the lines and the subtitle — `main`'s `4 + 20 + 4 + 16`. `CARD_TEXT_H` is the floor,
 /// so a grid's rows keep their height whatever the text size.
 pub fn text_height(ui: &Ui) -> f32 {
-    let heights = line_heights(ui, 0.);
+    let heights = line_heights(ui, "sm", "xs");
     CARD_TEXT_H.max(lines_height(&heights))
 }
 
@@ -212,28 +210,25 @@ fn cursor_ring(ui: &Ui, image: Rect, selected: bool) {
         ui.painter().rect_stroke(
             image,
             CornerRadius::same(image::RADIUS),
-            Stroke::new(3., ui.visuals().strong_text_color()),
+            Stroke::new(3., theme::tokens_of(ui).foreground),
             StrokeKind::Inside,
         );
     }
 }
 
-/// A tick in a filled circle, 4 px in from the image's top right corner.
-///
-/// The circle is the theme's strong text colour and the tick the panel's fill, so it reads on a
-/// dark theme and a light one alike (`main`'s primary/primary-foreground pair, which egui's
-/// selection colour doesn't have).
+/// A tick in a filled circle, 4 px in from the image's top right corner: `main`'s primary
+/// colour with the tick in its foreground, so it reads on a dark theme and a light one alike.
 fn played_badge(ui: &Ui, image: Rect) {
     let radius = 8.;
     let center = image.right_top() + vec2(-4. - radius, 4. + radius);
-    let visuals = ui.visuals();
-    ui.painter().circle_filled(center, radius, visuals.strong_text_color());
+    let tokens = theme::tokens_of(ui);
+    ui.painter().circle_filled(center, radius, tokens.primary);
     ui.painter().text(
         center,
         Align2::CENTER_CENTER,
         ICON_CHECK.codepoint,
         FontId::new(2. * radius - 4., egui::FontFamily::Name(FONT_FAMILY.into())),
-        visuals.panel_fill,
+        tokens.primary_foreground,
     );
 }
 
@@ -261,7 +256,7 @@ fn progress_bar(ui: &Ui, image: Rect, fraction: f32) {
         bar.min,
         pos2(bar.left() + bar.width() * fraction.clamp(0., 1.), bar.bottom()),
     );
-    painter.rect_filled(filled, radius, ui.visuals().selection.bg_fill);
+    painter.rect_filled(filled, radius, theme::tokens_of(ui).primary);
     painter.rect_stroke(
         bar,
         radius,
@@ -276,8 +271,8 @@ struct Lines {
     subtitle: Rect,
 }
 
-fn lines(ui: &Ui, image: Rect, title_step: f32, top_gap: f32) -> Lines {
-    let heights = line_heights(ui, title_step);
+fn lines(ui: &Ui, image: Rect, title: &str, subtitle: &str, top_gap: f32) -> Lines {
+    let heights = line_heights(ui, title, subtitle);
     let top = image.bottom() + top_gap;
     let width = image.width();
     Lines {
@@ -289,40 +284,36 @@ fn lines(ui: &Ui, image: Rect, title_step: f32, top_gap: f32) -> Lines {
     }
 }
 
-/// The line heights of a card's title (`title_step` points over the body size) and subtitle
-/// (`main`'s `text_xs` under `text_sm`).
+/// The line heights of a card's title and subtitle, from the text-style table.
 struct LineHeights {
     title: f32,
     subtitle: f32,
 }
 
-fn line_heights(ui: &Ui, title_step: f32) -> LineHeights {
-    let body = TextStyle::Body.resolve(ui.style());
-    let title = FontId::new(body.size + title_step, body.family.clone());
-    let subtitle = FontId::new((body.size - 2.).max(6.), body.family.clone());
+fn line_heights(ui: &Ui, title: &str, subtitle: &str) -> LineHeights {
+    let title = text::font(ui, title);
+    let subtitle = text::font(ui, subtitle);
     LineHeights {
         title: ui.fonts_mut(|fonts| fonts.row_height(&title)),
         subtitle: ui.fonts_mut(|fonts| fonts.row_height(&subtitle)),
     }
 }
 
-/// A one-line label cut short with an ellipsis, `size` points off the body size and muted when
-/// it's a subtitle.
-fn line(ui: &Ui, text: &str, size: f32, muted: bool) -> WidgetText {
-    let body = TextStyle::Body.resolve(ui.style());
-    let mut text = RichText::new(text).font(FontId::new((body.size + size).max(6.), body.family));
+/// A one-line label cut short with an ellipsis, sized from the table and muted when it's a
+/// subtitle.
+fn line(ui: &Ui, text: &str, style: &str, muted: bool) -> WidgetText {
+    let mut label = egui::RichText::new(text).font(self::text::font(ui, style));
     if muted {
-        text = text.color(ui.visuals().weak_text_color());
+        label = label.color(theme::tokens_of(ui).muted_foreground);
     }
-    text.into()
+    label.into()
 }
 
 /// "Episode 2" then its name, dimmer, on one line: the number stays whole, the name is cut
 /// short when it doesn't fit.
 fn episode_title(ui: &Ui, episode: &BaseItemDto) -> WidgetText {
-    let body = TextStyle::Body.resolve(ui.style());
-    let font = FontId::new(body.size + EPISODE_TITLE_STEP, body.family.clone());
-    let visuals = ui.visuals();
+    let font = text::font(ui, "base");
+    let tokens = theme::tokens_of(ui);
     let mut job = LayoutJob::default();
     let style = |color| TextFormat {
         font_id: font.clone(),
@@ -330,12 +321,12 @@ fn episode_title(ui: &Ui, episode: &BaseItemDto) -> WidgetText {
         ..Default::default()
     };
     if let Some(number) = episode.index_number {
-        job.append(&format!("Episode {number}"), 0., style(visuals.text_color()));
+        job.append(&format!("Episode {number}"), 0., style(tokens.foreground));
     }
     // Untitled episodes are named "Episode 3" by Jellyfin, which would say it twice.
     let name = episode.name.trim();
     if !name.is_empty() && !is_placeholder_episode_name(name) {
-        job.append(&format!("  {name}"), 0., style(visuals.weak_text_color()));
+        job.append(&format!("  {name}"), 0., style(tokens.muted_foreground));
     }
     WidgetText::LayoutJob(job.into())
 }

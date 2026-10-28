@@ -41,7 +41,7 @@ use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, SubtitleChoice, UiCommand, Version};
 use crate::task;
-use crate::theme::over_video;
+use crate::theme::{self, over_video};
 use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
@@ -935,7 +935,7 @@ impl PlayerPage {
                         let current = menu.current == Some(chapter.index);
                         if current {
                             ui.painter()
-                                .rect_filled(rect, CornerRadius::same(6), ui.visuals().selection.bg_fill);
+                                .rect_filled(rect, CornerRadius::same(6), theme::tokens_of(ui).accent);
                         } else if row.hovered() {
                             ui.painter().rect_filled(
                                 rect,
@@ -962,7 +962,7 @@ impl PlayerPage {
                             Align2::LEFT_TOP,
                             timestamp(chapter.start),
                             TextStyle::Small.resolve(ui.style()),
-                            ui.visuals().weak_text_color(),
+                            over_video::MUTED_FOREGROUND,
                         );
                         if row.clicked() {
                             chosen = Some(chapter.start);
@@ -1070,7 +1070,7 @@ impl PlayerPage {
                         ui.horizontal(|ui| {
                             ui.add_sized(vec2(110., 22.), egui::Label::new("Speed"));
                             if menu.in_group {
-                                ui.label(RichText::new("Normal in SyncPlay").color(ui.visuals().weak_text_color()));
+                                ui.label(RichText::new("Normal in SyncPlay").color(over_video::MUTED_FOREGROUND));
                             } else {
                                 for &speed in &Adjustments::SPEEDS {
                                     let current = (speed - adjustments.speed).abs() < 1e-6;
@@ -1090,7 +1090,7 @@ impl PlayerPage {
                 };
                 if let Some(hint) = hint {
                     ui.add_space(4.);
-                    ui.label(RichText::new(hint).small().color(ui.visuals().weak_text_color()));
+                    ui.label(RichText::new(hint).small().color(over_video::MUTED_FOREGROUND));
                 }
             });
         self.settings_tab = tab;
@@ -1490,11 +1490,8 @@ fn label_badge(ui: &mut egui::Ui, text: impl Into<String>) {
 /// A button of the settings menu's tabs and speeds, and its tracks: selected when it's the
 /// current choice, and never focusable.
 fn menu_button(ui: &mut egui::Ui, text: impl Into<String>, selected: bool) -> Response {
-    ui.add(
-        egui::Button::new(RichText::new(text.into()).small())
-            .selected(selected)
-            .sense(Sense::CLICK),
-    )
+    let button = egui::Button::new(RichText::new(text.into()).small()).sense(Sense::CLICK);
+    ui.add(theme::selected(ui, selected, button))
 }
 
 /// The version picker's button: a small select with the playing version's name and a caret, as
@@ -1535,7 +1532,7 @@ fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
 
 /// A small heading inside a settings tab.
 fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).small().color(ui.visuals().weak_text_color()));
+    ui.label(RichText::new(text).small().color(over_video::MUTED_FOREGROUND));
 }
 
 /// A settings value with its step buttons; `None` unless one was pressed.
@@ -1570,7 +1567,7 @@ fn push_button(ui: &mut egui::Ui, text: &str) -> bool {
 /// it (as on `main`).
 fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], selected: Option<i32>) -> Option<i32> {
     if choices.is_empty() {
-        ui.label(RichText::new(empty).small().color(ui.visuals().weak_text_color()));
+        ui.label(RichText::new(empty).small().color(over_video::MUTED_FOREGROUND));
         return None;
     }
     // Without a track saved or a default, the first one plays.
@@ -1600,7 +1597,7 @@ fn check_row(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
         ICON_CHECK.codepoint,
         0.,
         TextFormat {
-            font_id: FontId::new(body.size + 2., ICON_CHECK.font_family()),
+            font_id: crate::theme::text::icon(ui, ICON_CHECK.font_family()),
             color: if selected { color } else { Color32::TRANSPARENT },
             ..Default::default()
         },
@@ -1616,9 +1613,11 @@ fn check_row(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
     );
     ui.add_sized(
         vec2(ui.available_width(), TRACK_ROW_H),
-        egui::Button::new(egui::WidgetText::LayoutJob(job.into()))
-            .selected(selected)
-            .sense(Sense::CLICK),
+        theme::selected(
+            ui,
+            selected,
+            egui::Button::new(egui::WidgetText::LayoutJob(job.into())).sense(Sense::CLICK),
+        ),
     )
 }
 
