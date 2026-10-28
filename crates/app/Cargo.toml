@@ -16,6 +16,8 @@ egui.workspace = true
 # video.
 egui-wgpu.workspace = true
 egui_material_icons.workspace = true
+# The mascot loader's concave outlines, tessellated into egui meshes (`widgets/mascot.rs`).
+lyon_tessellation.workspace = true
 
 anyhow.workspace = true
 directories.workspace = true
