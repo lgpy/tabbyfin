@@ -117,6 +117,7 @@ pub struct Launch {
     /// Whether `placed.position` really is in physical pixels and can be set again exactly
     /// once the window exists. A config from before the scale factor was saved has the
     /// position in points, kept as "physical at scale 1", which is the same spot.
+    #[cfg_attr(not(windows), allow(dead_code))]
     physical: bool,
 }
 

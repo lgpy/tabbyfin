@@ -18,19 +18,9 @@ use egui::containers::scroll_area::{DragScroll, ScrollBarVisibility, ScrollSourc
 use egui::{Align, Button, Layout, Rect, RichText, ScrollArea, Ui};
 use egui_material_icons::icons::{ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT};
 
-use crate::widgets::text::CARD_GAP;
-
-/// How far under its title a row's cards start (`main`'s `shelf`).
-const TITLE_GAP: f32 = 16.;
-
-/// A titled row of cards, [`CARD_GAP`] apart. Returns the row's rectangle, for a page that
+/// A titled row of cards, with the space between its cards and under its title given (Home's
+/// shelves are wider apart than the item pages'). Returns the row's rectangle, for a page that
 /// scrolls its shelves into view as the keyboard cursor moves onto them.
-pub fn shelf(ui: &mut Ui, id: impl Hash + std::fmt::Debug, title: &str, cards: impl FnOnce(&mut Ui)) -> Rect {
-    shelf_with_gaps(ui, id, title, CARD_GAP, TITLE_GAP, cards)
-}
-
-/// [`shelf`] with a different space between the cards and under the title (Home's shelves are
-/// wider apart than the item pages').
 pub fn shelf_with_gaps(
     ui: &mut Ui,
     id: impl Hash + std::fmt::Debug,

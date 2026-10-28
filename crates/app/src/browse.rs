@@ -220,14 +220,6 @@ pub fn on_key<B: Browse>(page: &mut B, action: Action, cx: &mut PageCx) -> bool 
     }
 }
 
-/// Scrolls the selected card into view after a key moved the cursor onto it. Call it with the
-/// selected card's response while drawing.
-pub fn reveal(cursor: &mut Cursor, card: &egui::Response) {
-    if cursor.take_reveal() {
-        card.scroll_to_me(None);
-    }
-}
-
 /// Hides the cursor when the mouse is pressed on the page, so mouse users never see it. Call it
 /// with the page's whole `Ui`.
 pub fn hide_on_click(cursor: &mut Cursor, ui: &egui::Ui) {

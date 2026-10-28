@@ -69,6 +69,11 @@ pub struct App {
     text_size_check: Option<Task<f32>>,
     #[cfg(debug_assertions)]
     debug_keys: Option<crate::debug::KeyScript>,
+    /// Whether the pass before the current one ran [`Self::ui`] (eframe also runs logic-only
+    /// passes, for a window the compositor won't show). `TABBYFIN_KEYS` only presses keys in
+    /// passes that draw, so a script's presses aren't handed to a pass that can't act on them.
+    #[cfg(debug_assertions)]
+    drew_last_pass: bool,
 }
 
 impl App {
@@ -114,6 +119,8 @@ impl App {
             text_size_check: None,
             #[cfg(debug_assertions)]
             debug_keys: crate::debug::KeyScript::from_env(),
+            #[cfg(debug_assertions)]
+            drew_last_pass: false,
         };
         app.apply_appearance(ctx, &config);
         app
@@ -537,15 +544,24 @@ fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Si
 
 impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // A press injected into a pass that doesn't run `ui` (eframe's logic-only passes, for a
+        // window the compositor won't show) lands in no frame of its own: eframe hands that
+        // input to the next pass, so the presses bunch up and lose the script's timing. They
+        // wait here until a pass after a drawing one takes them, one per pass; `logic` asks for
+        // the next pass meanwhile.
         #[cfg(debug_assertions)]
-        if let Some(script) = &mut self.debug_keys {
-            script.inject(raw_input);
+        if self.drew_last_pass
+            && let Some(press) = self.debug_keys.as_mut().and_then(crate::debug::KeyScript::take_due)
+        {
+            press.inject(raw_input);
         }
         let scopes = self.key_scopes();
         self.keys.extend(keys::take(ctx, raw_input, &scopes));
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        #[cfg(debug_assertions)]
+        let drew_last_pass = std::mem::replace(&mut self.drew_last_pass, false);
         self.placement.tick(ctx);
         self.zoom = ctx.zoom_factor();
         // The appearance belongs to the app, so it's followed on every screen.
@@ -606,12 +622,21 @@ impl eframe::App for App {
         }
 
         #[cfg(debug_assertions)]
-        if let Some(due) = self.debug_keys.as_ref().and_then(|script| script.next_due()) {
-            ctx.request_repaint_after(due.saturating_duration_since(std::time::Instant::now()));
+        if let Some(due) = self.debug_keys.as_ref().and_then(crate::debug::KeyScript::next_due) {
+            let now = std::time::Instant::now();
+            match drew_last_pass {
+                // Its turn came in a pass that didn't draw: the next one that does takes it.
+                false => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
+                true => ctx.request_repaint_after(due.saturating_duration_since(now)),
+            }
         }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        #[cfg(debug_assertions)]
+        {
+            self.drew_last_pass = true;
+        }
         let ctx = ui.ctx().clone();
         let taken = std::mem::take(&mut self.keys);
         let keys = self.app_keys(&ctx, taken);
