@@ -8,8 +8,8 @@
 //! cut flat by slanted brows, an "ω" mouth), picked at random when it appears. Empty pages show
 //! the confused one, scratching its head under a question mark.
 //!
-//! Blinks and flicks come from a hash of the time slot rather than stored state, so a mascot can
-//! be built fresh on every render and still never repeat in lockstep.
+//! Blinks and flicks come from a hash of the time slot rather than stored state: nothing about the
+//! animation is kept per mascot, and two of them never blink or flick in lockstep.
 //!
 //! egui fills convex paths only, and these outlines are concave, so every piece is tessellated
 //! with `lyon_tessellation`: once, into a mesh in the drawings' own units ([`Shapes`]). Drawing
@@ -63,6 +63,10 @@ const BLINK_LEN: f32 = 0.24;
 const BLINK_EVERY: f32 = 3.6;
 const FLICK_LEN: f32 = 0.55;
 const FLICK_EVERY: f32 = 5.0;
+/// Seconds after which the pose repeats exactly: the pulse (1 s), the blinks (3.6 s) and the
+/// flicks (5 s) all come round together every 90 s, which is what [`Pose::at`] takes the time
+/// within.
+const CYCLE: f64 = 90.;
 
 const BODY: Color32 = Color32::from_rgb(0xc3, 0x96, 0xe7);
 const EAR_INNER: Color32 = Color32::from_rgb(0x8a, 0x63, 0xa9);
@@ -83,9 +87,9 @@ const QUESTION_WIDTH: f32 = 72.;
 /// How often a loader shows the evil face rather than the cute one.
 const EVIL_ODDS: f32 = 0.5;
 
-/// How far a flattened outline may stray from the curve, in drawing units: fine enough that a
-/// 160-point mascot shows no corners.
-const TOLERANCE: f32 = 0.5;
+/// How far a flattened outline may stray from the curve, in drawing units: a fifth of a pixel on
+/// the biggest mascot drawn (160 points), and no corners show at that size.
+const TOLERANCE: f32 = 2.5;
 
 /// The head's outline without the ears. The points behind the ears stay inside both ear poses.
 #[rustfmt::skip]
@@ -257,7 +261,7 @@ fn show(ui: &mut Ui, size: f32, face: Face) {
     let pose = if still {
         Pose::rest()
     } else {
-        Pose::at(ui.input(|input| input.time) as f32)
+        Pose::at(ui.input(|input| input.time))
     };
     paint(ui, Shapes::get(), &pose, face, rect);
     if !still {
@@ -265,10 +269,18 @@ fn show(ui: &mut Ui, size: f32, face: Face) {
     }
 }
 
-/// The face a loader keeps from its last pass, or a new pick. Kept in egui's memory under the
-/// `ui`'s id, so it lasts as long as the same place keeps drawing a loader in consecutive passes
-/// — a loader that goes away and comes back picks again, as `main`'s element state did.
+/// The face a loader keeps while it's drawn: the cute or the evil one, rolled here.
 fn kept_face(ui: &Ui) -> Face {
+    kept_face_with(ui, || {
+        Face::for_loader(noise(RandomState::new().build_hasher().finish()))
+    })
+}
+
+/// [`kept_face`] with the pick given, so a test can tell a kept face from a rolled one. The face
+/// is kept in egui's memory under the `ui`'s id for as long as the same place keeps drawing a
+/// loader in consecutive passes; one that goes away and comes back rolls again, as `main`'s
+/// element state did.
+fn kept_face_with(ui: &Ui, pick: impl FnOnce() -> Face) -> Face {
     #[derive(Clone, Copy)]
     struct Kept {
         face: Face,
@@ -277,27 +289,18 @@ fn kept_face(ui: &Ui) -> Face {
 
     let id = ui.scope_id().with("mascot-face");
     let pass = ui.ctx().cumulative_pass_nr();
-    let picked = || Kept {
-        face: kept_or_picked(None, || noise(RandomState::new().build_hasher().finish())),
-        pass,
-    };
-    ui.data_mut(|data| {
-        let kept = data.get_temp_mut_or_insert_with(id, picked);
-        if kept.pass + 1 != pass {
-            *kept = picked();
-        } else {
-            kept.pass = pass;
-        }
-        kept.face
-    })
+    let kept: Option<Kept> = ui.data(|data| data.get_temp(id));
+    if let Some(mut kept) = kept.filter(|kept| kept.pass + 1 == pass) {
+        kept.pass = pass;
+        ui.data_mut(|data| data.insert_temp(id, kept));
+        return kept.face;
+    }
+    let kept = Kept { face: pick(), pass };
+    ui.data_mut(|data| data.insert_temp(id, kept));
+    kept.face
 }
 
-/// The face kept from the last frame, or else a new pick from `roll`.
-fn kept_or_picked(kept: Option<Face>, roll: impl FnOnce() -> f32) -> Face {
-    kept.unwrap_or_else(|| Face::for_loader(roll()))
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Eyes {
     /// Open, squashed vertically to this fraction while blinking.
     Open(f32),
@@ -334,7 +337,10 @@ impl Pose {
         }
     }
 
-    fn at(time: f32) -> Self {
+    fn at(time: f64) -> Self {
+        // egui's clock counts seconds as an f64 from the app's start, and an f32 loses millimetres
+        // of a pulse once it's been up for hours: take the time within the pose's repeat instead.
+        let time = (time % CYCLE) as f32;
         let phase = time * TAU / PERIOD;
         let pulse = phase.sin();
         // The bob lags the pulse a little, and the ears droop a touch after that.
@@ -440,7 +446,7 @@ fn smooth(points: &[P], closed: bool) -> Vec<[P; 4]> {
         .collect()
 }
 
-// ---------------------------------------------------------------- tessellation (once, at startup)
+// ------------------------------------------------------------ tessellation (once, on the first mascot)
 
 /// The tessellation of every piece of the drawings, in drawing units: built once, on the first
 /// mascot, and moved into each pose from there on.
@@ -613,7 +619,11 @@ fn gradient(mut mesh: Mesh, tentacle: &Tentacle) -> Mesh {
 }
 
 /// Each vertex's share of the tentacle's wave: the direction and size it swings (the tip most,
-/// the root not at all), and how much of the wave's phase it trails by.
+/// the root not at all), and how much of the wave's phase it trails by. `main` displaced the
+/// drawing's own points by `sway * along^1.3 * sin(phase - along * 2.4 + phase)` perpendicular to
+/// the difference between each point's neighbours; a vertex is placed on that same curve through
+/// its position along the tentacle, so the points themselves move exactly where `main` moved them
+/// and the stroke between them swings with them.
 fn wave_shift(tentacle: &Tentacle, mesh: &Mesh) -> Vec<[f32; 3]> {
     let points = tentacle.points;
     let last = points.len() - 1;
@@ -621,14 +631,28 @@ fn wave_shift(tentacle: &Tentacle, mesh: &Mesh) -> Vec<[f32; 3]> {
         .iter()
         .map(|vertex| {
             let (segment, within) = closest(points, [vertex.pos.x, vertex.pos.y]);
-            let (a, b) = (points[segment.saturating_sub(1)], points[(segment + 1).min(last)]);
-            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            // Where the vertex lies along the tentacle, in point indices.
+            let along_point = segment as f32 + within;
+            let along = along_point / last as f32;
+            let [dx, dy] = tangent(points, along_point);
             let length = dx.hypot(dy).max(1.);
-            let along = (segment as f32 + within) / last as f32;
             let swing = tentacle.sway * along.powf(1.3);
             [-dy / length * swing, dx / length * swing, along * 2.4 - tentacle.phase]
         })
         .collect()
+}
+
+/// The direction `main`'s wave pushes a tentacle at `along_point`, a fractional point index: the
+/// difference between the point's neighbours, blended between the two points `along_point` lies
+/// between so that the stroke deforms smoothly rather than in steps.
+fn tangent(points: &[P], along_point: f32) -> P {
+    let last = points.len() - 1;
+    let around = |i: usize| {
+        let (a, b) = (points[i.saturating_sub(1)], points[(i + 1).min(last)]);
+        [b[0] - a[0], b[1] - a[1]]
+    };
+    let i = (along_point.floor().max(0.) as usize).min(last);
+    lerp(around(i), around((i + 1).min(last)), along_point - i as f32)
 }
 
 /// Each vertex's share of an ear's flick: the drawing's own points move by the difference
@@ -759,9 +783,10 @@ fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
             for (part, (center, _)) in eyes.iter().zip(EYES) {
                 parts.push(Drawn {
                     part,
-                    // The lid comes down: the eye squashes towards its own middle, as `main`'s
-                    // clamping of the evil eye's points did.
-                    pose: body.then(Affine::scale(center, [1., open])),
+                    // The lid comes down: the eye squashes towards its own middle in the drawings'
+                    // space, and then the head's bob and scale move it, as `main`'s clamping of the
+                    // evil eye's points did.
+                    pose: Affine::scale(center, [1., open]).then(body),
                     motion: 0.,
                     tint: None,
                 });
@@ -1015,9 +1040,12 @@ fn bounds_y(points: &[P]) -> (f32, f32) {
 
 #[cfg(test)]
 mod tests {
+    use egui::{Context, RawInput, UiBuilder, pos2};
+
     use super::{
-        BROWS, EVIL_ODDS, EYES, Eyes, FLICK_EVERY, Face, HEAD, SCRATCHING, SCRATCHING_FRONT, Shapes, TENTACLE_WIDTH,
-        below_brow, blink, cubic, flicks, frame, kept_or_picked, noise, smooth,
+        BROWS, EVIL_ODDS, EYES, Eyes, FLICK_EVERY, Face, HEAD, Mesh, Pose, SCRATCHING, SCRATCHING_FRONT, Shapes,
+        TENTACLE_WIDTH, TENTACLES, Tentacle, Vertex, WHITE_UV, below_brow, blink, cubic, flick_shift, flicks, frame,
+        kept_face_with, noise, smooth, wave_shift,
     };
 
     #[test]
@@ -1067,14 +1095,131 @@ mod tests {
     }
 
     #[test]
-    fn loader_keeps_its_face() {
-        for face in [Face::Cute, Face::Evil] {
-            let kept = kept_or_picked(Some(face), || panic!("picked again"));
-            assert_eq!(kept, face);
+    fn a_loader_rolls_the_evil_face_up_to_its_odds() {
+        assert_eq!(Face::for_loader(0.), Face::Evil);
+        assert_eq!(Face::for_loader(EVIL_ODDS - 0.001), Face::Evil);
+        assert_eq!(Face::for_loader(EVIL_ODDS), Face::Cute);
+        assert_eq!(Face::for_loader(0.999), Face::Cute);
+    }
+
+    /// Draws a loader for one pass in `ctx`, or nothing for a pass without one, returning the
+    /// face it showed and counting the rolls.
+    fn loader_pass(ctx: &Context, face: Option<Face>, rolls: &mut u32) -> Option<Face> {
+        let mut drawn = None;
+        let mut output = ctx.run_ui(RawInput::default(), |ui| {
+            if let Some(face) = face {
+                drawn = Some(
+                    ui.scope_builder(UiBuilder::new().id_salt("loader"), |ui| {
+                        kept_face_with(ui, || {
+                            *rolls += 1;
+                            face
+                        })
+                    })
+                    .inner,
+                );
+            }
+        });
+        // Nothing draws in a test, so the pass's texture changes (its font atlas) go with it.
+        output.textures_delta.clear();
+        drawn
+    }
+
+    #[test]
+    fn a_loader_keeps_its_face_while_it_stays() {
+        let ctx = Context::default();
+        let mut rolls = 0;
+        assert_eq!(loader_pass(&ctx, Some(Face::Cute), &mut rolls), Some(Face::Cute));
+        assert_eq!(rolls, 1, "the first pass rolled a face");
+        // The next pass keeps it, whatever it would have rolled.
+        assert_eq!(loader_pass(&ctx, Some(Face::Evil), &mut rolls), Some(Face::Cute));
+        assert_eq!(rolls, 1, "a loader that stays doesn't roll again");
+        // A pass without a loader ends that, so the one after rolls.
+        assert_eq!(loader_pass(&ctx, None, &mut rolls), None);
+        assert_eq!(loader_pass(&ctx, Some(Face::Evil), &mut rolls), Some(Face::Evil));
+        assert_eq!(rolls, 2, "a loader that comes back rolls again");
+        // And keeps the new face in its own consecutive passes.
+        assert_eq!(loader_pass(&ctx, Some(Face::Cute), &mut rolls), Some(Face::Evil));
+        assert_eq!(rolls, 2);
+    }
+
+    #[test]
+    fn a_flick_moves_the_drawings_points_to_their_other_pose() {
+        for ear in super::EARS.iter() {
+            // A mesh with a vertex on each of the drawing's own points.
+            let mesh = points_mesh(ear.up);
+            let shifts = flick_shift(ear.up, ear.flicked, &mesh);
+            for (i, (&from, &to)) in ear.up.iter().zip(ear.flicked).enumerate() {
+                let [dx, dy] = shifts[i];
+                assert!((dx - (to[0] - from[0])).abs() < 1e-3, "{from:?} should move to {to:?}");
+                assert!((dy - (to[1] - from[1])).abs() < 1e-3, "{from:?} should move to {to:?}");
+            }
         }
-        assert_eq!(kept_or_picked(None, || 0.), Face::Evil);
-        assert_eq!(kept_or_picked(None, || EVIL_ODDS), Face::Cute);
-        assert_eq!(kept_or_picked(None, || 0.999), Face::Cute);
+    }
+
+    #[test]
+    fn the_wave_holds_the_root_and_swings_the_tip_by_its_sway() {
+        for tentacle in &TENTACLES {
+            let last = tentacle.points.len() - 1;
+            let mesh = points_mesh(&[tentacle.points[0], tentacle.points[last]]);
+            let shifts = wave_shift(tentacle, &mesh);
+            let swing = |[dx, dy, _]: [f32; 3]| dx.hypot(dy);
+            assert!(swing(shifts[0]) < 1e-3, "the root is under the head and stays put");
+            assert!(
+                (swing(shifts[1]) - tentacle.sway).abs() < 1e-3,
+                "the tip swings by the tentacle's sway, {} instead",
+                swing(shifts[1])
+            );
+        }
+    }
+
+    #[test]
+    fn the_wave_moves_the_points_where_main_moved_them() {
+        for tentacle in &TENTACLES {
+            let mesh = points_mesh(tentacle.points);
+            let shifts = wave_shift(tentacle, &mesh);
+            for phase in [0., 0.7, 2.5, 5.1] {
+                let expected = main_wave(tentacle, phase);
+                for (i, &point) in tentacle.points.iter().enumerate() {
+                    let [dx, dy, lag] = shifts[i];
+                    let swing = (phase - lag).sin();
+                    let moved = [point[0] + dx * swing, point[1] + dy * swing];
+                    assert!(
+                        (moved[0] - expected[i][0]).abs() < 1e-2 && (moved[1] - expected[i][1]).abs() < 1e-2,
+                        "point {i} of {tentacle:?}: {moved:?} against {expected:?}",
+                        tentacle = tentacle.points[i]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_blinking_eye_squashes_before_the_head_moves_it() {
+        let shapes = Shapes::get();
+        let pose = Pose {
+            bob: 30.,
+            scale: [1., 1.],
+            ears: [0., 0.],
+            eyes: Eyes::Open(0.4),
+            low: 0.5,
+            float: 0.,
+            phase: None,
+        };
+        let parts = frame(shapes, &pose, Face::Cute);
+        let (center, r) = EYES[0];
+        let eye = parts
+            .iter()
+            .find(|drawn| std::ptr::eq(drawn.part, &shapes.eyes[0]))
+            .expect("the cute face has this eye");
+        // The lid comes down in the drawings' space, so the eye's edges are squashed where the
+        // drawing puts them and only then carried by the bob: the top and bottom of the rest eye
+        // land where the squashed eye's would, before the head moves.
+        let body = pose.body();
+        for y in [-r, r] {
+            let squashed = [center[0], center[1] + y * 0.4];
+            assert_eq!(eye.pose.pos([center[0], center[1] + y]), body.pos(squashed));
+        }
+        assert_eq!(eye.pose.pos(center), body.pos(center));
     }
 
     #[test]
@@ -1102,6 +1247,62 @@ mod tests {
         assert_eq!(open[1][0], [10., 5.]);
         assert_eq!(open[2][3], [30., 5.]);
         assert_eq!(smooth(&points, true).len(), 4);
+    }
+
+    /// A mesh with one vertex on each of `points`, as the tests need to stand in for a drawing's
+    /// points in a tessellated part.
+    fn points_mesh(points: &[[f32; 2]]) -> Mesh {
+        Mesh {
+            indices: (1..points.len() as u32).flat_map(|i| [0, i - 1, i]).collect(),
+            vertices: points
+                .iter()
+                .map(|&[x, y]| Vertex {
+                    pos: pos2(x, y),
+                    uv: WHITE_UV,
+                    color: super::WHITE,
+                })
+                .collect(),
+            texture_id: Default::default(),
+        }
+    }
+
+    /// `main`'s wave: each of the drawing's points pushed sideways by a travelling wave, the tip
+    /// moving most. The port has to land the points in the same place.
+    fn main_wave(tentacle: &Tentacle, phase: f32) -> Vec<[f32; 2]> {
+        let points = tentacle.points;
+        let last = points.len() - 1;
+        (0..=last)
+            .map(|i| {
+                let (a, b) = (points[i.saturating_sub(1)], points[(i + 1).min(last)]);
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let len = dx.hypot(dy).max(1.);
+                let along = i as f32 / last as f32;
+                let offset = tentacle.sway * along.powf(1.3) * (phase - along * 2.4 + tentacle.phase).sin();
+                [points[i][0] - dy / len * offset, points[i][1] + dx / len * offset]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_pose_repeats_within_its_cycle() {
+        // An hour of uptime: an f32 of that time has lost enough of a pulse to be visible, so the
+        // pose is taken within [`CYCLE`] first.
+        for time in [0., 0.3, 1.7, 42.25] {
+            let now = Pose::at(time);
+            let later = Pose::at(3600. + time);
+            assert_eq!(
+                (now.bob, now.scale, now.ears, now.eyes, now.low, now.float, now.phase),
+                (
+                    later.bob,
+                    later.scale,
+                    later.ears,
+                    later.eyes,
+                    later.low,
+                    later.float,
+                    later.phase
+                )
+            );
+        }
     }
 
     #[test]
