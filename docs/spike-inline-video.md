@@ -1,5 +1,7 @@
 # Spike: video inside the GPUI window (milestone 8)
 
+> **Historical:** this spike measured the GPUI app, which the egui migration replaced (see `docs/in-app-video.md` for the current video paths). The numbers are kept as a record.
+
 **Question:** can we show mpv's video inside our window, with GPUI drawing the controls on top? This is option C in plan §5.4: libmpv's software render API, with frames uploaded as GPUI images.
 
 **Answer:** yes. It plays at full frame rate up to 1080p, with a GPUI overlay drawn on the video. Almost all the measured cost here comes from this machine having no GPU, not from the approach. We still need a run on real hardware before shipping it.
