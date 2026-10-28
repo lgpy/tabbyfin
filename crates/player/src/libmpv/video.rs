@@ -71,13 +71,20 @@ pub struct VideoFrame {
 /// A GPU texture holding a finished frame. The render thread keeps it alive and doesn't write
 /// to it again for the next two frames.
 ///
-/// Windows: a D3D11 texture shared through a legacy share handle.
+/// Windows: a D3D11 texture on the UI's adapter, shared through a named NT handle, which the
+/// UI's D3D12 device opens by `name`. A new texture gets a new `id` and name; the frames of one
+/// texture share them. In the process that made it, a frame also holds the texture's handle,
+/// which keeps the name (and the texture) alive for as long as the frame is held, even after the
+/// render thread has moved on to a new ring (a resize). Frames from the player host process
+/// arrive without it; the host keeps the handles of the frames it sent last (`host.rs`).
 #[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SharedFrame {
-    pub handle: usize,
+    pub id: u64,
+    pub name: Arc<str>,
     pub width: u32,
     pub height: u32,
+    pub(crate) _handle: Option<Arc<std::os::windows::io::OwnedHandle>>,
 }
 
 /// A GPU texture holding a finished frame. The render thread keeps it alive and doesn't write
@@ -301,15 +308,15 @@ fn gpu_renderer(core: &Core, control: &RenderControl, import: VideoImport) -> Op
     }
     let gpu = match import {
         // On Windows, ANGLE first: it also gives zero-copy hardware decoding. Then plain WGL.
-        // V3 makes the textures on the adapter with `adapter_luid` and shares them as NT
-        // handles, which D3D12 opens.
+        // Both make their textures on the UI's adapter (`adapter_luid`), the only one whose
+        // D3D12 device can open them.
         #[cfg(windows)]
-        VideoImport::D3d11Textures { adapter_luid: _ } => super::angle::Angle::new(core)
+        VideoImport::D3d11Textures { adapter_luid } => super::angle::Angle::new(core, adapter_luid)
             .and_then(|angle| GlRenderer::new(core, control, angle))
             .map(|gpu| (GpuRenderer::Angle(gpu), "ANGLE/D3D11"))
             .or_else(|err| {
                 tracing::info!("ANGLE video output unavailable: {err}");
-                super::wgl::Wgl::new(core)
+                super::wgl::Wgl::new(core, adapter_luid)
                     .and_then(|wgl| GlRenderer::new(core, control, wgl))
                     .map(|gpu| (GpuRenderer::Wgl(gpu), "OpenGL/D3D11 interop"))
             }),

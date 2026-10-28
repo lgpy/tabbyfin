@@ -1,16 +1,18 @@
 //! GPU video output on Windows: mpv renders through OpenGL (libmpv's only GPU render API) into
-//! D3D11 textures registered with `WGL_NV_DX_interop2`. GPUI's DirectX renderer opens the
-//! textures by their share handles and draws them, so frames never pass through the CPU.
+//! D3D11 textures registered with `WGL_NV_DX_interop2`. The UI's D3D12 device opens the textures
+//! by their names (`d3d11.rs`) and draws them, so frames never pass through the CPU.
 //! See `docs/in-app-video.md` (phase 2) and `examples/dx_interop_probe.rs`.
+//!
+//! The D3D11 device is made on the UI's adapter. OpenGL runs wherever the driver puts it; if
+//! that's another GPU (a laptop with two), the interop fails and playback uses software frames.
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
 use windows::Win32::Foundation::{HANDLE, HMODULE, HWND};
-use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
+use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
 use windows::Win32::Graphics::Direct3D11::*;
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
-use windows::Win32::Graphics::Dxgi::IDXGIResource;
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{GetDC, HDC, ReleaseDC};
 use windows::Win32::Graphics::OpenGL::*;
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
@@ -18,11 +20,12 @@ use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, WI
 use windows::core::{BOOL, Interface, PCSTR, w};
 
 use super::Core;
+use super::d3d11::{SharedTexture, adapter};
 use super::opengl::{
     Backend, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER, GL_FRAMEBUFFER_COMPLETE, GL_RENDERER, GL_TEXTURE_2D, GetProcAddress,
     failed,
 };
-use super::video::SharedFrame;
+use super::video::{Luid, SharedFrame};
 use crate::{Error, Result};
 
 const WGL_ACCESS_WRITE_DISCARD_NV: u32 = 0x0002;
@@ -73,8 +76,7 @@ fn gl_proc<T: Copy>(name: &str) -> Result<T> {
 
 /// One shared texture, registered with GL and attached to its own framebuffer.
 pub(crate) struct Slot {
-    texture: ID3D11Texture2D,
-    share: HANDLE,
+    shared: SharedTexture,
     gl_texture: u32,
     fbo: u32,
     interop: HANDLE,
@@ -91,8 +93,9 @@ pub(crate) struct Wgl {
 }
 
 impl Wgl {
-    /// Sets up OpenGL, D3D11 and the interop between them on the calling (render) thread.
-    pub fn new(core: &Core) -> Result<Self> {
+    /// Sets up OpenGL, D3D11 (on the adapter with `luid`) and the interop between them on the
+    /// calling (render) thread.
+    pub fn new(core: &Core, luid: Luid) -> Result<Self> {
         // SAFETY: Win32/WGL/D3D11 setup on this thread; every handle is checked.
         unsafe {
             let instance = GetModuleHandleW(None).map_err(failed)?;
@@ -177,11 +180,13 @@ impl Wgl {
             })()
             .map_err(fail)?;
 
+            let adapter = adapter(luid).map_err(fail)?;
             let mut device = None;
             let mut context = None;
+            // `UNKNOWN`: the driver type comes from the adapter given.
             D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
+                &adapter,
+                D3D_DRIVER_TYPE_UNKNOWN,
                 HMODULE::default(),
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                 None,
@@ -237,44 +242,18 @@ impl Backend for Wgl {
             self.context.Flush();
             drawn?;
         }
-        Ok(SharedFrame {
-            handle: slot.share.0 as usize,
-            width,
-            height,
-        })
+        Ok(slot.shared.frame(width, height))
     }
 
     fn create_slot(&self, width: u32, height: u32) -> Result<Slot> {
-        // SAFETY: D3D11/GL calls with valid devices on the context's thread.
+        let shared = SharedTexture::new(&self.device, width, height, DXGI_FORMAT_B8G8R8A8_UNORM)?;
+        // SAFETY: GL and interop calls with valid objects on the context's thread.
         unsafe {
-            let desc = D3D11_TEXTURE2D_DESC {
-                Width: width,
-                Height: height,
-                MipLevels: 1,
-                ArraySize: 1,
-                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-                Usage: D3D11_USAGE_DEFAULT,
-                BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
-                MiscFlags: D3D11_RESOURCE_MISC_SHARED.0 as u32,
-                ..Default::default()
-            };
-            let mut texture = None;
-            self.device
-                .CreateTexture2D(&desc, None, Some(&mut texture))
-                .map_err(failed)?;
-            let texture: ID3D11Texture2D = texture.ok_or_else(|| failed("no texture"))?;
-            let share = texture
-                .cast::<IDXGIResource>()
-                .map_err(failed)?
-                .GetSharedHandle()
-                .map_err(failed)?;
-
             let mut gl_texture = 0;
             glGenTextures(1, &mut gl_texture);
             let interop = (self.fns.wglDXRegisterObjectNV)(
                 self.interop_device,
-                texture.as_raw(),
+                shared.texture.as_raw(),
                 gl_texture,
                 GL_TEXTURE_2D,
                 WGL_ACCESS_WRITE_DISCARD_NV,
@@ -295,8 +274,7 @@ impl Backend for Wgl {
             (self.fns.glBindFramebuffer)(GL_FRAMEBUFFER, 0);
             let _ = (self.fns.wglDXUnlockObjectsNV)(self.interop_device, 1, objects.as_mut_ptr());
             let slot = Slot {
-                texture,
-                share,
+                shared,
                 gl_texture,
                 fbo,
                 interop,
@@ -309,6 +287,7 @@ impl Backend for Wgl {
         }
     }
 
+    /// The texture itself lives on while frames of it are held (`d3d11::SharedTexture`).
     fn release_slot(&self, slot: Slot) {
         // SAFETY: objects created by this renderer, on the context's thread.
         unsafe {
@@ -316,7 +295,6 @@ impl Backend for Wgl {
             let _ = (self.fns.wglDXUnregisterObjectNV)(self.interop_device, slot.interop);
             glDeleteTextures(1, &slot.gl_texture);
         }
-        drop(slot.texture);
     }
 }
 
