@@ -1077,7 +1077,7 @@ fn chapters_shelf(
     asked: &mut Asked,
 ) -> Rect {
     let chapters = chapters(&data.item);
-    shelf::shelf_with_gaps(ui, "chapters", "Chapters", CARD_GAP, SHELF_TITLE_GAP, |ui| {
+    shelf::shelf_with_gaps(ui, "chapters", "Chapters", CARD_GAP, SHELF_TITLE_GAP, 0., |ui| {
         for (index, chapter) in chapters.iter().enumerate() {
             let is_selected = cursor.is_selected(CHAPTERS, index);
             let response = card::chapter(ui, images, &data.item.id, index, chapter, is_selected);
@@ -1422,6 +1422,8 @@ fn episodes_band(
                     &open.name,
                     BIG_CARD_GAP,
                     SHELF_TITLE_GAP,
+                    // The band already insets its content.
+                    0.,
                     |ui| {
                         for (index, episode) in episodes.iter().enumerate() {
                             let selected = cursor.is_selected(EPISODES, index);
@@ -1946,7 +1948,7 @@ fn people_shelf(
     asked: &mut Asked,
 ) -> Rect {
     let people = &data.item.people;
-    shelf::shelf_with_gaps(ui, "people", "Cast & crew", BIG_CARD_GAP, SHELF_TITLE_GAP, |ui| {
+    shelf::shelf_with_gaps(ui, "people", "Cast & crew", BIG_CARD_GAP, SHELF_TITLE_GAP, 0., |ui| {
         for (index, person) in people.iter().enumerate() {
             let is_selected = cursor.is_selected(PEOPLE, index);
             let response = card::person(ui, images, person, BIG_CARD_SCALE, is_selected);
@@ -1979,6 +1981,8 @@ fn extras_shelf(
         "Extras",
         crate::widgets::text::CARD_GAP,
         SHELF_TITLE_GAP,
+        // The page already insets its content.
+        0.,
         |ui| {
             for (index, extra) in extras.iter().enumerate() {
                 let is_selected = cursor.is_selected(EXTRAS, index);
@@ -2004,21 +2008,29 @@ fn similar_shelf(
     asked: &mut Asked,
 ) -> Rect {
     let similar = &data.similar;
-    shelf::shelf_with_gaps(ui, "similar", "More like this", BIG_CARD_GAP, SHELF_TITLE_GAP, |ui| {
-        for (index, item) in similar.iter().enumerate() {
-            let is_selected = cursor.is_selected(SIMILAR, index);
-            let response = card::poster_scaled(ui, images, item, BIG_CARD_SCALE, is_selected);
-            if is_selected && moved {
-                response.scroll_to_me(None);
+    shelf::shelf_with_gaps(
+        ui,
+        "similar",
+        "More like this",
+        BIG_CARD_GAP,
+        SHELF_TITLE_GAP,
+        0.,
+        |ui| {
+            for (index, item) in similar.iter().enumerate() {
+                let is_selected = cursor.is_selected(SIMILAR, index);
+                let response = card::poster_scaled(ui, images, item, BIG_CARD_SCALE, is_selected);
+                if is_selected && moved {
+                    response.scroll_to_me(None);
+                }
+                if response.clicked() {
+                    asked.open = Some(Route::for_item(item));
+                }
+                if let Some(action) = menu::item_menu(&response, item) {
+                    asked.menu = Some((action, item.clone()));
+                }
             }
-            if response.clicked() {
-                asked.open = Some(Route::for_item(item));
-            }
-            if let Some(action) = menu::item_menu(&response, item) {
-                asked.menu = Some((action, item.clone()));
-            }
-        }
-    })
+        },
+    )
 }
 
 /// Fades the backdrop into the page's background at its bottom, as `main`'s gradient did.

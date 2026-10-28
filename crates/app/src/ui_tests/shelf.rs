@@ -30,7 +30,7 @@ fn row(cards: usize) -> Harness<'static, ()> {
             crate::theme::apply(ctx, &crate::config::Config::default());
         })
         .build_ui(move |ui| {
-            shelf::shelf_with_gaps(ui, "row", "A shelf", 12., 8., |ui| {
+            shelf::shelf_with_gaps(ui, "row", "A shelf", 12., 8., shelf::PADDING, |ui| {
                 for index in 0..cards {
                     ui.label(format!("card {index}"));
                 }
@@ -132,7 +132,7 @@ fn with_animations_off_the_arrow_jumps() {
     let start = ui.get_by_label("card 0").rect().left();
     click_next(&mut ui);
     let jumped = offset(&ui, start);
-    assert!(jumped > 300., "the page was there at once: {jumped}");
+    assert!(jumped > SIZE.x / 2., "the page was there at once: {jumped}");
     ui.step();
     assert_eq!(offset(&ui, start), jumped, "nothing glides with animations off");
 }
