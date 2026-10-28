@@ -57,10 +57,10 @@ Download the package for your system from the [releases](https://github.com/lgpy
 |---|---|---|
 | Windows 10/11 (x86_64) | `tabbyfin-<version>-windows-x86_64-setup.exe` | Installs for your user (no admin rights needed), with a Start-menu entry and an uninstaller in Settings → Apps. libmpv and ANGLE are included. The build isn't code-signed, so SmartScreen may ask before it runs. |
 | Windows, portable | `tabbyfin-<version>-windows-x86_64.zip` | The same files: unzip anywhere and run `tabbyfin.exe`. |
-| Debian, Ubuntu (x86_64) | `tabbyfin_<version>-1_amd64.deb` | `sudo apt install ./tabbyfin_<version>-1_amd64.deb` pulls in `libmpv2` and Vulkan. |
-| Other Linux (x86_64) | `tabbyfin-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it. libmpv is included; needs a Vulkan driver and a 2022 or newer distribution (glibc 2.35: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21…). Without FUSE, run it with `--appimage-extract-and-run`. |
+| Debian, Ubuntu (x86_64) | `tabbyfin_<version>-1_amd64.deb` | `sudo apt install ./tabbyfin_<version>-1_amd64.deb` pulls in `libmpv2`, Vulkan and the windowing libraries. |
+| Other Linux (x86_64) | `tabbyfin-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it. libmpv is included; needs a Vulkan driver, the desktop's usual windowing libraries (xkbcommon, Wayland or X11) and a 2022 or newer distribution (glibc 2.35: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21…). Without FUSE, run it with `--appimage-extract-and-run`. |
 | Linux, Flatpak (x86_64) | `tabbyfin-<version>.flatpak` | `flatpak install --user tabbyfin-<version>.flatpak` (it fetches the freedesktop runtime from Flathub), then start it from the menu or with `flatpak run io.github.lgpy.tabbyfin`. mpv is included. Settings live in `~/.var/app/io.github.lgpy.tabbyfin/`, apart from the other packages'. |
-| Linux, tarball | `tabbyfin-<version>-linux-x86_64.tar.gz` | Needs libmpv (`libmpv.so.2`) and a Vulkan driver installed. For a menu entry, copy `tabbyfin` to `~/.local/bin/`, `tabbyfin.desktop` to `~/.local/share/applications/` and `tabbyfin.png` to `~/.local/share/icons/hicolor/512x512/apps/`. |
+| Linux, tarball | `tabbyfin-<version>-linux-x86_64.tar.gz` | Needs libmpv (`libmpv.so.2`), a Vulkan driver and the desktop's usual windowing libraries (xkbcommon, Wayland or X11) installed. For a menu entry, copy `tabbyfin` to `~/.local/bin/`, `tabbyfin.desktop` to `~/.local/share/applications/` and `tabbyfin.png` to `~/.local/share/icons/hicolor/512x512/apps/`. |
 | macOS 12+ (Apple silicon, Intel) | `tabbyfin-<version>-macos-<arch>.zip` | Needs `brew install mpv` for playback. The app is ad-hoc signed, not notarised: right-click it and choose Open the first time. |
 
 **Logs** are written to a daily file. *Settings → Logs → Open log folder* opens it; attach the log to bug reports.
@@ -79,7 +79,7 @@ mise tasks        # everything else
 Plain `cargo run` works too, with the Rust version pinned in `mise.toml` (1.99).
 
 **System libraries:**
-- **Linux:** a C toolchain, plus Vulkan, Wayland/X11, fontconfig and OpenSSL headers. The full `apt` line is in [`docs/PLAN.md`](docs/PLAN.md) §8. Install `libmpv2` to play video. libmpv is loaded at runtime, so building doesn't need it.
+- **Linux:** a C toolchain and `pkg-config`; the Vulkan, Wayland/X11 and xkbcommon libraries and libmpv are loaded at runtime, so building needs no `-dev` packages for them. The full `apt` line is in [`docs/PLAN.md`](docs/PLAN.md) §8. Install `libmpv2` to play video.
 - **Windows:** the MSVC toolchain. For playback, put `libmpv-2.dll` next to the exe (`packaging/fetch-libmpv.sh`), and optionally ANGLE (`packaging/fetch-angle.sh`).
 - **macOS:** Xcode command line tools, and `brew install mpv`.
 
@@ -97,4 +97,4 @@ Plain `cargo run` works too, with the Rust version pinned in `mise.toml` (1.99).
 
 Tabbyfin is licensed under the [GNU General Public License v3.0 or later](LICENSE).
 
-Packages include third-party software under its own licenses: libmpv (GPL-2.0-or-later) and, on Windows, ANGLE and the MinGW runtime. See [`packaging/THIRD_PARTY.md`](packaging/THIRD_PARTY.md). GPUI and GPUI Kit are Apache-2.0; the patched GPUI crates in `third_party/gpui/` keep that license.
+Packages include third-party software under its own licenses: libmpv (GPL-2.0-or-later), the egui stack (MIT OR Apache-2.0) with the fonts and icons it embeds, and, on Windows, ANGLE and the MinGW runtime. See [`packaging/THIRD_PARTY.md`](packaging/THIRD_PARTY.md).

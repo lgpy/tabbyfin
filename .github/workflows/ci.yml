@@ -26,10 +26,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
+        # eframe/winit build with the runner's C toolchain and pkg-config: the X11, Wayland and
+        # xkbcommon libraries are loaded at runtime (the .deb depends on them), as are libmpv
+        # and Vulkan, so no -dev packages are needed.
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev \
-            libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libssl-dev
+          sudo apt-get install -y pkg-config
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
@@ -109,11 +111,11 @@ jobs:
           key: ${{ matrix.target }}
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
+        # The same as the check job: packaging needs no -dev packages, and the release binary
+        # loads libmpv, Vulkan and the windowing libraries at runtime.
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev \
-            libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libssl-dev \
-            libmpv2
+          sudo apt-get install -y pkg-config
       - name: Install cargo-deb
         if: runner.os == 'Linux'
         uses: taiki-e/install-action@v2

@@ -2,7 +2,7 @@
 # Builds the Linux AppImage: the release binary, plus the system's libmpv and the libraries it
 # needs (FFmpeg, libass…), so it runs where mpv isn't installed. linuxdeploy leaves out the
 # libraries every desktop has and that must match the system (glibc, GL, X11), and Vulkan's
-# loader is left out too: it has to find the system's drivers, and GPUI can't run without it.
+# loader is left out too: it has to find the system's drivers, and wgpu needs it for the window.
 #
 #   packaging/appimage.sh <binary> <version> <out-dir>     (needs libmpv installed)
 #

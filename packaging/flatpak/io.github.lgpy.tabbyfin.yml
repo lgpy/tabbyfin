@@ -81,6 +81,7 @@ modules:
       - install -Dm644 packaging/tabbyfin.png /app/share/icons/hicolor/512x512/apps/io.github.lgpy.tabbyfin.png
       - install -Dm644 packaging/flatpak/io.github.lgpy.tabbyfin.metainfo.xml /app/share/metainfo/io.github.lgpy.tabbyfin.metainfo.xml
       - install -Dm644 LICENSE /app/share/licenses/io.github.lgpy.tabbyfin/LICENSE
+      - install -Dm644 packaging/THIRD_PARTY.md /app/share/licenses/io.github.lgpy.tabbyfin/THIRD_PARTY.md
     sources:
       - type: dir
         path: ../..

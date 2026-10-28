@@ -3,6 +3,9 @@
 # C:\Temp\jelly-dev, and runs it on the Windows host with logs on this terminal.
 #
 #   dev/win-run.sh [seconds]      # default: run until the window is closed
+#
+# The host runs this copy on C: next to the player's runtime DLLs (libmpv, ANGLE), which are
+# fetched once into the same folder; the build folder stays on the Linux side.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
