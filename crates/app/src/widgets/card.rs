@@ -331,6 +331,16 @@ fn episode_title(ui: &Ui, episode: &BaseItemDto) -> WidgetText {
     WidgetText::LayoutJob(job.into())
 }
 
+/// Puts a line at the left of `rect`, cut short when it doesn't fit. `Ui::put` centres and
+/// justifies its widget, which stretched a title across the card's width; `main`'s lines sat at
+/// the card's left edge and kept their length.
 fn put(ui: &mut Ui, rect: Rect, text: WidgetText) {
-    ui.put(rect, Label::new(text).halign(Align::LEFT).truncate());
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(Align::Min)),
+        |ui| {
+            ui.add(Label::new(text).truncate());
+        },
+    );
 }
