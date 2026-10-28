@@ -34,6 +34,7 @@ use crate::services::Services;
 use crate::session::{self, Session};
 use crate::views::{Page, PageCx};
 
+pub mod item;
 pub mod library;
 pub mod login;
 pub mod toasts;
@@ -329,6 +330,11 @@ impl PageHarness {
 
     pub fn state(&self) -> &PageRun {
         self.harness.state()
+    }
+
+    /// The harness itself, for a test that reads what a frame drew (a node's rectangle).
+    pub fn harness(&self) -> &Harness<'static, PageRun> {
+        &self.harness
     }
 
     /// A key press with its release, routed as `App::raw_input_hook` and the shell route them:
