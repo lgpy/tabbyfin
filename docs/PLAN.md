@@ -1,6 +1,6 @@
 # Tabbyfin: Foundation Plan
 
-A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](https://www.gpui.rs/) through [GPUI Kit](https://github.com/longbridge/gpui-kit), and playback runs in mpv.
+A native, cross-platform desktop Jellyfin client: the UI is built with [egui](https://github.com/emilk/egui) through [eframe](https://github.com/emilk/egui/tree/main/crates/eframe) and drawn with wgpu, and playback runs in mpv.
 
 **Targets:** Linux, Windows, and macOS.
 **Server:** developed and tested against Jellyfin **12.x** (12.2 at the time of writing). The minimum supported version is **10.11** (see §4.4).
@@ -33,15 +33,19 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 
 | Concern | Choice | Notes |
 |---|---|---|
-| UI | **`gpui-kit` 0.7.x** | Formerly `gpui-component`, renamed to GPUI Kit. It pins an exact GPUI snapshot (`gpui-pre =0.3.9` today) and re-exports it. `use gpui_kit::*` gives us GPUI. **We never add `gpui` as a separate dependency.** The crates.io `gpui` crate (0.2.2, 2025) is stale, and mixing in a second copy would break the build. |
-| Widgets | `gpui_kit::component` | More than 75 components, including text input, virtual lists, scroll areas, theming, dialogs, and sidebar. `gpui_kit::base` is there if we later want our own look on top of its unstyled behavior. |
-| HTTP | `reqwest` (rustls) + `serde`/`serde_json` | Runs on our own tokio runtime on a background thread. GPUI's executor isn't tokio (§6). |
-| Player | **libmpv, embedded**, loaded at runtime | Video renders inside the GPUI window (§5, `docs/in-app-video.md`). |
+| UI | **egui / eframe 0.37** | Current release. Its text shaping (harfrust/skrifa) and on-demand system font fallback (`egui_system_font_provider`, on by default) cover CJK and other scripts without bundling fonts. |
+| Renderer | **wgpu** (eframe's default), wgpu 30 | One native API per OS (DX12, Vulkan, Metal), so mpv's frames can be shown without a copy everywhere: egui-wgpu takes outside textures (`Renderer::register_native_texture`). |
+| Backends | DX12 on Windows (forced, or wgpu might pick Vulkan), Vulkan on Linux with GL as fallback, Metal on macOS | Windows imports D3D11 textures into D3D12, Linux imports Vulkan memory. On wgpu's GL fallback only the software video path works. |
+| Widgets | egui's own | First reach the same features as before the migration; the look comes later (`docs/ROADMAP.md`, R1–R6). Icons are `egui_material_icons` 0.9 (built for one egui version), with both its filled and outline fonts. |
+| HTTP | `reqwest` (rustls) + `serde`/`serde_json` | Runs on our own tokio runtime on a background thread; egui never awaits (§6). |
+| Player | **libmpv, embedded**, loaded at runtime | Video renders inside the egui window (§5, `docs/in-app-video.md`). |
 | Persistence | `directories` + TOML config. `keyring` (v4) holds the access token. | `keyring` uses the OS keychain on all three platforms. Where no credential store exists (WSL, or Linux without a Secret Service daemon), the token goes in a file only the user can read (`<config>/tokens/`, 0600), and a warning is logged. The config is saved to a temporary file and renamed into place, so a crash mid-save can't truncate it; one that doesn't parse is kept as `config.toml.unreadable` before the defaults replace it. |
 | Image cache | On-disk cache in the platform cache dir, keyed by `(item id, image type, tag, width)`; in memory, up to 256 MB of decoded RGBA images held as egui textures, least recently used dropped first | Jellyfin's `ImageTags` act as cache busters. The app decodes images itself, off the UI thread: egui's texture loaders have no budget, no queue that drops what scrolled past, and no blurhash placeholders. |
+| Toasts | Our own small module | `egui-notify` is still on egui 0.36. |
+| UI tests | `egui_kittest` 0.37 (a dev dependency) | Drives the pages headless through AccessKit, without a GPU when no snapshots are taken. |
 | Errors / logs | `thiserror` in the library crates, `anyhow` in the app, plus `tracing` | |
 
-**GPUI churn:** GPUI Kit warns that any GPUI snapshot can change its API. We upgrade `gpui-kit` on purpose, in its own commit, and only after reading its changelog. All GPUI code lives in the `app` crate.
+**Pinning:** eframe, egui and egui-wgpu are released together and pinned in the workspace; bump them together, along with `egui_material_icons`. wgpu comes in through eframe, but the app calls its types directly (video import, textures), so its version is named in `Cargo.toml` too.
 
 ---
 
@@ -49,9 +53,9 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [GPUI](ht
 
 ```
 tabbyfin/
-├── Cargo.toml                # workspace; pins gpui-kit
+├── Cargo.toml                # workspace; pins the UI stack
 ├── crates/
-│   ├── jellyfin/             # Pure API client: no gpui, no mpv
+│   ├── jellyfin/             # Pure API client: no UI, no mpv
 │   │   ├── client.rs         #   base URL, auth header, request helpers, error mapping
 │   │   ├── auth.rs           #   AuthenticateByName, Quick Connect, logout
 │   │   ├── items.rs          #   views, items, resume, next up, latest, seasons/episodes
@@ -59,23 +63,40 @@ tabbyfin/
 │   │   ├── images.rs         #   image URL builder
 │   │   ├── ticks.rs          #   Ticks newtype (1 tick = 100 ns) <-> Duration
 │   │   └── models.rs         #   hand-written DTOs, only the fields we use
-│   ├── player/               # mpv via libmpv: no gpui
+│   ├── player/               # mpv via libmpv: no UI
 │   │   ├── lib.rs            #   Player: load, set_property, command, add_subtitle, quit
 │   │   ├── events.rs         #   PlayerEvent enum and event translation
 │   │   └── libmpv/           #   runtime-loaded libmpv: core, event thread, video output
-│   └── app/                  # gpui-kit binary
-│       ├── main.rs
-│       ├── state.rs          #   AppState entity: session, user, router
-│       ├── router.rs         #   navigation stack (Route enum)
-│       ├── runtime.rs        #   tokio bridge
-│       ├── images.rs         #   async image load + disk cache -> gpui image source
-│       ├── playback.rs       #   PlaybackSession: ties Player events to server reporting
-│       ├── views/            #   login, home, library, item_detail, settings
-│       └── components/       #   poster card, shelf row, progress bar, etc.
+│   └── app/                  # the eframe binary, `tabbyfin` (§3.1)
 └── docs/
 ```
 
-**Why this split:** `jellyfin` and `player` can be built and tested on their own. For example, `cargo run -p jellyfin --example smoke` can run against a real server. That keeps GPUI changes confined to `app`.
+**Why this split:** `jellyfin` and `player` can be built and tested on their own. For example, `cargo run -p jellyfin --example smoke` can run against a real server. That keeps UI changes confined to `app`.
+
+### 3.1 The app crate
+
+```
+crates/app/src/
+├── main.rs          logging (unchanged), player host check, wgpu setup, eframe::run_native; declares every module
+├── app.rs           eframe::App: screens (restoring, sign-in, signed in), account switching; owns Services and the toasts
+├── services.rs      Services: everything per signed-in session, AppEvent, Services::tick
+├── task.rs          Task<T>: a tokio future whose result the UI polls; channel: repaint-on-send; Deadline: a timer
+├── runtime.rs       the tokio runtime, plus `start` returning the JoinHandle
+├── keys.rs          every key binding, and who gets a key: egui or the app
+├── toasts.rs        notifications
+├── nav.rs           Route, NavRequest
+├── debug.rs         TABBYFIN_KEYS replay, TABBYFIN_ROUTE parsing (compiled in debug builds only)
+├── browse.rs        the keyboard cursor and its egui wiring
+├── config.rs, credentials.rs, session.rs, update.rs, markers.rs
+├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
+├── playback.rs, syncplay.rs, remote.rs, live.rs   services
+├── images.rs, trickplay.rs   textures
+├── theme.rs         appearance: theme, text size, zoom, animations, over_video; `theme::apply` is called at launch
+├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
+├── ui_tests/        the headless UI tests (egui_kittest)
+├── widgets/         text (Load<T>), card, image, shelf, menu, state, video
+└── views/           mod (Page, PageCx, open), shell, home, login, search, library, value_filters, item, settings, player, dialogs
+```
 
 **Models:** we write the serde DTOs by hand and keep them to the fields we need. Every field is `Option` or `#[serde(default)]`, and unknown fields are ignored. Generating code from the full OpenAPI spec would create a huge, churny surface. Swashbuckle v10 in 12.0 already changed the generated document once. If we later want generated code, we generate it from the 12.x spec.
 
@@ -167,7 +188,7 @@ Source: the 12.0 release notes, plus 12.1 and 12.2, which only contained bug fix
 ### 4.5 Units and paging
 
 - Positions are measured in **ticks**, where 1 tick = 100 ns. One `Ticks` newtype handles conversion to and from `Duration`, so units are never mixed by hand.
-- Library grids load page by page with `StartIndex`/`Limit` as the user scrolls, using GPUI Kit's virtual list.
+- Library grids load page by page with `StartIndex`/`Limit` as the user scrolls, drawing only the rows on screen (`ScrollArea::show_rows`).
 
 ---
 
@@ -209,11 +230,11 @@ libmpv doesn't run inside the app. `Player::spawn` starts this same executable a
 - **Lifetime:** the host exits when its stdin closes, which happens when the app drops the player or exits. It's also killed when the app drops it.
 - **`TABBYFIN_PLAYER=embedded`** runs libmpv inside the app as before, for debugging.
 
-Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) through the host, on the egui branch with GPU frames on both (V2, V3) and the WGL path on Windows. Killing the host mid-play on both resumes playback in a new one. Linux GPU frames through the host are confirmed on WSL's llvmpipe (forced GPU path), in-process too.
+Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) through the host, with GPU frames on both and the WGL path on Windows. Killing the host mid-play on both resumes playback in a new one. Linux GPU frames through the host are confirmed on WSL's llvmpipe (forced GPU path), in-process too.
 
 ### 5.2 Threading and reporting
 
-1. The session runs on tokio. It forwards `PlayerEvent`s into `NowPlaying`, the state the player page draws (`Services`' playback manager in the egui app, a GPUI entity on `main`), and it receives `UiCommand`s from that page: pause, seek, volume, tracks and stop.
+1. The session runs on tokio. It forwards `PlayerEvent`s into `NowPlaying` — the state the player page draws and controls (`services.playback`) — and it receives `UiCommand`s from that page: pause, seek, volume, tracks and stop.
    - After playback starts, it also looks up the item's versions and, for episodes, the next episode.
    - **Switching version** starts a new session of the same item at the current position.
    - **Next episode** (button, Shift+N, or automatically when an episode plays to the end) starts a session for the next episode from its resume point.
@@ -235,7 +256,9 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
    - `/Sessions/Playing` on start.
    - `/Sessions/Playing/Progress` about every 10 s, plus immediately on pause, seek or track change.
    - `/Sessions/Playing/Stopped` when playback ends, using the last known position.
-3. When playback ends, pages that show watched state refresh.
+3. When playback ends, pages that show watched state refresh: the stop bumps `services.user_data`, the counter pages watch (§6).
+
+**Ownership and events:** each session sends its updates through a `task::channel` that `Services::tick` drains into `NowPlaying`, and handles the end there (autoplay, reconnect, the events below). A session is detached on tokio rather than a `Task`, so it outlives the screen that started it and still reports its stop after sign-out: `Services::end` stops the current one, dropping the manager stops any left and saves the volume, and quitting (`Services::shut_down`) waits up to 3 s for the stop reports. `AppEvent::PlaybackStarted` and `PlaybackEnded` open and close the player page; failures and notices are toasts. Reconnecting after `Ended::Lost` waits on a `task::Deadline` (2, 5, 10 s), cancelled by stopping playback.
 
 ### 5.3 Shipping libmpv
 
@@ -272,7 +295,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 
 `syncplay.rs` holds the group this session is in. The protocol is in `docs/ROADMAP.md` §2.4; the flow here:
 
-1. **Joining:** the top-bar popover lists groups (`/SyncPlay/List`), creates one or joins one. The server confirms with a `GroupJoined` update on the websocket. While in a group, the server clock is sampled (4 samples, then one a minute) and the ping is reported. Requests go out one at a time, in the order they're made, so a `Ready` never overtakes its `Buffering`.
+1. **Joining:** the SyncPlay panel in the top bar lists groups (`/SyncPlay/List`), creates one or joins one. The server confirms with a `GroupJoined` update on the websocket. While in a group, the server clock is sampled (4 samples, then one a minute) and the ping is reported. Requests go out one at a time, in the order they're made, so a `Ready` never overtakes its `Buffering`.
 2. **Starting something** while in a group (Play on an item page, next episode…) doesn't play locally: `PlaybackManager::play` hands it to SyncPlay, which sends `SetNewQueue` (the item, plus the next episode for episodes).
 3. **Queue updates:** when the queue's current entry changes, every member (this one too) loads it paused at the group's position (`PlayOptions::start_paused`, `group_item`), reports `Buffering`, then `Ready` after mpv's first `playback-restart`.
 4. **Commands** arrive with a `When` in server time. The app waits for it on tokio, not on the UI's frames (which can be 16 ms apart, more on a slow renderer), and sends the command straight to the player from there:
@@ -280,7 +303,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
    - `Pause`: at `When`, pause and seek to the group's position.
    - `Seek`: pause, seek, report `Buffering`, and `Ready` after the restart; the server then unpauses everyone.
    - `Stop`: stop playback.
-5. **Local controls** in a group session (`NowPlaying::control`): pause, seek and stop become `/SyncPlay/Pause`, `Unpause`, `Seek` and `Stop` requests, so they apply to everyone. Esc stops playback for the group, as in the web client. Volume and tracks stay local.
+5. **Local controls** in a group session (`Services::control`): pause, seek and stop become `/SyncPlay/Pause`, `Unpause`, `Seek` and `Stop` requests, so they apply to everyone. Esc stops playback for the group, as in the web client. Volume and tracks stay local.
 6. **End of an item:** each member sends `NextItem`; the server advances the queue once, and the next item arrives as a queue update. Local autoplay is off in a group.
 7. **Drift correction:** after an Unpause, the group's timeline is "position P at local instant T". Once a second, the local position (mpv's last report plus the time since, at the current speed) is compared with it:
    - Under 80 ms off: normal speed.
@@ -292,48 +315,77 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 9. **Leaving:** signing out, switching accounts and quitting leave the group first.
 10. **The queue:** the SyncPlay menu lists the group's queue (names fetched by id) with the playing entry marked: `SetPlaylistItem` plays an entry, `MovePlaylistItem` and `RemoveFromPlaylist` edit it, `SetShuffleMode` and `SetRepeatMode` set the modes. The changes come back as queue updates to everyone.
 
-## 6. App architecture (GPUI side)
+## 6. App architecture
 
-- **`AppState` (Entity):**
-  - Server URL, the authenticated session, and the current user.
-  - The `Router`.
-- **`Router`:**
-  - A stack of `Route` values: `Login`, `Home`, `Library{id}`, `Item{id}`, `Season{id}`, `Settings`.
-  - The root view renders whatever is on top of the stack. Going back pops it.
-- **Views load their own data:**
-  - They spawn a fetch when created and move through `Loading`, then `Loaded(T)` or `Error`.
-  - DTOs are cached in memory by id, so going back is instant.
-  - While loading, pages, the startup screen and the player show the mascot (`mascot.rs`): the app icon's jellycat, painted as GPUI paths each frame and still when animations are off. Each loader shows the cute or the evil face (`EVIL_ODDS`), picked when it appears and kept in element state while it shows; empty search results and empty libraries (`empty_state`) show the confused one, scratching its head under a question mark. Its source drawings and SVGs are in `packaging/mascot/`.
-- **Async bridge (`runtime.rs`):**
-  - One global multi-threaded tokio `Runtime`.
-  - A helper (an extension trait, for example `cx.spawn_tokio(fut)`) runs the future on tokio and returns the result to GPUI's foreground executor.
-  - GPUI code never awaits reqwest directly.
-- **Images:**
-  - Fetch through the bridge and save to the disk cache.
-  - Decode off the main thread and hand the result to GPUI.
-  - Show a placeholder from `ImageBlurHashes` while the real image loads.
-- **Keyboard:**
-  - Define GPUI `actions!` with a keymap: Backspace, Esc or Alt+← to go back, Ctrl+F (⌘F) to search.
-  - Browsing pages (`browse.rs`) share one keyboard cursor over sections of cards: Home shelves, the library grid, search result groups, and an item page's buttons followed by its seasons or episodes. Cards and episode rows also get a right-click menu (`item_menu.rs`) with the item page's commands; menus the keyboard opens are `PopupMenu`s in a controlled popover (`components::menu_popover`), since gpui-kit's `DropdownMenu` only opens on a click.
-    - The arrow keys move it, Tab and Shift+Tab jump between sections, and Enter opens the card or presses the button.
-    - It's hidden until a key is pressed and hides again on a click, so mouse users never see it.
-    - Each page keeps its cursor while it's on the stack, so Back returns to the same card.
-    - Search is a button in the top bar that opens into a box in the middle of the bar (also Ctrl+F / ⌘F); the box turns back into the button when it loses focus empty. Typing opens the results page (or goes back to it from a page opened from it), clearing the box or Esc closes it. Enter or Down in the box moves to the first result, and Up from the top row returns to the box.
-    - An item's version and track pickers are a column of the cursor: Up/Down move between them, Left/Right step through the choices and Enter moves to the next one, wrapping. gpui-kit's Select only opens its menu with a click, so the keys set it directly and send the same `Confirm` a menu pick would (`tracks::step_choice`).
-    - Settings is gpui-kit's `Settings` panel (a page per topic, searchable) and isn't on the cursor.
-    - On an item page, W toggles watched on the highlighted episode, season or entry; in a playlist, Alt+Up/Alt+Down move the entry and Delete removes it.
-    - The library toolbar (sort, order, show, genre, year, resolution, clear) is the row above the grid; Enter steps a picker to its next choice or presses a button.
-    - Up past a page's first row lets the action through to the shell, which moves into the top bar (the page's cursor hides until the page has the keys again). Left/Right move along it, Enter presses, Down or Esc go back. The account and SyncPlay menus are controlled popovers: opened from the keyboard they highlight an entry, which Up/Down move and Enter chooses. Their content renders in an overlay outside the shell, so it takes the popover's focus itself, forwards keys to the shell, and handles `Confirm` (the popover binds Enter to it) before the popover dismisses.
-  - In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N / Shift+P play the next / previous episode (or movie of its collection), PgUp/PgDn go to the previous/next chapter, Enter or S skips the intro (or plays the next episode from the up-next card, or starts over after an automatic resume), [ and ] change the speed, Z and X the subtitle delay, F toggles fullscreen, and Esc leaves fullscreen, then dismisses the up-next card, then leaves the player.
-- **Theme:**
-  - GPUI Kit's theme system, defaulting to dark.
+### State: one owner, no entities
+
+- `App` (`app.rs`) is the `eframe::App`. It owns the screens (`Restoring`, `SignIn(Box<Login>)`, `SignedIn(Box<SignedIn>)`), the toasts, the window's `Placement`, the zoom, and the keys `raw_input_hook` took from egui for the app.
+- While signed in, `SignedIn` holds the session's `Services` and the `Shell`. Pages get a `&mut PageCx` each frame: `ctx`, `services`, a `nav: Vec<NavRequest>` to push into, and `render_state` (the player's video needs the wgpu device; `None` in tests). There are no globals and no `Rc<RefCell<…>>`.
+- `Services` (`services.rs`) is everything per signed-in session: the session (client, user, server), `user_data`, `events: Vec<AppEvent>`, `images`, `playback`, `syncplay`, `live`, `remote`, the item page's playlist edit queue, and the marks and fetches that outlive a frame (a watched change, a series' next episode, a shuffle). `Services::new(session, ctx)` takes the `egui::Context`, which the services keep to wake the UI. `Services::tick(ctx)` runs each part's background work: images, the item menu's finished requests, playlist edits, then playback's, the websocket's, remote control's and SyncPlay's.
+- Cross-service calls that would otherwise be globals are methods on `Services` (`control(UiCommand)`, `play(&item, options)`, `play_all_with`, `enqueue`, `reload`, `mark`, `play_up_next`); each part's module adds its own `impl Services` block, so `services.rs` stays small.
+- `AppEvent`s are what the app or the shell must act on: `Toast`, `AppearanceChanged`, `SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `PlaybackStarted`, `PlaybackEnded`, `ToggleFullscreen`. The app drains them after the shell has drawn.
+- Adding an account parks the signed-in screen in `App::parked`: it keeps ticking (playback, the websocket), its toasts still show, and its screen-changing events (`SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `ToggleFullscreen`) are dropped, while anything else waits in its queue for the shell after *Back to your account*.
+- Ending a session (sign-out, expiry, switching, removing the parked account) calls `Services::end()` (stops playback, leaves a SyncPlay group) and then drops the screen. Quitting saves the window placement and calls `Services::shut_down` on the signed-in session and a parked one, waiting up to 3 s.
+- `user_data` counts changes to the user's watch data: bumped when a session ends, when the server says it changed elsewhere (coalesced, half a second later, and not during playback), and by the app's own edits.
+
+### Pages and navigation
+
+- A page is a struct implementing `views::Page`: `title()`, `scope()` (its key bindings), `on_key(action, cx) -> bool`, `on_text` (the library's letter jump), the search hooks (`set_search_term`, `enter_results`, `hide_cursor`), and `show(ui, cx)`.
+- The shell keeps a stack of `Box<dyn Page>` and each page's `Route` next to it (`StackEntry`), so Settings' toggle and the results page are found by route rather than by downcasting. Pages stay alive while stacked, so Back keeps their state. The top one is drawn in a `CentralPanel` under the top bar.
+- `views::open(route, cx)` makes the page for a route. Pages navigate by pushing `NavRequest::Push(route)` / `Back` into `cx.nav`; the shell applies them after drawing and requests a repaint, so the new page shows at once.
+- Loading (see `views/home.rs`): a page keeps a `Load<T>` (`widgets/text.rs`), an `Option<Task<…>>` and `loaded_at: Option<u64>`. `show` starts a load when `loaded_at != Some(services.user_data)` — the first load, Retry (`None`) and watch data changing elsewhere — then polls the task; what's on screen stays until new data arrives. A page under others doesn't reload in the background: it catches up when it's back on top. Owners keep a generation counter (library pages, playback sessions) and drop results for an older one.
+- While a page loads it shows a spinner: `main`'s mascot loader is back in the restyle backlog (R3).
+
+### Top bar
+
+- The bar is the app icon, Back while there's a page to go back to, the top page's title, and on the right the search box, SyncPlay (its panel), Settings (opens Settings, or closes it when it's on top) and the account menu. The open search box takes the middle of the bar; its width shrinks with the bar (at least 120 px) so the icon, Back and a title fit on its left and the buttons on its right at any window size or zoom. The player hides the bar while it plays.
+- **Search:** the box is the bar's only text field. Typing opens the results page (or comes back to it from a page opened from it); clearing the box closes them; Enter or Down moves into them; Up or Shift+Tab the results leave unused at their first row go back into the box. Esc gives the keyboard back to the page (over the results it closes them and clears the box).
+- The SyncPlay button shows pressed while in a group, and its panel is a `Popup` hanging under it: the server's groups to join or *New group*, or the group's name, state, members and queue with *Leave group*, plus shuffle and repeat. The account menu is a `Popup` of the shell's own rows too.
+
+### Async
+
+- **The rule:** UI code never awaits `jellyfin` futures. Work runs on the tokio runtime (`runtime.rs`), and the UI polls for it.
+- `Task<T>`: `Task::spawn(ctx, future)` runs the future on tokio and requests a repaint once its result is ready. `task.poll()` hands the result over once; a panic in the future is raised again on the UI thread. Dropping the task aborts the future. Owners keep `Option<Task<T>>`: replacing it cancels the previous one, and they set it back to `None` after `poll` returned the result.
+- Long-lived streams (a playback session's updates, the websocket) are a `task::channel`: `Sender::send` requests a repaint after each send, `Receiver::drain` takes everything without waiting. `Services::tick` drains them.
+- Timers (controls hiding, the search debounce, SyncPlay's drift checks, saving the window placement, reconnects) are a `task::Deadline`: `set(after)` starts or restarts it, `cancel()` stops it, `fire(ctx)` returns true once when it's due and otherwise asks for a repaint for the remaining time. No thread sleeps on the UI side. A deadline is only as punctual as the frames, so what must happen at an exact time (SyncPlay's scheduled commands) waits on tokio instead.
+- `Services::tick` runs from `App::logic`, which eframe also calls while the window is hidden whenever a repaint was requested, so playback and the sign-in form's requests carry on while the window is minimised.
+- Idle CPU stays near zero: nothing requests a repaint every frame except while something moves (video, an animation, a spinner).
+
+### Keyboard
+
+- **egui or the app, per frame.** egui moves focus by itself (Tab from nothing; the arrows once a widget has focus) and presses the focused widget with Space or Enter. On a cursor page that would fight the cursor, so `App::raw_input_hook` decides before egui sees the frame's input, from the state the last frame left:
+  - **egui keeps every key** while it's busy with keys (`keys::egui_wants_keys`): a widget has focus (a text field, or anything reached with Tab on a page without a scope), or a modal, menu, combo box or popup is open. egui then works as egui does, and the code that owns such a widget reads the keys it needs itself (`consume_key`).
+  - **Otherwise the app takes the keys bound in the active scopes** (`keys::take`): their press events are removed from egui's input, queued, and routed by the shell before anything is drawn. Unbound keys and all releases stay with egui.
+- `keys.rs` has one table, `BINDINGS`: `(Scope, modifiers, key) → Action`. The scopes are `App` (the zoom, on every screen, sign-in included), `Shell` (Back on Esc, Backspace and Alt+Left; search on Ctrl/Cmd+F), `Browse` (arrows, Tab, Shift+Tab, Enter; the item page's rows add W, Alt+Up, Alt+Down and Delete) and `Player`. The active scopes are the top page's `Page::scope()`, `Shell` and `App`. Modifiers match exactly, except on punctuation, which some layouts type with Shift or AltGr.
+- A page without the cursor (Settings) returns `None` from `scope()`: Tab, arrows, Space and Enter stay with egui there, while Esc and Backspace still go back when nothing has focus.
+- Routing order: open dialog, menu or focused text field (through egui) → the top bar while it has the keyboard → the page (`Page::on_key`) → the shell's own keys (Back, search). Up past a page's first row moves into the top bar; Left and Right move along it, Enter presses, Down or Esc goes back to the page with its cursor where it was.
+- The browsing `Cursor` (`browse.rs`) is pure logic with unit tests. A page implements `browse::Browse` (`cursor`, `sections`, `activate`, `adjust`, `at_edge`) and makes `browse::on_key` its `Page::on_key`. While drawing it asks `cursor.take_reveal()` once for the move and scrolls the selected card into view itself (`scroll_to_me`, or its own scroll offset where the row isn't drawn, as with `ScrollArea::show_rows`), and calls `browse::hide_on_click`. The cursor stays hidden until a key is pressed and hides again on a click.
+- Menus and popups: the account menu, the SyncPlay panel, the item page's *More* menu and the player's menus read their own keys out of egui's input before anything draws (`keys::take_exact`, so Alt+Up/Down stay the page's) and draw non-focusable rows, so the keys can't reach a button behind them. The other popups (the item menu, the Settings pickers' lists, the player's version list) take the pointer only, like egui's own.
+- In the player: Space pauses, ←/→ seek 10 s, ↑/↓ change the volume, M mutes, Shift+N / Shift+P play the next / previous episode (or movie of its collection), PgUp/PgDn go to the previous/next chapter, Enter or S skips the intro (or plays the next episode from the up-next card, or starts over after an automatic resume), [ and ] change the speed, Z and X the subtitle delay, F toggles fullscreen, and Esc leaves fullscreen, then dismisses the up-next card, then leaves the player.
+
+### Theme and appearance
+
+- `theme.rs` applies the config's theme (dark, light, or the system's), text size (90–150 % of egui's text styles, or the desktop's: the Windows registry, GNOME's `gsettings`, KDE's `kdeglobals`, read again when the window regains the focus), zoom (Ctrl/Cmd `=`, `-`, `0`, saved as `ui_zoom`), and animations (`animation_time` 0 and no scroll animation when off).
+- On Linux the desktop's colour scheme comes from the XDG portal (`theme::SystemTheme`), read on tokio; Windows and macOS let egui/winit follow the system.
+- Colours come from egui's style. The player stays dark over the video in both themes and takes its colours from `theme::over_video` (`Color32` constants).
+- Settings raises `AppEvent::AppearanceChanged` after saving an appearance setting; the app calls `theme::apply` (the appearance is the app's, so it applies on the sign-in screen too).
+
+### Toasts
+
+`toasts.rs` draws info, success and error notices in the window's bottom-right corner: 5 s (errors 8 s), longer while the pointer is on them, at most four at once, with a close button and optionally one action (`ToastAction::OpenUrl` for the update notice). The app owns `Toasts` and draws them over everything, on every screen; signed-in code raises them through `services.toast(…)`, and API errors through `services.handle_error`. Each toast is logged.
+
+### Images and video
+
+- `ImageCache` (`images.rs`) keeps the disk cache, a queue with a budget and blurhash placeholders, and hands out `egui::TextureHandle`s: `get(&ImageRequest)` queues a miss and asks for a frame, `Services::tick` uploads what finished. Every request carries a size (`ImageRequest::fill_width`, twice the drawn width), so the download stays small and the cache key covers it. Images bigger than the device's largest texture are scaled down as they're decoded. Loads stop with their owner (the load task selects on the completion channel closing). Blurhash previews are their own textures, with an LRU capped by bytes and entries. Trickplay (`trickplay.rs`) is a plain `Trickplay` the player page owns: `thumbnail(position)` and a `poll()` each frame, keeping the two most recently used sheets' tiles.
+- **Video** is `widgets::video::Video`, one per playback session. It keeps the session's frame receiver, wakes the UI for each new frame, reports the drawn size to the player (`set_target_size`, so mpv renders at the size drawn, never above the video's), uploads the newest frame and draws it letterboxed on black. Software frames are RGBA written with `queue.write_texture` into one `Rgba8Unorm` texture per size, registered once with `register_native_texture` (a new size swaps the texture under the same id). GPU frames are the player's own textures, imported once per image of its ring and registered with egui-wgpu (`docs/in-app-video.md`). Dropping the widget frees its registration and stops the wake task.
+- `widgets::video::import(render_state)` is what the app tells the player it can draw when a session starts it (`PlaybackManager::set_video_import` at sign-in): Vulkan memory on wgpu's Vulkan, D3D11 textures on a hardware DX12 adapter, pixels otherwise. A failed import falls back to software frames at the same position and stays there for the rest of the sign-in (`Services::fall_back_to_pixels`).
 
 ---
 
 ## 7. Milestones
 
 1. **Skeleton:**
-   - Cargo workspace with `gpui-kit` pinned and a window that opens with GPUI Kit initialized.
+   - Cargo workspace with the UI stack pinned and a window that opens with eframe.
    - `tracing` set up.
    - Verified on WSLg, and on native Windows if possible.
 2. **API client:**
@@ -345,7 +397,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
    - Token stored in the keyring, version gate (§4.4), and auto-login on launch.
 4. **Browsing:**
    - Home shelves.
-   - Library grid with paging and a virtual list.
+   - Library grid with paging, drawing only the rows on screen.
    - Series, season, episode, and movie pages.
    - Image cache.
 5. **Playback:**
@@ -359,7 +411,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
    - CI builds for all three platforms.
    - Bundle mpv on Windows and macOS (§5.5).
 8. **Spike:**
-   - In-window video using libmpv's software render (§5.4 C).
+   - In-window video using libmpv's software render, then GPU texture sharing (`docs/in-app-video.md`).
 
 ---
 
@@ -394,4 +446,4 @@ sudo apt install build-essential pkg-config libmpv2 \
 ## 9. Open questions
 
 1. ~~**Quick Connect on 10.11:** check whether `POST /QuickConnect/Initiate` exists there.~~ **Answered on 2026-10-14:** it does. The smoke test passes against 10.11.11 with legacy authorization off (`mise run dev:min`), Quick Connect included, so no version-based fallback is needed.
-2. **A window saved on a display that's gone (egui, A1):** eframe lists no displays before the window opens and afterwards names only the monitor the window is on, as a size without a position, so the question is settled before the window exists, where the OS can be asked: on Windows the process is made DPI-aware first (winit would only do it when its event loop starts, and until then Windows reports monitors scaled to 96 DPI), then the saved rectangle's centre is looked up among the monitors (`EnumDisplayMonitors`), and a spot on none of them opens the window centred on the primary. Everywhere else the window manager (or AppKit) keeps a window on screen, and Wayland doesn't let an app place its window at all, so the saved spot is used as saved and the app neither guesses nor moves the window after it's up. The placement is stored as physical pixels for the frame's top-left plus the scale factor they were measured at, with the content size in OS points — what eframe's own window storage keeps — so the UI zoom and a monitor of another scale both reopen right. On Windows winit converts the launch position with the scale factor of the monitor the window is created on, so when the window doesn't open on its saved spot (a mixed-DPI setup) the physical position is set again after the first frame, and a maximized window maximized again after that; otherwise nothing is sent. Configs from before the scale factor (`window_bounds` without `scale`) keep their position in points and are saved anew on the next move. Verified on the hidden X11 display; Windows, HiDPI and real multi-monitor desktops are in `docs/TESTING.md` §9.
+2. ~~**A window saved on a display that's gone:**~~ **Settled in A1:** eframe lists no displays before the window opens and afterwards names only the monitor the window is on, as a size without a position, so the question is settled before the window exists, where the OS can be asked: on Windows the process is made DPI-aware first (winit would only do it when its event loop starts, and until then Windows reports monitors scaled to 96 DPI), then the saved rectangle's centre is looked up among the monitors (`EnumDisplayMonitors`), and a spot on none of them opens the window centred on the primary. Everywhere else the window manager (or AppKit) keeps a window on screen, and Wayland doesn't let an app place its window at all, so the saved spot is used as saved and the app neither guesses nor moves the window after it's up. The placement is stored as physical pixels for the frame's top-left plus the scale factor they were measured at, with the content size in OS points — what eframe's own window storage keeps — so the UI zoom and a monitor of another scale both reopen right. On Windows winit converts the launch position with the scale factor of the monitor the window is created on, so when the window doesn't open on its saved spot (a mixed-DPI setup) the physical position is set again after the first frame, and a maximized window maximized again after that; otherwise nothing is sent. Configs from before the scale factor (`window_bounds` without `scale`) keep their position in points and are saved anew on the next move. Verified on the hidden X11 display; Windows, HiDPI and real multi-monitor desktops are in `docs/TESTING.md` §9.
