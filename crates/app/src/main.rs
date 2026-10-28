@@ -14,6 +14,7 @@ mod item_menu;
 mod keys;
 mod live;
 mod markers;
+mod motion;
 mod nav;
 mod playback;
 mod remote;

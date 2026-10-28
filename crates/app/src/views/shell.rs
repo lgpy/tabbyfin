@@ -38,6 +38,7 @@ use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 use crate::browse::Move;
 use crate::config::{Config, SavedServer};
 use crate::keys::{self, Action, Press, Scope};
+use crate::motion;
 use crate::nav::{NavRequest, Route};
 use crate::playback;
 use crate::services::AppEvent;
@@ -333,7 +334,12 @@ impl Shell {
                     // pages can use the same names for theirs (two `"cast"` shelves, two
                     // `ScrollArea`s).
                     let entry = self.stack.last_mut().expect("the page stack is never empty");
-                    ui.push_id(entry.serial, |ui| entry.page.show(ui, cx));
+                    let serial = entry.serial;
+                    ui.push_id(serial, |ui| {
+                        // A page rises in as it opens, as `main`'s did (the player takes the
+                        // window on its own, without the entry).
+                        motion::enter(ui, ("page", serial), 0.0, |ui| entry.page.show(ui, cx));
+                    });
                 });
         }
         self.navigate(cx);

@@ -16,8 +16,8 @@
 //!
 //! Watched and Favorite show at once and go back if the server refuses: the services remember
 //! the refusal in a numbered log (`Services::refused_marks`) and the page takes the change back
-//! whenever it next draws, since a reload would fail too while the server is down. `main`'s pop on the icons is an animation
-//! (R2) and waits for it.
+//! whenever it next draws, since a reload would fail too while the server is down. The icons pop
+//! as the item turns watched or favorite, as `main`'s did ([`crate::motion`]).
 //!
 //! The More menu is drawn by the page rather than egui's menu buttons, so the keyboard can walk
 //! it (`more_menu_keys`), as it could on `main`; egui keeps the keys while the popup is open.
@@ -42,6 +42,7 @@ use crate::item_menu::{
     resume_point,
 };
 use crate::keys::{self, Action, Scope};
+use crate::motion;
 use crate::nav::{NavRequest, Route};
 use crate::playback::PlayOptions;
 use crate::task::Task;
@@ -291,6 +292,47 @@ enum EntryAction {
     Remove,
 }
 
+/// When the Watched and Favorite toggles last turned on: `main`'s `Fill`.
+#[derive(Default)]
+struct Fills {
+    played: Fill,
+    favorite: Fill,
+}
+
+impl Fills {
+    /// Starts each icon's pop whose toggle went from off to on.
+    fn update(&mut self, before: (bool, bool), after: (bool, bool), now: f64) {
+        self.played.update(before.0, after.0, now);
+        self.favorite.update(before.1, after.1, now);
+    }
+}
+
+/// When a toggle last turned on, so its icon pops for [`motion::POP`] after that and not when the
+/// page shows again later.
+#[derive(Default)]
+struct Fill {
+    at: Option<f64>,
+}
+
+impl Fill {
+    /// Starts the fill if `before` was off and `now` is on.
+    fn update(&mut self, before: bool, now_on: bool, now: f64) {
+        if !before && now_on {
+            self.at = Some(now);
+        }
+    }
+
+    /// The icon's scale at `now`: popping just after it turned on, at its size after that.
+    fn scale(&self, now: f64) -> f32 {
+        self.at.map_or(1., |at| motion::pop_scale(now - at))
+    }
+
+    /// Whether the pop is still running, so the page asks for the next frame.
+    fn popping(&self, now: f64) -> bool {
+        self.at.is_some_and(|at| now - at < motion::POP)
+    }
+}
+
 pub struct ItemPage {
     /// The top bar's title: the route's name until the item loads.
     name: String,
@@ -300,6 +342,8 @@ pub struct ItemPage {
     /// The `services.user_data` the data was loaded at; `None` before the first load or after
     /// Retry.
     loaded_at: Option<u64>,
+    /// The Watched and Favorite icons fill in when the item turns watched or favorite.
+    fills: Fills,
     /// The chosen media source, an index into the item's versions. Used only when there is
     /// more than one (`selected_version`).
     version: usize,
@@ -341,6 +385,7 @@ impl ItemPage {
             data: Load::Loading,
             loading: None,
             loaded_at: None,
+            fills: Fills::default(),
             version: 0,
             cursor: Cursor::default(),
             columns: 1,
@@ -398,16 +443,18 @@ impl ItemPage {
     /// Marks an item watched or favorite: on screen right away, then on the server. A refusal
     /// comes back through `Services::refused_marks` and [`ItemPage::show_mark`] takes it back.
     fn mark(&mut self, item_id: String, change: Mark, cx: &mut PageCx) {
-        self.show_mark(&item_id, change, false);
+        self.show_mark(&item_id, change, false, cx.ctx.input(|input| input.time));
         cx.services.mark(item_id, change);
     }
 
     /// Shows `change` on each copy of the item on the page (itself, a child or an episode of
-    /// the open season), or with `undo`, takes it back from those still showing it.
-    fn show_mark(&mut self, item_id: &str, change: Mark, undo: bool) {
+    /// the open season), or with `undo`, takes it back from those still showing it. As on
+    /// `main`, the item's own toggle pops its icon when it turns on.
+    fn show_mark(&mut self, item_id: &str, change: Mark, undo: bool, now: f64) {
         let Load::Loaded(data) = &mut self.data else {
             return;
         };
+        let before = (is_played(&data.item), is_favorite(&data.item));
         let episodes = match self.open_season.as_mut().map(|season| &mut season.episodes) {
             Some(Load::Loaded(episodes)) => Some(episodes),
             _ => None,
@@ -423,6 +470,8 @@ impl ItemPage {
                 change.undone().apply(item);
             }
         }
+        let after = (is_played(&data.item), is_favorite(&data.item));
+        self.fills.update(before, after, now);
     }
 
     /// Opens `season`'s episodes under the seasons, or closes them if they're open. Returns
@@ -573,7 +622,7 @@ impl ItemPage {
     /// it last looked, then catches up with the log. The page may have been off screen when the
     /// server refused (under another page, behind the player, or with the window hidden), so the
     /// refusal waits for it here instead of being lost.
-    fn take_back_refused_marks(&mut self, refused: &RefusedMarks) {
+    fn take_back_refused_marks(&mut self, refused: &RefusedMarks, now: f64) {
         let refusals: Vec<(String, Mark)> = refused
             .after(self.marks_seen)
             .map(|entry| (entry.item_id.clone(), entry.mark))
@@ -581,7 +630,7 @@ impl ItemPage {
         self.marks_seen = refused.sequence();
         // Newest first, so two quick toggles both refused unwind to where they started.
         for (item_id, mark) in refusals.into_iter().rev() {
-            self.show_mark(&item_id, mark, true);
+            self.show_mark(&item_id, mark, true, now);
         }
     }
 
@@ -835,6 +884,7 @@ impl ItemPage {
         let selected = self.cursor.selected();
         let images = &mut cx.services.images;
         let cursor = &mut self.cursor;
+        let fills = &self.fills;
         let mut asked = Asked::default();
         // The page's own scroll target, set once every shelf is drawn: the next scroll area to
         // finish takes a target, and a shelf's row would be it (U3).
@@ -849,7 +899,7 @@ impl ItemPage {
                     bottom: 0,
                 })
                 .show(ui, |ui| {
-                    let header = header(ui, data, &actions, selected, images, &mut asked);
+                    let header = header(ui, data, &actions, selected, fills, images, &mut asked);
                     let mut pickers = None;
                     if data.item.media_sources.len() > 1 {
                         ui.add_space(SECTION_GAP);
@@ -879,7 +929,10 @@ impl ItemPage {
                     let mut episodes_row = None;
                     if let Some(open) = &self.open_season {
                         ui.add_space(SECTION_GAP);
-                        episodes_row = Some(episodes_band(ui, open, moved, cursor, images, &mut asked));
+                        // The band rises in each time a season opens, as `main`'s did.
+                        episodes_row = Some(motion::enter(ui, ("season-episodes", open.id.as_str()), 0.0, |ui| {
+                            episodes_band(ui, open, moved, cursor, images, &mut asked)
+                        }));
                     }
                     let mut people_row = None;
                     if !data.item.people.is_empty() {
@@ -1451,6 +1504,7 @@ fn header(
     data: &ItemData,
     actions: &[ItemAction],
     selected: Option<Position>,
+    fills: &Fills,
     images: &mut ImageCache,
     asked: &mut Asked,
 ) -> Rect {
@@ -1483,7 +1537,7 @@ fn header(
                 // Lines the text up beside the poster, as on `main`.
                 ui.add_space(120.);
             }
-            info_column(ui, data, actions, selected, asked);
+            info_column(ui, data, actions, selected, fills, asked);
         });
     });
     Rect::from_min_max(top, pos2(ui.max_rect().right(), ui.cursor().min.y))
@@ -1491,7 +1545,14 @@ fn header(
 
 /// The title's column: the series line, the title and its actions, the meta line, genres,
 /// studios, the synopsis and the tags.
-fn info_column(ui: &mut Ui, data: &ItemData, actions: &[ItemAction], selected: Option<Position>, asked: &mut Asked) {
+fn info_column(
+    ui: &mut Ui,
+    data: &ItemData,
+    actions: &[ItemAction],
+    selected: Option<Position>,
+    fills: &Fills,
+    asked: &mut Asked,
+) {
     let item = &data.item;
     let weak = theme::tokens_of(ui).muted_foreground;
     ui.spacing_mut().item_spacing.y = 8.;
@@ -1521,13 +1582,13 @@ fn info_column(ui: &mut Ui, data: &ItemData, actions: &[ItemAction], selected: O
                 ui.add(Label::new(RichText::new(&item.name).font(title_font.clone())).wrap());
             });
             ui.add_space((ui.available_width() - actions_width).max(0.));
-            actions_row(ui, data, actions, selected, episode.as_deref(), asked);
+            actions_row(ui, data, actions, selected, episode.as_deref(), fills, asked);
         });
     } else {
         // A narrow window: the actions go under the title rather than squeeze it to a word a
         // line.
         ui.add(Label::new(RichText::new(&item.name).font(title_font)).wrap());
-        actions_row(ui, data, actions, selected, episode.as_deref(), asked);
+        actions_row(ui, data, actions, selected, episode.as_deref(), fills, asked);
     }
 
     let meta = meta_line(item);
@@ -1683,11 +1744,15 @@ fn actions_row(
     actions: &[ItemAction],
     selected: Option<Position>,
     episode: Option<&str>,
+    fills: &Fills,
     asked: &mut Asked,
 ) {
     let item = &data.item;
     let played = is_played(item);
     let favorite = is_favorite(item);
+    let now = ui.input(|input| input.time);
+    // With the animations setting off the icons are drawn at their size, at once.
+    let animations = theme::animations(ui.ctx());
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = ACTION_GAP - 2. * ACTION_RING_GAP;
         for (index, &action) in actions.iter().enumerate() {
@@ -1698,12 +1763,14 @@ fn actions_row(
                 });
             let response = match action {
                 ItemAction::TogglePlayed => {
-                    let icon = menu::played_icon(ui, played).size(ACTION_ICON);
-                    toggle(ui, icon, played, "Watched")
+                    let icon = menu::played_icon(ui, played);
+                    let scale = if animations { fills.played.scale(now) } else { 1. };
+                    toggle(ui, icon, played, "Watched", scale)
                 }
                 ItemAction::ToggleFavorite => {
-                    let icon = menu::favorite_icon(ui, favorite).size(ACTION_ICON);
-                    toggle(ui, icon, favorite, "Favorite")
+                    let icon = menu::favorite_icon(ui, favorite);
+                    let scale = if animations { fills.favorite.scale(now) } else { 1. };
+                    toggle(ui, icon, favorite, "Favorite", scale)
                 }
                 _ => {
                     let look = action_look(action, item, episode);
@@ -1738,6 +1805,10 @@ fn actions_row(
             }
         }
     });
+    if animations && (fills.played.popping(now) || fills.favorite.popping(now)) {
+        // The icons are still growing into place: keep the frames coming.
+        ui.ctx().request_repaint();
+    }
 }
 
 /// An action button: its icon, and a label for the actions that are named. Not focusable: the
@@ -1774,10 +1845,11 @@ fn action_button(ui: &Ui, look: &ActionLook) -> egui::Button<'static> {
 
 /// Watched and Favorite: pressed while on (the theme's accent behind it, as `main`'s checked
 /// toggles had), with the icon filled in green or red and a muted outline so the pressed toggle
-/// still reads on a highlighted row, whose own fill is the same accent.
-fn toggle(ui: &mut Ui, icon: RichText, on: bool, tooltip: &str) -> Response {
+/// still reads on a highlighted row, whose own fill is the same accent. `scale` is the icon's
+/// pop as it turns on, which fits in the button's own size.
+fn toggle(ui: &mut Ui, icon: RichText, on: bool, tooltip: &str, scale: f32) -> Response {
     let tokens = theme::tokens_of(ui);
-    let mut button = egui::Button::new(icon)
+    let mut button = egui::Button::new(icon.size(ACTION_ICON * scale))
         .selected(on)
         .sense(Sense::CLICK)
         .min_size(vec2(ACTION_SIZE, ACTION_SIZE));
@@ -2092,6 +2164,7 @@ impl Page for ItemPage {
     }
 
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        let now = ui.input(|input| input.time);
         let more_id = more_menu_id(ui);
         let versions_id = versions_menu_id(ui);
         self.menu_back_keys(cx.ctx, [more_id, versions_id]);
@@ -2107,6 +2180,14 @@ impl Page for ItemPage {
             if !cx.services.playlist_edits_pending(&self.item_id) {
                 match result {
                     Ok(data) => {
+                        // Marked watched or favorite (here or elsewhere) since it last loaded.
+                        if let Load::Loaded(old) = &self.data {
+                            self.fills.update(
+                                (is_played(&old.item), is_favorite(&old.item)),
+                                (is_played(&data.item), is_favorite(&data.item)),
+                                now,
+                            );
+                        }
                         if !data.item.name.is_empty() {
                             self.name = data.item.name.clone();
                         }
@@ -2136,7 +2217,7 @@ impl Page for ItemPage {
         }
         // Marks the server refused: take back what the page showed ahead of it, however long
         // ago the refusal came.
-        self.take_back_refused_marks(&cx.services.refused_marks);
+        self.take_back_refused_marks(&cx.services.refused_marks, now);
         browse::hide_on_click(&mut self.cursor, ui);
 
         match &self.data {
@@ -2580,18 +2661,18 @@ mod tests {
 
         // It showed both ahead of the server; the refusals came while it was off screen.
         let mut page = loaded_page(true, true, 0);
-        page.take_back_refused_marks(&refused);
+        page.take_back_refused_marks(&refused, 0.);
         assert_eq!(shown(&page), (false, false));
 
         // Its sequence caught up: the same log doesn't take a later mark back.
-        page.show_mark("movie", Mark::Played(true), false);
-        page.show_mark("movie", Mark::Favorite(true), false);
-        page.take_back_refused_marks(&refused);
+        page.show_mark("movie", Mark::Played(true), false, 1.);
+        page.show_mark("movie", Mark::Favorite(true), false, 1.);
+        page.take_back_refused_marks(&refused, 1.);
         assert_eq!(shown(&page), (true, true));
 
         // A page made after the refusals starts at the log's sequence and takes nothing back.
         let mut fresh = loaded_page(true, true, refused.sequence());
-        fresh.take_back_refused_marks(&refused);
+        fresh.take_back_refused_marks(&refused, 2.);
         assert_eq!(shown(&fresh), (true, true));
 
         // Only the newest refusals are kept.
