@@ -6,6 +6,10 @@
 //!   held key, roughly). Keys are named as on `main`: `ctrl-f`, `shift-tab`, `alt-left`, `pageup`,
 //!   `]`, `a`. They're injected into egui's input from `App::raw_input_hook`, so they take the
 //!   same path as real keys (`keys.rs`), and printable ones type their text into a focused field.
+//!   A press is only injected in a pass that will draw: eframe runs logic-only passes for a window
+//!   the compositor won't show, and input given to one of those only reaches the next pass, where
+//!   presses bunch up out of time order. So the presses wait for drawing to resume, one per pass
+//!   (dev/README.md, `docs/egui-migration.md` §6).
 //! - `TABBYFIN_ROUTE` opens a page on top of Home at startup ([`Start`]).
 
 use std::time::{Duration, Instant};
@@ -31,7 +35,7 @@ pub struct KeyScript {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct ScriptKey {
+pub struct ScriptKey {
     key: Key,
     modifiers: Modifiers,
     /// What the key types, for a focused text field.
@@ -51,34 +55,42 @@ impl KeyScript {
         })
     }
 
-    /// Adds the presses that are due to `input`.
-    pub fn inject(&mut self, input: &mut egui::RawInput) {
-        let elapsed = self.start.elapsed();
-        while let Some((at, press)) = self.presses.get(self.next)
-            && *at <= elapsed
-        {
-            if let Some(log) = &press.log {
-                tracing::info!("debug key: {log}");
-            }
-            let key = |pressed| Event::Key {
-                key: press.key,
-                physical_key: None,
-                pressed,
-                repeat: false,
-                modifiers: press.modifiers,
-            };
-            input.events.push(key(true));
-            if let Some(text) = &press.text {
-                input.events.push(Event::Text(text.clone()));
-            }
-            input.events.push(key(false));
-            self.next += 1;
+    /// The next press that's due, taken out of the script: the caller injects it into a pass
+    /// that draws. At most one per pass, so a script held back while the window wasn't drawn
+    /// plays out one key per frame rather than all at once.
+    pub fn take_due(&mut self) -> Option<ScriptKey> {
+        let (at, press) = self.presses.get(self.next)?;
+        if *at > self.start.elapsed() {
+            return None;
         }
+        if let Some(log) = &press.log {
+            tracing::info!("debug key: {log}");
+        }
+        self.next += 1;
+        Some(press.clone())
     }
 
     /// When the next press is due, for the app to wake up then.
     pub fn next_due(&self) -> Option<Instant> {
         self.presses.get(self.next).map(|(at, _)| self.start + *at)
+    }
+}
+
+impl ScriptKey {
+    /// Presses the key, types its text and releases it, as a person at the keyboard would.
+    pub fn inject(&self, input: &mut egui::RawInput) {
+        let key = |pressed| Event::Key {
+            key: self.key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: self.modifiers,
+        };
+        input.events.push(key(true));
+        if let Some(text) = &self.text {
+            input.events.push(Event::Text(text.clone()));
+        }
+        input.events.push(key(false));
     }
 }
 
@@ -242,8 +254,6 @@ impl Start {
                 id: id.into(),
                 name: "Person".into(),
             })),
-            // I1's image cache check page (docs/egui-migration.md §6).
-            ("posters", Some(id)) => Some(Start::Open(Route::Posters { id: id.into() })),
             _ => None,
         }
     }
@@ -251,11 +261,11 @@ impl Start {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
-    use egui::{Key, Modifiers};
+    use egui::{Event, Key, Modifiers};
 
-    use super::{Start, parse_key, schedule};
+    use super::{KeyScript, Start, parse_key, schedule};
     use crate::nav::Route;
 
     #[test]
@@ -312,6 +322,32 @@ mod tests {
     }
 
     #[test]
+    fn a_press_is_taken_once_and_only_when_it_is_due() {
+        let mut script = KeyScript {
+            start: Instant::now(),
+            presses: schedule("down"),
+            next: 0,
+        };
+        // The first key waits for the window to open (`FIRST_KEY_AFTER`).
+        assert!(script.take_due().is_none());
+        script.start -= Duration::from_secs(4);
+        let press = script.take_due().expect("due after the first delay");
+        let mut input = egui::RawInput::default();
+        press.inject(&mut input);
+        assert_eq!(input.events.len(), 2);
+        assert!(matches!(
+            input.events[0],
+            Event::Key {
+                key: Key::ArrowDown,
+                pressed: true,
+                ..
+            }
+        ));
+        assert!(matches!(input.events[1], Event::Key { pressed: false, .. }));
+        assert!(script.take_due().is_none());
+    }
+
+    #[test]
     fn routes_parse() {
         assert_eq!(Start::parse("search:test"), Some(Start::Search("test".into())));
         assert_eq!(Start::parse("settings"), Some(Start::Open(Route::Settings)));
@@ -346,10 +382,6 @@ mod tests {
                 id: "abc".into(),
                 name: "Person".into(),
             }))
-        );
-        assert_eq!(
-            Start::parse("posters:ffff"),
-            Some(Start::Open(Route::Posters { id: "ffff".into() }))
         );
         assert_eq!(Start::parse("item"), None);
         assert_eq!(Start::parse("nowhere"), None);

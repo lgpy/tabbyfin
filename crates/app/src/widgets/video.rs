@@ -68,6 +68,7 @@ const RING: usize = 3;
 enum ImportError {
     /// The frame's image is gone: the player let go of it (an old ring, after a resize) before
     /// the UI got to it. Only Windows, where frames name their textures rather than hold them.
+    #[cfg_attr(not(windows), allow(dead_code))]
     Gone(String),
     /// Importing doesn't work here (a driver quirk, another GPU): software frames from now on.
     Failed(String),

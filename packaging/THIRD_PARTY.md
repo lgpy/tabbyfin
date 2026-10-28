@@ -20,14 +20,16 @@ The UI and renderer are the Rust **egui** stack, statically linked into the app:
 [wgpu](https://wgpu.rs), under MIT OR Apache-2.0, plus `egui_material_icons`
 (https://github.com/lucasmerlin/hello_egui), under MIT. The exact versions are in `Cargo.lock`.
 
-The binary embeds egui's default fonts and the Material Symbols icons:
+The binary embeds egui's default fonts and the Material Symbols icons. Their licences require
+the licence texts to be handed out with them, so every package carries them in `licenses/`
+(the `.deb` and Flatpak keep them beside this file):
 
-| Files | Project | License |
-|---|---|---|
-| `Ubuntu-Light.ttf` | Ubuntu font family, https://design.ubuntu.com/font | Ubuntu Font Licence 1.0 |
-| `Hack-Regular.ttf` | Hack, https://sourcefoundry.org/hack | MIT (Bitstream Vera License for the glyphs it inherits) |
-| `egui-icons.ttf`, a subset of emoji-icon-font | https://github.com/jslegers/emoji-icon-font | MIT |
-| `MaterialSymbolsRounded-Regular.ttf`, `MaterialSymbolsRounded_Filled-Regular.ttf` | Material Symbols, https://fonts.google.com/icons | Apache-2.0 |
+| Files | Project | License | Text |
+|---|---|---|---|
+| `Ubuntu-Light.ttf` | Ubuntu font family, https://design.ubuntu.com/font | Ubuntu Font Licence 1.0 | `licenses/Ubuntu-Font-Licence-1.0.txt` |
+| `Hack-Regular.ttf` | Hack, https://sourcefoundry.org/hack | MIT (Bitstream Vera License for the glyphs it inherits) | `licenses/Hack.txt` |
+| `egui-icons.ttf`, a subset of emoji-icon-font | https://github.com/jslegers/emoji-icon-font | MIT | `licenses/emoji-icon-font.txt` |
+| `MaterialSymbolsRounded-Regular.ttf`, `MaterialSymbolsRounded_Filled-Regular.ttf` | Material Symbols, https://fonts.google.com/icons | Apache-2.0 | `licenses/Material-Symbols.txt`, `licenses/Apache-2.0.txt` |
 
 ## ANGLE (Windows)
 

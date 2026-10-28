@@ -8,7 +8,7 @@
 //! - It loads again when `services.user_data` moves on (watch data changed elsewhere), checked
 //!   in `show`, so a page under others catches up when it's back on top.
 //! - Clicks and Enter open pages through `cx.nav`; Esc going back is the shell's.
-//! - The browse cursor: [`Browse`] for the keys, [`browse::reveal`] and
+//! - The browse cursor: [`Browse`] for the keys, `Cursor::take_reveal` and
 //!   [`browse::hide_on_click`] while drawing.
 //! - Cards and shelves are `widgets/`, the item menu `widgets/menu.rs`; what a menu asks for is
 //!   carried out here, after the frame's drawing. *Add to playlist…* opens U8's dialog.

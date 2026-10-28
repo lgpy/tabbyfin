@@ -21,21 +21,6 @@ fn runtime() -> &'static Runtime {
     })
 }
 
-/// Runs `fut` on the tokio runtime and returns a future resolving to its output.
-pub fn spawn<F>(fut: F) -> impl Future<Output = F::Output> + 'static
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    let handle = runtime().spawn(fut);
-    async move {
-        match handle.await {
-            Ok(output) => output,
-            Err(err) => std::panic::resume_unwind(err.into_panic()),
-        }
-    }
-}
-
 /// Starts `fut` on the tokio runtime. Dropping the handle leaves it running; aborting it stops
 /// the future at its next await.
 pub fn start<F>(fut: F) -> tokio::task::JoinHandle<F::Output>
