@@ -20,6 +20,9 @@ eframe = "0.37"
 egui = "0.37"
 egui-wgpu = "0.37"
 egui_material_icons = { version = "0.9", features = ["filled", "outline"] }
+# The mascot loader: egui fills convex paths only and the jellycat's outlines are concave, so
+# they're tessellated into meshes (`crates/app/src/widgets/mascot.rs`).
+lyon_tessellation = "1"
 
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
 # The session websocket, upgraded through reqwest so it shares its TLS setup.
