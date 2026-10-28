@@ -458,7 +458,7 @@ impl App {
                 AppEvent::AppearanceChanged => self.apply_appearance(ctx, &Config::load()),
                 AppEvent::PlaybackStarted => {
                     if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
-                        signed_in.shell.player_started();
+                        signed_in.shell.player_started(ctx);
                     }
                 }
                 AppEvent::PlaybackEnded => {
