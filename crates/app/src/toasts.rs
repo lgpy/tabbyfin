@@ -1,6 +1,8 @@
 //! Notifications in the window's bottom-right corner: info, success and error. Each goes away
 //! by itself after a few seconds (not while the pointer is on it), or with its close button,
-//! and can carry one action button (the update notice's Download).
+//! and can carry one action button (the update notice's Download). Its buttons are
+//! `Sense::CLICK` widgets, not focusable (U8's rule for its dialogs'): a Tab with a toast over
+//! the player mustn't give egui the focus, or egui would keep the player's keys (`keys.rs`).
 //!
 //! Anything can raise one: signed-in code pushes `AppEvent::Toast` into `Services::events`, and
 //! the app, which owns [`Toasts`], shows them.
@@ -171,13 +173,16 @@ impl Toasts {
                                             }
                                             ui.label(&shown.toast.text);
                                             if let Some((label, action)) = &shown.toast.action
-                                                && ui.button(label).clicked()
+                                                && toast_button(ui, egui::Button::new(label)).clicked()
                                             {
                                                 clicked = Some(action.clone());
                                                 closed.push(shown.id);
                                             }
                                         });
-                                        if ui.small_button(ICON_CLOSE).on_hover_text("Close").clicked() {
+                                        if toast_button(ui, egui::Button::new(ICON_CLOSE.codepoint).small())
+                                            .on_hover_text("Close")
+                                            .clicked()
+                                        {
                                             closed.push(shown.id);
                                         }
                                     });
@@ -191,6 +196,14 @@ impl Toasts {
         self.shown.retain(|shown| !closed.contains(&shown.id));
         clicked
     }
+}
+
+/// A toast's action or close button, drawn as the button it's given. Not focusable
+/// (`Sense::CLICK` without `FOCUSABLE`), as U8's dialogs' buttons aren't: a Tab that focused
+/// one over the player would give egui the keyboard and take the player's keys away
+/// (`keys.rs`).
+fn toast_button(ui: &mut egui::Ui, button: egui::Button<'_>) -> egui::Response {
+    ui.add(button.sense(egui::Sense::CLICK))
 }
 
 fn icon(kind: Kind, visuals: &egui::Visuals) -> (egui_material_icons::MaterialIcon, Color32) {
