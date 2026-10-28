@@ -1,6 +1,6 @@
 # Moving Tabbyfin to egui: plan
 
-**Status (2026-10-28):** every task is done — waves 0–5, X3 and its fix tasks (X5–X7), and X2 (the docs) — so the `egui` branch is ready to merge into `main`. This file's task list and §6 notes are kept until it has: `docs/PLAN.md` is the architecture reference from then on.
+**Status (2026-10-28):** every task is done — waves 0–5, X3 and its fix tasks (X5–X7), and X2 (the docs) — so the `egui` branch is ready to merge into `main`. This file's task list and §6 notes are kept until it has: `docs/PLAN.md` is the architecture reference from then on. The restyle (R1–R6, [below](#restyle-backlog)) runs on `egui` before that merge, in two waves.
 
 **Approach:** replace in place. The first task (F1) deletes the GPUI code from `crates/app` and sets up the egui app. Every later task ports one piece back. The old code stays readable on `main`:
 
@@ -646,13 +646,26 @@ The reviewer reads the old file(s) on `main` next to the diff:
 
 ## Restyle backlog
 
-After X3, once the egui app matches `main`'s features. Not started before then.
+After X3, once the egui app matches `main`'s features. Same tiers and worktree flow as §2; the cheap tasks run as pi workers (`pi-agents:worker`).
 
-| ID | Item | Tier |
-|---|---|---|
-| R1 | Theme tokens: colours, radii, spacing, fonts like `main` (gpui-kit's look), with the app's own text-style table that the text size setting scales (`theme::apply_text_size` scales egui's until then); the card's hover dim, the played badge's and the watched/favorite icons' colours, and the person card's initials size | C+R |
-| R2 | Animations: page entry, staggered shelves, image fade-in, toggle pop, prompt slide-in, controls fade | C |
-| R3 | The mascot loader (`main`'s `mascot.rs`): tessellate its paths with `lyon_tessellation` into `egui::Mesh`es; the three faces, blink and flick timing | C+R |
-| R4 | Search box opening out of its button and closing back | C |
-| R5 | Scroll feel: wheel smoothing and shelf glide like `smooth_scroll.rs`; the grabbing cursor and release coasting a drag-scrollable row has now | C |
-| R6 | Player overlay polish: gradients, button sizes, icon sizes as on `main` | C |
+| ID | Item | Tier | Does it | Review | Wave |
+|---|---|---|---|---|---|
+| R1 | Theme tokens: colours, radii, spacing, fonts like `main` (gpui-kit's look), with the app's own text-style table that the text size setting scales (`theme::apply_text_size` scales egui's until then); the card's hover dim, the played badge's and the watched/favorite icons' colours, and the person card's initials size | C+R | pi xhigh | Opus medium | A |
+| R3 | The mascot loader (`main`'s `mascot.rs`): tessellate its paths with `lyon_tessellation` into `egui::Mesh`es; the three faces, blink and flick timing | C+R | pi high | Opus medium | A |
+| R5 | Scroll feel: wheel smoothing and shelf glide like `smooth_scroll.rs`; the grabbing cursor and release coasting a drag-scrollable row has now | C | pi high | — | A |
+| R2 | Animations: page entry, staggered shelves, image fade-in, toggle pop, prompt slide-in, controls fade | C | pi high | — | B |
+| R4 | Search box opening out of its button and closing back | C | pi high | — | B |
+| R6 | Player overlay polish: gradients, button sizes, icon sizes as on `main` | C | pi high | — | B |
+
+Wave B waits for R1's merge, since its items draw with R1's tokens.
+
+### Briefs
+
+Every brief implies §4's four rules. The old look's source is `main`'s files plus gpui-kit 0.7.3 itself (`~/.cargo/registry/src/*/gpui-kit-0.7.3`, `gpui-component-0.7.3`): its default light and dark themes, and the components the old pages used. Check each item with screenshots in light and dark against the same screen of `main` (built in its own worktree), both on Xvfb `:99`.
+
+- **R1:** `main`'s `theme.rs`, `components.rs` and the gpui-kit theme. The tokens live in `theme.rs` (one place, light and dark), egui's `Visuals`/`Spacing` are set from them, and widgets read the tokens instead of literal colours (`grep -rn 'Color32::' crates/app/src` lists them; `theme::over_video` stays the player's). The text-style table replaces egui's scaled styles, and the text size setting scales the table.
+- **R3:** `main`'s `mascot.rs` and where it was used (`app_view.rs`, `components.rs`, `views/player.rs`). It replaces `widgets::state::spinner` and the other spinners `main` had the mascot in; the animations setting stops its blink and flick, as on `main`. Tessellate once and cache the meshes, not per frame.
+- **R5:** `main`'s `smooth_scroll.rs` and `rail_drag.rs`. Wheel smoothing for the pages' scroll areas and the shelves' glide; keep the keyboard's reveal-into-view working (the UI tests check it). Repaints only while something moves.
+- **R2:** `main`'s `motion.rs` and its callers; the animations setting turns each off.
+- **R4:** `main`'s `views/shell.rs` search box; the keyboard's open and close (`keys.rs`) stay as they are.
+- **R6:** `main`'s `views/player.rs` bars and menus; colours from `theme::over_video`.
