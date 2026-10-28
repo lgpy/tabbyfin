@@ -42,8 +42,15 @@ blurhash = { version = "0.2", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # Whether a saved window spot still lands on a monitor, asked of the OS before the window opens,
-# in physical pixels (`window.rs`). The same `windows` version as the player crate.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }
+# in physical pixels (`window.rs`), and opening the player's video textures on wgpu's D3D12
+# device (`widgets/video/dx12.rs`). The `windows` version wgpu and the player crate use.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Reading wgpu's Vulkan device UUID for the player (`widgets/video.rs`). The version wgpu uses.

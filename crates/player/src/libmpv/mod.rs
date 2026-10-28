@@ -6,6 +6,8 @@
 
 #[cfg(windows)]
 mod angle;
+#[cfg(windows)]
+mod d3d11;
 #[cfg(target_os = "linux")]
 mod egl;
 mod embedded;
