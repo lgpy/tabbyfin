@@ -4,7 +4,9 @@ Things that work in development but haven't been tested where it matters: on rea
 
 Tick an item when it's been tried; note the hardware, OS and server version, and file anything that fails. Roadmap numbers refer to [`ROADMAP.md`](ROADMAP.md).
 
-**Legend:** ✅ tested in development · ⬜ still to test
+**The app now runs on egui** (ROADMAP §7). Every UI check below was first recorded on a GPUI build, and those ✅ marks stay as history. The egui build needs each UI check re-checked; entries that name the egui task that ran them (U3, U4, U5, … , X3, X5, X6) were recorded on the egui build, and the rest are the old build's results. Hardware, packaging and server checks are unaffected by the migration and stay as they are.
+
+**Legend:** ✅ tested in development (on a GPUI build unless the entry says otherwise) · ⬜ still to test
 
 ---
 
@@ -158,7 +160,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 ✅ Windows with an AMD RX 6600: ANGLE zero-copy (`d3d11va`, 4K HEVC 10-bit at ~11% CPU) and the WGL fallback. Linux: only Mesa llvmpipe in WSL (software rendering).
 
 - ⬜ **Windows, NVIDIA** and **Windows, Intel**: the log line `video decoding:` says `d3d11va` and playback is smooth with the 4K HEVC version of Test Movie.
-- ⬜ A **hybrid laptop** (Intel + NVIDIA): video shows (ANGLE and GPUI must end up on the same GPU).
+- ⬜ A **hybrid laptop** (Intel + NVIDIA): video shows (ANGLE and the app must end up on the same GPU).
 - ⬜ (egui branch, V3) **Windows GPU frames on NVIDIA and Intel**: the log says `video output: GPU (ANGLE/D3D11)` and `video: GPU frames`, the picture is right (colours not swapped, not black), resizing and pausing work, no `couldn't import a GPU frame` or `skipped a GPU frame` lines beyond a resize, no tearing in fast motion (sync is `glFinish` plus the ring, no fences); then the same with ANGLE hidden (`OpenGL/D3D11 interop`).
 - ⬜ (egui branch, V3) A **hybrid laptop** on Windows: the window on either GPU (Windows' per-app graphics preference): `OpenGL ES (ANGLE) context for mpv renderer=` names the window's GPU (`graphics backend=… adapter=`), and with ANGLE hidden the WGL path either shows video or falls back to software frames rather than black.
 - ⬜ (egui branch, V3) A **release build** on Windows: CPU for 4K HEVC 10-bit with ANGLE, app and host together (debug: 14–21%, `docs/in-app-video.md`).
@@ -176,7 +178,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 - ⬜ **Linux with a real GPU:** GPU frames through the host (Vulkan memory fds over the socket). Watch for "a frame's memory never arrived" in the log.
 - ⬜ **macOS:** playback works through the host (software frames over the pipe), and CPU use is reasonable at 1080p.
-- ⬜ **Windows on NVIDIA and Intel**, and a hybrid laptop: the host's ANGLE device and GPUI must be on the same adapter for shared handles (egui branch: §7's V3 entries).
+- ⬜ **Windows on NVIDIA and Intel**, and a hybrid laptop: the host's ANGLE device and the app must be on the same adapter for shared handles (egui branch: §7's V3 entries).
 - ⬜ **A release build on Windows** (no console): the host starts without a window flashing up, and its log reaches the app's log file.
 - ⬜ Quitting the app during playback leaves no `tabbyfin --player-host` process behind (Task Manager / `ps`).
 - ✅ (egui branch, V1) Software video in the egui window through the host and embedded: Linux (WSL, llvmpipe) and Windows (RX 6600, `TABBYFIN_VIDEO=software`); resizing re-renders at the new size on both; killing the host mid-play brings the video back in a new one (Linux). GPU frames came with V2 (Linux) and V3 (Windows); see below.
@@ -229,7 +231,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ## 10. Player mouse niceties (2.1.8)
 
-The development harness cannot send mouse input. The cursor hiding uses `App::hide_cursor_until_mouse_moves` (the gpui-pre patch), which the platforms restore on the next mouse move.
+The development harness cannot send mouse input. The player page hides the cursor with `CursorIcon::None` while the controls are hidden, and the platform brings it back on the next mouse move.
 
 - ✅ **Single click** on the video pauses; a **double click** toggles fullscreen and leaves the video playing (the first click's pause is undone), also in a SyncPlay group, where the group must not end up paused.
 - ✅ **Wheel over the video**: one notch is 5% volume, scrolling down takes it away, and a fast spin follows the wheel rather than the event count.

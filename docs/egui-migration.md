@@ -1,6 +1,6 @@
 # Moving Tabbyfin to egui: plan
 
-**Status (2026-10-28):** waves 0–5, X3 and its fix tasks (X5–X7) are done; X2 (docs) is open. Work happens on the `egui` branch; `main` stays the GPUI app until the switch is done.
+**Status (2026-10-28):** every task is done — waves 0–5, X3 and its fix tasks (X5–X7), and X2 (the docs) — so the `egui` branch is ready to merge into `main`. This file's task list and §6 notes are kept until it has: `docs/PLAN.md` is the architecture reference from then on.
 
 **Approach:** replace in place. The first task (F1) deletes the GPUI code from `crates/app` and sets up the egui app. Every later task ports one piece back. The old code stays readable on `main`:
 
@@ -254,7 +254,7 @@ crates/app/src/
 | U7 | Item page: seasons, episodes, playlist entries | C+R | pi max | Opus high | U6, U8 | 5 |
 | X4 | UI tests with egui_kittest | C | pi xhigh | — | U1–U5 | 5 |
 | X3 | Parity sweep and cleanup | C runs it, **S** triages | pi high | Opus medium (triage) | everything | 6 |
-| X2 | Docs | C *(mechanical)*, R for `in-app-video.md` | pi high | Opus medium | X3 | 6 |
+| X2 ✅ | Docs | C *(mechanical)*, R for `in-app-video.md` | pi high | Opus medium | X3 | 6 |
 
 **Why these levels:** Opus xhigh where a mistake spreads or is hard to see (F1's patterns copied everywhere, SyncPlay timing, the untested Windows interop, the player's many interactions); medium where the review is mostly checking a list. pi max where one page holds intricate state and keyboard handling (shell, library, playlist editing, player); high where the port is near line for line.
 
