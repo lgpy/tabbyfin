@@ -7,12 +7,15 @@
 //! watched or favorite — and hands back *Add to playlist…* for the page to open U8's dialog.
 //! `main`'s menu did all of it itself, through GPUI globals.
 //!
-//! Each action that takes a request first ([`Services::mark`], [`Services::play_up_next`])
-//! runs it on tokio and reports back in [`Services::apply_menu_requests`], which `Services::tick`
-//! calls, so no page owns a task for it.
+//! Each action that takes a request first ([`Services::mark`], [`Services::play_up_next`],
+//! [`Services::play_shuffled`]) runs it on tokio and reports back in
+//! [`Services::apply_menu_requests`], which `Services::tick` calls, so no page owns a task for
+//! it.
 //!
-//! egui's menus don't take keys, so the menu is pointer-only for now, like the account menu
-//! (S1).
+//! egui's menus don't take keys, so the context menu is pointer-only for now, like the account
+//! menu (S1); the item page's own More menu draws and reads its keys itself (`views/item.rs`).
+
+use std::collections::VecDeque;
 
 use egui::text::LayoutJob;
 use egui::{Button, Color32, FontId, Response, RichText, TextFormat, TextStyle, Ui, WidgetText};
@@ -22,8 +25,9 @@ use jellyfin::models::{BaseItemDto, BaseItemKind};
 
 use crate::item_menu::{self, Mark, can_add_to_playlist, can_mark, is_favorite, is_playable, is_played, resume_point};
 use crate::playback::PlayOptions;
-use crate::services::{Marked, Services, UpNext};
+use crate::services::{Marked, Services, Shuffled, UpNext};
 use crate::toasts::Toast;
+use crate::views::item::shuffle;
 use crate::widgets::text::timestamp;
 
 /// What a choice in [`item_menu`] asks for.
@@ -157,6 +161,53 @@ fn icon_entry(ui: &mut Ui, icon: egui_material_icons::MaterialIcon, label: &str)
 const SUCCESS: Color32 = Color32::from_rgb(0x2e, 0xc4, 0x6e);
 const RED: Color32 = Color32::from_rgb(0xef, 0x44, 0x44);
 
+/// How many refused marks the services remember. A page left off screen catches up with the
+/// newest ones (it takes back each refusal once); past this many the page is showing data the
+/// server has long replaced, and a successful mark reloads it anyway.
+pub(crate) const REFUSED_MARKS_KEPT: usize = 64;
+
+/// A mark the server refused, numbered in the order the refusals came in.
+pub(crate) struct RefusedMark {
+    pub(crate) sequence: u64,
+    pub(crate) item_id: String,
+    pub(crate) mark: Mark,
+}
+
+/// The recent marks the server refused. A page remembers the last sequence it applied and takes
+/// the newer ones while it draws, so a refusal that came while the page was off screen (under
+/// another page, behind the player, or with the window hidden) is still taken back, and only
+/// once. `main` kept the page's own request open for the length of the mark, which navigation
+/// dropped.
+#[derive(Default)]
+pub(crate) struct RefusedMarks {
+    sequence: u64,
+    entries: VecDeque<RefusedMark>,
+}
+
+impl RefusedMarks {
+    pub(crate) fn push(&mut self, item_id: String, mark: Mark) {
+        self.sequence += 1;
+        self.entries.push_back(RefusedMark {
+            sequence: self.sequence,
+            item_id,
+            mark,
+        });
+        while self.entries.len() > REFUSED_MARKS_KEPT {
+            self.entries.pop_front();
+        }
+    }
+
+    /// The sequence of the newest refusal (0 before any).
+    pub(crate) fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    /// The refusals after `sequence`, oldest first.
+    pub(crate) fn after(&self, sequence: u64) -> impl Iterator<Item = &RefusedMark> {
+        self.entries.iter().filter(move |entry| entry.sequence > sequence)
+    }
+}
+
 /// What a menu choice needs beyond the menu: playing (its controls are in `playback.rs`),
 /// marking, and the episode fetch that *Play* on a series or season comes down to.
 impl Services {
@@ -234,6 +285,9 @@ impl Services {
                 Err(err) => {
                     let message = self.handle_error(&err);
                     self.toast(Toast::error(message));
+                    // The page (or menu) may have shown the change already; it takes it back
+                    // when it draws, however long from now that is.
+                    self.refused_marks.push(item_id, mark);
                 }
             }
         }
@@ -254,5 +308,31 @@ impl Services {
                 }
             }
         }
+        let shuffled: Vec<Shuffled> = self.shuffles.drain().collect();
+        for result in shuffled {
+            match result {
+                Ok(mut episodes) => {
+                    shuffle(&mut episodes);
+                    self.play_all(episodes);
+                }
+                Err(err) => {
+                    let message = self.handle_error(&err);
+                    self.toast(Toast::error(message));
+                }
+            }
+        }
+    }
+
+    /// Plays all of a series' or season's episodes in random order, for the item page's
+    /// *Shuffle*: which episodes takes a request, so it runs on tokio and outlives the page —
+    /// going Back still starts the shuffle, as `main`'s detached task did.
+    pub fn play_shuffled(&mut self, item: &BaseItemDto) {
+        let client = self.session.client.clone();
+        let item = item.clone();
+        let sender = self.shuffle_from.clone();
+        crate::runtime::detach(async move {
+            let result = item_menu::episodes_of(&client, &item).await;
+            let _ = sender.send(result);
+        });
     }
 }
