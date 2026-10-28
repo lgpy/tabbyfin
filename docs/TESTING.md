@@ -90,7 +90,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ The skip button and up-next card **click** correctly (they sit above the controls when those are visible).
 - ⬜ Autoplay off in Settings: the episode ends and the player closes.
 
-✅ The egui build (U10), on 12.2: the skip button during the intro, Enter skipping it (0:01 → 0:12), `auto_skip_intro = true` skipping the 10 s intro by itself, the up-next card from the Outro with its countdown, Esc dismissing it (no autoplay) and Esc again stopping, autoplay into the next episode, and PgUp to the previous chapter. Screenshots and the gaps in §29.
+✅ The egui build (U10), on 12.2: the skip button during the intro, Enter skipping it (0:01 → 0:12), `auto_skip_intro = true` skipping the 10 s intro by itself, the up-next card from the Outro with its countdown, Esc dismissing it (no autoplay) and Esc again stopping, autoplay into the next episode, and PgUp to the previous chapter. Screenshots and the gaps in §30.
 
 ## 5. Live connection (2.4.1)
 
@@ -227,7 +227,7 @@ The development harness cannot send mouse input. The cursor hiding uses `App::hi
 - ✅ **Cursor and controls**: after 3 s without movement both disappear while playing; any movement brings both back; neither happens while paused.
 - ✅ The wheel over the control bars does not change the volume.
 
-✅ The egui build (U10): the controls hide after 3 s while playing, stay while paused, and come back with any key that acts on the player; the *hidden display*'s pointer went nowhere, so the click, wheel, trackpad and cursor rows above are unchecked there (§29).
+✅ The egui build (U10): the controls hide after 3 s while playing, stay while paused, and come back with any key that acts on the player; the *hidden display*'s pointer went nowhere, so the click, wheel, trackpad and cursor rows above are unchecked there (§30).
 
 ## 11. Volume and mute in reports (2.2.4)
 
@@ -259,7 +259,7 @@ The development harness cannot send mouse input. The cursor hiding uses `App::hi
 - ⬜ **Clicking the clock** switches to the time left, and the choice survives a restart.
 - ⬜ The next episode keeps the speed and size and drops the delays; a **SyncPlay** group shows "Normal in SyncPlay" and stays at 1×.
 
-✅ The egui build (U10): `]` twice set 1.5× (the badge next to the clock), `x` twice the subtitle delay (+0.2 s, shown by the settings menu opened for the screenshot only), and `show_remaining_time = true` in the config showed "-0:31 / 1:00" after the chapter's name. The menu's buttons and the clock's click are unchecked (no pointer; §29).
+✅ The egui build (U10): `]` twice set 1.5× (the badge next to the clock), `x` twice the subtitle delay (+0.2 s, shown by the settings menu opened for the screenshot only), and `show_remaining_time = true` in the config showed "-0:31 / 1:00" after the chapter's name. The menu's buttons and the clock's click are unchecked (no pointer; §30).
 
 ## 14. Theme (4.3)
 
@@ -296,7 +296,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ A remote **previous** from the dashboard: restarts the item, or within 5 s goes to the previous one.
 - ⬜ A movie in **several collections** uses the first the server lists.
 
-✅ The egui build (U10): Shift+P on S02E02 played S02E01 and Shift+N came back (the buttons appear for an item that has them, with their tooltips); clicking them is unchecked (§29).
+✅ The egui build (U10): Shift+P on S02E02 played S02E01 and Shift+N came back (the buttons appear for an item that has them, with their tooltips); clicking them is unchecked (§30).
 
 ## 16. Image memory (6.6)
 
@@ -315,7 +315,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ An item **without tiles** shows only the time; a version switch shows the new version's tiles.
 - ⬜ **10.11** (the same endpoints) with tiles generated.
 
-⬜ The egui build (U10) draws the seek bar's hover time and thumbnail from the same `Trickplay` (the page polls it every frame); the pointer can't be driven here, so hovering and scrubbing are unchecked (§29).
+⬜ The egui build (U10) draws the seek bar's hover time and thumbnail from the same `Trickplay` (the page polls it every frame); the pointer can't be driven here, so hovering and scrubbing are unchecked (§30).
 
 ## 18. Resume prompt (2.1.10)
 
@@ -324,7 +324,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **Autoplay** into an episode with a resume point shows the card, and it goes away by itself after 10 s.
 - ⬜ Clicking **Start over**; in a **SyncPlay** group it's a group seek.
 
-✅ The egui build (U10): Shift+N to Second Movie resumed at 0:25 with "Resumed from 0:25 · Start over", and Enter started over from 0:00 (§29).
+✅ The egui build (U10): Shift+N to Second Movie resumed at 0:25 with "Resumed from 0:25 · Start over", and Enter started over from 0:00 (§30).
 
 ## 19. Subtitle appearance (4.2)
 
@@ -451,3 +451,24 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **Fullscreen** (`f`, its button, Esc leaving it first): the hidden display has no window manager.
 - ⬜ A **reconnect** (Back over the last frame) and the fallback to software frames after a failed GPU import: neither was triggered here (the import only fails on real drivers).
 - ⬜ A **10.11** server, and real GPU frames on Linux (V2's own check) and Windows (V3) with the controls over them.
+
+## 31. Library grid and filters (U5)
+
+✅ **egui (U5)**, against 12.2 (`TABBYFIN_ROUTE=library:f137a2dd21bbc1b99aa5c0f6bf02a805:movies`), screenshots in `U5-scratch/`: the grid with 2 items, the toolbar's Sort, order, Show, *Genres, tags…*, *Any year* and *Any resolution* and the count (`u5-library2.png`); Show stepped by Enter through Unwatched (empty: "Nothing matches these filters.", `Clear filters` appears, `u5-show-unwatched.png`), Watched and Favorites (1 item, `u5-favorites.png`), the config saving `filter` each time; Sort stepped to Date added with its descending order and the config saved (`u5-sort-added.png`); the order button flipping the grid and `descending = true` (`u5-order-desc.png`); Year stepped to *2020s* (both movies, `u5-year.png`); Resolution to 4K on 12.2 (Test Movie, which has a 4K version, `u5-resolution.png`); *Clear filters* resetting every choice and leaving the cursor on the last control (`u5-clear.png`); the old single-genre view (`genre = "Comedy"`) upgraded to `genres`, applied (1 item) and saved back as `genres` (`u5-upgraded.png`).
+
+✅ The genres, tags and ratings dialog by keyboard: Enter on the toolbar's button opening it with the first genre highlighted (`u5-values.png`), Space ticking Comedy and Down then Space Documentary (the grid behind reloaded each time, the button reading "Comedy, Documentary", `Clear filters` appearing, `u5-values-two.png`), Enter closing it with the Comic filter applied (`u5-values-entered.png`), Esc closing it over 2 items (`u5-values-escaped.png`), and a config with a genre and year the library no longer has keeping both listed in the dialog and the year picker, checked (`u5-remembered-dialog.png`).
+
+✅ The letter jump: `TABBYFIN_KEYS="… t"` moved the highlight to Test Movie on the dev library (`u5-letter-jump.png`), and on `dev/fake-library.py`'s 10,000 movies `z` scrolled to the start of the Z names and highlighted the first one (`u5-fake-jump.png`). The letter bar shows only while sorted by name, and the grid's toolbar and grid are the cursor's two sections (Up from the grid gives the toolbar, Up from the toolbar the top bar).
+
+✅ **Virtualised rows and pages**: on the 10,000-item fake library, 150 Downs scrolled about 1,000 items with only the visible rows drawn and only their posters asked for (259 poster requests for the whole scroll; 56 for a letter jump), the cursor's row scrolled into view by the page itself (`u5-fake-scrolled2.png`), 10,000 items counted. Idle CPU was 0 ticks over 10 s and 8 s on that page.
+
+✅ **Watch data from elsewhere**: unmarking Second Movie as played over REST while the grid was open dropped its badge (`u5-refresh-before.png`, `u5-refresh-after.png`) without a spinner, with the items and scroll kept; the played state was put back.
+
+✅ **10.11** (`config-template-min`, `TABBYFIN_ROUTE=library:f137a2dd21bbc1b99aa5c0f6bf02a805:movies`): the grid and toolbar load; 4K gives 0 items, as `docs/PLAN.md` §4.3 says for 10.11's first-version width check, where 12.2 finds Test Movie's 4K version (`u5-1011-4k.png`).
+
+✅ A collections folder (`collection_type` none, browsed folder by folder) lists *Test Collection* with only Sort, order and Show (`u5-folder.png`), and `TABBYFIN_ROUTE=person:<id>` opens a `Source::Person` page (toolbar without the value/year/resolution pickers, "Nothing here yet.", `u5-person.png`). Enter on a card opened the U6 stub and Esc came back with the cursor still on that card (`u5-open-item.png`, `u5-back-library.png`).
+
+- ⬜ **With a mouse**: clicking a card, the toolbar's `ComboBox`es (choosing an entry), the letter bar's letters, and the dialog's checkboxes and *Done*. Right-click menus and *Add to playlist…* from a card (U8's dialog; its own checks are §27).
+- ⬜ **Window resize** with the cursor in the grid (the column count changes), and zoom.
+- ⬜ A page request that fails mid-library and is retried after its rows scroll out and back, and the error state's *Retry*.
+- ⬜ Picking sort and filter on **10.11 with a bigger library**, and the resolution choices on 10.11 for HD and SD.
