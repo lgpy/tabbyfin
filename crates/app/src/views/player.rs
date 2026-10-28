@@ -1597,7 +1597,7 @@ fn check_row(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
         ICON_CHECK.codepoint,
         0.,
         TextFormat {
-            font_id: FontId::new(body.size + 2., ICON_CHECK.font_family()),
+            font_id: crate::theme::text::icon(ui, ICON_CHECK.font_family()),
             color: if selected { color } else { Color32::TRANSPARENT },
             ..Default::default()
         },

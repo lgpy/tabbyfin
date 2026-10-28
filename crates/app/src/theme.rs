@@ -229,8 +229,6 @@ pub struct Tokens {
     pub foreground: Color32,
     /// A box or chip a little apart from the background.
     pub muted: Color32,
-    /// A settings group's box (`main`'s `group_box`).
-    pub group_box: Color32,
     /// Secondary text: card subtitles, hints, a row's description.
     pub muted_foreground: Color32,
     /// Separators and outlines.
@@ -243,14 +241,14 @@ pub struct Tokens {
     pub button_hover: Color32,
     pub button_active: Color32,
 
-    /// The app's main colour: primary buttons, checked boxes, a card's progress fill.
+    /// The app's main colour: primary buttons and a card's progress fill (egui's own checked
+    /// checkboxes draw their box from [`Self::secondary`] and their tick from the foreground).
     pub primary: Color32,
     pub primary_foreground: Color32,
     pub primary_hover: Color32,
 
-    /// The second colour: a box's fill, a slider's rail.
+    /// The second colour: egui's checkbox boxes and slider rails, and them pressed.
     pub secondary: Color32,
-    pub secondary_foreground: Color32,
     pub secondary_active: Color32,
 
     /// A row's highlight: menus, toggles, lists.
@@ -262,7 +260,6 @@ pub struct Tokens {
 
     /// Errors: a failed toast, an error line.
     pub danger: Color32,
-    pub danger_foreground: Color32,
     /// A watched tick.
     pub success: Color32,
     pub warning: Color32,
@@ -270,15 +267,10 @@ pub struct Tokens {
     /// gpui-kit's base red, which is the favorite heart (`danger` is the error red).
     pub red: Color32,
 
-    /// Focus rings and outlines nothing else covers.
-    pub ring: Color32,
     /// Menus, popups and dialogs.
     pub popover: Color32,
-    /// A dialog's scrim.
+    /// A dialog's scrim, which `main`'s dialogs and sheets drew the page under.
     pub overlay: Color32,
-    /// The scrollbar's thumb, and under the pointer.
-    pub scrollbar: Color32,
-    pub scrollbar_hover: Color32,
 
     /// The radius of controls (`main`'s theme override of gpui-kit's 6).
     pub radius: u8,
@@ -293,7 +285,6 @@ impl Tokens {
         background: Color32::from_rgb(0xff, 0xff, 0xff),
         foreground: Color32::from_rgb(0x0a, 0x0a, 0x0a),
         muted: Color32::from_rgb(0xf5, 0xf5, 0xf5),
-        group_box: Color32::from_rgb(0xf5, 0xf5, 0xf5),
         // gpui-kit's neutral-500 is under the 4.5:1 WCAG AA asks of small text on its grey
         // fills; one step darker (neutral-600) passes, as `main` had it.
         muted_foreground: Color32::from_rgb(0x52, 0x52, 0x52),
@@ -307,22 +298,17 @@ impl Tokens {
         // `background.blend(primary)` at 90 %.
         primary_hover: Color32::from_rgb(0x2e, 0x2e, 0x2e),
         secondary: Color32::from_rgb(0xe5, 0xe5, 0xe5),
-        secondary_foreground: Color32::from_rgb(0x17, 0x17, 0x17),
         secondary_active: Color32::from_rgb(0xd4, 0xd4, 0xd4),
         accent: Color32::from_rgb(0xf5, 0xf5, 0xf5),
         accent_foreground: Color32::from_rgb(0x17, 0x17, 0x17),
         selection: Color32::from_rgb(0x55, 0xa0, 0xfc),
         danger: Color32::from_rgb(0xef, 0x44, 0x44),
-        danger_foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
         success: Color32::from_rgb(0x22, 0xc5, 0x5e),
         warning: Color32::from_rgb(0xea, 0xb3, 0x08),
         info: Color32::from_rgb(0x06, 0xb6, 0xd4),
         red: Color32::from_rgb(0xdc, 0x26, 0x26),
-        ring: Color32::from_rgb(0xa3, 0xa3, 0xa3),
         popover: Color32::from_rgb(0xff, 0xff, 0xff),
         overlay: Color32::from_rgba_premultiplied(0, 0, 0, 13),
-        scrollbar: Color32::from_rgba_premultiplied(0x92, 0x92, 0x92, 0xe6),
-        scrollbar_hover: Color32::from_rgb(0xa3, 0xa3, 0xa3),
         radius: 10,
         radius_lg: 12,
     };
@@ -333,7 +319,6 @@ impl Tokens {
         background: Color32::from_rgb(0x0a, 0x0a, 0x0a),
         foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
         muted: Color32::from_rgb(0x26, 0x26, 0x26),
-        group_box: Color32::from_rgb(0x0a, 0x0a, 0x0a),
         muted_foreground: Color32::from_rgb(0xa3, 0xa3, 0xa3),
         border: Color32::from_rgb(0x26, 0x26, 0x26),
         input: Color32::from_rgb(0x2f, 0x2f, 0x2f),
@@ -346,22 +331,17 @@ impl Tokens {
         primary_foreground: Color32::from_rgb(0x17, 0x17, 0x17),
         primary_hover: Color32::from_rgb(0xe2, 0xe2, 0xe2),
         secondary: Color32::from_rgb(0x26, 0x26, 0x26),
-        secondary_foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
         secondary_active: Color32::from_rgb(0x21, 0x21, 0x21),
         accent: Color32::from_rgb(0x26, 0x26, 0x26),
         accent_foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
         selection: Color32::from_rgb(0x1d, 0x4e, 0xd8),
         danger: Color32::from_rgb(0xf8, 0x71, 0x71),
-        danger_foreground: Color32::from_rgb(0xdc, 0x26, 0x26),
         success: Color32::from_rgb(0x4a, 0xde, 0x80),
         warning: Color32::from_rgb(0xfa, 0xcc, 0x15),
         info: Color32::from_rgb(0x22, 0xd3, 0xee),
         red: Color32::from_rgb(0xf8, 0x71, 0x71),
-        ring: Color32::from_rgb(0x73, 0x73, 0x73),
         popover: Color32::from_rgb(0x0a, 0x0a, 0x0a),
         overlay: Color32::from_rgba_premultiplied(0, 0, 0, 51),
-        scrollbar: Color32::from_rgba_premultiplied(0x49, 0x49, 0x49, 0xe6),
-        scrollbar_hover: Color32::from_rgb(0x52, 0x52, 0x52),
         radius: 10,
         radius_lg: 12,
     };
@@ -382,17 +362,50 @@ pub fn tokens_of(ui: &egui::Ui) -> &'static Tokens {
     tokens(ui.visuals())
 }
 
-/// A primary button, as `main`'s `.primary()` had it: `primary` behind `primary_foreground`
-/// text.
-pub fn primary_button(ui: &egui::Ui, label: impl Into<egui::WidgetText>) -> egui::Button<'static> {
+/// The widget style a primary button draws with, as `main`'s `.primary()` buttons had it:
+/// `primary` behind `primary_foreground` text, and `primary_hover` under the pointer or pressed.
+/// Apply it in a [`egui::Ui::scope`] around the button.
+pub fn primary_style(ui: &mut egui::Ui) {
     let tokens = tokens_of(ui);
-    let label = label.into().color(tokens.primary_foreground);
-    egui::Button::new(label).fill(tokens.primary)
+    let widgets = &mut ui.visuals_mut().widgets;
+    for visuals in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.active] {
+        visuals.weak_bg_fill = tokens.primary;
+        visuals.bg_stroke = Stroke::NONE;
+        visuals.fg_stroke.color = tokens.primary_foreground;
+    }
+    widgets.hovered.weak_bg_fill = tokens.primary_hover;
+    widgets.active.weak_bg_fill = tokens.primary_hover;
+}
+
+/// A primary button of `width` with its label centred, drawn with [`primary_style`] (so it takes
+/// `primary_hover` under the pointer and pressed) and disabled while `enabled` is false.
+pub fn primary_button(ui: &mut egui::Ui, label: &str, width: f32, enabled: bool) -> egui::Response {
+    let colour = tokens_of(ui).primary_foreground;
+    let button = egui::Button::new(egui::RichText::new(label).color(colour)).min_size(egui::vec2(width, 0.));
+    // A button centres its contents with the layout of the `Ui` drawing it.
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, ui.spacing().interact_size.y),
+        egui::Layout::top_down(egui::Align::Center),
+        |ui| {
+            primary_style(ui);
+            ui.add_enabled(enabled, button)
+        },
+    )
+    .inner
+}
+
+/// A row in a picker's list, highlighted with `accent` when it's the chosen one: egui's own
+/// `selectable_label` paints the text selection's blue.
+pub fn selectable_label(ui: &mut egui::Ui, on: bool, text: impl Into<egui::WidgetText>) -> egui::Response {
+    let button = egui::Button::new(text).frame_when_inactive(on);
+    ui.add(selected(ui, on, button))
 }
 
 /// `main`'s fill for a selected control — a menu row, a toggle, a checked box — which egui would
-/// paint in the text selection's colour. Pass it with [`egui::Button::selected`].
+/// paint in the text selection's colour. The button keeps its `selected` state (AccessKit's
+/// selected/toggled flag) and is filled with `accent` when it's on.
 pub fn selected<'a>(ui: &egui::Ui, selected: bool, button: egui::Button<'a>) -> egui::Button<'a> {
+    let button = button.selected(selected);
     if selected {
         button.fill(tokens_of(ui).accent)
     } else {
@@ -478,18 +491,19 @@ fn visuals(tokens: &Tokens) -> egui::Visuals {
     };
     visuals.widgets.hovered = egui::style::WidgetVisuals {
         bg_fill: tokens.secondary,
-        weak_bg_fill: tokens.accent,
+        weak_bg_fill: tokens.button_hover,
         bg_stroke: Stroke::new(1., tokens.input),
-        fg_stroke: Stroke::new(1., tokens.accent_foreground),
+        fg_stroke: Stroke::new(1., tokens.foreground),
         corner_radius,
         expansion: 0.,
     };
     visuals.widgets.active = egui::style::WidgetVisuals {
-        bg_fill: tokens.accent,
+        // A checkbox or slider held down.
+        bg_fill: tokens.secondary_active,
         weak_bg_fill: tokens.button_active,
         bg_stroke: Stroke::new(1., tokens.border),
-        // What `strong_text_color` returns: the cursor's ring, a primary button's fill and a
-        // played badge used it for the foreground.
+        // What `strong_text_color` returns: the cursor's ring and a played badge used it for the
+        // foreground.
         fg_stroke: Stroke::new(1., tokens.foreground),
         corner_radius,
         expansion: 0.,
@@ -931,7 +945,8 @@ mod tests {
             assert_eq!(visuals.selection.stroke.color, tokens.foreground);
             assert_eq!(visuals.widgets.noninteractive.fg_stroke.color, tokens.foreground);
             assert_eq!(visuals.widgets.inactive.weak_bg_fill, tokens.button);
-            assert_eq!(visuals.widgets.hovered.weak_bg_fill, tokens.accent);
+            assert_eq!(visuals.widgets.hovered.weak_bg_fill, tokens.button_hover);
+            assert_eq!(visuals.widgets.active.bg_fill, tokens.secondary_active);
             // What `strong_text_color` returns, which the cursor rings and primary buttons
             // painted with before the tokens were read directly.
             assert_eq!(visuals.strong_text_color(), tokens.foreground);

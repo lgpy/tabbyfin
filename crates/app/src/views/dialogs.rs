@@ -149,55 +149,59 @@ impl AddToPlaylist {
 
         let ctx = cx.ctx;
         let mut chosen = None;
-        let modal = egui::Modal::new(egui::Id::unique("add_to_playlist")).show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.heading("Add to playlist");
-            ui.add_space(8.);
-            // Enter picks the highlighted line, as `main`'s dialog's Confirm did; the field
-            // never sees it, or it would only give up the focus.
-            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-            let field = ui.add(
-                TextEdit::singleline(&mut self.typed)
-                    .interactive(!self.busy)
-                    .hint_text("Find a playlist or name a new one")
-                    .desired_width(f32::INFINITY),
-            );
-            if std::mem::take(&mut self.focus) {
-                field.request_focus();
-            }
-            if field.changed() {
-                // A different filter: back to the top line.
-                self.highlighted = 0;
-                self.scroll_to_highlight = true;
-            }
+        // `main`'s dialogs dimmed the page under them with the theme's `overlay`.
+        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
+        let modal = egui::Modal::new(egui::Id::unique("add_to_playlist"))
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                ui.set_width(WIDTH);
+                ui.heading("Add to playlist");
+                ui.add_space(8.);
+                // Enter picks the highlighted line, as `main`'s dialog's Confirm did; the field
+                // never sees it, or it would only give up the focus.
+                let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+                let field = ui.add(
+                    TextEdit::singleline(&mut self.typed)
+                        .interactive(!self.busy)
+                        .hint_text("Find a playlist or name a new one")
+                        .desired_width(f32::INFINITY),
+                );
+                if std::mem::take(&mut self.focus) {
+                    field.request_focus();
+                }
+                if field.changed() {
+                    // A different filter: back to the top line.
+                    self.highlighted = 0;
+                    self.scroll_to_highlight = true;
+                }
 
-            // Up and Down move the highlight; the field has nothing to move to on one line, and
-            // its own focus filter keeps egui from moving focus with them (`TextEdit` locks the
-            // vertical arrows).
-            let rows = self.rows();
-            self.highlighted = self.highlighted.min(rows.len().saturating_sub(1));
-            let (up, down) = ui.input_mut(|input| {
-                (
-                    input.consume_key(Modifiers::NONE, Key::ArrowUp),
-                    input.consume_key(Modifiers::NONE, Key::ArrowDown),
-                )
+                // Up and Down move the highlight; the field has nothing to move to on one line, and
+                // its own focus filter keeps egui from moving focus with them (`TextEdit` locks the
+                // vertical arrows).
+                let rows = self.rows();
+                self.highlighted = self.highlighted.min(rows.len().saturating_sub(1));
+                let (up, down) = ui.input_mut(|input| {
+                    (
+                        input.consume_key(Modifiers::NONE, Key::ArrowUp),
+                        input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                    )
+                });
+                if !rows.is_empty() && !self.busy {
+                    if down {
+                        self.highlighted = (self.highlighted + 1).min(rows.len() - 1);
+                        self.scroll_to_highlight = true;
+                    }
+                    if up {
+                        self.highlighted = self.highlighted.saturating_sub(1);
+                        self.scroll_to_highlight = true;
+                    }
+                    if enter {
+                        chosen = Some(self.highlighted);
+                    }
+                }
+                ui.add_space(4.);
+                self.list(ui, &rows, &mut chosen);
             });
-            if !rows.is_empty() && !self.busy {
-                if down {
-                    self.highlighted = (self.highlighted + 1).min(rows.len() - 1);
-                    self.scroll_to_highlight = true;
-                }
-                if up {
-                    self.highlighted = self.highlighted.saturating_sub(1);
-                    self.scroll_to_highlight = true;
-                }
-                if enter {
-                    chosen = Some(self.highlighted);
-                }
-            }
-            ui.add_space(4.);
-            self.list(ui, &rows, &mut chosen);
-        });
 
         if let Some(index) = chosen {
             self.choose(index, cx);
@@ -372,61 +376,64 @@ impl EditPlaylist {
 
         let ctx = cx.ctx;
         let mut save = false;
-        let modal = egui::Modal::new(egui::Id::unique("edit_playlist")).show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.heading("Edit playlist");
-            ui.add_space(8.);
-            // Enter saves, as `main`'s dialog's Confirm did; the field never sees it.
-            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-            if !self.busy {
-                self.keys(ui);
-            }
+        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
+        let modal = egui::Modal::new(egui::Id::unique("edit_playlist"))
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                ui.set_width(WIDTH);
+                ui.heading("Edit playlist");
+                ui.add_space(8.);
+                // Enter saves, as `main`'s dialog's Confirm did; the field never sees it.
+                let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+                if !self.busy {
+                    self.keys(ui);
+                }
 
-            muted(ui, "Name");
-            let field = ui.add(
-                TextEdit::singleline(&mut self.typed)
-                    .interactive(!self.busy)
-                    .desired_width(f32::INFINITY),
-            );
-            if std::mem::take(&mut self.focus) {
-                field.request_focus();
-            }
-            // A click into the name takes the keyboard back from the sharing switch.
-            if field.gained_focus() {
-                self.field = Field::Name;
-            }
-            ui.add_space(8.);
-            match &self.public {
-                Load::Loading => muted(ui, "Checking who can see it…"),
-                Load::Failed(message) => muted(ui, message.clone()),
-                Load::Loaded(public) => {
-                    let on = *public;
-                    if switch_row(ui, on, self.field == Field::Sharing).clicked() && !self.busy {
-                        self.field = Field::Sharing;
-                        let_keyboard_go(ui);
-                        self.public = Load::Loaded(!on);
+                muted(ui, "Name");
+                let field = ui.add(
+                    TextEdit::singleline(&mut self.typed)
+                        .interactive(!self.busy)
+                        .desired_width(f32::INFINITY),
+                );
+                if std::mem::take(&mut self.focus) {
+                    field.request_focus();
+                }
+                // A click into the name takes the keyboard back from the sharing switch.
+                if field.gained_focus() {
+                    self.field = Field::Name;
+                }
+                ui.add_space(8.);
+                match &self.public {
+                    Load::Loading => muted(ui, "Checking who can see it…"),
+                    Load::Failed(message) => muted(ui, message.clone()),
+                    Load::Loaded(public) => {
+                        let on = *public;
+                        if switch_row(ui, on, self.field == Field::Sharing).clicked() && !self.busy {
+                            self.field = Field::Sharing;
+                            let_keyboard_go(ui);
+                            self.public = Load::Loaded(!on);
+                        }
                     }
                 }
-            }
-            ui.add_space(12.);
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let can_save = !self.busy && !self.typed.trim().is_empty();
-                    if ui
-                        .add_enabled(can_save, Button::new("Save").sense(Sense::CLICK))
-                        .clicked()
-                    {
-                        save = true;
-                    }
-                    if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
-                        ui.close();
-                    }
+                ui.add_space(12.);
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let can_save = !self.busy && !self.typed.trim().is_empty();
+                        if ui
+                            .add_enabled(can_save, Button::new("Save").sense(Sense::CLICK))
+                            .clicked()
+                        {
+                            save = true;
+                        }
+                        if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
+                            ui.close();
+                        }
+                    });
                 });
+                if enter && !self.busy && !self.typed.trim().is_empty() {
+                    save = true;
+                }
             });
-            if enter && !self.busy && !self.typed.trim().is_empty() {
-                save = true;
-            }
-        });
 
         if save {
             self.save(cx);
@@ -542,30 +549,33 @@ impl DeletePlaylist {
 
         let ctx = cx.ctx;
         let mut delete = false;
-        let modal = egui::Modal::new(egui::Id::unique("delete_playlist")).show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.heading(format!("Delete “{}”?", self.name));
-            ui.add_space(8.);
-            ui.label(DELETE_PLAYLIST_NOTE);
-            ui.add_space(12.);
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add_enabled(!self.busy, Button::new("Delete").sense(Sense::CLICK))
-                        .clicked()
-                    {
-                        delete = true;
-                    }
-                    if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
-                        ui.close();
-                    }
+        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
+        let modal = egui::Modal::new(egui::Id::unique("delete_playlist"))
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                ui.set_width(WIDTH);
+                ui.heading(format!("Delete “{}”?", self.name));
+                ui.add_space(8.);
+                ui.label(DELETE_PLAYLIST_NOTE);
+                ui.add_space(12.);
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(!self.busy, Button::new("Delete").sense(Sense::CLICK))
+                            .clicked()
+                        {
+                            delete = true;
+                        }
+                        if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
+                            ui.close();
+                        }
+                    });
                 });
+                // Enter is the confirmation's Delete, as the alert's OK was on `main`.
+                if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) && !self.busy {
+                    delete = true;
+                }
             });
-            // Enter is the confirmation's Delete, as the alert's OK was on `main`.
-            if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) && !self.busy {
-                delete = true;
-            }
-        });
 
         if delete {
             self.delete(cx);
