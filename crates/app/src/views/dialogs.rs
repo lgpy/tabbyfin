@@ -21,6 +21,8 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 
 use crate::nav::NavRequest;
 use crate::task::Task;
+use crate::theme;
+use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::PageCx;
 use crate::widgets::text::Load;
@@ -623,22 +625,20 @@ fn row_line(ui: &mut Ui, row: &Row, highlighted: bool) -> Response {
         ),
         None => (ICON_ADD, format!("New playlist “{}”", row.name), String::new()),
     };
-    let weak = ui.visuals().weak_text_color();
-    let body = TextStyle::Body.resolve(ui.style());
+    let tokens = theme::tokens_of(ui);
+    let weak = tokens.muted_foreground;
     let atoms = (
-        icon.rich_text().size(body.size + 2.).color(weak),
-        RichText::new(format!(" {name}")).size(body.size),
+        icon.rich_text().size(text::BASE).color(weak),
+        RichText::new(format!(" {name}")).font(text::font(ui, "base")),
         Atom::grow(),
-        RichText::new(detail).size(body.size - 2.).color(weak),
+        RichText::new(detail).font(text::font(ui, "sm")).color(weak),
     );
     let width = ui.available_width();
-    ui.add(
-        Button::new(atoms)
-            .selected(highlighted)
-            .sense(Sense::CLICK)
-            .truncate()
-            .min_size(vec2(width, 0.)),
-    )
+    let button = Button::new(atoms)
+        .sense(Sense::CLICK)
+        .truncate()
+        .min_size(vec2(width, 0.));
+    ui.add(theme::selected(ui, highlighted, button))
 }
 
 /// The sharing switch: a tick box and its label, with the keyboard's ring on it while the
@@ -648,12 +648,12 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
     let padding = 6.;
     let line = ui.text_style_height(&TextStyle::Body);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), line + 2. * padding), Sense::CLICK);
-    let visuals = ui.visuals();
+    let tokens = theme::tokens_of(ui);
     if selected {
         ui.painter().rect_stroke(
             rect,
             CornerRadius::same(8),
-            Stroke::new(3., visuals.strong_text_color()),
+            Stroke::new(3., tokens.foreground),
             StrokeKind::Inside,
         );
     }
@@ -662,20 +662,21 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
         Vec2::splat(line),
     );
     if on {
+        // `main`'s checked box: the primary colour with its tick in the foreground.
         ui.painter()
-            .rect_filled(tick_box, CornerRadius::same(4), visuals.selection.bg_fill);
+            .rect_filled(tick_box, CornerRadius::same(4), tokens.primary);
         ui.painter().text(
             tick_box.center(),
             Align2::CENTER_CENTER,
             ICON_CHECK.codepoint,
             FontId::new(line * 0.8, ICON_CHECK.font_family()),
-            visuals.selection.stroke.color,
+            tokens.primary_foreground,
         );
     } else {
         ui.painter().rect_stroke(
             tick_box,
             CornerRadius::same(4),
-            visuals.widgets.inactive.bg_stroke,
+            Stroke::new(1., tokens.input),
             StrokeKind::Inside,
         );
     }
@@ -684,14 +685,14 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
         Align2::LEFT_CENTER,
         "Everyone on this server can see it",
         TextStyle::Body.resolve(ui.style()),
-        visuals.text_color(),
+        tokens.foreground,
     );
     response
 }
 
 /// A line of muted text: what the dialog is waiting for, or why there's nothing to pick.
 fn muted(ui: &mut Ui, text: impl Into<String>) {
-    ui.label(RichText::new(text).color(ui.visuals().weak_text_color()));
+    ui.label(RichText::new(text).color(theme::tokens_of(ui).muted_foreground));
 }
 
 /// The sharing switch takes no widget focus, so the name must let go of the keyboard on the way
