@@ -245,6 +245,7 @@ impl Shell {
         for press in keys {
             self.on_key(press, cx);
         }
+        self.type_letters(cx);
         self.notify_update(cx);
         #[cfg(debug_assertions)]
         self.debug_play(cx);
@@ -326,6 +327,30 @@ impl Shell {
                 Action::OpenSearch => self.focus_search(cx),
                 _ => {}
             }
+        }
+    }
+
+    /// Text typed while the app has the keyboard goes to the top page (`Page::on_text`), for
+    /// pages that read letters: the library's letter jump. Not while egui is busy with keys (a
+    /// text field, a menu, a dialog), nor with the keyboard in the bar, which is where a typed
+    /// letter would otherwise land behind the bar. The events stay in egui's input; nothing
+    /// listens for text while no widget has the focus.
+    fn type_letters(&mut self, cx: &mut PageCx) {
+        if self.player || self.bar_key.is_some() || self.search_focused || keys::egui_wants_keys(cx.ctx) {
+            return;
+        }
+        let texts: Vec<String> = cx.ctx.input(|input| {
+            input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Text(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect()
+        });
+        for text in texts {
+            self.top_mut().on_text(&text, cx);
         }
     }
 
