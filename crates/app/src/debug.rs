@@ -188,7 +188,8 @@ fn parse_key(spec: &str) -> Option<(Key, Modifiers, Option<String>)> {
 pub enum Start {
     /// `search:<term>`: types `term` into the search box.
     Search(String),
-    /// `settings`, `item:<id>`, or `library:<id>[:movies|tvshows]`, opened on top of Home.
+    /// `settings`, `item:<id>`, `person:<id>`, or `library:<id>[:movies|tvshows]`, opened on
+    /// top of Home.
     Open(Route),
     /// `play:<id>[:<audio index>[:<subtitle index or -1>[:<media source id>]]]`: opens the item
     /// and plays it from its resume point. Empty fields keep the defaults.
@@ -236,6 +237,10 @@ impl Start {
                     Some("tvshows") => Some(CollectionType::TvShows),
                     _ => None,
                 },
+            })),
+            ("person", Some(id)) => Some(Start::Open(Route::Person {
+                id: id.into(),
+                name: "Person".into(),
             })),
             // I1's image cache check page (docs/egui-migration.md §6).
             ("posters", Some(id)) => Some(Start::Open(Route::Posters { id: id.into() })),
@@ -335,6 +340,13 @@ mod tests {
                 ..
             }))
         ));
+        assert_eq!(
+            Start::parse("person:abc"),
+            Some(Start::Open(Route::Person {
+                id: "abc".into(),
+                name: "Person".into(),
+            }))
+        );
         assert_eq!(
             Start::parse("posters:ffff"),
             Some(Start::Open(Route::Posters { id: "ffff".into() }))

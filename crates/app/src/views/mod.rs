@@ -48,6 +48,14 @@ pub trait Page {
         false
     }
 
+    /// Text typed while the page has the keyboard and egui isn't using it (no widget focus, no
+    /// menu or dialog open, the top bar's keyboard not in the bar): the library's letter jump.
+    /// Returns whether the page used it. The shell offers the top page every text event of the
+    /// frame, before the page draws.
+    fn on_text(&mut self, _text: &str, _cx: &mut PageCx) -> bool {
+        false
+    }
+
     /// The top bar's search box typed a new term (trimmed, never empty), for the results page
     /// to search for. Only [`search::SearchPage`] uses it; U4 searches when it arrives.
     fn set_search_term(&mut self, _term: &str, _cx: &mut PageCx) {}
@@ -75,12 +83,20 @@ pub trait Page {
 }
 
 /// The page for `route`.
-pub fn open(route: Route, _cx: &mut PageCx) -> Box<dyn Page> {
+pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
     match route {
         Route::Home => Box::new(home::HomePage::default()),
-        Route::Library { name, .. } => Box::new(StubPage::new(name, "U5")),
+        Route::Library {
+            id,
+            name,
+            collection_type,
+        } => Box::new(library::LibraryPage::new(
+            cx,
+            library::Source::Folder { id, collection_type },
+            name,
+        )),
         Route::Item { name, .. } => Box::new(StubPage::new(name, "U6")),
-        Route::Person { name, .. } => Box::new(StubPage::new(name, "U5")),
+        Route::Person { id, name } => Box::new(library::LibraryPage::new(cx, library::Source::Person { id }, name)),
         Route::Search => Box::new(search::SearchPage::default()),
         Route::Settings => Box::new(StubPage::new("Settings".into(), "U9")),
         #[cfg(debug_assertions)]

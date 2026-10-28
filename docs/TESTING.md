@@ -412,3 +412,24 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ The **GitHub Actions jobs**: this branch isn't pushed (X1 must not push), so `mise run ci:build` couldn't run; the same steps passed locally.
 - ⬜ The `.deb`, AppImage and Flatpak on a **real desktop with a GPU** (the list in §7), and the Windows and macOS packages from CI.
 - ⬜ **Playback** from those packaged builds; the checks above only opened the sign-in screen.
+
+## 30. Library grid and filters (U5)
+
+✅ **egui (U5)**, against 12.2 (`TABBYFIN_ROUTE=library:f137a2dd21bbc1b99aa5c0f6bf02a805:movies`), screenshots in `U5-scratch/`: the grid with 2 items, the toolbar's Sort, order, Show, *Genres, tags…*, *Any year* and *Any resolution* and the count (`u5-library2.png`); Show stepped by Enter through Unwatched (empty: "Nothing matches these filters.", `Clear filters` appears, `u5-show-unwatched.png`), Watched and Favorites (1 item, `u5-favorites.png`), the config saving `filter` each time; Sort stepped to Date added with its descending order and the config saved (`u5-sort-added.png`); the order button flipping the grid and `descending = true` (`u5-order-desc.png`); Year stepped to *2020s* (both movies, `u5-year.png`); Resolution to 4K on 12.2 (Test Movie, which has a 4K version, `u5-resolution.png`); *Clear filters* resetting every choice and leaving the cursor on the last control (`u5-clear.png`); the old single-genre view (`genre = "Comedy"`) upgraded to `genres`, applied (1 item) and saved back as `genres` (`u5-upgraded.png`).
+
+✅ The genres, tags and ratings dialog by keyboard: Enter on the toolbar's button opening it with the first genre highlighted (`u5-values.png`), Space ticking Comedy and Down then Space Documentary (the grid behind reloaded each time, the button reading "Comedy, Documentary", `Clear filters` appearing, `u5-values-two.png`), Enter closing it with the Comic filter applied (`u5-values-entered.png`), Esc closing it over 2 items (`u5-values-escaped.png`), and a config with a genre and year the library no longer has keeping both listed in the dialog and the year picker, checked (`u5-remembered-dialog.png`).
+
+✅ The letter jump: `TABBYFIN_KEYS="… t"` moved the highlight to Test Movie on the dev library (`u5-letter-jump.png`), and on `dev/fake-library.py`'s 10,000 movies `z` scrolled to the start of the Z names and highlighted the first one (`u5-fake-jump.png`). The letter bar shows only while sorted by name, and the grid's toolbar and grid are the cursor's two sections (Up from the grid gives the toolbar, Up from the toolbar the top bar).
+
+✅ **Virtualised rows and pages**: on the 10,000-item fake library, 150 Downs scrolled about 1,000 items with only the visible rows drawn and only their posters asked for (259 poster requests for the whole scroll; 56 for a letter jump), the cursor's row scrolled into view by the page itself (`u5-fake-scrolled2.png`), 10,000 items counted. Idle CPU was 0 ticks over 10 s and 8 s on that page.
+
+✅ **Watch data from elsewhere**: unmarking Second Movie as played over REST while the grid was open dropped its badge (`u5-refresh-before.png`, `u5-refresh-after.png`) without a spinner, with the items and scroll kept; the played state was put back.
+
+✅ **10.11** (`config-template-min`, `TABBYFIN_ROUTE=library:f137a2dd21bbc1b99aa5c0f6bf02a805:movies`): the grid and toolbar load; 4K gives 0 items, as `docs/PLAN.md` §4.3 says for 10.11's first-version width check, where 12.2 finds Test Movie's 4K version (`u5-1011-4k.png`).
+
+✅ A collections folder (`collection_type` none, browsed folder by folder) lists *Test Collection* with only Sort, order and Show (`u5-folder.png`), and `TABBYFIN_ROUTE=person:<id>` opens a `Source::Person` page (toolbar without the value/year/resolution pickers, "Nothing here yet.", `u5-person.png`). Enter on a card opened the U6 stub and Esc came back with the cursor still on that card (`u5-open-item.png`, `u5-back-library.png`).
+
+- ⬜ **With a mouse**: clicking a card, the toolbar's `ComboBox`es (choosing an entry), the letter bar's letters, and the dialog's checkboxes and *Done*. Right-click menus and *Add to playlist…* from a card (U8's dialog; its own checks are §27).
+- ⬜ **Window resize** with the cursor in the grid (the column count changes), and zoom.
+- ⬜ A page request that fails mid-library and is retried after its rows scroll out and back, and the error state's *Retry*.
+- ⬜ Picking sort and filter on **10.11 with a bigger library**, and the resolution choices on 10.11 for HD and SD.
