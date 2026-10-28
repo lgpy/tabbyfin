@@ -1,5 +1,6 @@
 //! A server image filling its space, from I1's cache: cover fit (cropped to the space, never
-//! stretched), rounded corners, and its blurhash underneath while it loads.
+//! stretched), rounded corners, and its blurhash underneath while it loads. An image fades in
+//! over its blurhash when it shows, as `main`'s did ([`crate::motion`]).
 //!
 //! The caller owns the space (a card allocates its own rectangle) and the request, so the widget
 //! only draws. Every request carries the size it's drawn at ([`ImageRequest::fill_width`] in
@@ -7,12 +8,12 @@
 //! full-width banner asks a fixed width instead ([`show_at_width`]), so resizing doesn't fetch
 //! it again.
 
-use egui::{CornerRadius, Rect, Ui, Vec2};
+use egui::{Color32, CornerRadius, Rect, Ui, Vec2};
 use jellyfin::ImageRequest;
 use jellyfin::models::BaseItemDto;
 
 use crate::images::ImageCache;
-use crate::theme;
+use crate::{motion, theme};
 
 /// The cards' rounded corners, `main`'s `rounded_xl`.
 pub const RADIUS: u8 = 12;
@@ -77,7 +78,17 @@ fn show_with_width(
             .and_then(|hash| cache.placeholder(hash)),
         Some(_) => None,
     };
-    if let Some(texture) = image.as_ref().or(preview.as_ref()) {
+    if let Some(texture) = &image {
+        // Fading in over the blurhash as it loads, and as its page opens.
+        let alpha = motion::image_alpha(ui, &request);
+        let mut picture = egui::Image::from_texture(texture)
+            .uv(cover_uv(texture.size_vec2(), rect.size()))
+            .corner_radius(CornerRadius::same(radius));
+        if alpha < 1. {
+            picture = picture.tint(Color32::from_white_alpha((alpha * 255.).round() as u8));
+        }
+        picture.paint_at(ui, rect);
+    } else if let Some(texture) = &preview {
         egui::Image::from_texture(texture)
             .uv(cover_uv(texture.size_vec2(), rect.size()))
             .corner_radius(CornerRadius::same(radius))

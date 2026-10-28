@@ -561,7 +561,8 @@ fn apply_animations(ctx: &egui::Context, on: bool) {
 }
 
 /// Whether animations (and smooth scrolling) are on, from the style [`apply_animations`] left:
-/// R2's animations and the wheel's instant step follow the setting without reading the config.
+/// `motion.rs`'s animations and the wheel's instant step follow the setting without reading the
+/// config.
 pub fn animations(ctx: &egui::Context) -> bool {
     ctx.global_style().animation_time > 0.
 }
