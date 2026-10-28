@@ -4,11 +4,15 @@
 //! position.
 //!
 //! The bar has the app's icon, Back when there's a page to go back to, the page's title, and
-//! on the right the search box, SyncPlay (U2 fills its panel), Settings and the account menu.
-//! The keyboard walks it: Up past a page's first row moves into the bar, Left and Right move
-//! along, Enter presses, Down or Esc goes back to the page with its cursor where it was. The
-//! account menu is drawn and driven here too: its keys are read before egui's focus pass can
-//! hand them to a button or card behind it.
+//! on the right the search box, SyncPlay, Settings and the account menu. The keyboard walks
+//! it: Up past a page's first row moves into the bar, Left and Right move along, Enter presses,
+//! Down or Esc goes back to the page with its cursor where it was. The account menu and the
+//! SyncPlay panel are drawn and driven here too: their keys are read before egui's focus pass
+//! can hand them to a button or card behind them.
+//!
+//! The SyncPlay panel (`render_syncplay` on `main`) lists the server's groups to join, or the
+//! group this session is in: its state, its members and the group's queue, which the keyboard
+//! can play, move, remove and toggle (`menu_entries` on `main`).
 //!
 //! The search box is the bar's only text field: typing opens the results page (or comes back
 //! to it from a page opened from them), clearing it closes them, and Enter or Down moves into
@@ -25,7 +29,11 @@ use egui::{
     Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, vec2,
 };
 use egui_material_icons::MaterialIcon;
-use egui_material_icons::icons::{ICON_ARROW_BACK, ICON_CHECK, ICON_GROUPS, ICON_SEARCH, ICON_SETTINGS};
+use egui_material_icons::icons::{
+    ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHECK, ICON_CLOSE, ICON_GROUPS, ICON_REPEAT,
+    ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
+};
+use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 
 use crate::browse::Move;
 use crate::config::{Config, SavedServer};
@@ -33,6 +41,8 @@ use crate::keys::{self, Action, Press, Scope};
 use crate::nav::{NavRequest, Route};
 use crate::playback;
 use crate::services::AppEvent;
+use crate::session::Session;
+use crate::syncplay::SyncPlay;
 use crate::task::Task;
 use crate::theme::over_video;
 use crate::toasts::{Toast, ToastAction};
@@ -56,6 +66,47 @@ const SEARCH_ID: &str = "top_bar_search";
 /// memory (`Popup::is_any_open`).
 const ACCOUNT_MENU_W: f32 = 240.;
 const ACCOUNT_MENU: &str = "account_menu";
+/// The SyncPlay panel's width, as `main`'s popover had it.
+const SYNCPLAY_PANEL_W: f32 = 300.;
+/// The SyncPlay panel's id in egui's popup memory (egui keeps the keyboard while it's open
+/// only if it is in that memory, as for the account menu), and the id it lives under.
+const SYNCPLAY_PANEL: &str = "syncplay_panel";
+/// How tall the group's queue may grow before it scrolls: the panel hangs from the bar, so a
+/// long queue would otherwise run off the bottom of the window.
+const SYNCPLAY_QUEUE_H: f32 = 320.;
+
+/// A choice in the SyncPlay panel, in the order it lists them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MenuEntry {
+    JoinGroup(String),
+    NewGroup,
+    ToggleShuffle,
+    CycleRepeat,
+    /// An entry of the group's queue, by playlist item id: Enter plays it, Delete removes it,
+    /// Alt+Up and Alt+Down move it.
+    QueueEntry(String),
+    LeaveGroup,
+}
+
+/// The panel's keyboard highlight: the entry itself, so that a queue change can never slide it
+/// onto *Leave group* or a *Join* row, and where that entry was last seen, to find its
+/// neighbours when it goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Highlight {
+    entry: MenuEntry,
+    /// The entry's index the last time the list had it.
+    index: usize,
+}
+
+impl Highlight {
+    /// The highlight on `index` of `entries`.
+    fn at(entries: &[MenuEntry], index: usize) -> Option<Self> {
+        Some(Self {
+            entry: entries.get(index)?.clone(),
+            index,
+        })
+    }
+}
 
 /// The top bar's controls, in the order the keyboard walks them from the left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,6 +203,13 @@ pub struct Shell {
     /// an arrow key picks one). Whether the menu is open is egui's popup memory's, so egui keeps
     /// the keyboard while it is (`Popup::is_any_open`).
     account_highlight: Option<usize>,
+    /// The SyncPlay panel's keyboard highlight: `None` when a click opened the panel, until an
+    /// arrow key picks an entry.
+    syncplay_highlight: Option<Highlight>,
+    /// The panel scrolls its queue to the highlighted entry next time it draws: set when the
+    /// keyboard moves the highlight, so the highlighted row is on screen (a `scroll_to_me` on
+    /// every frame would stop the pointer scrolling the queue itself).
+    syncplay_scroll: bool,
     /// The app icon at the start of the bar.
     logo: Option<egui::TextureHandle>,
 }
@@ -185,10 +243,13 @@ impl Shell {
             want_search_focus: false,
             search_focused: false,
             account_highlight: None,
+            syncplay_highlight: None,
+            syncplay_scroll: false,
             logo: load_logo(cx.ctx),
         };
         // A new session starts with no menu left over from the last one.
         egui::Popup::close_id(cx.ctx, account_menu_id());
+        egui::Popup::close_id(cx.ctx, syncplay_panel_id());
         #[cfg(debug_assertions)]
         shell.debug_start(cx);
         shell
@@ -216,7 +277,12 @@ impl Shell {
         self.want_search_focus = false;
         self.search_focused = false;
         self.account_highlight = None;
+        self.syncplay_highlight = None;
+        self.syncplay_scroll = false;
         egui::Popup::close_id(ctx, account_menu_id());
+        // A popup left open while its button isn't drawn would keep egui's keyboard from the
+        // player.
+        egui::Popup::close_id(ctx, syncplay_panel_id());
         ctx.memory_mut(|memory| memory.surrender_focus(Id::unique(SEARCH_ID)));
         // The player takes every key: nothing else may keep egui's focus, or egui would keep
         // the keyboard (`keys.rs`) while the player's keys are needed.
@@ -396,30 +462,165 @@ impl Shell {
                 cx.nav.push(NavRequest::Back);
             }
             BarItem::Search => self.focus_search(cx),
-            BarItem::SyncPlay => self.syncplay_notice(cx),
+            BarItem::SyncPlay => self.open_syncplay_panel(true, cx),
             BarItem::Settings => self.toggle_settings(cx),
             BarItem::Account => self.open_account_menu(cx.ctx),
         }
     }
 
-    /// The account menu's keys, which egui keeps while its popup is open: Tab stays in the
-    /// menu, Backspace and Alt+Left close it like Esc, Ctrl/Cmd+F closes it and opens the box,
-    /// Up and Down move its highlight, Enter picks. Read before anything in the bar draws, so
-    /// egui's focus pass can't hand the keyboard to a button or card behind the menu (Enter
-    /// would then press that as well); the popup itself only draws its rows.
+    /// The SyncPlay panel's keys, which egui keeps while its popup is open (it closes on Esc
+    /// itself). They're read before anything in the bar draws, as the account menu's are, so
+    /// egui's focus pass can't hand the keyboard to a button or card behind the panel. Tab and
+    /// the horizontal arrows stay in the panel, Backspace and Alt+Left close it like Esc,
+    /// Ctrl/Cmd+F closes it and opens the search box, Up and Down move the highlight, Enter
+    /// picks, and Alt+Up/Alt+Down move the highlighted queue entry with the highlight, Delete
+    /// removes it.
+    fn syncplay_panel_keys(&mut self, cx: &mut PageCx) {
+        if !egui::Popup::is_id_open(cx.ctx, syncplay_panel_id()) {
+            self.syncplay_highlight = None;
+            return;
+        }
+        let ctx = cx.ctx;
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Tab) | keys::take_exact(ctx, Modifiers::SHIFT, Key::Tab) {
+            cancel_focus(ctx);
+        }
+        take_horizontal_keys(ctx);
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Backspace)
+            | keys::take_exact(ctx, Modifiers::ALT, Key::ArrowLeft)
+        {
+            self.close_syncplay_panel(ctx);
+            return;
+        }
+        if keys::take_exact(ctx, Modifiers::COMMAND, Key::F) {
+            self.close_syncplay_panel(ctx);
+            self.focus_search(cx);
+            return;
+        }
+        let entries = entries_of(&cx.services.syncplay);
+        // The queue can change under the highlight (another member edits it, or a removal just
+        // landed): keep it on an entry that's there, and off *Leave group* or a *Join* row when
+        // its own entry has gone.
+        resolve_highlight(&mut self.syncplay_highlight, &entries);
+        let highlighted = self
+            .syncplay_highlight
+            .as_ref()
+            .map(|highlight| highlight.entry.clone());
+        let position = highlighted
+            .as_ref()
+            .and_then(|entry| entries.iter().position(|candidate| candidate == entry));
+        let alt_up = keys::take_exact(ctx, Modifiers::ALT, Key::ArrowUp);
+        let alt_down = keys::take_exact(ctx, Modifiers::ALT, Key::ArrowDown);
+        if alt_up | alt_down {
+            let step = if alt_up { -1 } else { 1 };
+            if let Some(index) = position
+                && let Some(MenuEntry::QueueEntry(id)) = entries.get(index).cloned()
+                && move_target(&entries, index, step).is_some()
+            {
+                cx.services.syncplay.move_entry(id, step);
+                // The highlight is the entry, so it follows it to its new place once the queue
+                // update lands; `main` moved an index instead (see §6).
+                self.syncplay_scroll = true;
+            }
+            cancel_focus(ctx);
+            return;
+        }
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Delete)
+            && let Some(MenuEntry::QueueEntry(id)) = highlighted
+        {
+            cx.services.syncplay.remove_entry(id);
+            // The highlight stays on the entry until the queue update takes it away; then it
+            // falls back to a neighbouring queue entry, never to *Leave group*.
+            self.syncplay_scroll = true;
+            return;
+        }
+        let down = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowDown);
+        let up = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowUp);
+        if down | up {
+            let step = if down { 1 } else { -1 };
+            self.syncplay_highlight =
+                highlight_step(position, step, entries.len()).and_then(|index| Highlight::at(&entries, index));
+            self.syncplay_scroll = true;
+            cancel_focus(ctx);
+        }
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Enter)
+            && let Some(entry) = highlighted
+        {
+            self.choose_syncplay_entry(entry, true, cx);
+        }
+    }
+
+    /// Opens the SyncPlay panel under its button, with fresh groups from the server. From the
+    /// keyboard the first entry is highlighted; from a click none is, until an arrow picks
+    /// one, as the account menu does.
+    fn open_syncplay_panel(&mut self, from_keyboard: bool, cx: &mut PageCx) {
+        let first = entries_of(&cx.services.syncplay).into_iter().next();
+        self.syncplay_highlight = if from_keyboard {
+            first.map(|entry| Highlight { entry, index: 0 })
+        } else {
+            None
+        };
+        self.syncplay_scroll = true;
+        cx.services.syncplay.refresh_groups();
+        egui::Popup::open_id(cx.ctx, syncplay_panel_id());
+        cx.ctx.request_repaint();
+    }
+
+    fn close_syncplay_panel(&mut self, ctx: &egui::Context) {
+        egui::Popup::close_id(ctx, syncplay_panel_id());
+        self.syncplay_highlight = None;
+        self.syncplay_scroll = false;
+        ctx.request_repaint();
+    }
+
+    /// Opens the panel if it's closed and closes it if it's open, for the button's click.
+    fn toggle_syncplay_panel(&mut self, cx: &mut PageCx) {
+        if egui::Popup::is_id_open(cx.ctx, syncplay_panel_id()) {
+            self.close_syncplay_panel(cx.ctx);
+        } else {
+            self.open_syncplay_panel(false, cx);
+        }
+    }
+
+    /// Does what a SyncPlay entry says. Shuffle and repeat leave the panel open, to see the
+    /// change; anything else closes it, and a choice made with the keyboard gives the keyboard
+    /// back to the page, as `main`'s `leave_top_bar` did. A click only closes the panel: the
+    /// page's cursor stays where it was (`main`'s clickable rows never went near it).
+    fn choose_syncplay_entry(&mut self, entry: MenuEntry, from_keyboard: bool, cx: &mut PageCx) {
+        match entry {
+            MenuEntry::ToggleShuffle => return cx.services.syncplay.toggle_shuffle(),
+            MenuEntry::CycleRepeat => return cx.services.syncplay.cycle_repeat(),
+            _ => {}
+        }
+        self.close_syncplay_panel(cx.ctx);
+        if from_keyboard {
+            self.leave_top_bar(cx);
+        }
+        match entry {
+            MenuEntry::JoinGroup(id) => cx.services.syncplay.join(id),
+            MenuEntry::NewGroup => {
+                let name = new_group_name(&cx.services.session);
+                cx.services.syncplay.create(name);
+            }
+            MenuEntry::QueueEntry(id) => cx.services.syncplay.play_entry(id),
+            MenuEntry::LeaveGroup => cx.services.syncplay.leave(),
+            MenuEntry::ToggleShuffle | MenuEntry::CycleRepeat => {}
+        }
+    }
+
+    /// The account menu's keys, which egui keeps while its popup is open: Tab and the horizontal
+    /// arrows stay in the menu, Backspace and Alt+Left close it like Esc, Ctrl/Cmd+F closes it and
+    /// opens the box, Up and Down move its highlight, Enter picks. Read before anything in the bar
+    /// draws, so egui's focus pass can't hand the keyboard to a button or card behind the menu
+    /// (Enter would then press that as well); the popup itself only draws its rows.
     fn account_menu_keys(&mut self, cx: &mut PageCx) {
         if !egui::Popup::is_id_open(cx.ctx, account_menu_id()) {
             return;
         }
         let ctx = cx.ctx;
-        // Tab and the arrows queued an egui focus move in its focus pass; cancel it before any
-        // widget behind the menu can take the focus (Enter would then press that as well).
-        fn cancel_focus(ctx: &egui::Context) {
-            ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
-        }
         if keys::take_exact(ctx, Modifiers::NONE, Key::Tab) | keys::take_exact(ctx, Modifiers::SHIFT, Key::Tab) {
             cancel_focus(ctx);
         }
+        take_horizontal_keys(ctx);
         if keys::take_exact(ctx, Modifiers::NONE, Key::Backspace)
             | keys::take_exact(ctx, Modifiers::ALT, Key::ArrowLeft)
         {
@@ -485,12 +686,6 @@ impl Shell {
         };
         cx.nav.push(request);
         cx.ctx.request_repaint();
-    }
-
-    /// U2 brings the SyncPlay panel; until then the button says so, like the item menu's
-    /// *Add to playlist…* until U8.
-    fn syncplay_notice(&mut self, cx: &mut PageCx) {
-        cx.services.toast(Toast::info("SyncPlay arrives with U2."));
     }
 
     fn can_go_back(&self) -> bool {
@@ -601,6 +796,7 @@ impl Shell {
     fn top_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         self.search_box_keys(cx);
         self.account_menu_keys(cx);
+        self.syncplay_panel_keys(cx);
         let can_go_back = self.can_go_back();
         let keyboard = self.bar_key;
         let box_shown = self.search_shown();
@@ -689,9 +885,12 @@ impl Shell {
                     in_group,
                 );
                 if syncplay.clicked() {
+                    // A click leaves no keyboard in the bar (the panel's keys are
+                    // `syncplay_panel_keys`').
                     self.bar_key = None;
-                    self.syncplay_notice(cx);
+                    self.toggle_syncplay_panel(cx);
                 }
+                self.syncplay_panel(&syncplay, ui, cx);
                 if !box_shown {
                     let search = bar_button(ui, ICON_SEARCH, "Search", keyboard == Some(BarItem::Search), false);
                     if search.clicked() {
@@ -822,6 +1021,114 @@ impl Shell {
                 cx.services.events.push(AppEvent::SignOut);
             }
         }
+    }
+
+    /// The SyncPlay button's panel: the server's groups to join, or the group this session is
+    /// in with its queue. Drawn from the button it hangs under, so it follows the bar.
+    fn syncplay_panel(&mut self, button: &Response, ui: &mut egui::Ui, cx: &mut PageCx) {
+        let id = syncplay_panel_id();
+        if !egui::Popup::is_id_open(ui.ctx(), id) {
+            return;
+        }
+        let mut chosen = None;
+        egui::Popup::menu(button)
+            .id(id)
+            .open_memory(None::<egui::SetOpenCommand>)
+            .align(RectAlign::BOTTOM_END)
+            .width(SYNCPLAY_PANEL_W)
+            // A click inside the panel may step a toggle or press a row's button; the entries
+            // that move on close it themselves. `main`'s popover stayed up the same way.
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| chosen = self.syncplay_content(ui, cx));
+        if let Some(entry) = chosen {
+            // A click closes the panel where it is: the page's cursor stays put.
+            self.choose_syncplay_entry(entry, false, cx);
+        }
+    }
+
+    /// The panel's body, and the entry a click picked (the caller carries it out).
+    fn syncplay_content(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) -> Option<MenuEntry> {
+        // The panel keeps its width as its contents change (`main`'s was 300 wide): an `Area`
+        // shrinks to its content, so without this the first frame's labels would decide it.
+        ui.set_width(SYNCPLAY_PANEL_W);
+        let state = &cx.services.syncplay;
+        let highlight = self.syncplay_highlight.as_ref().map(|highlight| &highlight.entry);
+        let mut chosen = None;
+        let muted = ui.visuals().weak_text_color();
+        match &state.group {
+            Some(group) => {
+                ui.label(RichText::new(&group.group_name).strong());
+                ui.label(RichText::new(group_status(group.state)).small().color(muted));
+                ui.label(RichText::new(format!("Watching: {}", group.participants.join(", "))).small());
+                ui.label(
+                    RichText::new("Anything you play now plays for everyone in the group.")
+                        .small()
+                        .color(muted),
+                );
+                let scroll = std::mem::take(&mut self.syncplay_scroll);
+                if let Some(entry) = group_queue(ui, state, highlight, scroll) {
+                    chosen = Some(entry);
+                }
+                let leave = ui.add(
+                    egui::Button::new("Leave group")
+                        .selected(matches!(highlight, Some(MenuEntry::LeaveGroup)))
+                        .sense(Sense::CLICK),
+                );
+                if leave.clicked() {
+                    chosen = Some(MenuEntry::LeaveGroup);
+                }
+            }
+            None => {
+                ui.label(RichText::new("Watch together").strong());
+                ui.label(
+                    RichText::new("Play in sync with others on this server.")
+                        .small()
+                        .color(muted),
+                );
+                if state.groups.is_empty() {
+                    ui.label(RichText::new("No groups yet.").small().color(muted));
+                }
+                for group in &state.groups {
+                    // A row is wrapped in `ui.horizontal` so that it measures only itself: a
+                    // `with_layout` directly in a vertical `Ui` would take the height left in
+                    // the panel.
+                    ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let join = ui.add(
+                                egui::Button::new("Join")
+                                    .small()
+                                    .selected(matches!(
+                                        highlight,
+                                        Some(MenuEntry::JoinGroup(id)) if id == &group.group_id
+                                    ))
+                                    .sense(Sense::CLICK),
+                            );
+                            if join.clicked() {
+                                chosen = Some(MenuEntry::JoinGroup(group.group_id.clone()));
+                            }
+                            // The names take what's left, so a long one truncates rather than
+                            // pushing *Join* out of the panel.
+                            ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                                ui.add(egui::Label::new(&group.group_name).truncate());
+                                ui.add(
+                                    egui::Label::new(RichText::new(group.participants.join(", ")).small().color(muted))
+                                        .truncate(),
+                                );
+                            });
+                        });
+                    });
+                }
+                let new_group = ui.add(
+                    egui::Button::new("New group")
+                        .selected(matches!(highlight, Some(MenuEntry::NewGroup)))
+                        .sense(Sense::CLICK),
+                );
+                if new_group.clicked() {
+                    chosen = Some(MenuEntry::NewGroup);
+                }
+            }
+        }
+        chosen
     }
 
     /// The search box, centred in the bar while it's open.
@@ -1044,6 +1351,276 @@ fn bar_button(ui: &mut Ui, icon: MaterialIcon, tooltip: &str, highlighted: bool,
     response
 }
 
+/// The SyncPlay panel's id in egui's popup memory, where `Popup::is_any_open` looks for it.
+fn syncplay_panel_id() -> Id {
+    Id::unique(SYNCPLAY_PANEL)
+}
+
+/// The name *New group* gives the group: `main`'s `"{user}'s group"`.
+fn new_group_name(session: &Session) -> String {
+    format!("{}'s group", session.user.name)
+}
+
+/// What the SyncPlay panel lists, in the order the keyboard walks it: with a group, its queue's
+/// toggles and entries and *Leave group*; without one, the server's groups and *New group*.
+fn syncplay_entries(group: Option<&GroupInfo>, groups: &[GroupInfo], queue: Option<&PlayQueue>) -> Vec<MenuEntry> {
+    match group {
+        Some(_) => {
+            let mut entries = Vec::new();
+            if let Some(queue) = queue.filter(|queue| !queue.playlist.is_empty()) {
+                entries.push(MenuEntry::ToggleShuffle);
+                entries.push(MenuEntry::CycleRepeat);
+                entries.extend(
+                    queue
+                        .playlist
+                        .iter()
+                        .map(|entry| MenuEntry::QueueEntry(entry.playlist_item_id.clone())),
+                );
+            }
+            entries.push(MenuEntry::LeaveGroup);
+            entries
+        }
+        None => {
+            let mut entries: Vec<MenuEntry> = groups
+                .iter()
+                .map(|group| MenuEntry::JoinGroup(group.group_id.clone()))
+                .collect();
+            entries.push(MenuEntry::NewGroup);
+            entries
+        }
+    }
+}
+
+/// What [`syncplay_entries`] lists for the panel's current state.
+fn entries_of(syncplay: &SyncPlay) -> Vec<MenuEntry> {
+    syncplay_entries(syncplay.group.as_ref(), &syncplay.groups, syncplay.queue.as_ref())
+}
+
+/// Keeps the panel's highlight on an entry the list still has: the queue can change under it
+/// (another member edits it, or a removal just landed). An entry that has gone falls back to a
+/// neighbouring queue entry, the one that took its place (the next, else the previous), and
+/// otherwise to no highlight at all: never to *Leave group*, *Join* or *New group*.
+fn resolve_highlight(highlight: &mut Option<Highlight>, entries: &[MenuEntry]) {
+    let Some(current) = highlight else {
+        return;
+    };
+    if let Some(index) = entries.iter().position(|entry| entry == &current.entry) {
+        current.index = index;
+        return;
+    }
+    let from = current.index.min(entries.len());
+    let next = entries[from..]
+        .iter()
+        .position(|entry| matches!(entry, MenuEntry::QueueEntry(_)))
+        .map(|offset| from + offset);
+    *highlight = next
+        .or_else(|| {
+            entries[..from]
+                .iter()
+                .rposition(|entry| matches!(entry, MenuEntry::QueueEntry(_)))
+        })
+        .and_then(|index| Highlight::at(entries, index));
+}
+
+/// One step of the panel's keyboard highlight: Down goes to the first entry when none is picked
+/// and stops at the last, Up goes to the last and stops at the first, as `main`'s menu did.
+fn highlight_step(current: Option<usize>, step: i32, len: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    Some(match (current, step) {
+        (None, 1..) => 0,
+        (None, _) => len - 1,
+        (Some(index), 1..) => (index + 1).min(len - 1),
+        (Some(index), _) => index.saturating_sub(1),
+    })
+}
+
+/// Where Alt+Up or Alt+Down would move the entry at `from`: only a queue entry swaps with
+/// another queue entry, so the toggles before the queue and *Leave group* after it stay put.
+fn move_target(entries: &[MenuEntry], from: usize, by: isize) -> Option<usize> {
+    if !matches!(entries.get(from), Some(MenuEntry::QueueEntry(_))) {
+        return None;
+    }
+    let target = from.checked_add_signed(by)?;
+    matches!(entries.get(target), Some(MenuEntry::QueueEntry(_))).then_some(target)
+}
+
+/// The group's state, as `main` showed it.
+fn group_status(state: GroupState) -> &'static str {
+    match state {
+        GroupState::Idle => "Nothing playing",
+        GroupState::Waiting => "Waiting for everyone",
+        GroupState::Paused => "Paused",
+        GroupState::Playing => "Playing",
+    }
+}
+
+/// The group's queue: shuffle and repeat, then the entries (the playing one in bold), each with
+/// buttons to play it, move it and remove it. `highlight` is the entry the keyboard is on, so a
+/// reordered queue keeps the ring on the same row.
+fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scroll: bool) -> Option<MenuEntry> {
+    let queue = state.queue.as_ref().filter(|queue| !queue.playlist.is_empty())?;
+    let mut chosen = None;
+    let muted = ui.visuals().weak_text_color();
+    ui.add_space(4.);
+    ui.label(RichText::new("Queue").small().color(muted));
+    ui.horizontal(|ui| {
+        let shuffled = queue.shuffle_mode == ShuffleMode::Shuffle;
+        let shuffle = toggle_button(ui, ICON_SHUFFLE, "Shuffle", shuffled);
+        if matches!(highlight, Some(MenuEntry::ToggleShuffle)) {
+            ring(ui, &shuffle);
+        }
+        if shuffle.clicked() {
+            chosen = Some(MenuEntry::ToggleShuffle);
+        }
+        // Off, all, one: each press moves to the next, as on `main`.
+        let (icon, tooltip, on) = match queue.repeat_mode {
+            RepeatMode::RepeatNone => (ICON_REPEAT, "Repeat is off", false),
+            RepeatMode::RepeatAll => (ICON_REPEAT, "Repeating the queue", true),
+            RepeatMode::RepeatOne => (ICON_REPEAT_ONE, "Repeating one", true),
+        };
+        let repeat = toggle_button(ui, icon, "Repeat", on).on_hover_text(tooltip);
+        if matches!(highlight, Some(MenuEntry::CycleRepeat)) {
+            ring(ui, &repeat);
+        }
+        if repeat.clicked() {
+            chosen = Some(MenuEntry::CycleRepeat);
+        }
+    });
+    let last = queue.playlist.len() - 1;
+    egui::ScrollArea::vertical()
+        .max_height(SYNCPLAY_QUEUE_H)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            for (index, entry) in queue.playlist.iter().enumerate() {
+                let name = state.names.get(&entry.item_id).cloned().unwrap_or_else(|| "…".into());
+                let playing = queue.playing_item_index == index as i32;
+                let highlighted = matches!(
+                    highlight,
+                    Some(MenuEntry::QueueEntry(id)) if id == &entry.playlist_item_id
+                );
+                let frame = egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(4, 1))
+                    .corner_radius(CornerRadius::same(4))
+                    .fill(if highlighted {
+                        ui.visuals().selection.bg_fill
+                    } else {
+                        Color32::TRANSPARENT
+                    });
+                let row = frame.show(ui, |ui| {
+                    // `ui.horizontal` keeps the row as tall as its contents, so the panel isn't
+                    // stretched by the first row (a `with_layout` in a vertical `Ui` takes the
+                    // height left).
+                    ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if small_icon_button(ui, ICON_CLOSE, "Remove (Delete)", false).clicked() {
+                                state.remove_entry(entry.playlist_item_id.clone());
+                            }
+                            let down =
+                                small_icon_button(ui, ICON_ARROW_DOWNWARD, "Move down (Alt+Down)", index == last);
+                            if down.clicked() {
+                                state.move_entry(entry.playlist_item_id.clone(), 1);
+                            }
+                            let up = small_icon_button(ui, ICON_ARROW_UPWARD, "Move up (Alt+Up)", index == 0);
+                            if up.clicked() {
+                                state.move_entry(entry.playlist_item_id.clone(), -1);
+                            }
+                            // The name takes the room left, so long ones truncate: the playing
+                            // entry is bold, the others muted. Clicking it plays it for the group.
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                let text = if playing {
+                                    RichText::new(name.clone()).strong()
+                                } else {
+                                    RichText::new(name.clone()).color(muted)
+                                };
+                                let name = egui::Label::new(text).truncate().selectable(false).sense(Sense::CLICK);
+                                if ui.add(name).clicked() {
+                                    chosen = Some(MenuEntry::QueueEntry(entry.playlist_item_id.clone()));
+                                }
+                            });
+                        });
+                    });
+                });
+                if highlighted && scroll {
+                    row.response.scroll_to_me(Some(Align::Center));
+                }
+            }
+        });
+    chosen
+}
+
+/// A toggle in the panel: a button with an icon before its label, pressed while it's on.
+fn toggle_button(ui: &mut Ui, icon: MaterialIcon, label: &str, on: bool) -> Response {
+    let body = TextStyle::Small.resolve(ui.style());
+    // A selected button paints its text with the selection's stroke, so the icon and label take
+    // that colour with it (a `LayoutJob` keeps its own colour where a `RichText` is recoloured).
+    let color = if on {
+        ui.visuals().selection.stroke.color
+    } else {
+        ui.visuals().text_color()
+    };
+    let mut job = LayoutJob::default();
+    job.append(
+        icon.codepoint,
+        0.,
+        TextFormat {
+            font_id: FontId::new(body.size + 2., icon.font_family()),
+            color,
+            ..Default::default()
+        },
+    );
+    job.append(
+        &format!("  {label}"),
+        0.,
+        TextFormat {
+            font_id: body,
+            color,
+            ..Default::default()
+        },
+    );
+    ui.add(
+        egui::Button::new(egui::WidgetText::LayoutJob(job.into()))
+            .small()
+            .selected(on)
+            .sense(Sense::CLICK),
+    )
+}
+
+/// A small icon-only button in a queue row, disabled at the ends of the queue.
+fn small_icon_button(ui: &mut Ui, icon: MaterialIcon, tooltip: &str, disabled: bool) -> Response {
+    let button = egui::Button::new(icon.rich_text().size(16.))
+        .small()
+        .frame(false)
+        .sense(Sense::CLICK);
+    let response = ui.add_enabled(!disabled, button);
+    if disabled {
+        response.on_disabled_hover_text(tooltip)
+    } else {
+        response.on_hover_text(tooltip)
+    }
+}
+
+/// Cancels the focus move egui queued for a key a menu reads itself, before a widget behind the
+/// menu can take the focus (Enter would then press that as well).
+fn cancel_focus(ctx: &egui::Context) {
+    ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+}
+
+/// Takes the plain Left and Right arrows from egui while a top-bar menu is open. egui's
+/// `MenuState::handle_keyboard` gives the focus to the menu's anchor button (the SyncPlay or
+/// account button) on a Left when nothing in the menu is focused, and from then on egui keeps
+/// the keyboard: Space or Backspace would go to that button rather than the menu. Neither menu
+/// has anything horizontal to move, so they keep these keys too.
+fn take_horizontal_keys(ctx: &egui::Context) -> bool {
+    let left = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowLeft);
+    let right = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowRight);
+    if left | right {
+        cancel_focus(ctx);
+    }
+    left | right
+}
+
 /// The keyboard's ring around a bar item (`main`'s selection ring).
 fn ring(ui: &Ui, response: &Response) {
     ui.painter().rect_stroke(
@@ -1119,7 +1696,14 @@ fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BarItem, bar_items, bar_step, menu_step};
+    use jellyfin::{GroupInfo, GroupState, PlayQueue, QueueItem};
+
+    use egui::{Event, Key, Modifiers, RawInput};
+
+    use super::{
+        BarItem, Highlight, MenuEntry, bar_items, bar_step, highlight_step, menu_step, move_target, resolve_highlight,
+        syncplay_entries, take_horizontal_keys,
+    };
 
     #[test]
     fn the_bar_starts_on_back_or_search() {
@@ -1161,5 +1745,200 @@ mod tests {
         assert_eq!(menu_step(None, 1, 4), Some(0));
         assert_eq!(menu_step(None, -1, 4), Some(3));
         assert_eq!(menu_step(Some(0), 1, 0), None);
+    }
+
+    fn group(id: &str) -> GroupInfo {
+        GroupInfo {
+            group_id: id.into(),
+            group_name: format!("Group {id}"),
+            state: GroupState::Idle,
+            participants: Vec::new(),
+        }
+    }
+
+    fn queue(items: &[&str], playing_index: i32) -> PlayQueue {
+        PlayQueue {
+            reason: "NewPlaylist".into(),
+            playlist: items
+                .iter()
+                .map(|id| QueueItem {
+                    item_id: (*id).into(),
+                    playlist_item_id: (*id).into(),
+                })
+                .collect(),
+            playing_item_index: playing_index,
+            start_position_ticks: Default::default(),
+            is_playing: false,
+            shuffle_mode: Default::default(),
+            repeat_mode: Default::default(),
+        }
+    }
+
+    #[test]
+    fn without_a_group_the_panel_lists_the_groups_then_new_group() {
+        let groups = [group("a"), group("b")];
+        let entries = syncplay_entries(None, &groups, None);
+        assert_eq!(
+            entries,
+            vec![
+                MenuEntry::JoinGroup("a".into()),
+                MenuEntry::JoinGroup("b".into()),
+                MenuEntry::NewGroup,
+            ]
+        );
+        // `main` highlighted *New group* with `groups.len()`.
+        assert_eq!(entries.len() - 1, groups.len());
+        assert_eq!(syncplay_entries(None, &[], None), vec![MenuEntry::NewGroup]);
+    }
+
+    #[test]
+    fn in_a_group_the_queue_sits_between_the_toggles_and_leave() {
+        let queue = queue(&["x", "y"], 1);
+        let entries = syncplay_entries(Some(&group("g")), &[group("other")], Some(&queue));
+        assert_eq!(
+            entries,
+            vec![
+                MenuEntry::ToggleShuffle,
+                MenuEntry::CycleRepeat,
+                MenuEntry::QueueEntry("x".into()),
+                MenuEntry::QueueEntry("y".into()),
+                MenuEntry::LeaveGroup,
+            ]
+        );
+        assert_eq!(entries.last(), Some(&MenuEntry::LeaveGroup));
+    }
+
+    #[test]
+    fn a_group_without_a_queue_lists_only_leave() {
+        // `main` showed no queue at all (not even the toggles) until it had an entry.
+        let empty = queue(&[], -1);
+        assert_eq!(
+            syncplay_entries(Some(&group("g")), &[], Some(&empty)),
+            vec![MenuEntry::LeaveGroup]
+        );
+        assert_eq!(
+            syncplay_entries(Some(&group("g")), &[], None),
+            vec![MenuEntry::LeaveGroup]
+        );
+    }
+
+    #[test]
+    fn the_panel_highlight_stops_at_the_ends() {
+        // Opened with a click, the first Down picks the first entry and the first Up the last.
+        assert_eq!(highlight_step(None, 1, 3), Some(0));
+        assert_eq!(highlight_step(None, -1, 3), Some(2));
+        assert_eq!(highlight_step(Some(0), 1, 3), Some(1));
+        assert_eq!(highlight_step(Some(1), 1, 3), Some(2));
+        // Up and Down stop rather than wrapping round, as `main`'s menu did.
+        assert_eq!(highlight_step(Some(2), 1, 3), Some(2));
+        assert_eq!(highlight_step(Some(0), -1, 3), Some(0));
+        assert_eq!(highlight_step(Some(0), 1, 0), None);
+    }
+
+    #[test]
+    fn only_queue_entries_move_with_alt_up_and_down() {
+        let entries = vec![
+            MenuEntry::ToggleShuffle,
+            MenuEntry::CycleRepeat,
+            MenuEntry::QueueEntry("x".into()),
+            MenuEntry::QueueEntry("y".into()),
+            MenuEntry::LeaveGroup,
+        ];
+        assert_eq!(move_target(&entries, 2, 1), Some(3));
+        assert_eq!(move_target(&entries, 3, -1), Some(2));
+        // The toggles before the queue and *Leave group* after it aren't targets.
+        assert_eq!(move_target(&entries, 2, -1), None);
+        assert_eq!(move_target(&entries, 3, 1), None);
+        assert_eq!(move_target(&entries, 1, 1), None);
+    }
+
+    /// The entries of a group with a queue of `ids` (the playing entry first).
+    fn group_entries(ids: &[&str]) -> Vec<MenuEntry> {
+        syncplay_entries(Some(&group("g")), &[], Some(&queue(ids, 0)))
+    }
+
+    fn highlighted(entry: MenuEntry, index: usize) -> Option<Highlight> {
+        Some(Highlight { entry, index })
+    }
+
+    #[test]
+    fn the_highlight_follows_its_entry_through_a_reorder() {
+        // The keyboard is on "b"; the server moves it (the list is redrawn in the new order).
+        let mut highlight = highlighted(MenuEntry::QueueEntry("b".into()), 3);
+        let entries = vec![
+            MenuEntry::ToggleShuffle,
+            MenuEntry::CycleRepeat,
+            MenuEntry::QueueEntry("b".into()),
+            MenuEntry::QueueEntry("a".into()),
+            MenuEntry::LeaveGroup,
+        ];
+        resolve_highlight(&mut highlight, &entries);
+        assert_eq!(highlight, highlighted(MenuEntry::QueueEntry("b".into()), 2));
+    }
+
+    #[test]
+    fn a_removed_entry_falls_back_to_its_neighbour_not_to_leave() {
+        // "b" was at index 3; the queue update takes it out. "c" took its place: the next one.
+        let mut highlight = highlighted(MenuEntry::QueueEntry("b".into()), 3);
+        resolve_highlight(&mut highlight, &group_entries(&["a", "c"]));
+        assert_eq!(highlight, highlighted(MenuEntry::QueueEntry("c".into()), 3));
+
+        // The last entry went: the highlight goes back to the previous queue entry.
+        let mut highlight = highlighted(MenuEntry::QueueEntry("c".into()), 4);
+        resolve_highlight(&mut highlight, &group_entries(&["a", "b"]));
+        assert_eq!(highlight, highlighted(MenuEntry::QueueEntry("b".into()), 3));
+
+        // The only entry went: nothing to highlight (and *Leave group* is next).
+        let mut highlight = highlighted(MenuEntry::QueueEntry("a".into()), 2);
+        resolve_highlight(&mut highlight, &group_entries(&[]));
+        assert_eq!(highlight, None);
+    }
+
+    #[test]
+    fn a_highlight_never_lands_on_a_button() {
+        // The group ended under the highlight: the list is the server's groups now, and none of
+        // them is a queue entry.
+        let mut highlight = highlighted(MenuEntry::LeaveGroup, 2);
+        let groups = [group("a"), group("b")];
+        resolve_highlight(&mut highlight, &syncplay_entries(None, &groups, None));
+        assert_eq!(highlight, None);
+
+        // *Shuffle*'s queue went: neither the toggles nor *Leave group* take the highlight.
+        let mut highlight = highlighted(MenuEntry::ToggleShuffle, 0);
+        resolve_highlight(&mut highlight, &group_entries(&[]));
+        assert_eq!(highlight, None);
+    }
+
+    #[test]
+    fn the_menus_keep_the_horizontal_arrows() {
+        // Plain Left and Right are the menus' (egui would otherwise give the focus to the
+        // button they hang under); Shift+Left is the page's and stays with egui.
+        let ctx = egui::Context::default();
+        let left = |modifiers| Event::Key {
+            key: Key::ArrowLeft,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let mut taken = false;
+        let mut remaining = Vec::new();
+        let mut output = ctx.run_ui(
+            RawInput {
+                events: vec![left(Modifiers::NONE), left(Modifiers::SHIFT)],
+                ..Default::default()
+            },
+            |ctx| {
+                taken = take_horizontal_keys(ctx);
+                remaining = ctx.input(|input| input.events.clone());
+            },
+        );
+        // No painter here: the pass's (empty) texture updates would panic on drop otherwise.
+        output.textures_delta.clear();
+        assert!(taken);
+        assert_eq!(remaining.len(), 1);
+        assert!(
+            matches!(&remaining[0], Event::Key { key: Key::ArrowLeft, modifiers, .. } if *modifiers == Modifiers::SHIFT)
+        );
     }
 }
