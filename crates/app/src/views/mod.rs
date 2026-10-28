@@ -81,7 +81,7 @@ pub fn open(route: Route, _cx: &mut PageCx) -> Box<dyn Page> {
         Route::Item { name, .. } => Box::new(StubPage::new(name, "U6")),
         Route::Person { name, .. } => Box::new(StubPage::new(name, "U5")),
         Route::Search => Box::new(search::SearchPage::default()),
-        Route::Settings => Box::new(StubPage::new("Settings".into(), "U9")),
+        Route::Settings => Box::new(settings::SettingsPage::new()),
         #[cfg(debug_assertions)]
         Route::Posters { id } => Box::new(posters::PostersPage::new(id)),
     }
