@@ -274,22 +274,30 @@ mod tests {
     fn a_discard_pass_is_the_same_appearance() {
         let ctx = Context::default();
         let mut seen = Vec::new();
-        let mut output = ctx.run_ui(
+        let mut first = ctx.run_ui(
             RawInput {
                 time: Some(0.),
+                ..Default::default()
+            },
+            |ui| seen.push(appear(ui.ctx(), "page")),
+        );
+        first.textures_delta.clear();
+        // A frame that asks for a second pass, as a Grid's or a popup's sizing does.
+        let mut second = ctx.run_ui(
+            RawInput {
+                time: Some(0.1),
                 ..Default::default()
             },
             |ui| {
                 seen.push(appear(ui.ctx(), "page"));
                 if ui.ctx().current_pass_index() == 0 {
-                    // A second pass in the same frame, as a Grid's or a popup's sizing pass.
                     ui.ctx().request_discard("test");
                 }
             },
         );
-        output.textures_delta.clear();
-        assert_eq!(seen.len(), 2, "the frame ran two passes");
-        assert_eq!(seen, [0., 0.], "both passes are the same appearance");
+        second.textures_delta.clear();
+        assert_eq!(seen.len(), 3, "the second frame ran two passes");
+        assert_eq!(seen, [0., 0., 0.], "one appearance across the frame's passes");
     }
 
     #[test]
