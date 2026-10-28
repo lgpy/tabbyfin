@@ -177,8 +177,21 @@ async fn read_messages(
                 frames.send_replace(Some(Frame::Pixels(Arc::new(frame))));
             }
             #[cfg(windows)]
-            Message::SharedHandle { handle, width, height } => {
-                frames.send_replace(Some(Frame::Shared(SharedFrame { handle, width, height })));
+            Message::SharedHandle {
+                id,
+                name,
+                width,
+                height,
+            } => {
+                let frame = SharedFrame {
+                    id,
+                    name: name.into(),
+                    width,
+                    height,
+                    // The host's to keep (`host.rs`); the app opens the texture by its name.
+                    _handle: None,
+                };
+                frames.send_replace(Some(Frame::Shared(frame)));
             }
             #[cfg(target_os = "linux")]
             Message::SharedFd {
