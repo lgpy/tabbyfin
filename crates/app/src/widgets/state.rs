@@ -25,7 +25,8 @@ pub fn message(ui: &mut Ui, message: impl Into<String>) {
     });
 }
 
-/// A page with nothing on it: the confused mascot over the message.
+/// A page with nothing on it: the confused mascot over the message. It greets for a few seconds
+/// and then holds still (see `widgets::mascot`), so an empty page is idle.
 pub fn empty(ui: &mut Ui, message: impl Into<String>) {
     let message = message.into();
     let line = ui.text_style_height(&TextStyle::Body);

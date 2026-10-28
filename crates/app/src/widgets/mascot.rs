@@ -19,8 +19,10 @@
 //! antialiased (epaint feathers only the shapes it tessellates itself): at the sizes drawn, the
 //! edges of the head are the only place it shows.
 //!
-//! A mascot that animates asks for a repaint once per animation step ([`ANIMATION_STEP`]) and one
-//! with animations off asks for none, so a loader costs nothing once it has drawn.
+//! A loader is waiting on something, so it animates and asks for a repaint once per animation step
+//! ([`ANIMATION_STEP`]) for as long as it's up. An empty page is idle: its confused mascot moves for
+//! [`CONFUSED_ANIMATION`] seconds after it appears, holds its rest pose after that and asks for no
+//! frames at all — and with the animations setting off no mascot asks for any.
 
 use std::collections::hash_map::RandomState;
 use std::f32::consts::TAU;
@@ -67,6 +69,10 @@ const FLICK_EVERY: f32 = 5.0;
 /// flicks (5 s) all come round together every 90 s, which is what [`Pose::at`] takes the time
 /// within.
 const CYCLE: f64 = 90.;
+
+/// Seconds the confused mascot moves after it appears. An empty page has nothing to wait for, so
+/// it says hello and then holds still, where `main` animated it for as long as the page was up.
+const CONFUSED_ANIMATION: f64 = 8.;
 
 const BODY: Color32 = Color32::from_rgb(0xc3, 0x96, 0xe7);
 const EAR_INNER: Color32 = Color32::from_rgb(0x8a, 0x63, 0xa9);
@@ -258,15 +264,51 @@ fn show(ui: &mut Ui, size: f32, face: Face) {
     // The animations setting is egui's own animation time, which `theme::apply_animations` turns
     // off with it: `main`'s loader read the same switch (`cx.reduce_motion()`).
     let still = ui.style().animation_time == 0.;
-    let pose = if still {
-        Pose::rest()
-    } else {
+    // The time it appeared is recorded whether or not it's moving, so turning the animations on
+    // doesn't start a mascot that has been up for a while over.
+    let greeting = just_appeared(ui);
+    let moving = !still
+        && match face {
+            // A loader is waiting on something, so it moves for as long as it's up.
+            Face::Cute | Face::Evil => true,
+            // A page with nothing on it is idle: its mascot settles once it has said hello.
+            Face::Confused => greeting,
+        };
+    let pose = if moving {
         Pose::at(ui.input(|input| input.time))
+    } else {
+        Pose::rest()
     };
     paint(ui, Shapes::get(), &pose, face, rect);
-    if !still {
+    if moving {
         ui.ctx().request_repaint_after(ANIMATION_STEP);
     }
+}
+
+/// Whether the confused mascot has only just appeared, so it's still within
+/// [`CONFUSED_ANIMATION`] of its first frame. The time it appeared is kept in egui's memory under
+/// the `ui`'s id, as its face is: a repaint for something else (a hover, a key) doesn't start the
+/// greeting over, while a mascot that goes away for a pass and comes back does.
+fn just_appeared(ui: &Ui) -> bool {
+    #[derive(Clone, Copy)]
+    struct Appeared {
+        pass: u64,
+        time: f64,
+    }
+
+    let id = ui.scope_id().with("mascot-appeared");
+    let pass = ui.ctx().cumulative_pass_nr();
+    let now = ui.input(|input| input.time);
+    let appeared = ui.data(|data| data.get_temp::<Appeared>(id));
+    let appeared = match appeared.filter(|appeared| appeared.pass + 1 == pass) {
+        Some(mut appeared) => {
+            appeared.pass = pass;
+            appeared
+        }
+        None => Appeared { pass, time: now },
+    };
+    ui.data_mut(|data| data.insert_temp(id, appeared));
+    now - appeared.time < CONFUSED_ANIMATION
 }
 
 /// The face a loader keeps while it's drawn: the cute or the evil one, rolled here.
@@ -1040,6 +1082,8 @@ fn bounds_y(points: &[P]) -> (f32, f32) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use egui::{Context, RawInput, UiBuilder, pos2};
 
     use super::{
@@ -1100,6 +1144,65 @@ mod tests {
         assert_eq!(Face::for_loader(EVIL_ODDS - 0.001), Face::Evil);
         assert_eq!(Face::for_loader(EVIL_ODDS), Face::Cute);
         assert_eq!(Face::for_loader(0.999), Face::Cute);
+    }
+
+    /// Draws `contents` for one pass at `time`, and returns how long egui would wait for the next
+    /// frame (`Duration::MAX` when nothing asks for one).
+    fn pass_at(ctx: &Context, time: f64, contents: impl FnMut(&mut egui::Ui)) -> Duration {
+        let input = RawInput {
+            time: Some(time),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, contents);
+        output.textures_delta.clear();
+        output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+    }
+
+    #[test]
+    fn an_empty_pages_mascot_settles_after_its_greeting() {
+        let ctx = Context::default();
+        let empty_page = |time: f64| pass_at(&ctx, time, |ui| super::confused(ui, super::PAGE));
+
+        // It moves, a frame at a time, for its first few seconds.
+        for time in [0., 0.5, 3.9, 7.9] {
+            let delay = empty_page(time);
+            assert!(
+                delay <= super::ANIMATION_STEP,
+                "at {time} s it should still move: {delay:?}"
+            );
+        }
+        // After that it holds its rest pose and asks for nothing, and a repaint for something else
+        // (a hover, a key) doesn't start it over.
+        for time in [8.1, 8.2, 30., 3600.] {
+            let delay = empty_page(time);
+            assert_eq!(delay, Duration::MAX, "at {time} s it should hold still: {delay:?}");
+        }
+        // A pass without it, then it's back: an empty page that comes back says hello again.
+        assert_eq!(pass_at(&ctx, 4000., |_| {}), Duration::MAX);
+        let delay = empty_page(4000.5);
+        assert!(
+            delay <= super::ANIMATION_STEP,
+            "it should move again when it comes back: {delay:?}"
+        );
+        assert_eq!(
+            empty_page(4008.6),
+            Duration::MAX,
+            "and settle again eight seconds later"
+        );
+    }
+
+    #[test]
+    fn a_loader_keeps_moving_for_as_long_as_it_is_up() {
+        let ctx = Context::default();
+        let loader = |time: f64| pass_at(&ctx, time, |ui| super::loader(ui, super::PAGE));
+        // A loader is waiting on something, so it doesn't settle like the empty state's mascot.
+        for time in [0., 5., 10., 60., 3600.] {
+            let delay = loader(time);
+            assert!(
+                delay <= super::ANIMATION_STEP,
+                "at {time} s it should still move: {delay:?}"
+            );
+        }
     }
 
     /// Draws a loader for one pass in `ctx`, or nothing for a pass without one, returning the
