@@ -55,7 +55,7 @@ use crate::widgets::text::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, runtime_text,
     timestamp,
 };
-use crate::widgets::{card, image, shelf, state};
+use crate::widgets::{card, image, mascot, shelf, state};
 
 /// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
 pub fn shuffle<T>(items: &mut [T]) {
@@ -1400,15 +1400,15 @@ fn episodes_band(
     rect
 }
 
-/// A line in the episodes band at the height the cards would take: a spinner while they load,
+/// A line in the episodes band at the height the cards would take: the mascot while they load,
 /// or a message.
-fn band_note(ui: &mut Ui, message: &str, spinner: bool) {
+fn band_note(ui: &mut Ui, message: &str, loading: bool) {
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), LANDSCAPE_H),
         Layout::centered_and_justified(Direction::LeftToRight),
         |ui| {
-            if spinner {
-                ui.spinner();
+            if loading {
+                mascot::loader(ui, mascot::PAGE);
             } else {
                 ui.label(RichText::new(message).color(theme::tokens_of(ui).muted_foreground));
             }
