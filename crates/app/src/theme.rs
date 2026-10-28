@@ -7,7 +7,6 @@
 //! On Linux egui gets no system theme from winit, so [`SystemTheme`] reads the desktop's from the
 //! XDG portal and follows the portal's changes (as `main` did).
 
-use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use egui::FontId;
@@ -105,23 +104,14 @@ pub fn text_scale(setting: Option<u16>) -> f32 {
     scale.clamp(0.75, 2.)
 }
 
-/// The text styles at 100 %, which the text size setting multiplies. egui's own until the
-/// restyle (R1) registers its sizes and named styles with [`set_text_styles`].
-static BASE_TEXT_STYLES: Mutex<Option<BTreeMap<egui::TextStyle, FontId>>> = Mutex::new(None);
-
-/// Sets the text styles the setting scales, at 100 %: for the restyle (R1), whose own sizes and
-/// named styles (`TextStyle::Name`) scale with the setting from then on. Apply the setting after
-/// (or let the next [`apply`] do it).
-pub fn set_text_styles(styles: BTreeMap<egui::TextStyle, FontId>) {
-    *BASE_TEXT_STYLES.lock().unwrap() = Some(styles);
-}
-
 /// Scales the app's text styles, which sizes text and the controls drawn around it. Fixed layout
 /// sizes don't follow, as on `main`: the setting makes text bigger, not the window's chrome.
+///
+/// The sizes scaled are egui's own; the restyle (R1) gives the app its own table (and the named
+/// styles that go with it) by putting it behind this in place of the call below.
 fn apply_text_size(ctx: &egui::Context, setting: Option<u16>) {
     let scale = text_scale(setting);
-    let mut base = BASE_TEXT_STYLES.lock().unwrap();
-    let base = base.get_or_insert_with(egui::style::default_text_styles);
+    let base = egui::style::default_text_styles();
     ctx.all_styles_mut(|style| {
         // From the 100 % sizes every time, so applying this again doesn't compound.
         for (text_style, font) in base.iter() {
@@ -228,12 +218,15 @@ const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 #[cfg(target_os = "linux")]
 const PORTAL_SETTINGS: &str = "org.freedesktop.portal.Settings";
 /// The desktop's appearance, whose `color-scheme` is the light or dark preference.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const APPEARANCE: &str = "org.freedesktop.appearance";
 /// The key in [`APPEARANCE`] that says which theme the desktop prefers.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const COLOR_SCHEME: &str = "color-scheme";
 
 /// The theme a portal colour scheme asks for: 1 is dark, 2 is light. 0 (no preference), a
 /// missing portal and anything else are light, as `main` showed without a signal.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn scheme_theme(scheme: u32) -> egui::Theme {
     match scheme {
         1 => egui::Theme::Dark,
@@ -441,8 +434,7 @@ fn parse_reg_dword(output: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_animations, apply_text_size, parse_kde_font_size, parse_reg_dword, scheme_theme, set_text_styles, snap,
-        text_scale,
+        apply_animations, apply_text_size, parse_kde_font_size, parse_reg_dword, scheme_theme, snap, text_scale,
     };
 
     #[test]
@@ -509,16 +501,6 @@ mod tests {
         assert_eq!(size(&ctx, &body), normal * 1.5);
         apply_text_size(&ctx, Some(100));
         assert_eq!(size(&ctx, &body), normal);
-
-        // The restyle's own sizes and named styles scale too.
-        let title = egui::TextStyle::Name("title".into());
-        let mut styles = egui::style::default_text_styles();
-        styles.insert(title.clone(), egui::FontId::proportional(20.));
-        styles.insert(body.clone(), egui::FontId::proportional(15.));
-        set_text_styles(styles);
-        apply_text_size(&ctx, Some(130));
-        assert_eq!(size(&ctx, &body), 19.5);
-        assert_eq!(size(&ctx, &title), 26.);
     }
 
     /// Stand-ins for xdg-desktop-portal's settings interface, served on the session bus under

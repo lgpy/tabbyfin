@@ -1,8 +1,5 @@
 // Release builds on Windows run without a console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// While the app moves to egui, code arrives before its callers (docs/egui-migration.md). X3
-// removes this.
-#![allow(dead_code)]
 
 // Every module of the egui app is declared here, including those later tasks fill, so they
 // never need to edit this file. Each one's doc comment says which task brings it.

@@ -48,6 +48,7 @@ chmod +x "$tool"
 appdir="$work/AppDir"
 mkdir -p "$appdir/usr/share/doc/tabbyfin"
 cp "$here/../LICENSE" "$here/THIRD_PARTY.md" "$appdir/usr/share/doc/tabbyfin/"
+cp -r "$here/licenses" "$appdir/usr/share/doc/tabbyfin/"
 
 # The app finds libmpv in ../lib next to its executable (usr/bin -> usr/lib). Without FUSE
 # (containers, CI, WSL) linuxdeploy runs from its own extracted copy.
