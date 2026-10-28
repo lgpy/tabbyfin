@@ -137,6 +137,12 @@ fn apply_animations(ctx: &egui::Context, on: bool) {
     });
 }
 
+/// Whether animations (and smooth scrolling) are on, from the style [`apply_animations`] left:
+/// R2's animations and the wheel's instant step follow the setting without reading the config.
+pub fn animations(ctx: &egui::Context) -> bool {
+    ctx.global_style().animation_time > 0.
+}
+
 /// The desktop's colour scheme, from the XDG desktop portal's settings: what "follow the
 /// system" means on Linux, where winit reports no system theme (its X11 backend has none, its
 /// Wayland one only knows what the app set). The same source `main` used.
