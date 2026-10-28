@@ -241,11 +241,11 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
 
 | Platform | libmpv |
 |---|---|
-| Linux | The system's `libmpv2` for the `.deb` (which depends on it) and the tarball. The AppImage bundles it with the libraries it needs (`packaging/appimage.sh`, with linuxdeploy pinned in `packaging/linuxdeploy.lock`), leaving out what has to match the system (glibc, GL, X11/Wayland, the Vulkan loader) and forcing in `libjack` and `libusb`, which linuxdeploy's exclude list skips but plenty of desktops lack. The app looks for libmpv in `../lib` next to its executable (the AppImage's `usr/lib`), any version, before the system's. The AppImage is built in an Ubuntu 22.04 container (`packaging/appimage-docker.sh`, `mise run package:appimage`, a CI job of its own), so it needs glibc 2.35 and carries that release's mpv 0.34 (`libmpv.so.1`). The Flatpak (`packaging/flatpak/`, app id `io.github.lgpy.tabbyfin`, freedesktop 26.08 runtime) builds mpv 0.41 itself, with libass and libplacebo, on the runtime's FFmpeg; the runtime's codecs-extra extension supplies H.264, HEVC and the rest. Its Rust crates are listed in `packaging/flatpak/cargo-sources.json` because the build is offline: regenerate it with `mise run flatpak:sources` whenever `Cargo.lock` changes. It builds with the SDK's Rust (1.98 for 26.08), so the code must not need anything newer. |
+| Linux | The system's `libmpv2` for the `.deb` (which depends on it, on `libvulkan1`, and on the Wayland, xkbcommon and X11 libraries winit loads at runtime) and the tarball. The AppImage bundles it with the libraries it needs (`packaging/appimage.sh`, with linuxdeploy pinned in `packaging/linuxdeploy.lock`), leaving out what has to match the system (glibc, GL, X11/Wayland, the Vulkan loader) and forcing in `libjack` and `libusb`, which linuxdeploy's exclude list skips but plenty of desktops lack. The app looks for libmpv in `../lib` next to its executable (the AppImage's `usr/lib`), any version, before the system's. The AppImage is built in an Ubuntu 22.04 container (`packaging/appimage-docker.sh`, `mise run package:appimage`, a CI job of its own), so it needs glibc 2.35 and carries that release's mpv 0.34 (`libmpv.so.1`). The Flatpak (`packaging/flatpak/`, app id `io.github.lgpy.tabbyfin`, freedesktop 26.08 runtime) builds mpv 0.41 itself, with libass and libplacebo, on the runtime's FFmpeg; the runtime's codecs-extra extension supplies H.264, HEVC and the rest. Its Rust crates are listed in `packaging/flatpak/cargo-sources.json` because the build is offline: regenerate it with `mise run flatpak:sources` whenever `Cargo.lock` changes. It builds with the SDK's Rust (1.98 for 26.08), so the code must not need anything newer. |
 | Windows | `libmpv-2.dll` next to `tabbyfin.exe` in the zip. It's a shinchiro build, pinned with its checksum in `packaging/mpv.lock` and fetched by `packaging/fetch-libmpv.sh`. The zip also carries ANGLE (`libEGL.dll`, `libGLESv2.dll`) and its MinGW runtime DLLs, MSYS2 builds pinned in `packaging/angle.lock` and fetched by `packaging/fetch-angle.sh`, for zero-copy video. |
 | macOS | Not bundled yet. The app looks in Homebrew's folders, so `brew install mpv` makes playback work. Bundling `libmpv.dylib` is still to do. The app is ad-hoc signed, not notarized. |
 
-**App icon:** the mascot traced from the drawing, as a vector: `packaging/tabbyfin.svg` is the source (the rest pose from `packaging/mascot/jelly-logo.svg`, cropped square), and the PNGs and the `.ico` are rendered from it. `packaging/tabbyfin.png` (512×512) is what's shipped, and `packaging/tabbyfin-artwork.png` is a 1024×1024 render for anywhere that wants it bigger. The top bar shows `crates/app/assets/logo.png`, a 128×128 render embedded in the binary (GPUI scales images without mipmaps, so the 512 px one would alias at 40 px). Linux installs the PNG as the 512×512 hicolor icon (the `.deb`, the AppImage, the Flatpak; the tarball carries it). Windows uses `packaging/tabbyfin.ico`, embedded in `tabbyfin.exe` as icon resource 1 by `crates/app/build.rs` (GPUI gives its windows that icon) and used by the installer's shortcuts. macOS gets `tabbyfin.icns`, made from the PNG with `sips` and `iconutil` when `package.sh` builds the bundle. After changing the SVG, render them again with resvg (`cargo install resvg`), each `.ico` size drawn at its own size so the small ones stay sharp:
+**App icon:** the mascot traced from the drawing, as a vector: `packaging/tabbyfin.svg` is the source (the rest pose from `packaging/mascot/jelly-logo.svg`, cropped square), and the PNGs and the `.ico` are rendered from it. `packaging/tabbyfin.png` (512×512) is what's shipped, and `packaging/tabbyfin-artwork.png` is a 1024×1024 render for anywhere that wants it bigger. The top bar shows `crates/app/assets/logo.png`, a 128×128 render embedded in the binary (the image cache uploads one mip level, so the 512 px one would alias at 40 px). Linux installs the PNG as the 512×512 hicolor icon (the `.deb`, the AppImage, the Flatpak; the tarball carries it). Windows uses `packaging/tabbyfin.ico`, embedded in `tabbyfin.exe` as icon resource 1 by `crates/app/build.rs` (Explorer uses it; the window itself gets `packaging/tabbyfin.png` through eframe, and the installer's shortcuts use the `.ico` file). macOS gets `tabbyfin.icns`, made from the PNG with `sips` and `iconutil` when `package.sh` builds the bundle. After changing the SVG, render them again with resvg (`cargo install resvg`), each `.ico` size drawn at its own size so the small ones stay sharp:
 
 ```sh
 resvg -w 512 -h 512 packaging/tabbyfin.svg packaging/tabbyfin.png
@@ -257,7 +257,7 @@ convert /tmp/icon-{256,128,64,48,32,16}.png packaging/tabbyfin.ico
 
 **Pinned downloads** (`packaging/mpv.lock`, `angle.lock`, `linuxdeploy.lock`) go through `packaging/download.sh`, which tries our copy first (the repo's `deps` release, one asset per file, named by its SHA256; fetched with `gh` and CI's token while the repo is private), then the original URL, and checks the checksum either way. After changing a lock file, `mise run deps:mirror` uploads the new file. The Flatpak's sources (libass, libplacebo, mpv, crates) aren't mirrored: Flathub-style builds fetch them from their projects.
 
-`packaging/THIRD_PARTY.md` holds mpv's license (GPL-2.0-or-later) and source information, and ships in the packages.
+`packaging/THIRD_PARTY.md` holds the licenses and source information of the bundled third-party software (mpv, ANGLE, and the egui stack's fonts and icons), and ships in the packages.
 
 **Builds:** `.github/workflows/ci.yml` runs clippy and the tests on all three OSes. On a `v*` tag, or when started by hand, it also packages all four targets:
 - Linux `.tar.gz` and `.deb`, the AppImage (built in Ubuntu 22.04), and a Flatpak bundle (`packaging/flatpak/build.sh`)
@@ -370,20 +370,21 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 **Ubuntu / WSL2 (current machine):**
 ```sh
 sudo apt install build-essential pkg-config libmpv2 \
-  libvulkan-dev mesa-vulkan-drivers vulkan-tools \
-  libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
-  libfontconfig-dev libfreetype-dev libssl-dev
+  libvulkan1 mesa-vulkan-drivers vulkan-tools \
+  libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 \
+  libx11-6 libx11-xcb1 libxcursor1 libxi6
 ```
-- `libmpv2` is the runtime library the player loads. No `-dev` package is needed, because libmpv is loaded at runtime.
+- `libmpv2` is the runtime library the player loads, and `libvulkan1` the loader wgpu renders through; neither needs a `-dev` package, because both are loaded at runtime.
+- winit loads xkbcommon, the Wayland client and cursor libraries and the X11 libraries at runtime too, so building needs no `-dev` packages for them. The `.deb` names them as dependencies (`crates/app/Cargo.toml`).
 - `mingw-w64` adds the Windows test loop: `dev/win-run.sh` cross-builds, copies to `C:\Temp\jelly-dev` and runs on the Windows host.
   - It uses its own config folder (`TABBYFIN_CONFIG_DIR=C:\Temp\jelly-dev\config`), so your real sign-in isn't touched. Set it to an empty string to use the normal one.
   - `TABBYFIN_VIDEO=software` forces software video and `=gpu` forces the GPU path, even on software OpenGL, to compare the two. Both work on Linux too.
   - The script also fetches ANGLE next to the exe. Delete `libEGL.dll` there to try the WGL path.
   - `TABBYFIN_ROUTE=play:<id>:::<media source id>` plays a specific version, e.g. the 4K HEVC 10-bit one that `dev/make-media.sh` adds to Test Movie.
 - `TABBYFIN_KEYS="down right enter wait escape"` (debug builds) presses keys inside the app 3 s after sign-in, 250 ms apart; `wait` pauses for a second. Together with a screenshot (`import -window <id>` under X11), it tests keyboard navigation without touching the desktop's real keyboard or mouse.
-- GPUI on WSL2 runs through WSLg (`WAYLAND_DISPLAY=wayland-0` is set). It needs a working Vulkan driver, such as mesa `dzn` or llvmpipe.
+- The app on WSL2 runs through WSLg (`WAYLAND_DISPLAY=wayland-0` is set). It needs a working Vulkan driver, such as mesa `dzn` or llvmpipe.
 - Run `vulkaninfo --summary` before debugging rendering problems.
-- If WSLg rendering is poor, use a native Windows build for daily UI work. GPUI supports Windows directly.
+- If WSLg rendering is poor, use a native Windows build for daily UI work. The app runs on Windows directly.
 
 **Test server:** see `dev/README.md`. It's a Jellyfin 12.2 container with a synthetic library generated by ffmpeg, set up by a script.
 - A second container runs Jellyfin 10.11, the minimum version, on port 8097: `mise run dev:min` sets it up and runs the smoke test against it.

@@ -4,10 +4,8 @@
 #
 #   dev/win-run.sh [seconds]      # default: run until the window is closed
 #
-# Debug builds of GPUI compile their HLSL shaders at runtime from the build-time source path.
-# Windows resolves that Linux path on C:, so the shaders are mirrored there. (Icons are
-# embedded via rust-embed's debug-embed feature; see crates/app/Cargo.toml.)
-# Release builds embed everything; use CI for those.
+# The host runs this copy on C: next to the player's runtime DLLs (libmpv, ANGLE), which are
+# fetched once into the same folder; the build folder stays on the Linux side.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,16 +15,6 @@ target=x86_64-pc-windows-gnu
 cargo build -p tabbyfin --target "$target"
 mkdir -p "$dest"
 x86_64-w64-mingw32-strip -o "$dest/tabbyfin.exe" "$root/target/$target/debug/tabbyfin.exe"
-
-mirror() { # <dir under a Linux path> -> same path on C:
-  [[ -d "$1" ]] || return 0
-  mkdir -p "/mnt/c$1"
-  cp -ru "$1/." "/mnt/c$1/"
-}
-registry="$(ls -d "$HOME"/.cargo/registry/src/*/ | head -n1)"
-for crate in "$registry"gpui-pre-windows-* "$root"/third_party/gpui/gpui-pre-windows; do
-  mirror "${crate%/}/src"
-done
 
 # libmpv, pinned in packaging/mpv.lock. Extracted with Windows' own tar.exe (libarchive reads
 # .7z), since 7z usually isn't installed in WSL.
