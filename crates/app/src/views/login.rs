@@ -74,6 +74,21 @@ enum Field {
     Password,
 }
 
+impl Field {
+    /// The field's own widget id, so the keyboard stays in it while the rows above change (an
+    /// error, the starting-up status, the saved accounts): egui's automatic ids shift with the
+    /// widgets made before them, and egui drops the focus of an id that no longer draws, which
+    /// left the user's next keystroke with nothing. `main`'s inputs were entities and kept their
+    /// identity the same way.
+    fn id(self) -> egui::Id {
+        egui::Id::unique(match self {
+            Self::Server => "login_server",
+            Self::Username => "login_username",
+            Self::Password => "login_password",
+        })
+    }
+}
+
 pub struct Login {
     device_id: String,
     /// Saved accounts to continue as, most recently used first.
@@ -146,6 +161,12 @@ impl Login {
             retry: Deadline::default(),
             event: None,
         };
+        // As on `main`, which focused the input as the form was made: asking by id focuses the
+        // field the first time it draws, so a key typed at launch can't land in a form that
+        // hasn't taken the keyboard yet.
+        if let Some(field) = login.focus {
+            ctx.memory_mut(|memory| memory.request_focus(field.id()));
+        }
         if has_url {
             login.connect(ctx);
         }
@@ -365,6 +386,11 @@ impl Login {
                         self.status =
                             Some("You'll be signed back in automatically as soon as the server answers.".into());
                         self.retry.set(RECONNECT_INTERVAL);
+                    } else {
+                        // The address is what has to change (or be tried again), so the keyboard
+                        // goes back to it, as a failed sign-in puts it back in the password.
+                        // Connecting with Enter gave the field up, as a text field does.
+                        self.focus = Some(Field::Server);
                     }
                 }
             },
@@ -438,6 +464,7 @@ impl Login {
         ui.label("Server address");
         let address = ui.add(
             egui::TextEdit::singleline(&mut self.url)
+                .id(Field::Server.id())
                 .hint_text("jellyfin.example.com or 192.168.1.10:8096")
                 .desired_width(f32::INFINITY)
                 .interactive(!self.busy),
@@ -480,6 +507,7 @@ impl Login {
         ui.label("Username");
         let username = ui.add(
             egui::TextEdit::singleline(&mut self.username)
+                .id(Field::Username.id())
                 .desired_width(f32::INFINITY)
                 .interactive(!self.busy),
         );
@@ -495,6 +523,7 @@ impl Login {
         ui.horizontal(|ui| {
             let password = ui.add(
                 egui::TextEdit::singleline(&mut self.password)
+                    .id(Field::Password.id())
                     .password(!self.show_password)
                     .desired_width(ui.available_width() - 40.0)
                     .interactive(!self.busy),
