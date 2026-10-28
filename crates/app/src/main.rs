@@ -29,6 +29,9 @@ mod theme;
 mod toasts;
 mod tracks;
 mod trickplay;
+// The UI tests: `egui_kittest` driving the pages and screens (debug builds' tests only).
+#[cfg(test)]
+mod ui_tests;
 mod update;
 mod views;
 mod widgets;
