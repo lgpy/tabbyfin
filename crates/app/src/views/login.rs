@@ -106,6 +106,8 @@ pub struct Login {
     show_password: bool,
     /// Set when the form moves to another step, so the next field the user needs has focus.
     focus: Option<Field>,
+    /// The widget the keyboard was in last frame, so a new one is scrolled into view.
+    last_focus: Option<egui::Id>,
 
     /// Set once the server address has been verified.
     server: Option<(Client, PublicSystemInfo)>,
@@ -153,6 +155,7 @@ impl Login {
             password: String::new(),
             show_password: false,
             focus: if has_url { None } else { Some(Field::Server) },
+            last_focus: None,
             server: None,
             quick_connect_code: None,
             busy: false,
@@ -219,16 +222,43 @@ impl Login {
         }
     }
 
-    pub fn show(&mut self, _ui: &mut egui::Ui, ctx: &egui::Context) {
+    pub fn show(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         // `main`'s form sat in the middle of the window (`items_center` and `justify_center`),
-        // not at the top of a page. An `Area` anchored to the window's centre puts the form's
-        // middle there whatever its height is, so a step that grows or shrinks stays centred.
-        egui::Area::new(egui::Id::unique("sign-in"))
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.set_width(FORM_WIDTH);
-                self.form(ui, ctx);
+        // not at the top of a page. The form's height is only known after it has been laid
+        // out, so the spacer above it comes from the last frame; a step that changes height
+        // asks for the frame that recentres it. A form taller than the window starts at the
+        // top and the scroll area reaches the rest, instead of being cut off.
+        let viewport = ui.available_height();
+        // The vertical area fills the window's width, so the form's fixed-width column is
+        // centred in it, and only takes the height its contents need.
+        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                let id = egui::Id::unique("sign-in-form-height");
+                let form_height: f32 = ui.data(|data| data.get_temp(id)).unwrap_or(0.);
+                ui.add_space(((viewport - form_height) * 0.5).max(0.));
+                let form = ui.allocate_ui_with_layout(
+                    egui::vec2(FORM_WIDTH, 0.),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| self.form(ui, ctx),
+                );
+                let measured = form.response.rect.height();
+                if (measured - form_height).abs() > 0.5 {
+                    ui.ctx().request_repaint();
+                }
+                ui.data_mut(|data| data.insert_temp(id, measured));
+                // Tab has to reach a field the window's edge cuts off: when the keyboard moves
+                // to something in the form, scroll that widget into view. Nothing else (a toast
+                // action, say) moves the form.
+                let focused = ctx.memory(|memory| memory.focused());
+                if focused != self.last_focus
+                    && let Some(response) = focused.and_then(|id| ctx.read_response(id))
+                    && form.response.rect.contains_rect(response.rect)
+                {
+                    ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+                }
+                self.last_focus = focused;
             });
+        });
     }
 
     fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
