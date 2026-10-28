@@ -94,7 +94,10 @@ pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
             library::Source::Folder { id, collection_type },
             name,
         )),
-        Route::Item { name, .. } => Box::new(StubPage::new(name, "U6")),
+        Route::Item { id, name } => {
+            let marks_seen = cx.services.refused_marks.sequence();
+            Box::new(item::ItemPage::new(id, name, marks_seen))
+        }
         Route::Person { id, name } => Box::new(library::LibraryPage::new(cx, library::Source::Person { id }, name)),
         Route::Search => Box::new(search::SearchPage::default()),
         Route::Settings => Box::new(StubPage::new("Settings".into(), "U9")),

@@ -57,4 +57,8 @@ pub enum NavRequest {
     Push(Route),
     /// Closes the top page, like the Back button.
     Back,
+    /// Puts the keyboard in the top bar's search box, opening it. A page's own menu asks for
+    /// this on Ctrl/Cmd+F: egui keeps the keys while a popup is open, so the shell's binding
+    /// never sees that key, and the account menu has always closed itself and focused the box.
+    OpenSearch,
 }

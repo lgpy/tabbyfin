@@ -3,7 +3,9 @@
 //!
 //! The caller owns the space (a card allocates its own rectangle) and the request, so the widget
 //! only draws. Every request carries the size it's drawn at ([`ImageRequest::fill_width`] in
-//! [`ImageCache::get`]'s key), which keeps the download small and the cache entry's own.
+//! [`ImageCache::get`]'s key), which keeps the download small and the cache entry's own; a
+//! full-width banner asks a fixed width instead ([`show_at_width`]), so resizing doesn't fetch
+//! it again.
 
 use egui::{Color32, CornerRadius, Rect, Ui, Vec2};
 use jellyfin::ImageRequest;
@@ -28,12 +30,41 @@ pub fn show(
     blurhash_from: Option<&BaseItemDto>,
     radius: u8,
 ) {
+    show_with_width(ui, cache, rect, request, blurhash_from, radius, None);
+}
+
+/// [`show`] asking the server for a fixed `width` rather than twice the drawn width: a banner
+/// that fills the window would otherwise be fetched (and kept in the cache) again at every
+/// window size, maximised state or zoom level. It is still scaled to `rect`.
+pub fn show_at_width(
+    ui: &Ui,
+    cache: &mut ImageCache,
+    rect: Rect,
+    request: Option<&ImageRequest>,
+    blurhash_from: Option<&BaseItemDto>,
+    radius: u8,
+    width: u32,
+) {
+    show_with_width(ui, cache, rect, request, blurhash_from, radius, Some(width));
+}
+
+fn show_with_width(
+    ui: &Ui,
+    cache: &mut ImageCache,
+    rect: Rect,
+    request: Option<&ImageRequest>,
+    blurhash_from: Option<&BaseItemDto>,
+    radius: u8,
+    width: Option<u32>,
+) {
     let painter = ui.painter();
     // What shows before the blurhash arrives, or when there's no image at all.
     painter.rect_filled(rect, radius, ui.visuals().faint_bg_color);
     let Some(request) = request else { return };
-    // Twice the drawn width, so it stays sharp on a high-DPI screen; the server doesn't upscale.
-    let request = request.clone().fill_width((rect.width() * 2.).ceil() as u32);
+    // Twice the drawn width, so it stays sharp on a high-DPI screen (the server doesn't
+    // upscale), or the width the caller fixed.
+    let width = width.unwrap_or((rect.width() * 2.).ceil() as u32);
+    let request = request.clone().fill_width(width);
     let image = cache.get(&request);
     let preview = match &image {
         // The blurhash is only a guess at what's coming, so it's for while the image loads.
