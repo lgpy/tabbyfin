@@ -509,9 +509,9 @@ fn section(ui: &mut Ui, icon: MaterialIcon, title: &str, contents: impl FnOnce(&
         ui.label(RichText::new(title).heading());
     });
     ui.add_space(HEADING_GAP);
-    // `main`'s `GroupBox`: its `group_box` colour, the border and the controls' radius.
-    egui::Frame::group(ui.style())
-        .fill(tokens.group_box)
+    // `main`'s `GroupBox::outline`: the border and the controls' radius over the page, with no
+    // fill of its own (an unchecked checkbox would read poorly on a grey box in light).
+    egui::Frame::NONE
         .stroke(egui::Stroke::new(1., tokens.border))
         .corner_radius(egui::CornerRadius::same(tokens.radius))
         .inner_margin(12)
@@ -554,10 +554,13 @@ fn row(ui: &mut Ui, row: Row, control: impl FnOnce(&mut Ui)) {
         } else {
             format!("{} · unset: {}", row.key, row.unset)
         };
+        // The config keys are monospace, as the file is: `RichText::monospace` would apply its
+        // family after the table's font, so the font id is built directly.
+        let mut font = text::font(ui, "xs");
+        font.family = egui::FontFamily::Monospace;
         ui.label(
             RichText::new(metadata)
-                .font(text::font(ui, "xs"))
-                .monospace()
+                .font(font)
                 .color(theme::tokens_of(ui).muted_foreground),
         );
     }
@@ -655,7 +658,7 @@ impl SettingsPage {
                 .selected_text(selected)
                 .show_ui(ui, |ui| {
                     for (value, label) in options {
-                        if ui.selectable_label(*value == current, label.as_ref()).clicked() {
+                        if theme::selectable_label(ui, *value == current, label.as_ref()).clicked() {
                             picked = Some(*value);
                         }
                     }

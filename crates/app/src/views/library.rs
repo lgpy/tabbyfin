@@ -785,6 +785,9 @@ impl LibraryPage {
             }
             let total = self.total;
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // `main`'s `px_6` on the right too: the count sits clear of the window's edge
+                // now that the page owns the whole width.
+                ui.add_space(GRID_PADDING - RING_GAP);
                 if let Some(total) = total {
                     ui.label(
                         RichText::new(item_count(total))
@@ -1160,7 +1163,7 @@ fn picker(ui: &mut Ui, id: &'static str, width: f32, labels: Vec<&str>, selected
         .show_ui(ui, |ui| {
             let mut chosen = None;
             for (index, label) in labels.iter().enumerate() {
-                if ui.selectable_label(index == selected, *label).clicked() {
+                if crate::theme::selectable_label(ui, index == selected, *label).clicked() {
                     chosen = Some(index);
                 }
             }
@@ -1183,13 +1186,13 @@ fn values_summary(view: &LibraryView) -> String {
 /// A button with a material icon before its label, as `main`'s toolbar buttons had.
 fn icon_button(ui: &Ui, icon: MaterialIcon, label: &str) -> egui::Button<'static> {
     let body = TextStyle::Button.resolve(ui.style());
-    let color = ui.visuals().text_color();
+    let color = crate::theme::tokens_of(ui).foreground;
     let mut job = LayoutJob::default();
     job.append(
         icon.codepoint,
         0.,
         TextFormat {
-            font_id: FontId::new(body.size + 2., icon.font_family()),
+            font_id: crate::theme::text::icon(ui, icon.font_family()),
             color,
             ..Default::default()
         },

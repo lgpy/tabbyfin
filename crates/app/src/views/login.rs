@@ -483,9 +483,7 @@ impl Login {
         let entered = address.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         ui.add_space(8.0);
         // `main`'s form: the step's button under the field, the width of the form.
-        let width = ui.available_width();
-        let connect = theme::primary_button(ui, "Connect");
-        let connect = ui.add_enabled(!self.busy, connect.min_size(egui::vec2(width, 0.)));
+        let connect = theme::primary_button(ui, "Connect", ui.available_width(), !self.busy);
         if self.busy {
             ui.spinner();
         }
@@ -565,18 +563,26 @@ impl Login {
         ui.add_space(8.0);
 
         let width = ui.available_width();
-        let sign_in = theme::primary_button(ui, "Sign in");
-        let sign_in = ui.add_enabled(!self.busy, sign_in.min_size(egui::vec2(width, 0.)));
+        let sign_in = theme::primary_button(ui, "Sign in", width, !self.busy);
         if self.busy {
             ui.spinner();
         }
         if sign_in.clicked() || password_entered {
             self.sign_in(ctx);
         }
-        let quick_connect = ui.add_enabled(
-            !self.busy,
-            egui::Button::new("Use Quick Connect").min_size(egui::vec2(width, 0.)),
-        );
+        // Centred like the primary button above it.
+        let quick_connect = ui
+            .allocate_ui_with_layout(
+                egui::vec2(width, ui.spacing().interact_size.y),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    ui.add_enabled(
+                        !self.busy,
+                        egui::Button::new("Use Quick Connect").min_size(egui::vec2(width, 0.)),
+                    )
+                },
+            )
+            .inner;
         if quick_connect.clicked() {
             self.start_quick_connect(ctx);
         }

@@ -1261,13 +1261,16 @@ fn entry_row(
     );
     let toggle = row
         .scope_builder(UiBuilder::new().max_rect(watched_rect), |ui| {
-            ui.add(theme::selected(
-                ui,
-                played,
-                egui::Button::new(menu::played_icon(ui, played))
-                    .sense(Sense::CLICK)
-                    .min_size(vec2(WATCHED_SIZE, WATCHED_SIZE)),
-            ))
+            // On, the toggle's accent fill would merge with the row's own accent highlight:
+            // a muted outline keeps it readable.
+            let button = egui::Button::new(menu::played_icon(ui, played))
+                .sense(Sense::CLICK)
+                .min_size(vec2(WATCHED_SIZE, WATCHED_SIZE));
+            let mut button = theme::selected(ui, played, button);
+            if played {
+                button = button.stroke(Stroke::new(1., theme::tokens_of(ui).muted_foreground));
+            }
+            ui.add(button)
         })
         .inner
         .on_hover_text("Watched (W)");
@@ -1704,7 +1707,18 @@ fn actions_row(
                 }
                 _ => {
                     let look = action_look(action, item, episode);
-                    let response = ui.add(action_button(ui, &look)).on_hover_text(look.tooltip.as_str());
+                    // A primary action's hover and pressed colours come from the theme's style,
+                    // which only a scope can give this button.
+                    let response = if look.primary {
+                        ui.scope(|ui| {
+                            theme::primary_style(ui);
+                            ui.add(action_button(ui, &look))
+                        })
+                        .inner
+                    } else {
+                        ui.add(action_button(ui, &look))
+                    };
+                    let response = response.on_hover_text(look.tooltip.as_str());
                     if action == ItemAction::More {
                         asked.more = Some(response.clone());
                     }
@@ -1737,39 +1751,32 @@ fn action_button(ui: &Ui, look: &ActionLook) -> egui::Button<'static> {
         tokens.foreground
     };
     let mut job = LayoutJob::default();
+    // The icon is bigger than the label, so both are centred on the line's middle: left to the
+    // baseline, the 24-point glyph sits low beside a 14-point label.
+    let centered = |font_id| TextFormat {
+        font_id,
+        color,
+        valign: Align::Center,
+        ..Default::default()
+    };
     job.append(
         look.icon.codepoint,
         0.,
-        TextFormat {
-            font_id: FontId::new(ACTION_ICON, look.icon.font_family()),
-            color,
-            ..Default::default()
-        },
+        centered(FontId::new(ACTION_ICON, look.icon.font_family())),
     );
     if let Some(label) = &look.label {
-        job.append(
-            &format!("  {label}"),
-            0.,
-            TextFormat {
-                font_id: body,
-                color,
-                ..Default::default()
-            },
-        );
+        job.append(&format!("  {label}"), 0., centered(body));
     }
-    let button = egui::Button::new(WidgetText::LayoutJob(job.into()))
+    egui::Button::new(WidgetText::LayoutJob(job.into()))
         .sense(Sense::CLICK)
-        .min_size(vec2(ACTION_SIZE, ACTION_SIZE));
-    if look.primary {
-        button.fill(tokens.primary).stroke(Stroke::NONE)
-    } else {
-        button
-    }
+        .min_size(vec2(ACTION_SIZE, ACTION_SIZE))
 }
 
 /// Watched and Favorite: pressed while on (the theme's accent behind it, as `main`'s checked
-/// toggles had), with the icon filled in green or red.
+/// toggles had), with the icon filled in green or red and a muted outline so the pressed toggle
+/// still reads on a highlighted row, whose own fill is the same accent.
 fn toggle(ui: &mut Ui, icon: RichText, on: bool, tooltip: &str) -> Response {
+    let tokens = theme::tokens_of(ui);
     let mut button = egui::Button::new(icon)
         .selected(on)
         .sense(Sense::CLICK)
@@ -1777,7 +1784,9 @@ fn toggle(ui: &mut Ui, icon: RichText, on: bool, tooltip: &str) -> Response {
     if on {
         // A selected button paints itself with the selection colour; `main`'s toggles used the
         // accent, and the icon keeps its own green or red.
-        button = button.fill(theme::tokens_of(ui).accent);
+        button = button
+            .fill(tokens.accent)
+            .stroke(Stroke::new(1., tokens.muted_foreground));
     }
     ui.add(button).on_hover_text(tooltip)
 }
