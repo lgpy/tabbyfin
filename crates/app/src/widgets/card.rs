@@ -3,8 +3,8 @@
 //! loads.
 //!
 //! A card allocates its own space (the image plus a block for the text) and answers the pointer
-//! with its [`Response`], so the caller handles clicks, the keyboard's [`crate::browse::reveal`]
-//! and the item's context menu. What `main` drew over the image comes with it: the played
+//! with its [`Response`], so the caller handles clicks, scrolling the selected card into view
+//! (`Cursor::take_reveal`) and the item's context menu. What `main` drew over the image comes with it: the played
 //! badge, the progress bar, dimming under the pointer and the cursor's ring. Titles and
 //! subtitles are cut short when they don't fit, and the sizes follow A1's text size.
 

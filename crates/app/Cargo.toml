@@ -86,4 +86,9 @@ assets = [
     ["../../packaging/tabbyfin.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
     # The bundled fonts' and icons' licenses, next to the generated copyright file.
     ["../../packaging/THIRD_PARTY.md", "usr/share/doc/tabbyfin/", "644"],
+    ["../../packaging/licenses/Ubuntu-Font-Licence-1.0.txt", "usr/share/doc/tabbyfin/licenses/", "644"],
+    ["../../packaging/licenses/Hack.txt", "usr/share/doc/tabbyfin/licenses/", "644"],
+    ["../../packaging/licenses/emoji-icon-font.txt", "usr/share/doc/tabbyfin/licenses/", "644"],
+    ["../../packaging/licenses/Material-Symbols.txt", "usr/share/doc/tabbyfin/licenses/", "644"],
+    ["../../packaging/licenses/Apache-2.0.txt", "usr/share/doc/tabbyfin/licenses/", "644"],
 ]

@@ -1,0 +1,6 @@
+Material Symbols Rounded (MaterialSymbolsRounded-Regular.ttf,
+MaterialSymbolsRounded_Filled-Regular.ttf)
+
+Copyright 2022 Google LLC. Licensed under the Apache License, Version 2.0:
+see Apache-2.0.txt. Source: https://fonts.google.com/icons and
+https://github.com/google/material-design-icons

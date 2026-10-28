@@ -2,8 +2,7 @@
 //!
 //! A page is a plain struct implementing [`Page`], kept on the shell's stack while it's open,
 //! and drawn each frame with a [`PageCx`] lending it the session's services. [`open`] makes the
-//! page for a route; pages that aren't ported yet are a [`StubPage`] naming the task that
-//! brings them, and each task replaces its arm.
+//! page for a route.
 
 pub mod dialogs;
 pub mod home;
@@ -11,8 +10,6 @@ pub mod item;
 pub mod library;
 pub mod login;
 pub mod player;
-#[cfg(debug_assertions)]
-pub mod posters;
 pub mod search;
 pub mod settings;
 pub mod shell;
@@ -101,31 +98,5 @@ pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
         Route::Person { id, name } => Box::new(library::LibraryPage::new(cx, library::Source::Person { id }, name)),
         Route::Search => Box::new(search::SearchPage::default()),
         Route::Settings => Box::new(settings::SettingsPage::new()),
-        #[cfg(debug_assertions)]
-        Route::Posters { id } => Box::new(posters::PostersPage::new(id)),
-    }
-}
-
-/// A page that isn't ported to egui yet.
-pub struct StubPage {
-    title: String,
-    task: &'static str,
-}
-
-impl StubPage {
-    fn new(title: String, task: &'static str) -> Self {
-        Self { title, task }
-    }
-}
-
-impl Page for StubPage {
-    fn title(&self) -> &str {
-        &self.title
-    }
-
-    fn show(&mut self, ui: &mut egui::Ui, _cx: &mut PageCx) {
-        ui.centered_and_justified(|ui| {
-            ui.label(format!("This page arrives with {}.", self.task));
-        });
     }
 }

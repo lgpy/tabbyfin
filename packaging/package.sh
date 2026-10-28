@@ -29,6 +29,8 @@ case "$target" in
     mkdir -p "$stage/$name"
     cp "$bin_dir/tabbyfin" "$packaging/tabbyfin.desktop" "$packaging/tabbyfin.png" "$packaging/THIRD_PARTY.md" \
       "$root/LICENSE" "$stage/$name/"
+    # The embedded fonts' licences (THIRD_PARTY.md lists them).
+    cp -r "$packaging/licenses" "$stage/$name/"
     tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
     (cd "$root" && cargo deb -p tabbyfin --target "$target" --no-build --output "$out/")
     ;;
@@ -37,6 +39,7 @@ case "$target" in
     name="tabbyfin-$version-windows-x86_64"
     mkdir -p "$stage/$name"
     cp "$bin_dir/tabbyfin.exe" "$packaging/THIRD_PARTY.md" "$root/LICENSE" "$stage/$name/"
+    cp -r "$packaging/licenses" "$stage/$name/"
     "$packaging/fetch-libmpv.sh" windows-x86_64 "$stage/$name"
     "$packaging/fetch-angle.sh" "$stage/$name"
     if command -v 7z >/dev/null; then
@@ -54,6 +57,7 @@ case "$target" in
     cp "$bin_dir/tabbyfin" "$app/Contents/MacOS/"
     sed "s/@VERSION@/$version/g" "$packaging/Info.plist" > "$app/Contents/Info.plist"
     cp "$packaging/THIRD_PARTY.md" "$root/LICENSE" "$app/Contents/Resources/"
+    cp -R "$packaging/licenses" "$app/Contents/Resources/"
     # The icon, from the 512 px PNG (so no 512@2x).
     iconset="$stage/tabbyfin.iconset"
     mkdir -p "$iconset"
