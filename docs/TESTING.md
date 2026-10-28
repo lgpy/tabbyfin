@@ -90,6 +90,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ The websocket on 12.2 and 10.11 (`cargo run -p jellyfin --example socket`), a 150 s keep-alive hold; Home refreshing when an item is marked watched from elsewhere.
 
+✅ The egui build (P3): `GET /Sessions` shows the session with `SupportsMediaControl: true` and the general commands reported on connect (so the dashboard offers a remote); unmarking an item as played from REST (as another device would) made Home drop its badge and progress bar about a second later; five episodes marked at once (a series) gave one refresh (`watch data changed elsewhere: pages refresh` once, ~0.5 s after the burst's first `UserDataChanged`); a change while something was playing gave none, and the page caught up when playback ended. Idle CPU stayed at 0 ticks over 10 s with the timer armed.
+
 - ⬜ **Another real device**: mark something watched in the web client or a phone app; Tabbyfin's open page refreshes within a second or so.
 - ⬜ **Reconnecting**: restart the server, or drop the network for a minute, while the app is open; the log shows "session websocket connected" again and refreshes still work.
 - ⬜ Behind a **reverse proxy with HTTPS** (`wss://`), e.g. nginx or Caddy, including a base path like `/jellyfin`.
@@ -222,13 +224,17 @@ The development harness cannot send mouse input. The cursor hiding uses `App::hi
 - ✅ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app (about a second later; the report is batched).
 ✅ Re-run after batching the reports: the same check gave `VolumeLevel = 85` and `IsMuted = true` about 3 s after the keys.
 
+✅ The egui build (P3), with the dashboard's requests over REST against 12.2: `SetVolume 42`, `Mute`, `Unmute` and `VolumeUp` gave `VolumeLevel = 42`, `IsMuted = true`, `IsMuted = false` and `VolumeLevel = 47` in `/Sessions` (about 1–3 s later, the batch).
+
 ## 12. Remote control (2.2.5)
 
 ✅ Against the 12.2 dev server, driving the app's session over REST the way the dashboard does (`POST /Sessions/{id}/Playing…`, `/Command`, `/Message`): play now with a start position, pause, seek, unpause, set volume, mute, unmute, subtitles off, a message (shown as a notification), next and stop all show up in `/Sessions`. Play last plus play next with a series put the series' episodes (expanded by the server) ahead of the movie, and next went to S01E01. The 10.11.11 server sends the same `Play`, `Playstate` and `GeneralCommand` payloads (captured, not run against the app).
 
+✅ The egui build (P3), same way: play now from 10 s, pause, seek, unpause, volume, mute, unmute, `SetSubtitleStreamIndex 3` and `SetAudioStreamIndex 2` (both in `PlayState`), `PreviousTrack` (back to the start, then to S01E01), a message (a toast, screenshot in the report), play next (series) plus play last (movie), next twice (S01E01, then S01E02), and stop. In a SyncPlay group with the scripted member as dev2, remote pause, unpause and seek reached the member as group commands, remote play next added the episode to the group's queue (`QueueNext` at the member), and remote stop stopped both. Round 2: two play requests sent 25 ms apart, both still fetching (play next Second Movie, then play last Test Movie), played Second Movie and then Test Movie on `NextTrack`, i.e. they applied in the order they were made.
+
 - ✅ From the **web dashboard** (and a phone app): the session shows a remote control, its buttons work, and the volume and tracks it shows follow the app.
-- ⬜ **Fullscreen** from the dashboard toggles the window (the harness can't check fullscreen).
-- ⬜ In a **SyncPlay group**: remote pause and seek act on the whole group, and play next/last add to the group's queue.
+- ⬜ **Fullscreen** from the dashboard toggles the window (the harness can't check fullscreen; P3 verified the event reaches the app, and winit asks the window manager, which the hidden display doesn't have).
+- ✅ In a **SyncPlay group**: remote pause and seek act on the whole group, and play next/last add to the group's queue (egui build, P3, with the scripted member).
 - ⬜ Changing the **audio track** remotely during a transcode restarts the stream at the same position.
 
 ## 13. Speed, delays, subtitle size and the clock (2.1.5–2.1.7)

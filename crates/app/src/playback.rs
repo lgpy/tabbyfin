@@ -412,7 +412,6 @@ struct Running {
     muted: bool,
     adjustments: Adjustments,
     autoplay: bool,
-    queued: Option<BaseItemDto>,
     resumed_from: Option<Duration>,
 }
 
@@ -579,7 +578,6 @@ impl PlaybackManager {
             muted,
             adjustments,
             autoplay,
-            queued: self.queue.front().cloned(),
             resumed_from,
         });
     }
@@ -976,7 +974,9 @@ impl Services {
                     versions: Vec::new(),
                     trickplay: TrickplayTiles::new(),
                     previous: None,
-                    next: running.queued.clone(),
+                    // Read when the session starts, not when it was asked for: a remote play
+                    // next or last queued while it was loading counts too.
+                    next: playback.queue.front().cloned(),
                     next_cancelled: false,
                     autoplay: running.autoplay,
                     chapters: Vec::new(),
