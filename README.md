@@ -2,7 +2,7 @@
 
 <h1 align="center">Tabbyfin</h1>
 
-A native desktop client for [Jellyfin](https://jellyfin.org), built with [GPUI](https://www.gpui.rs/) through [GPUI Kit](https://github.com/longbridge/gpui-kit). Video plays inside the app with [mpv](https://mpv.io) (libmpv), drawn straight from the GPU.
+A native desktop client for [Jellyfin](https://jellyfin.org), built with [egui](https://github.com/emilk/egui) through [eframe](https://github.com/emilk/egui/tree/main/crates/eframe) and drawn with [wgpu](https://wgpu.rs). Video plays inside the app with [mpv](https://mpv.io) (libmpv); on Linux and Windows its frames go to the screen from the GPU without a copy.
 
 Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**; developed against 12.x.
 
@@ -91,7 +91,6 @@ Plain `cargo run` works too, with the Rust version pinned in `mise.toml` (1.99).
 - [`docs/in-app-video.md`](docs/in-app-video.md): how video gets from mpv into the window on each OS.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): missing features and open work.
 - [`docs/TESTING.md`](docs/TESTING.md): what still needs testing on real hardware, servers and with other people.
-- [`third_party/gpui/PATCHES.md`](third_party/gpui/PATCHES.md): our changes to GPUI.
 
 ## License
 
