@@ -46,6 +46,12 @@ impl LoginRun {
             self.event = Some(event);
         }
     }
+
+    /// The form itself, for what the app changes between frames (a parked account going away,
+    /// the saved accounts after a *Forget*): those have no widget to reach through the tree.
+    fn login_mut(&mut self) -> &mut Login {
+        self.login.as_mut().expect("the form is made")
+    }
 }
 
 fn login_harness(make: impl FnOnce(&egui::Context) -> Login + 'static) -> egui_kittest::Harness<'static, LoginRun> {
@@ -100,6 +106,134 @@ fn sign_in_steps_from_the_address_to_a_session() {
         }
         _ => panic!("the form asked the app to do something other than sign in"),
     }
+}
+
+/// A fresh install's form takes the keyboard by itself: the very first thing typed at launch
+/// lands in the address field, with no click and no Tab before it, and each step on from it
+/// (the username, then the password, Enter taking each one to the next as `main`'s did) is
+/// focused before anything is typed into it. The sign-in the mock only matches with the typed
+/// credentials is what proves they arrived.
+#[test]
+fn the_form_takes_the_keyboard_at_launch() {
+    let server = FixtureServer::start();
+    server.json("GET", "/System/Info/Public", "public_info");
+    server.json_for_body(
+        "POST",
+        "/Users/AuthenticateByName",
+        "authenticate",
+        serde_json::json!({"Username": "dev", "Pw": "dev"}),
+    );
+    let mut ui = login_harness(|ctx| Login::new(ctx, "ui-test-device".into(), Vec::new(), false, None));
+
+    // The address field has the keyboard on the form's first frame, before anything was clicked.
+    assert!(
+        ui.get_by_role(Role::TextInput).is_focused(),
+        "the address field doesn't have the keyboard at launch"
+    );
+    ui.get_by_role(Role::TextInput).type_text(&server.uri());
+    ui.step();
+    assert_eq!(
+        ui.get_by_role(Role::TextInput).value().as_deref(),
+        Some(server.uri().as_str()),
+        "typing at launch didn't reach the address field"
+    );
+
+    // Enter connects, as on `main`, and the username field is focused for the next thing typed.
+    ui.key_press(egui::Key::Enter);
+    ui.step();
+    step_until(&mut ui, "the credentials step", |harness| {
+        harness.query_by_label("Username").is_some()
+    });
+    assert!(
+        ui.get_by_role(Role::TextInput).is_focused(),
+        "the username field didn't take the keyboard"
+    );
+    ui.get_by_role(Role::TextInput).type_text("dev");
+    ui.step();
+    assert_eq!(ui.get_by_role(Role::TextInput).value().as_deref(), Some("dev"));
+
+    // Enter moves on to the password field, which is focused too; Enter there signs in.
+    ui.key_press(egui::Key::Enter);
+    ui.step();
+    assert!(
+        ui.get_by_role(Role::PasswordInput).is_focused(),
+        "Enter in the username didn't move the keyboard to the password"
+    );
+    ui.get_by_role(Role::PasswordInput).type_text("dev");
+    ui.step();
+    ui.key_press(egui::Key::Enter);
+    ui.step();
+    step_until(&mut ui, "the sign-in", |harness| harness.state().event.is_some());
+
+    match ui.state().event.as_ref().expect("a sign-in event") {
+        LoginEvent::LoggedIn(session) => {
+            assert_eq!(session.user.name, "dev");
+            assert_eq!(session.client.token(), Some(TOKEN));
+        }
+        _ => panic!("the form asked the app to do something other than sign in"),
+    }
+}
+
+/// A failed connect says so above the field and puts the keyboard back in it, so the address
+/// can be fixed without clicking into it first (a connect started with Enter gives the field up,
+/// as a text field does).
+#[test]
+fn a_failed_connect_keeps_the_keyboard_in_the_address_field() {
+    let server = FixtureServer::start();
+    server.status("GET", "/System/Info/Public", 404);
+    let mut ui = login_harness(|ctx| Login::new(ctx, "ui-test-device".into(), Vec::new(), false, None));
+
+    ui.get_by_role(Role::TextInput).type_text(&server.uri());
+    ui.step();
+    ui.key_press(egui::Key::Enter);
+    ui.step();
+    step_until(&mut ui, "the error", |harness| {
+        harness
+            .query_by_label("That address doesn't look like a Jellyfin server.")
+            .is_some()
+    });
+    ui.step();
+
+    // Typing again goes into the field, without clicking it first.
+    assert!(
+        ui.get_by_role(Role::TextInput).is_focused(),
+        "the keyboard didn't come back to the address field"
+    );
+    ui.get_by_role(Role::TextInput).type_text("0");
+    ui.step();
+    let expected = format!("{}0", server.uri());
+    assert_eq!(
+        ui.get_by_role(Role::TextInput).value().as_deref(),
+        Some(expected.as_str()),
+        "the field lost what was typed after the error"
+    );
+}
+
+/// The keyboard stays in the address field while the rows above it change: it keeps its own
+/// widget id, where egui's automatic ones come and go with the widgets made before them, and
+/// egui drops the focus of an id that stops drawing (`main`'s inputs were entities and kept
+/// theirs). Here the parked account behind *Add account* goes away, which takes its button
+/// away from above the field.
+#[test]
+fn the_keyboard_stays_in_the_field_when_the_rows_above_it_change() {
+    let mut ui = login_harness(|ctx| Login::new(ctx, "ui-test-device".into(), Vec::new(), true, None));
+    assert!(ui.query_by_label_contains("Back to your account").is_some());
+    assert!(ui.get_by_role(Role::TextInput).is_focused());
+
+    ui.state_mut().login_mut().set_can_cancel(false);
+    ui.step();
+    assert!(ui.query_by_label_contains("Back to your account").is_none());
+    assert!(
+        ui.get_by_role(Role::TextInput).is_focused(),
+        "the field lost the keyboard when the rows above it changed"
+    );
+
+    ui.get_by_role(Role::TextInput).type_text("http://localhost:8096");
+    ui.step();
+    assert_eq!(
+        ui.get_by_role(Role::TextInput).value().as_deref(),
+        Some("http://localhost:8096")
+    );
 }
 
 /// A refused sign-in says so and stays on the form, with the password field ready for another

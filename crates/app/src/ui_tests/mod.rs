@@ -37,6 +37,7 @@ use crate::views::{Page, PageCx};
 pub mod item;
 pub mod library;
 pub mod login;
+pub mod settings;
 pub mod toasts;
 
 /// How long a test waits for a server answer or a page before it fails.
@@ -206,6 +207,10 @@ pub fn session(server: &FixtureServer) -> Session {
 /// A harness with the app's fonts and initial appearance, and no accessibility check: the app
 /// names most of its controls with a label beside them rather than `labelled_by`, which the
 /// check (meant for a restyle's accessibility pass) would flag on nearly every one.
+///
+/// Characters only the system's fonts have (the arrow in Settings' descriptions, say) are drawn
+/// as boxes rather than panicked on: eframe hands the app a system font provider, which a
+/// harness has no counterpart for here (and CI has no fonts to offer it).
 pub fn build_harness<S>(
     size: egui::Vec2,
     state: S,
@@ -213,6 +218,7 @@ pub fn build_harness<S>(
 ) -> Harness<'static, S> {
     Harness::builder()
         .with_size(size)
+        .allow_missing_glyphs()
         .with_accessibility_check(false)
         .with_context_setup(|ctx| {
             egui_material_icons::initialize(ctx);
