@@ -3,7 +3,7 @@
 What's missing and what still needs work, as of 2026-10-15. Done items are marked ✅ and kept for context.
 
 - **Egui:** the app runs on egui/eframe, drawn with wgpu, with mpv's frames imported into wgpu (§7). The migration from GPUI is done; its plan and task list stay in `docs/egui-migration.md` until the branch merges into `main`, and `docs/PLAN.md` §2–§6 describe what was built.
-- **Egui branch: accepted differences** (X3's sweep, 2026-10-28). The egui app matches `main`'s features except for these, accepted for now: egui's default look until the restyle (`docs/egui-migration.md`, Restyle backlog), with spinners instead of the mascot loader; popups (the item menu, the player's settings menu, the Settings pickers' lists) take the pointer only, while the pickers step with Left/Right; Tab passes the top bar's buttons before the page. In WSL debug builds it idles at 0 % CPU (`main` ~0.8 %), plays software video at about 60 % of `main`'s CPU, and holds about half of `main`'s memory on a 10,000-item library.
+- **Egui branch: accepted differences** (X3's sweep, 2026-10-28). The egui app matches `main`'s features except for these, accepted for now: the restyle's remaining items (`docs/egui-migration.md`, Restyle backlog) — R1 brought the colours, radii, spacing and text styles, and the look still lacks the animations, the mascot loader (spinners stand in), the search box's motion and the player's overlay polish; popups (the item menu, the player's settings menu, the Settings pickers' lists) take the pointer only, while the pickers step with Left/Right; Tab passes the top bar's buttons before the page. In WSL debug builds it idles at 0 % CPU (`main` ~0.8 %), plays software video at about 60 % of `main`'s CPU, and holds about half of `main`'s memory on a 10,000-item library.
 - `docs/PLAN.md` describes the architecture, and `docs/in-app-video.md` the video pipeline. This document only lists gaps.
 - **Priority:**
   - **P1:** needed before calling it v1.
@@ -179,11 +179,11 @@ The GPUI UI was replaced in place: `crates/app` is an eframe app drawn with wgpu
 
 ### Restyle backlog
 
-Starting from egui's default look, in this order. None of it is started.
+Starting from egui's default look, in this order. R1 has landed; the rest isn't started.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| R1 | **Theme tokens** | P2 | M | Colours, radii, spacing and fonts like the old app, with the app's own text-style table that the text size setting scales (today `theme::apply_text_size` scales egui's). Also the card's hover dim, the played badge's and the watched/favorite icons' colours, and the person card's initials size. |
+| ✅ R1 | **Theme tokens** | P2 | M | Landed: `theme::Tokens` (gpui-kit 0.7.3's light and dark themes with `main`'s radius 10/12 and light `muted_foreground` of `0x525252`) build egui's `Visuals` and `Spacing`; widgets read the tokens; the text-style table is `main`'s gpui scale (`text_xs` … `text_2xl`) and the text size setting scales it; the card's hover dim is the background at 20 %, the played badge is `primary`/`primary_foreground`, the watched tick is `success` and the heart the base red, and a person card's initials are `text_2xl`. With it came `main`'s page and top-bar spacing (24-point insets, a 72-point bar, 40-point buttons) and full-width primary buttons on the sign-in form. |
 | R2 | **Animations** | P3 | S | Page entry, staggered shelves, image fade-in, toggle pop, prompt slide-in, controls fade. The animations setting turns them off. |
 | R3 | **The mascot loader** | P3 | M | The old loader's jellycat, tessellated into egui meshes (`lyon_tessellation`): egui fills convex paths only, and its outlines are concave. The three faces, blink and flick timing. Spinners until then. |
 | R4 | **Search box** | P3 | S | Opening out of its button and closing back. |
