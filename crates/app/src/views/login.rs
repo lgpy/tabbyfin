@@ -219,17 +219,16 @@ impl Login {
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(FORM_WIDTH, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| self.form(ui, ctx),
-                );
+    pub fn show(&mut self, _ui: &mut egui::Ui, ctx: &egui::Context) {
+        // `main`'s form sat in the middle of the window (`items_center` and `justify_center`),
+        // not at the top of a page. An `Area` anchored to the window's centre puts the form's
+        // middle there whatever its height is, so a step that grows or shrinks stays centred.
+        egui::Area::new(egui::Id::unique("sign-in"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_width(FORM_WIDTH);
+                self.form(ui, ctx);
             });
-        });
     }
 
     fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
