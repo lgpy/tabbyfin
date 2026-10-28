@@ -45,9 +45,12 @@ pub enum Message {
         width: u32,
         height: u32,
     },
-    /// A frame in a D3D11 texture with a legacy share handle, which any process can open.
+    /// A frame in a D3D11 texture shared through a named NT handle, which the app opens by
+    /// `name` (see [`crate::libmpv::SharedFrame`]). The host keeps the texture alive while the
+    /// app may still open it (`host.rs`).
     SharedHandle {
-        handle: usize,
+        id: u64,
+        name: String,
         width: u32,
         height: u32,
     },
@@ -164,6 +167,13 @@ mod tests {
             args: vec!["seek".into(), 10.into()],
         };
         write(&mut a, &request, &[]).await.unwrap();
+        let shared = Message::SharedHandle {
+            id: 3,
+            name: "Local\\tabbyfin-video-1-2-3".into(),
+            width: 1280,
+            height: 720,
+        };
+        write(&mut a, &shared, &[]).await.unwrap();
         let imports = [
             VideoImport::Pixels,
             VideoImport::VulkanMemory { device_uuid: [7; 16] },
@@ -183,6 +193,11 @@ mod tests {
         assert!(matches!(message, Message::Event(PlayerEvent::Position(p)) if p == Duration::from_millis(1500)));
         let (request, _): (Request, _) = read(&mut b).await.unwrap().unwrap();
         assert!(matches!(request, Request::Command { id: 7, .. }));
+        let (message, _): (Message, _) = read(&mut b).await.unwrap().unwrap();
+        assert!(matches!(
+            message,
+            Message::SharedHandle { id: 3, ref name, width: 1280, height: 720 } if name == "Local\\tabbyfin-video-1-2-3"
+        ));
         for import in imports {
             let (request, _): (Request, _) = read(&mut b).await.unwrap().unwrap();
             assert!(matches!(request, Request::Start { import: read } if read == import));

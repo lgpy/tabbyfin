@@ -4,11 +4,13 @@
 //! texture manager. Software frames are written with `queue.write_texture` into one texture per
 //! frame size, registered once (egui's texture deltas would copy each frame twice more on the
 //! way). GPU frames are the player's own textures, imported once per image of its ring
-//! (`vulkan.rs` on Linux; V3 adds Windows) and drawn as they are.
+//! (`vulkan.rs` on Linux, `dx12.rs` on Windows) and drawn as they are.
 //!
 //! [`import`] is what the app tells the player it can draw when it starts it, so the player
 //! only sets up a video output whose frames this widget can show.
 
+#[cfg(windows)]
+mod dx12;
 #[cfg(target_os = "linux")]
 mod vulkan;
 
@@ -40,6 +42,8 @@ pub struct Video {
     shown: Option<(egui::TextureId, [u32; 2])>,
     /// A GPU frame couldn't be imported; see [`Video::import_failed`].
     import_failed: bool,
+    /// GPU frames in a row whose image was already gone ([`ImportError::Gone`]).
+    gone: u32,
     /// Repaints for each new frame. Dropping the widget stops it.
     _wake: Task<()>,
 }
@@ -58,6 +62,20 @@ struct Imported {
 /// The player renders into a ring of three images (`player::libmpv::opengl`), so that many
 /// imports are kept: each image is imported once and drawn whenever it comes round again.
 const RING: usize = 3;
+
+/// Why a GPU frame wasn't imported.
+#[derive(Debug)]
+enum ImportError {
+    /// The frame's image is gone: the player let go of it (an old ring, after a resize) before
+    /// the UI got to it. Only Windows, where frames name their textures rather than hold them.
+    Gone(String),
+    /// Importing doesn't work here (a driver quirk, another GPU): software frames from now on.
+    Failed(String),
+}
+
+/// Frames in a row whose image was gone, before the import counts as failed: far more than a
+/// resize can cause, since the player's current ring stays alive.
+const MAX_GONE: u32 = 10;
 
 /// A texture for software frames of one size, registered with egui-wgpu.
 struct FrameTexture {
@@ -89,6 +107,7 @@ impl Video {
             imported: Vec::new(),
             shown: None,
             import_failed: false,
+            gone: 0,
             _wake: wake,
         }
     }
@@ -139,25 +158,38 @@ impl Video {
 
     /// Shows a GPU frame: its image's texture, imported the first time the image comes. A new
     /// size means a new ring, and the old ring's textures are let go.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     fn show_shared(&mut self, frame: &player::libmpv::SharedFrame) {
         let size = [frame.width, frame.height];
         if let Some(imported) = self.imported.iter().find(|i| i.image == frame.id) {
             self.shown = Some((imported.id, imported.size));
+            self.gone = 0;
             return;
         }
         if self.import_failed {
             return;
         }
         let RenderState { device, renderer, .. } = &self.render_state;
-        let texture = match vulkan::import(device, frame) {
+        #[cfg(target_os = "linux")]
+        let texture = vulkan::import(device, frame).map_err(ImportError::Failed);
+        #[cfg(windows)]
+        let texture = dx12::import(device, frame);
+        let texture = match texture {
             Ok(texture) => texture,
-            Err(err) => {
+            // The last frame stays up; the next one is from the player's current ring. Only if
+            // that keeps happening does something else go wrong.
+            Err(ImportError::Gone(err)) if self.gone < MAX_GONE => {
+                tracing::debug!(?size, "video: skipped a GPU frame: {err}");
+                self.gone += 1;
+                return;
+            }
+            Err(ImportError::Gone(err) | ImportError::Failed(err)) => {
                 tracing::warn!(?size, "video: couldn't import a GPU frame: {err}");
                 self.import_failed = true;
                 return;
             }
         };
+        self.gone = 0;
         if self.imported.first().is_none_or(|i| i.size != size) {
             tracing::info!(width = frame.width, height = frame.height, "video: GPU frames");
         }
@@ -187,9 +219,9 @@ impl Video {
         }
     }
 
-    /// GPU frames are only sent where the app asks for them ([`import`]), which it doesn't yet
-    /// on this OS.
-    #[cfg(not(target_os = "linux"))]
+    /// GPU frames are only sent where the app asks for them ([`import`]), which it doesn't on
+    /// this OS.
+    #[cfg(not(any(target_os = "linux", windows)))]
     fn show_shared(&mut self, _frame: &player::libmpv::SharedFrame) {
         tracing::warn!("a GPU video frame, which this build can't draw yet");
     }
@@ -311,24 +343,22 @@ fn contain(rect: egui::Rect, [width, height]: [u32; 2]) -> egui::Rect {
     egui::Rect::from_center_size(rect.center(), frame * scale)
 }
 
-/// What the player should send for this window: Vulkan memory where wgpu runs on Vulkan and
-/// can import it (Linux), pixels otherwise. On wgpu's GL fallback that's pixels by itself, since
-/// [`adapter_import`] finds nothing to import there. V3 adds D3D11 textures (Windows).
+/// What the player should send for this window: what [`adapter_import`] finds the window's
+/// device can import. That's Vulkan memory where wgpu runs on Vulkan and can import it (Linux),
+/// D3D11 textures where it runs on DX12 (Windows), and pixels otherwise: on wgpu's GL fallback,
+/// or `WGPU_BACKEND` picking another API, that's pixels by itself.
 ///
 /// The player still decides whether its GPU path is worth it: it renders pixels where its
 /// OpenGL is a software rasterizer (llvmpipe), unless `TABBYFIN_VIDEO=gpu`.
 pub fn import(render_state: Option<&RenderState>) -> VideoImport {
-    let possible = render_state.map_or(VideoImport::Pixels, adapter_import);
-    let import = match possible {
-        VideoImport::VulkanMemory { .. } => possible,
-        _ => VideoImport::Pixels,
-    };
-    tracing::info!(?import, ?possible, "video: what the player is asked for");
+    let import = render_state.map_or(VideoImport::Pixels, adapter_import);
+    tracing::info!(?import, "video: what the player is asked for");
     import
 }
 
 /// What the renderer's device could import: Vulkan memory where wgpu runs on Vulkan and the
-/// device has `VULKAN_EXTERNAL_MEMORY_FD` (`main.rs` asks for it), D3D11 textures on DX12, and
+/// device has `VULKAN_EXTERNAL_MEMORY_FD` (`main.rs` asks for it), D3D11 textures on DX12 (not
+/// on WARP, the CPU adapter, where the player's GPU path would cost more than pixels), and
 /// pixels otherwise (wgpu on GL; Metal for now).
 pub fn adapter_import(render_state: &RenderState) -> VideoImport {
     let adapter = &render_state.adapter;
@@ -345,9 +375,10 @@ pub fn adapter_import(render_state: &RenderState) -> VideoImport {
             })
         }
         #[cfg(windows)]
-        wgpu::Backend::Dx12 => dx12_adapter_luid(adapter).map_or(VideoImport::Pixels, |adapter_luid| {
-            VideoImport::D3d11Textures { adapter_luid }
-        }),
+        wgpu::Backend::Dx12 if adapter.get_info().device_type != wgpu::DeviceType::Cpu => dx12_adapter_luid(adapter)
+            .map_or(VideoImport::Pixels, |adapter_luid| VideoImport::D3d11Textures {
+                adapter_luid,
+            }),
         _ => VideoImport::Pixels,
     }
 }

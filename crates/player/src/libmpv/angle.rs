@@ -1,8 +1,11 @@
 //! GPU video output on Windows through ANGLE: mpv renders with OpenGL ES (libmpv's `opengl`
-//! render API) on ANGLE's D3D11 backend, into D3D11 textures shared with GPUI's DirectX
-//! renderer. Because mpv's GL context sits on a D3D11 device, its `d3d11va` hardware decoder
+//! render API) on ANGLE's D3D11 backend, into D3D11 textures that the UI's D3D12 device opens
+//! (`d3d11.rs`). Because mpv's GL context sits on a D3D11 device, its `d3d11va` hardware decoder
 //! hands decoded frames straight to the renderer (mpv's `d3d11egl` interop): zero-copy from
 //! decoder to screen, including 10-bit (P010) video.
+//!
+//! ANGLE is put on the UI's adapter (`EGL_ANGLE_platform_angle_d3d_luid`), which on a laptop
+//! with two GPUs needn't be the one it would pick by itself.
 //!
 //! Needs ANGLE (`libEGL.dll`, `libGLESv2.dll`) next to the executable; without it, playback
 //! uses the WGL interop in `wgl.rs`, which decodes with a copy back to the CPU.
@@ -12,25 +15,26 @@ use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 
 use khronos_egl as egl;
-use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Direct3D11::*;
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC};
-use windows::Win32::Graphics::Dxgi::IDXGIResource;
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM;
 use windows::core::Interface;
 
 use super::Core;
+use super::d3d11::{SharedTexture, adapter_luid};
 use super::opengl::{
     Backend, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER, GL_FRAMEBUFFER_COMPLETE, GL_RENDERER, GL_TEXTURE_2D, GetProcAddress,
     cast, failed,
 };
-use super::video::SharedFrame;
+use super::video::{Luid, SharedFrame};
 use crate::{Error, Result};
 
-// EGL_ANGLE_platform_angle(_d3d), EGL_EXT_device_query, EGL_ANGLE_device_d3d,
-// EGL_ANGLE_d3d_texture_client_buffer.
+// EGL_ANGLE_platform_angle(_d3d), EGL_ANGLE_platform_angle_d3d_luid, EGL_EXT_device_query,
+// EGL_ANGLE_device_d3d, EGL_ANGLE_d3d_texture_client_buffer.
 const EGL_PLATFORM_ANGLE_ANGLE: egl::Enum = 0x3202;
 const EGL_PLATFORM_ANGLE_TYPE_ANGLE: egl::Attrib = 0x3203;
 const EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE: egl::Attrib = 0x3208;
+const EGL_PLATFORM_ANGLE_D3D_LUID_HIGH_ANGLE: egl::Attrib = 0x34A0;
+const EGL_PLATFORM_ANGLE_D3D_LUID_LOW_ANGLE: egl::Attrib = 0x34A1;
 const EGL_DEVICE_EXT: egl::Int = 0x322C;
 const EGL_D3D11_DEVICE_ANGLE: egl::Int = 0x33A1;
 const EGL_D3D_TEXTURE_ANGLE: egl::Enum = 0x33A3;
@@ -82,8 +86,7 @@ fn load_egl() -> Result<Egl> {
 
 /// One shared texture on ANGLE's device, bound as a GL texture through a pbuffer.
 pub(crate) struct Slot {
-    _texture: ID3D11Texture2D,
-    share: HANDLE,
+    shared: SharedTexture,
     surface: egl::Surface,
     gl_texture: u32,
     fbo: u32,
@@ -102,16 +105,32 @@ pub(crate) struct Angle {
 }
 
 impl Angle {
-    /// Sets up ANGLE (D3D11) and its D3D11 device on the calling (render) thread.
-    pub fn new(core: &Core) -> Result<Self> {
+    /// Sets up ANGLE (D3D11) and its D3D11 device on the calling (render) thread, on the adapter
+    /// with `luid`.
+    pub fn new(core: &Core, luid: Luid) -> Result<Self> {
         let egl = Box::new(load_egl()?);
         // SAFETY: EGL/GL setup on this thread; every object is checked and cleaned up.
         unsafe {
-            let attributes = [
-                EGL_PLATFORM_ANGLE_TYPE_ANGLE,
-                EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
-                egl::ATTRIB_NONE,
-            ];
+            let mut attributes = vec![EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE];
+            // An ANGLE without the extension would refuse the display; it then picks its
+            // adapter itself, and the check below decides.
+            let client = egl
+                .query_string(None, egl::EXTENSIONS)
+                .map(|e| e.to_string_lossy().into_owned());
+            if client
+                .as_deref()
+                .is_ok_and(|e| e.split(' ').any(|e| e == "EGL_ANGLE_platform_angle_d3d_luid"))
+            {
+                attributes.extend([
+                    EGL_PLATFORM_ANGLE_D3D_LUID_HIGH_ANGLE,
+                    luid.high as egl::Attrib,
+                    EGL_PLATFORM_ANGLE_D3D_LUID_LOW_ANGLE,
+                    luid.low as egl::Attrib,
+                ]);
+            } else {
+                tracing::info!("ANGLE can't be given an adapter (no EGL_ANGLE_platform_angle_d3d_luid)");
+            }
+            attributes.push(egl::ATTRIB_NONE);
             let display = egl
                 .get_platform_display(EGL_PLATFORM_ANGLE_ANGLE, egl::DEFAULT_DISPLAY, &attributes)
                 .map_err(failed)?;
@@ -226,6 +245,15 @@ impl Angle {
             let Some(device) = ID3D11Device::from_raw_borrowed(&raw).cloned() else {
                 return Err(fail(&egl, failed("ANGLE returned no D3D11 device")));
             };
+            // The UI can only open textures from its own adapter.
+            match adapter_luid(&device) {
+                Ok(on) if on == luid => {}
+                Ok(on) => {
+                    let err = format!("ANGLE runs on another adapter ({on:?}) than the window ({luid:?})");
+                    return Err(fail(&egl, failed(err)));
+                }
+                Err(err) => return Err(fail(&egl, err)),
+            }
 
             Ok(Self {
                 egl,
@@ -254,43 +282,18 @@ impl Backend for Angle {
         draw: impl FnOnce(u32) -> Result<()>,
     ) -> Result<SharedFrame> {
         let drawn = draw(slot.fbo);
-        // Make sure the frame is complete before GPUI's device reads it.
+        // Make sure the frame is complete before the UI's device reads it: the UI only hears of
+        // it after this, and has no other way to wait for GL.
         // SAFETY: on the thread owning the context.
         unsafe { (self.gl.glFinish)() };
         drawn?;
-        Ok(SharedFrame {
-            handle: slot.share.0 as usize,
-            width,
-            height,
-        })
+        Ok(slot.shared.frame(width, height))
     }
 
     fn create_slot(&self, width: u32, height: u32) -> Result<Slot> {
-        // SAFETY: D3D11/EGL/GL calls with valid objects on the context's thread.
+        let shared = SharedTexture::new(&self.device, width, height, DXGI_FORMAT_R8G8B8A8_UNORM)?;
+        // SAFETY: EGL/GL calls with valid objects on the context's thread.
         unsafe {
-            let desc = D3D11_TEXTURE2D_DESC {
-                Width: width,
-                Height: height,
-                MipLevels: 1,
-                ArraySize: 1,
-                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-                Usage: D3D11_USAGE_DEFAULT,
-                BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
-                MiscFlags: D3D11_RESOURCE_MISC_SHARED.0 as u32,
-                ..Default::default()
-            };
-            let mut texture = None;
-            self.device
-                .CreateTexture2D(&desc, None, Some(&mut texture))
-                .map_err(failed)?;
-            let texture: ID3D11Texture2D = texture.ok_or_else(|| failed("no texture"))?;
-            let share = texture
-                .cast::<IDXGIResource>()
-                .map_err(failed)?
-                .GetSharedHandle()
-                .map_err(failed)?;
-
             let attributes = [
                 egl::WIDTH,
                 width as egl::Int,
@@ -307,7 +310,7 @@ impl Backend for Angle {
                 .create_pbuffer_from_client_buffer(
                     self.display,
                     EGL_D3D_TEXTURE_ANGLE,
-                    egl::ClientBuffer::from_ptr(texture.as_raw()),
+                    egl::ClientBuffer::from_ptr(shared.texture.as_raw()),
                     self.config,
                     &attributes,
                 )
@@ -321,8 +324,7 @@ impl Backend for Angle {
             let mut fbo = 0;
             (self.gl.glGenFramebuffers)(1, &mut fbo);
             let slot = Slot {
-                _texture: texture,
-                share,
+                shared,
                 surface,
                 gl_texture,
                 fbo,
@@ -343,6 +345,7 @@ impl Backend for Angle {
         }
     }
 
+    /// The texture itself lives on while frames of it are held (`d3d11::SharedTexture`).
     fn release_slot(&self, slot: Slot) {
         // SAFETY: objects created by this renderer, on the context's thread.
         unsafe {

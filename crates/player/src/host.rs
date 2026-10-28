@@ -121,6 +121,11 @@ async fn serve() -> i32 {
 async fn forward_frames(out: Output, video: VideoOutput) {
     #[cfg(target_os = "linux")]
     let mut fds = FdSender::from_env();
+    // The frames sent last, whose handles keep their textures' names open: after a resize the
+    // render thread releases the old ring, while the app may not have opened the frame it just
+    // got. A few frames later it has a newer one, so the old textures can go.
+    #[cfg(windows)]
+    let mut sent = std::collections::VecDeque::new();
     let mut frames = video.frames();
     while frames.changed().await.is_ok() {
         let Some(frame) = frames.borrow_and_update().clone() else {
@@ -137,10 +142,15 @@ async fn forward_frames(out: Output, video: VideoOutput) {
             #[cfg(windows)]
             Frame::Shared(frame) => {
                 let message = Message::SharedHandle {
-                    handle: frame.handle,
+                    id: frame.id,
+                    name: frame.name.to_string(),
                     width: frame.width,
                     height: frame.height,
                 };
+                sent.push_back(frame);
+                if sent.len() > KEEP_SENT {
+                    sent.pop_front();
+                }
                 send(&out, &message, &[]).await
             }
             #[cfg(target_os = "linux")]
@@ -169,6 +179,11 @@ async fn forward_frames(out: Output, video: VideoOutput) {
         }
     }
 }
+
+/// How many of the frames it sent last the host keeps open for the app (Windows): two rings'
+/// worth, a fraction of a second of video.
+#[cfg(windows)]
+const KEEP_SENT: usize = 6;
 
 async fn send<W: AsyncWrite + Unpin>(out: &Mutex<W>, message: &Message, payload: &[u8]) -> std::io::Result<()> {
     let mut out = out.lock().await;
