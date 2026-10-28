@@ -388,10 +388,9 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ **egui (S1)**, against 12.2 with `dev` and `dev2` on one server: restoring `dev`; the form's server address (HTTPS tried before HTTP), username and password with Enter moving between them and signing in; Quick Connect, approved through `POST /QuickConnect/Authorize` (the endpoint the web client uses); a saved account's *continue as*; *Add account* keeping the signed-in session, *Back to your account* returning to it, and signing in as `dev2` instead (the waiting session is dropped); *Sign out* revoking the token and dropping the account from the config while `dev2` stays listed; switching accounts; *Remove* on the sign-in screen; removing the *parked* account from the Add-account form, which ends its session and takes *Back to your account* away; an expired session, which keeps the account, deletes the token and prefills the form with the error; a server stopped during restore, which waits and signs back in when it answers. The account menu's choices and the expiry event were driven with temporary test code: egui 0.37 menus don't take the keyboard yet, so the button and menu are pointer-only until U1.
 
-- ⬜ **Clicking** through all of the above (the egui menu needs a pointer for now).
-
 ✅ **egui (X7)**, on the hidden `:99` display with an empty config dir and `TABBYFIN_KEYS` typing the dev server's address at launch (no click, no Tab): the address reached the field (`X7-scratch/X7-1-address-typed-at-launch.png`), Enter connected and the username field was focused for `dev` (`X7-2-credentials-username-typed.png`), Enter moved the keyboard to the password, and Enter there signed in (`X7-3-signed-in.png`). In kittest, a failed connect puts the keyboard back in the address field, and the field keeps it when a row above it goes.
 
+- ⬜ **Clicking** through all of the above (the egui menu needs a pointer for now).
 - ⬜ Signing in to a **new server** while another account waits.
 - ⬜ **Sign out with no account left** (the form prefilled with the server and username).
 - ⬜ **Windows and macOS keychains** with two accounts.
