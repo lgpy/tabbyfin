@@ -940,9 +940,7 @@ impl PlayerPage {
                     ui.set_opacity(alpha);
                 }
                 if let Some(segment) = view.skippable {
-                    let button =
-                        egui::Button::new(icon_text(ui, ICON_SKIP_NEXT, segment.kind.skip_label())).sense(Sense::CLICK);
-                    if ui.add(button).clicked() {
+                    if prompt_button(ui, ButtonKind::Large, Some(ICON_SKIP_NEXT), segment.kind.skip_label()).clicked() {
                         cx.services.control(UiCommand::SeekTo(segment.end));
                     }
                 } else if view.show_up_next {
@@ -953,11 +951,12 @@ impl PlayerPage {
                         .corner_radius(CornerRadius::same(12))
                         .inner_margin(Margin::same(12))
                         .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.x = GAP;
                             ui.horizontal(|ui| {
-                                ui.label(format!("Resumed from {}", timestamp(from)));
-                                let start_over = egui::Button::new(icon_text(ui, ICON_RESTART_ALT, "Start over"))
-                                    .sense(Sense::CLICK);
-                                if ui.add(start_over).clicked() {
+                                ui.label(RichText::new(format!("Resumed from {}", timestamp(from))).small());
+                                if prompt_button(ui, ButtonKind::Primary, Some(ICON_RESTART_ALT), "Start over")
+                                    .clicked()
+                                {
                                     cx.services.start_over();
                                 }
                             });
@@ -974,9 +973,12 @@ impl PlayerPage {
             .corner_radius(CornerRadius::same(12))
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
-                ui.set_width(UP_NEXT_W);
+                // `main`'s `w(320)` is the card's width with its padding, and gpui boxes that way.
+                ui.set_width(UP_NEXT_W - 2. * 12.);
+                ui.spacing_mut().item_spacing = vec2(8., 8.);
                 ui.label(RichText::new("Up next").small().color(over_video::MUTED_FOREGROUND));
-                ui.add(egui::Label::new(RichText::new(label)).truncate());
+                let name = theme::text::font(ui, "base");
+                ui.add(egui::Label::new(RichText::new(label).font(name)).truncate());
                 if view.autoplay
                     && let Some(remaining) = view.remaining
                 {
@@ -984,11 +986,10 @@ impl PlayerPage {
                     ui.label(RichText::new(text).small().color(over_video::MUTED_FOREGROUND));
                 }
                 ui.horizontal(|ui| {
-                    let play = egui::Button::new(icon_text(ui, ICON_PLAY_ARROW, "Play now")).sense(Sense::CLICK);
-                    if ui.add(play).clicked() {
+                    if prompt_button(ui, ButtonKind::Primary, Some(ICON_PLAY_ARROW), "Play now").clicked() {
                         cx.services.play_next();
                     }
-                    if ui.add(egui::Button::new("Cancel").sense(Sense::CLICK)).clicked()
+                    if prompt_button(ui, ButtonKind::Ghost, None, "Cancel").clicked()
                         && let Some(state) = cx.services.playback.now_playing_mut()
                     {
                         state.next_cancelled = true;
@@ -1554,29 +1555,85 @@ fn control_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str) -> Respo
     sized_control(ui, icon, CONTROL, tooltip, false)
 }
 
-/// A button with an icon before its label, in the prompt's cards.
-fn icon_text(ui: &egui::Ui, icon: MaterialIcon, text: &str) -> egui::WidgetText {
-    let body = TextStyle::Body.resolve(ui.style());
-    let mut job = LayoutJob::default();
-    job.append(
-        icon.codepoint,
-        0.,
-        TextFormat {
-            font_id: FontId::new(body.size + 4., icon.font_family()),
-            color: over_video::FOREGROUND,
-            ..Default::default()
+/// How a prompt's button is painted, as gpui-kit's variants are: `main`'s large default button
+/// (Skip intro), a primary one (Play now, Start over) and a ghost one (Cancel).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ButtonKind {
+    Large,
+    Primary,
+    Ghost,
+}
+
+/// A button of the player's prompt, as gpui-kit draws one: 32 points high with `main`'s padding,
+/// radius and icon size (24 in the large one, 16 otherwise). Drawn by the page rather than as an
+/// `egui::Button` for those measurements, and so it can't take the keyboard.
+fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>, label: &str) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let (padding, gap, text, icon_size) = match kind {
+        ButtonKind::Large => (12., 8., theme::text::font(ui, "base"), 24.),
+        _ => (10., 8., theme::text::font(ui, "sm"), 16.),
+    };
+    let (fg, fill, stroke, hover, pressed) = match kind {
+        ButtonKind::Large => (
+            tokens.foreground,
+            tokens.button,
+            tokens.input,
+            tokens.button_hover,
+            tokens.button_active,
+        ),
+        ButtonKind::Primary => (
+            tokens.primary_foreground,
+            tokens.primary,
+            tokens.primary,
+            tokens.primary_hover,
+            tokens.primary_hover,
+        ),
+        ButtonKind::Ghost => (
+            tokens.foreground,
+            Color32::TRANSPARENT,
+            Color32::TRANSPARENT,
+            ghost_hover(ui),
+            tokens.accent,
+        ),
+    };
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), text, fg);
+    let mut width = galley.size().x + 2. * padding;
+    if icon.is_some() {
+        width += icon_size + gap;
+    }
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 32.), Sense::CLICK);
+    let fill = if response.is_pointer_button_down_on() {
+        pressed
+    } else if response.hovered() {
+        hover
+    } else {
+        fill
+    };
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        CornerRadius::same(tokens.radius),
+        fill,
+        if stroke == Color32::TRANSPARENT {
+            Stroke::NONE
+        } else {
+            Stroke::new(1., stroke)
         },
+        StrokeKind::Inside,
     );
-    job.append(
-        &format!("  {text}"),
-        0.,
-        TextFormat {
-            font_id: body,
-            color: over_video::FOREGROUND,
-            ..Default::default()
-        },
-    );
-    egui::WidgetText::LayoutJob(job.into())
+    let mut left = rect.left() + padding;
+    if let Some(icon) = icon {
+        painter.text(
+            pos2(left, rect.center().y),
+            Align2::LEFT_CENTER,
+            icon.codepoint,
+            FontId::new(icon_size, icon.font_family()),
+            fg,
+        );
+        left += icon_size + gap;
+    }
+    painter.galley(pos2(left, rect.center().y - galley.size().y / 2.), galley, fg);
+    response
 }
 
 /// A small label in the player's bars (SyncPlay, Transcoding, the speed).
