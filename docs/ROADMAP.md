@@ -2,7 +2,7 @@
 
 What's missing and what still needs work, as of 2026-10-15. Done items are marked ✅ and kept for context.
 
-- **Egui:** the app runs on egui/eframe, drawn with wgpu, with mpv's frames imported into wgpu (§7). The migration from GPUI is done; its plan and task list stay in `docs/egui-migration.md` until the branch merges into `main`, and `docs/PLAN.md` §2–§6 describe what was built.
+- **Egui:** the app runs on egui/eframe, drawn with wgpu, with mpv's frames imported into wgpu (§7). The migration from GPUI is done; `docs/egui-migration.md` keeps its decisions and notes, and `docs/PLAN.md` §2–§6 describe what was built.
 - **Egui branch: accepted differences** (X3's sweep, 2026-10-28; the restyle landed in R7). The egui app matches `main`'s features and look: R1 brought the colours, radii, spacing and text styles, R2 the animations, R3 the mascot loader, R4 the search box's motion, R6 the player's overlay and R7 the last layout details (the centred sign-in form, Home's shelf padding, left-aligned card titles) and the search box's clear button. What's accepted for now: popups (the item menu, the player's settings menu, the Settings pickers' lists) take the pointer only, while the pickers step with Left/Right; Tab passes the top bar's buttons before the page. In WSL debug builds it idles at 0 % CPU (`main` ~0.8 %), plays software video at about 60 % of `main`'s CPU, and holds about half of `main`'s memory on a 10,000-item library.
 - `docs/PLAN.md` describes the architecture, and `docs/in-app-video.md` the video pipeline. This document only lists gaps.
 - **Priority:**
@@ -172,7 +172,7 @@ Wanted, so moved out of the plan's "not in v1" list. All the endpoints below are
 
 The GPUI UI was replaced in place: `crates/app` is an eframe app drawn with wgpu, and the pure logic, the player crate and the `jellyfin` API client came over with it.
 
-- **Done:** the foundation (services, tasks, keys, toasts, the window and theme), the pages (Home, search, libraries with sort and filters, the item page with its children and playlist editing, Settings, the player), sign-in and accounts, SyncPlay, remote control and the websocket, Linux and Windows GPU video, packaging and CI, `egui_kittest` UI tests, and the parity sweep with its fixes. `docs/egui-migration.md` has the task list and what each task settled.
+- **Done:** the foundation (services, tasks, keys, toasts, the window and theme), the pages (Home, search, libraries with sort and filters, the item page with its children and playlist editing, Settings, the player), sign-in and accounts, SyncPlay, remote control and the websocket, Linux and Windows GPU video, packaging and CI, `egui_kittest` UI tests, and the parity sweep with its fixes. `docs/egui-migration.md` has what each task settled.
 - **What stayed the same:** `crates/jellyfin`, the player crate and its host process, the config file and where tokens live, every dev knob, and Jellyfin 10.11 as the minimum.
 - **What's different:** `main`'s look with egui doing the drawing (the theme tokens and text styles, the animations, the mascot loader, the search box's motion, the player's overlay and R7's layout details are back), pointer-only menus except where the shell or a page reads their keys, and Tab reaching the top bar's buttons before the page. All of it is in the accepted differences above.
 - **What's still open:** the same hardware and release-build checks as before (`docs/TESTING.md`), now against the egui build.
