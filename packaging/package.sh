@@ -27,8 +27,8 @@ case "$target" in
   x86_64-unknown-linux-gnu)
     name="tabbyfin-$version-linux-x86_64"
     mkdir -p "$stage/$name"
-    cp "$bin_dir/tabbyfin" "$packaging/tabbyfin.desktop" "$packaging/tabbyfin.png" "$root/LICENSE" \
-      "$stage/$name/"
+    cp "$bin_dir/tabbyfin" "$packaging/tabbyfin.desktop" "$packaging/tabbyfin.png" "$packaging/THIRD_PARTY.md" \
+      "$root/LICENSE" "$stage/$name/"
     tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
     (cd "$root" && cargo deb -p tabbyfin --target "$target" --no-build --output "$out/")
     ;;

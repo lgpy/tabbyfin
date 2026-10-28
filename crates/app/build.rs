@@ -1,5 +1,7 @@
-//! Embeds the app icon in Windows builds, as icon resource 1: GPUI gives its windows that icon,
-//! so the title bar, taskbar and Alt+Tab show it (the installer's shortcuts use the .ico file).
+//! Embeds the app icon in Windows builds, as icon resource 1: Explorer uses it for
+//! `tabbyfin.exe`, and the installer's shortcuts use the .ico file. The window's own icon comes
+//! from `window::viewport` (`packaging/tabbyfin.png`); eframe doesn't read Windows icon
+//! resources.
 
 fn main() {
     println!("cargo:rerun-if-changed=../../packaging/tabbyfin.ico");

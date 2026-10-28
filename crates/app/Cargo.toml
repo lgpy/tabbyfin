@@ -62,12 +62,14 @@ maintainer = "lgpy <lgpy17@gmail.com>"
 copyright = "2026, lgpy <lgpy17@gmail.com>"
 license-file = ["../../LICENSE", "0"]
 section = "video"
-# Playback uses the system libmpv. libmpv, Vulkan and Wayland are loaded at runtime, so
-# `$auto` can't see them.
-depends = "$auto, libmpv2, libvulkan1, libwayland-client0"
+# Playback uses the system libmpv and wgpu the system Vulkan loader; winit loads xkbcommon,
+# Wayland and the X11 libraries at runtime. `$auto` sees none of them because they're `dlopen`ed.
+depends = "$auto, libmpv2, libvulkan1, libwayland-client0, libxkbcommon0, libxkbcommon-x11-0, libx11-6, libx11-xcb1, libxcursor1, libxi6"
 extended-description = "Desktop client for Jellyfin built with egui, playing media in mpv."
 assets = [
     ["target/release/tabbyfin", "usr/bin/", "755"],
     ["../../packaging/tabbyfin.desktop", "usr/share/applications/", "644"],
     ["../../packaging/tabbyfin.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
+    # The bundled fonts' and icons' licenses, next to the generated copyright file.
+    ["../../packaging/THIRD_PARTY.md", "usr/share/doc/tabbyfin/", "644"],
 ]
