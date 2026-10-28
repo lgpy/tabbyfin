@@ -49,7 +49,7 @@ pub trait Page {
     }
 
     /// The top bar's search box typed a new term (trimmed, never empty), for the results page
-    /// to search for. Only [`search::SearchPage`] uses it; U4 searches when it arrives.
+    /// to search for. Only [`search::SearchPage`] uses it.
     fn set_search_term(&mut self, _term: &str, _cx: &mut PageCx) {}
 
     /// Enter or Down in the search box: the results page takes the keyboard. Returns whether
@@ -59,8 +59,7 @@ pub trait Page {
     /// The results page has the box's keys around it too: the shell focuses the box whenever
     /// the results come back on top (Back from one of their pages), and an Up or Shift+Tab the
     /// results page leaves unused at its first row goes back into the box rather than the top
-    /// bar, as `main`'s search page did (`at_edge`). U4's page only has to return `true` here
-    /// when it has a first row to move onto.
+    /// bar, as `main`'s search page did (`at_edge`).
     fn enter_results(&mut self, _cx: &mut PageCx) -> bool {
         false
     }

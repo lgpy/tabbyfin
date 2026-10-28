@@ -29,6 +29,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ✅ **egui (U3)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U3-scratch/`): Down walks Home's shelves and the page scrolls the whole shelf into view, downwards and back up (`home-keys4.png`, `home-keys-up.png`); Enter on the first card opened Collections and Esc came back to Home with the ring on the same card (`home-enter-stub.png`, `home-back.png`).
 
+✅ **egui (U4)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U4-scratch/`): `TABBYFIN_ROUTE=search:test` shows the three groups — Movies and Shows as posters, Episodes as stills — two rows of four episodes in a 1280 px window, sorted by name (`u4-search-test2.png`); Enter in the box moved the cursor onto the first result and two Downs walked it Movies → Shows → Episodes and scrolled the Episodes group into view (`u4-search-episodes.png`); a fourth Down moved inside the episode grid to its second row, kept on screen (`u4-search-grid-row2.png`); Up and Shift+Tab from the first row went back into the box with typing continuing there (`test` → `testx`, `test` → `testy`: `u4-search-typed-x.png`, `u4-search-shifttab.png`), the debounced search then showing *No results.*; Enter on a result opened its item page and Esc came back to the results with the box focused and typing going in again (`u4-search-open-item.png`, `u4-search-back.png`); Enter with no results kept the keyboard in the box (`zzz` → `zzzq`, `u4-search-noresults-enter.png`); Ctrl+F then typing `test` from Home opened the results (`u4-search-typed-from-home.png`) and backspacing the box empty closed them again (`u4-search-cleared.png`). Idle CPU on the results page was 0 ticks over 10 s.
+
 ✅ The account menu is a gpui-kit `PopupMenu`: Enter on the user button opens it, Down highlights the accounts, *Add account…* and *Sign out*, Enter on *Add account…* shows sign-in, and Esc closes it with the keyboard back on the user button.
 
 - ⬜ With a real keyboard: the top bar after mouse use (a click elsewhere hides its ring), and the account menu switching to another saved account.
@@ -401,7 +403,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 - ⬜ **With a mouse**: the bar's buttons, a click on the bar's Back leaving no keyboard in the bar, opening the account menu by clicking the user button and a click outside closing it, and a click on the page hiding the bar's ring.
 - ⬜ **Fullscreen while playing** (Xvfb has no window manager, so fullscreen does nothing there): *closed again when the player closes by itself*.
-- ⬜ U4's real results page: its `at_edge` must return `false` for Up and Shift+Tab at the first row (the shell then focuses the box), and `enter_results` `true` once it has a row. Esc over another page leaving the box open with its text.
+- ⬜ U4's results page with a **mouse** (a click on a card opening the item, a right-click giving the item menu), the failed state (the search erroring while the page is up), and a search with the window **resized** while the cursor is in the results (the column count changes, and the cursor may land outside them). Esc over another page leaving the box open with its text.
 
 ## 29. Packaging and CI (X1)
 
