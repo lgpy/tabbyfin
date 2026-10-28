@@ -271,6 +271,12 @@ impl Config {
             Err(_) => Config::default(),
         };
         config.list_current_account();
+        // The views older versions saved keep their one genre in `genre`, which is never written
+        // back out: upgrade them here, before anything saves the config again (the restore, the
+        // window's placement and the library pages all save it).
+        for view in config.library_views.values_mut() {
+            view.upgrade();
+        }
         if config.device_id.is_empty() {
             config.device_id = uuid::Uuid::new_v4().simple().to_string();
             if let Err(err) = config.save() {
