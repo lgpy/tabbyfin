@@ -27,6 +27,7 @@ use crate::config::{self, Config, SubtitleColor, SubtitleStyle, ThemePreference}
 use crate::services::AppEvent;
 use crate::task::Task;
 use crate::theme;
+use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::{Page, PageCx};
 
@@ -502,20 +503,23 @@ impl SettingsPage {
 /// A group on the page: its heading, and a box around its rows.
 fn section(ui: &mut Ui, icon: MaterialIcon, title: &str, contents: impl FnOnce(&mut Ui)) {
     ui.add_space(SECTION_GAP);
+    let tokens = theme::tokens_of(ui);
     ui.horizontal(|ui| {
-        ui.label(
-            icon.rich_text()
-                .size(HEADING_ICON)
-                .color(ui.visuals().weak_text_color()),
-        );
+        ui.label(icon.rich_text().size(HEADING_ICON).color(tokens.muted_foreground));
         ui.label(RichText::new(title).heading());
     });
     ui.add_space(HEADING_GAP);
-    egui::Frame::group(ui.style()).inner_margin(12).show(ui, |ui| {
-        // The box spans the form's width, not just its widest row.
-        ui.set_width(ui.available_width());
-        contents(ui);
-    });
+    // `main`'s `GroupBox::outline`: the border and the controls' radius over the page, with no
+    // fill of its own (an unchecked checkbox would read poorly on a grey box in light).
+    egui::Frame::NONE
+        .stroke(egui::Stroke::new(1., tokens.border))
+        .corner_radius(egui::CornerRadius::same(tokens.radius))
+        .inner_margin(12)
+        .show(ui, |ui| {
+            // The box spans the form's width, not just its widest row.
+            ui.set_width(ui.available_width());
+            contents(ui);
+        });
 }
 
 /// What a row shows besides its control: the setting's name, what it does (when it takes
@@ -538,10 +542,11 @@ fn row(ui: &mut Ui, row: Row, control: impl FnOnce(&mut Ui)) {
         ui.label(RichText::new(row.label).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
     });
+    // `main`'s setting descriptions were `text_sm` in the muted colour.
     ui.label(
         RichText::new(row.description)
-            .small()
-            .color(ui.visuals().weak_text_color()),
+            .font(text::font(ui, "sm"))
+            .color(theme::tokens_of(ui).muted_foreground),
     );
     if !row.key.is_empty() {
         let metadata = if row.unset.is_empty() {
@@ -549,11 +554,14 @@ fn row(ui: &mut Ui, row: Row, control: impl FnOnce(&mut Ui)) {
         } else {
             format!("{} · unset: {}", row.key, row.unset)
         };
+        // The config keys are monospace, as the file is: `RichText::monospace` would apply its
+        // family after the table's font, so the font id is built directly.
+        let mut font = text::font(ui, "xs");
+        font.family = egui::FontFamily::Monospace;
         ui.label(
             RichText::new(metadata)
-                .small()
-                .monospace()
-                .color(ui.visuals().weak_text_color()),
+                .font(font)
+                .color(theme::tokens_of(ui).muted_foreground),
         );
     }
     ui.add_space(ROW_GAP);
@@ -650,7 +658,7 @@ impl SettingsPage {
                 .selected_text(selected)
                 .show_ui(ui, |ui| {
                     for (value, label) in options {
-                        if ui.selectable_label(*value == current, label.as_ref()).clicked() {
+                        if theme::selectable_label(ui, *value == current, label.as_ref()).clicked() {
                             picked = Some(*value);
                         }
                     }
@@ -697,7 +705,11 @@ fn info(ui: &mut Ui, label: &str, value: &str) {
 
 /// A paragraph in a group that isn't a setting.
 fn note(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).small().color(ui.visuals().weak_text_color()));
+    ui.label(
+        RichText::new(text)
+            .font(crate::theme::text::font(ui, "sm"))
+            .color(theme::tokens_of(ui).muted_foreground),
+    );
     ui.add_space(ROW_GAP);
 }
 

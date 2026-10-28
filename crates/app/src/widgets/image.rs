@@ -7,11 +7,12 @@
 //! full-width banner asks a fixed width instead ([`show_at_width`]), so resizing doesn't fetch
 //! it again.
 
-use egui::{Color32, CornerRadius, Rect, Ui, Vec2};
+use egui::{CornerRadius, Rect, Ui, Vec2};
 use jellyfin::ImageRequest;
 use jellyfin::models::BaseItemDto;
 
 use crate::images::ImageCache;
+use crate::theme;
 
 /// The cards' rounded corners, `main`'s `rounded_xl`.
 pub const RADIUS: u8 = 12;
@@ -58,8 +59,9 @@ fn show_with_width(
     width: Option<u32>,
 ) {
     let painter = ui.painter();
-    // What shows before the blurhash arrives, or when there's no image at all.
-    painter.rect_filled(rect, radius, ui.visuals().faint_bg_color);
+    // What shows before the blurhash arrives, or when there's no image at all: `main`'s `muted`
+    // grey under a card.
+    painter.rect_filled(rect, radius, theme::tokens_of(ui).muted);
     let Some(request) = request else { return };
     // Twice the drawn width, so it stays sharp on a high-DPI screen (the server doesn't
     // upscale), or the width the caller fixed.
@@ -83,10 +85,13 @@ fn show_with_width(
     }
 }
 
-/// Darkens what's drawn in `rect` while the pointer is on it, as `main`'s cards did on hover.
+/// Dims what's drawn in `rect` while the pointer is on it, as `main`'s `opacity(0.8)` did: the
+/// page's background at 20 % over the picture, so a card dims on a light theme as well as a dark
+/// one instead of only darkening.
 pub fn dim(ui: &Ui, rect: Rect, radius: u8) {
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(radius), Color32::from_black_alpha(51));
+    let background = theme::tokens_of(ui).background;
+    let fill = egui::Color32::from_rgba_unmultiplied(background.r(), background.g(), background.b(), 51);
+    ui.painter().rect_filled(rect, CornerRadius::same(radius), fill);
 }
 
 /// The part of a texture to show so it fills `target` without stretching it: the widest or

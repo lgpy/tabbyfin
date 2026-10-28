@@ -94,7 +94,11 @@ impl ValueFilters {
                             if !first {
                                 ui.add_space(12.);
                             }
-                            ui.label(RichText::new(*title).small().color(ui.visuals().weak_text_color()));
+                            ui.label(
+                                RichText::new(*title)
+                                    .font(crate::theme::text::font(ui, "sm"))
+                                    .color(crate::theme::tokens_of(ui).muted_foreground),
+                            );
                         }
                         Line::Value(kind, value) => {
                             let checked = chosen(view, *kind).iter().any(|chosen| chosen == value);
@@ -195,7 +199,7 @@ fn chosen_mut(view: &mut LibraryView, kind: ValueKind) -> &mut Vec<String> {
 /// it.
 fn value_row(ui: &mut Ui, value: &str, checked: bool, highlighted: bool) -> egui::InnerResponse<egui::Response> {
     let fill = if highlighted {
-        ui.visuals().selection.bg_fill
+        crate::theme::tokens_of(ui).accent
     } else {
         Color32::TRANSPARENT
     };

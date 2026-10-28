@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use egui::{Align2, Color32, Id, RichText};
+use egui::{Align2, Id, RichText};
 use egui_material_icons::icons::{ICON_CHECK_CIRCLE, ICON_CLOSE, ICON_ERROR, ICON_INFO};
 
 /// How long a toast stays up.
@@ -163,7 +163,7 @@ impl Toasts {
                                 .show(ui, |ui| {
                                     ui.set_width(WIDTH);
                                     ui.horizontal_top(|ui| {
-                                        let (icon, color) = icon(shown.toast.kind, ui.visuals());
+                                        let (icon, color) = icon(shown.toast.kind, ui);
                                         ui.label(icon.rich_text().size(20.0).color(color));
                                         ui.vertical(|ui| {
                                             // What's left beside the icon, after the close button.
@@ -206,11 +206,14 @@ fn toast_button(ui: &mut egui::Ui, button: egui::Button<'_>) -> egui::Response {
     ui.add(button.sense(egui::Sense::CLICK))
 }
 
-fn icon(kind: Kind, visuals: &egui::Visuals) -> (egui_material_icons::MaterialIcon, Color32) {
+/// A toast's icon and colour, as `main`'s notifications had them: the theme's info, success and
+/// danger colours.
+fn icon(kind: Kind, ui: &egui::Ui) -> (egui_material_icons::MaterialIcon, egui::Color32) {
+    let tokens = crate::theme::tokens_of(ui);
     match kind {
-        Kind::Info => (ICON_INFO, visuals.hyperlink_color),
-        Kind::Success => (ICON_CHECK_CIRCLE, Color32::from_rgb(0x2e, 0xa0, 0x43)),
-        Kind::Error => (ICON_ERROR, visuals.error_fg_color),
+        Kind::Info => (ICON_INFO, tokens.info),
+        Kind::Success => (ICON_CHECK_CIRCLE, tokens.success),
+        Kind::Error => (ICON_ERROR, tokens.danger),
     }
 }
 

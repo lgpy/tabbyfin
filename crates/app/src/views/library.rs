@@ -46,8 +46,8 @@ use crate::widgets::{card, state};
 
 /// Items per request: rows show placeholders until the page holding them arrives.
 const PAGE_SIZE: usize = 100;
-/// Space around the grid and the toolbar (`main`'s 24 px, less the central panel's own margin).
-const GRID_PADDING: f32 = 16.;
+/// `main`'s `px_6` around the toolbar and the grid.
+const GRID_PADDING: f32 = 24.;
 /// Space around a toolbar control for the cursor's ring.
 const RING_GAP: f32 = 3.;
 /// The jump bar's letters; `#` is the top (names starting with digits or symbols).
@@ -756,7 +756,7 @@ impl LibraryPage {
 
     fn toolbar(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let tools = self.tools();
-        let muted = ui.visuals().weak_text_color();
+        let muted = crate::theme::tokens_of(ui).muted_foreground;
         let mut action = None;
         ui.horizontal_wrapped(|ui| {
             ui.add_space(GRID_PADDING - RING_GAP);
@@ -769,7 +769,11 @@ impl LibraryPage {
                     Tool::Show => Some("Show"),
                     _ => None,
                 } {
-                    ui.label(RichText::new(label).small().color(muted));
+                    ui.label(
+                        RichText::new(label)
+                            .font(crate::theme::text::font(ui, "sm"))
+                            .color(muted),
+                    );
                 }
                 let (response, control) = Self::tool(ui, tool, &self.view, &self.years, self.tool_index(tool));
                 if let Some(control) = control {
@@ -781,8 +785,15 @@ impl LibraryPage {
             }
             let total = self.total;
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // `main`'s `px_6` on the right too: the count sits clear of the window's edge
+                // now that the page owns the whole width.
+                ui.add_space(GRID_PADDING - RING_GAP);
                 if let Some(total) = total {
-                    ui.label(RichText::new(item_count(total)).small().color(muted));
+                    ui.label(
+                        RichText::new(item_count(total))
+                            .font(crate::theme::text::font(ui, "sm"))
+                            .color(muted),
+                    );
                 }
             });
         });
@@ -879,15 +890,16 @@ impl LibraryPage {
             ui.spacing_mut().item_spacing.y = gap;
             for letter in LETTERS.chars() {
                 let (rect, response) = ui.allocate_exact_size(vec2(LETTER_BAR_W, line), Sense::click());
+                let tokens = crate::theme::tokens_of(ui);
                 if response.hovered() {
-                    let fill = ui.visuals().selection.bg_fill;
+                    let fill = tokens.accent;
                     ui.painter()
                         .rect_filled(rect.shrink2(vec2(4., 0.)), CornerRadius::same(2), fill);
                 }
                 let color = if response.hovered() {
-                    ui.visuals().selection.stroke.color
+                    tokens.accent_foreground
                 } else {
-                    ui.visuals().weak_text_color()
+                    tokens.muted_foreground
                 };
                 ui.painter().text(
                     rect.center(),
@@ -917,7 +929,8 @@ impl LibraryPage {
         let rows = total.div_ceil(columns);
         let card_height = POSTER_H + card::text_height(ui);
         let pitch = card_height + CARD_GAP;
-        let viewport = ui.available_height();
+        // The grid sits `main`'s `pt_4` under the toolbar, so it has that much less room.
+        let viewport = (ui.available_height() - 16.).max(0.);
         // `show_rows` leaves out the last row's gap below it.
         let max_offset = (rows as f32 * pitch - CARD_GAP - viewport).max(0.);
         if let Some(index) = self.scroll_to.take() {
@@ -943,6 +956,8 @@ impl LibraryPage {
         let mut missing = Vec::new();
         let mut opened = None;
         let mut chosen = None;
+        // `main`'s `pt_4` between the toolbar and the grid.
+        ui.add_space(16.);
         ui.horizontal_top(|ui| {
             let size = vec2(grid_width, viewport);
             ui.allocate_ui_with_layout(size, Layout::top_down(Align::Min), |ui| {
@@ -1083,6 +1098,8 @@ impl Page for LibraryPage {
             self.refresh(cx);
         }
         browse::hide_on_click(&mut self.cursor, ui);
+        // `main`'s `pt_4` over the toolbar.
+        ui.add_space(16.);
         self.toolbar(ui, cx);
 
         if self.total.is_none() {
@@ -1146,7 +1163,7 @@ fn picker(ui: &mut Ui, id: &'static str, width: f32, labels: Vec<&str>, selected
         .show_ui(ui, |ui| {
             let mut chosen = None;
             for (index, label) in labels.iter().enumerate() {
-                if ui.selectable_label(index == selected, *label).clicked() {
+                if crate::theme::selectable_label(ui, index == selected, *label).clicked() {
                     chosen = Some(index);
                 }
             }
@@ -1169,13 +1186,13 @@ fn values_summary(view: &LibraryView) -> String {
 /// A button with a material icon before its label, as `main`'s toolbar buttons had.
 fn icon_button(ui: &Ui, icon: MaterialIcon, label: &str) -> egui::Button<'static> {
     let body = TextStyle::Button.resolve(ui.style());
-    let color = ui.visuals().text_color();
+    let color = crate::theme::tokens_of(ui).foreground;
     let mut job = LayoutJob::default();
     job.append(
         icon.codepoint,
         0.,
         TextFormat {
-            font_id: FontId::new(body.size + 2., icon.font_family()),
+            font_id: crate::theme::text::icon(ui, icon.font_family()),
             color,
             ..Default::default()
         },
@@ -1197,7 +1214,7 @@ fn ring(ui: &Ui, response: &Response) {
     ui.painter().rect_stroke(
         response.rect.expand(RING_GAP),
         CornerRadius::same(4),
-        Stroke::new(1.5, ui.visuals().selection.stroke.color),
+        Stroke::new(1.5, crate::theme::tokens_of(ui).foreground),
         StrokeKind::Outside,
     );
 }
@@ -1239,7 +1256,7 @@ fn item_count(total: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jump, chosen, columns, item_count, jump_target, year_choices, years_of};
+    use super::{GRID_PADDING, Jump, chosen, columns, item_count, jump_target, year_choices, years_of};
 
     #[test]
     fn letters_jump_past_the_names_before_them() {
@@ -1275,11 +1292,11 @@ mod tests {
         // No room at all is still one column.
         assert_eq!(columns(0.), 1);
         assert_eq!(columns(150.), 1);
-        // Two posters and the gap between them, plus the padding on both sides.
-        assert_eq!(columns(2. * 150. + 16. + 2. * 16.), 2);
-        assert_eq!(columns(3. * 150. + 2. * 16. + 2. * 16.), 3);
+        // Two posters and the gap between them, plus `main`'s padding on both sides.
+        assert_eq!(columns(2. * 150. + 16. + 2. * GRID_PADDING), 2);
+        assert_eq!(columns(3. * 150. + 2. * 16. + 2. * GRID_PADDING), 3);
         // A poster and a bit doesn't fit a second.
-        assert_eq!(columns(2. * 150. + 16. + 2. * 16. - 1.), 1);
+        assert_eq!(columns(2. * 150. + 16. + 2. * GRID_PADDING - 1.), 1);
     }
 
     #[test]

@@ -524,3 +524,21 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **Subtitle size from Settings while a session runs**: the picker calls `set_subtitle_scale`, which the running session follows (only the write was checked here).
 
 *Harness note:* an occluded window on this window-manager-less display gets logic-only passes from eframe (no `ui` runs), and a key injected by `TABBYFIN_KEYS` in one of those passes reached no frame at all, which is what made the first round-2 runs miss a step now and then. X3 made `App` inject a press only in a pass that follows one that drew, so a script's presses wait for drawing to resume (one key per frame) instead of being swallowed; the earlier workaround (keeping the window at the display's top-left, 1600×1000, raised before each key) isn't needed any more. A real window with the keyboard focus can't lose keys this way.
+
+## 33. Theme tokens (R1)
+
+**egui (R1)**, against the 12.2 dev server, keyboard only (`TABBYFIN_KEYS`, `TABBYFIN_ROUTE`, screenshots in `R1-scratch/`).
+
+✅ The tokens behind every screen, in dark and light: Home (`r1-home-dark.png`, `r1-home-light.png`), a library's grid (`r1-library-dark.png`, `r1-library-light.png`), a movie's and a series' item page (`r1-movie-*.png`, `r1-series-*.png`), Settings (`r1-settings-*.png`) and the sign-in form (`r1-login-*.png`), next to the same screens of `main` (`main-*.png`). The backgrounds, the text and muted greys, the card titles and subtitles (14/12), the shelf headings (18), the top bar's 72 points with 24-point icons, the played badges, progress bars, the watched tick and favourite heart, the buttons' and pickers' fills and radii, and the settings groups' outlines match `main`'s.
+
+✅ Text size 150 % scales the whole table and nothing else: the same screens at `r1-*-150-*.png` against `main-home-150.png`, `main-movie-150.png` and `main-settings-150.png`.
+
+✅ The open search box (`r1-search-dark.png`), a season's open episodes band (`r1-series-band.png`), the player with its up-next card (`r1-player-dark.png`), and a project's menu rows' and SyncPlay panel's highlights (`accent`).
+
+- ⬜ **The card's hover dim**: `main` faded a card to 80 % under the pointer; here it's the page's background at 20 % over the picture. Needs a mouse (the dim only shows while a card is hovered), in both themes.
+- ⬜ **Toasts** in both themes: their info, success and error icons take the theme's colours, and the popup frame the tokens' fill, border and radius.
+- ⬜ **Light and dark on Windows and macOS**, including following the system's appearance there (only Linux was checked; the portal is Linux's stand-in).
+- ⬜ **A person card's initials** at the table's `text_2xl` (the dev library's items have no cast to show one).
+- ⬜ **The card title's baseline** and the action buttons' centred icon and label at 90 % and 150 % zoom.
+- ⬜ **With a mouse**: a primary button's hover and press (the sign-in form's *Connect*, the item page's *Resume*), and a picker's open list highlighting its current choice with the theme's `accent` (the list is pointer-only, §32).
+- ⬜ **A checked settings switch** in the light theme on a white page (the box is `secondary` with a foreground tick, not `main`'s black box with a white tick — egui draws both the checked and unchecked box from one colour).

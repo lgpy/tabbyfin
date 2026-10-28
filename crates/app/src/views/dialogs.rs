@@ -21,6 +21,8 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 
 use crate::nav::NavRequest;
 use crate::task::Task;
+use crate::theme;
+use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::PageCx;
 use crate::widgets::text::Load;
@@ -147,55 +149,59 @@ impl AddToPlaylist {
 
         let ctx = cx.ctx;
         let mut chosen = None;
-        let modal = egui::Modal::new(egui::Id::unique("add_to_playlist")).show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.heading("Add to playlist");
-            ui.add_space(8.);
-            // Enter picks the highlighted line, as `main`'s dialog's Confirm did; the field
-            // never sees it, or it would only give up the focus.
-            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-            let field = ui.add(
-                TextEdit::singleline(&mut self.typed)
-                    .interactive(!self.busy)
-                    .hint_text("Find a playlist or name a new one")
-                    .desired_width(f32::INFINITY),
-            );
-            if std::mem::take(&mut self.focus) {
-                field.request_focus();
-            }
-            if field.changed() {
-                // A different filter: back to the top line.
-                self.highlighted = 0;
-                self.scroll_to_highlight = true;
-            }
+        // `main`'s dialogs dimmed the page under them with the theme's `overlay`.
+        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
+        let modal = egui::Modal::new(egui::Id::unique("add_to_playlist"))
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                ui.set_width(WIDTH);
+                ui.heading("Add to playlist");
+                ui.add_space(8.);
+                // Enter picks the highlighted line, as `main`'s dialog's Confirm did; the field
+                // never sees it, or it would only give up the focus.
+                let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+                let field = ui.add(
+                    TextEdit::singleline(&mut self.typed)
+                        .interactive(!self.busy)
+                        .hint_text("Find a playlist or name a new one")
+                        .desired_width(f32::INFINITY),
+                );
+                if std::mem::take(&mut self.focus) {
+                    field.request_focus();
+                }
+                if field.changed() {
+                    // A different filter: back to the top line.
+                    self.highlighted = 0;
+                    self.scroll_to_highlight = true;
+                }
 
-            // Up and Down move the highlight; the field has nothing to move to on one line, and
-            // its own focus filter keeps egui from moving focus with them (`TextEdit` locks the
-            // vertical arrows).
-            let rows = self.rows();
-            self.highlighted = self.highlighted.min(rows.len().saturating_sub(1));
-            let (up, down) = ui.input_mut(|input| {
-                (
-                    input.consume_key(Modifiers::NONE, Key::ArrowUp),
-                    input.consume_key(Modifiers::NONE, Key::ArrowDown),
-                )
+                // Up and Down move the highlight; the field has nothing to move to on one line, and
+                // its own focus filter keeps egui from moving focus with them (`TextEdit` locks the
+                // vertical arrows).
+                let rows = self.rows();
+                self.highlighted = self.highlighted.min(rows.len().saturating_sub(1));
+                let (up, down) = ui.input_mut(|input| {
+                    (
+                        input.consume_key(Modifiers::NONE, Key::ArrowUp),
+                        input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                    )
+                });
+                if !rows.is_empty() && !self.busy {
+                    if down {
+                        self.highlighted = (self.highlighted + 1).min(rows.len() - 1);
+                        self.scroll_to_highlight = true;
+                    }
+                    if up {
+                        self.highlighted = self.highlighted.saturating_sub(1);
+                        self.scroll_to_highlight = true;
+                    }
+                    if enter {
+                        chosen = Some(self.highlighted);
+                    }
+                }
+                ui.add_space(4.);
+                self.list(ui, &rows, &mut chosen);
             });
-            if !rows.is_empty() && !self.busy {
-                if down {
-                    self.highlighted = (self.highlighted + 1).min(rows.len() - 1);
-                    self.scroll_to_highlight = true;
-                }
-                if up {
-                    self.highlighted = self.highlighted.saturating_sub(1);
-                    self.scroll_to_highlight = true;
-                }
-                if enter {
-                    chosen = Some(self.highlighted);
-                }
-            }
-            ui.add_space(4.);
-            self.list(ui, &rows, &mut chosen);
-        });
 
         if let Some(index) = chosen {
             self.choose(index, cx);
@@ -370,61 +376,64 @@ impl EditPlaylist {
 
         let ctx = cx.ctx;
         let mut save = false;
-        let modal = egui::Modal::new(egui::Id::unique("edit_playlist")).show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.heading("Edit playlist");
-            ui.add_space(8.);
-            // Enter saves, as `main`'s dialog's Confirm did; the field never sees it.
-            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-            if !self.busy {
-                self.keys(ui);
-            }
+        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
+        let modal = egui::Modal::new(egui::Id::unique("edit_playlist"))
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                ui.set_width(WIDTH);
+                ui.heading("Edit playlist");
+                ui.add_space(8.);
+                // Enter saves, as `main`'s dialog's Confirm did; the field never sees it.
+                let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+                if !self.busy {
+                    self.keys(ui);
+                }
 
-            muted(ui, "Name");
-            let field = ui.add(
-                TextEdit::singleline(&mut self.typed)
-                    .interactive(!self.busy)
-                    .desired_width(f32::INFINITY),
-            );
-            if std::mem::take(&mut self.focus) {
-                field.request_focus();
-            }
-            // A click into the name takes the keyboard back from the sharing switch.
-            if field.gained_focus() {
-                self.field = Field::Name;
-            }
-            ui.add_space(8.);
-            match &self.public {
-                Load::Loading => muted(ui, "Checking who can see it…"),
-                Load::Failed(message) => muted(ui, message.clone()),
-                Load::Loaded(public) => {
-                    let on = *public;
-                    if switch_row(ui, on, self.field == Field::Sharing).clicked() && !self.busy {
-                        self.field = Field::Sharing;
-                        let_keyboard_go(ui);
-                        self.public = Load::Loaded(!on);
+                muted(ui, "Name");
+                let field = ui.add(
+                    TextEdit::singleline(&mut self.typed)
+                        .interactive(!self.busy)
+                        .desired_width(f32::INFINITY),
+                );
+                if std::mem::take(&mut self.focus) {
+                    field.request_focus();
+                }
+                // A click into the name takes the keyboard back from the sharing switch.
+                if field.gained_focus() {
+                    self.field = Field::Name;
+                }
+                ui.add_space(8.);
+                match &self.public {
+                    Load::Loading => muted(ui, "Checking who can see it…"),
+                    Load::Failed(message) => muted(ui, message.clone()),
+                    Load::Loaded(public) => {
+                        let on = *public;
+                        if switch_row(ui, on, self.field == Field::Sharing).clicked() && !self.busy {
+                            self.field = Field::Sharing;
+                            let_keyboard_go(ui);
+                            self.public = Load::Loaded(!on);
+                        }
                     }
                 }
-            }
-            ui.add_space(12.);
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let can_save = !self.busy && !self.typed.trim().is_empty();
-                    if ui
-                        .add_enabled(can_save, Button::new("Save").sense(Sense::CLICK))
-                        .clicked()
-                    {
-                        save = true;
-                    }
-                    if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
-                        ui.close();
-                    }
+                ui.add_space(12.);
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let can_save = !self.busy && !self.typed.trim().is_empty();
+                        if ui
+                            .add_enabled(can_save, Button::new("Save").sense(Sense::CLICK))
+                            .clicked()
+                        {
+                            save = true;
+                        }
+                        if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
+                            ui.close();
+                        }
+                    });
                 });
+                if enter && !self.busy && !self.typed.trim().is_empty() {
+                    save = true;
+                }
             });
-            if enter && !self.busy && !self.typed.trim().is_empty() {
-                save = true;
-            }
-        });
 
         if save {
             self.save(cx);
@@ -540,30 +549,33 @@ impl DeletePlaylist {
 
         let ctx = cx.ctx;
         let mut delete = false;
-        let modal = egui::Modal::new(egui::Id::unique("delete_playlist")).show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.heading(format!("Delete “{}”?", self.name));
-            ui.add_space(8.);
-            ui.label(DELETE_PLAYLIST_NOTE);
-            ui.add_space(12.);
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add_enabled(!self.busy, Button::new("Delete").sense(Sense::CLICK))
-                        .clicked()
-                    {
-                        delete = true;
-                    }
-                    if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
-                        ui.close();
-                    }
+        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
+        let modal = egui::Modal::new(egui::Id::unique("delete_playlist"))
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                ui.set_width(WIDTH);
+                ui.heading(format!("Delete “{}”?", self.name));
+                ui.add_space(8.);
+                ui.label(DELETE_PLAYLIST_NOTE);
+                ui.add_space(12.);
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(!self.busy, Button::new("Delete").sense(Sense::CLICK))
+                            .clicked()
+                        {
+                            delete = true;
+                        }
+                        if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
+                            ui.close();
+                        }
+                    });
                 });
+                // Enter is the confirmation's Delete, as the alert's OK was on `main`.
+                if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) && !self.busy {
+                    delete = true;
+                }
             });
-            // Enter is the confirmation's Delete, as the alert's OK was on `main`.
-            if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) && !self.busy {
-                delete = true;
-            }
-        });
 
         if delete {
             self.delete(cx);
@@ -623,22 +635,20 @@ fn row_line(ui: &mut Ui, row: &Row, highlighted: bool) -> Response {
         ),
         None => (ICON_ADD, format!("New playlist “{}”", row.name), String::new()),
     };
-    let weak = ui.visuals().weak_text_color();
-    let body = TextStyle::Body.resolve(ui.style());
+    let tokens = theme::tokens_of(ui);
+    let weak = tokens.muted_foreground;
     let atoms = (
-        icon.rich_text().size(body.size + 2.).color(weak),
-        RichText::new(format!(" {name}")).size(body.size),
+        icon.rich_text().size(text::BASE).color(weak),
+        RichText::new(format!(" {name}")).font(text::font(ui, "base")),
         Atom::grow(),
-        RichText::new(detail).size(body.size - 2.).color(weak),
+        RichText::new(detail).font(text::font(ui, "sm")).color(weak),
     );
     let width = ui.available_width();
-    ui.add(
-        Button::new(atoms)
-            .selected(highlighted)
-            .sense(Sense::CLICK)
-            .truncate()
-            .min_size(vec2(width, 0.)),
-    )
+    let button = Button::new(atoms)
+        .sense(Sense::CLICK)
+        .truncate()
+        .min_size(vec2(width, 0.));
+    ui.add(theme::selected(ui, highlighted, button))
 }
 
 /// The sharing switch: a tick box and its label, with the keyboard's ring on it while the
@@ -648,12 +658,12 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
     let padding = 6.;
     let line = ui.text_style_height(&TextStyle::Body);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), line + 2. * padding), Sense::CLICK);
-    let visuals = ui.visuals();
+    let tokens = theme::tokens_of(ui);
     if selected {
         ui.painter().rect_stroke(
             rect,
             CornerRadius::same(8),
-            Stroke::new(3., visuals.strong_text_color()),
+            Stroke::new(3., tokens.foreground),
             StrokeKind::Inside,
         );
     }
@@ -662,20 +672,21 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
         Vec2::splat(line),
     );
     if on {
+        // `main`'s checked box: the primary colour with its tick in the foreground.
         ui.painter()
-            .rect_filled(tick_box, CornerRadius::same(4), visuals.selection.bg_fill);
+            .rect_filled(tick_box, CornerRadius::same(4), tokens.primary);
         ui.painter().text(
             tick_box.center(),
             Align2::CENTER_CENTER,
             ICON_CHECK.codepoint,
             FontId::new(line * 0.8, ICON_CHECK.font_family()),
-            visuals.selection.stroke.color,
+            tokens.primary_foreground,
         );
     } else {
         ui.painter().rect_stroke(
             tick_box,
             CornerRadius::same(4),
-            visuals.widgets.inactive.bg_stroke,
+            Stroke::new(1., tokens.input),
             StrokeKind::Inside,
         );
     }
@@ -684,14 +695,14 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
         Align2::LEFT_CENTER,
         "Everyone on this server can see it",
         TextStyle::Body.resolve(ui.style()),
-        visuals.text_color(),
+        tokens.foreground,
     );
     response
 }
 
 /// A line of muted text: what the dialog is waiting for, or why there's nothing to pick.
 fn muted(ui: &mut Ui, text: impl Into<String>) {
-    ui.label(RichText::new(text).color(ui.visuals().weak_text_color()));
+    ui.label(RichText::new(text).color(theme::tokens_of(ui).muted_foreground));
 }
 
 /// The sharing switch takes no widget focus, so the name must let go of the keyboard on the way
