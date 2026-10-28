@@ -213,7 +213,7 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
 
 ### 5.2 Threading and reporting
 
-1. The session runs on tokio. It forwards `PlayerEvent`s to a `NowPlaying` GPUI entity, which the player page draws, and it receives `UiCommand`s from that page: pause, seek, volume, tracks and stop.
+1. The session runs on tokio. It forwards `PlayerEvent`s into `NowPlaying`, the state the player page draws (`Services`' playback manager in the egui app, a GPUI entity on `main`), and it receives `UiCommand`s from that page: pause, seek, volume, tracks and stop.
    - After playback starts, it also looks up the item's versions and, for episodes, the next episode.
    - **Switching version** starts a new session of the same item at the current position.
    - **Next episode** (button, Shift+N, or automatically when an episode plays to the end) starts a session for the next episode from its resume point.
