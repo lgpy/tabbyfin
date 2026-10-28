@@ -13,8 +13,8 @@
 //! - Cards and shelves are `widgets/`, the item menu `widgets/menu.rs`; what a menu asks for is
 //!   carried out here, after the frame's drawing. *Add to playlist…* opens U8's dialog.
 //!
-//! `main` staggered the shelves in as the page appeared; egui draws them all at once until R2
-//! brings the animations back.
+//! The shelves come in one after another as the page appears, as `main`'s did
+//! ([`crate::motion`]).
 
 use std::collections::HashMap;
 
@@ -24,6 +24,7 @@ use jellyfin::{Client, ItemsQuery};
 use crate::browse::{self, Browse, Cursor, Position, Section};
 use crate::images::ImageCache;
 use crate::keys::{Action, Scope};
+use crate::motion;
 use crate::nav::{NavRequest, Route};
 use crate::task::Task;
 use crate::views::dialogs::AddToPlaylist;
@@ -342,17 +343,19 @@ fn show_shelves(
                     if index > 0 {
                         ui.add_space(SHELF_GAP);
                     }
-                    let shelf = shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, |ui| {
-                        cards(
-                            ui,
-                            row.items,
-                            index,
-                            row.landscape,
-                            moved,
-                            &mut *cursor,
-                            &mut *images,
-                            &mut asked,
-                        );
+                    let shelf = motion::enter(ui, ("shelf", row.id), motion::shelf_delay(index), |ui| {
+                        shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, |ui| {
+                            cards(
+                                ui,
+                                row.items,
+                                index,
+                                row.landscape,
+                                moved,
+                                &mut *cursor,
+                                &mut *images,
+                                &mut asked,
+                            );
+                        })
                     });
                     if moved && selected.is_some_and(|position| position.section == index) {
                         target = Some(shelf);

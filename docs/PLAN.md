@@ -88,6 +88,7 @@ crates/app/src/
 ├── debug.rs         TABBYFIN_KEYS replay, TABBYFIN_ROUTE parsing (compiled in debug builds only)
 ├── browse.rs        the keyboard cursor and its egui wiring
 ├── smooth_scroll.rs the shelves' glide, and the wheel's instant step with animations off
+├── motion.rs        `main`'s animations: page entry, the shelves' stagger, image fades, toggle pops, the player's prompt and controls
 ├── config.rs, credentials.rs, session.rs, update.rs, markers.rs
 ├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
 ├── playback.rs, syncplay.rs, remote.rs, live.rs   services
@@ -351,7 +352,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 - Long-lived streams (a playback session's updates, the websocket) are a `task::channel`: `Sender::send` requests a repaint after each send, `Receiver::drain` takes everything without waiting. `Services::tick` drains them.
 - Timers (controls hiding, the search debounce, SyncPlay's drift checks, saving the window placement, reconnects) are a `task::Deadline`: `set(after)` starts or restarts it, `cancel()` stops it, `fire(ctx)` returns true once when it's due and otherwise asks for a repaint for the remaining time. No thread sleeps on the UI side. A deadline is only as punctual as the frames, so what must happen at an exact time (SyncPlay's scheduled commands) waits on tokio instead.
 - `Services::tick` runs from `App::logic`, which eframe also calls while the window is hidden whenever a repaint was requested, so playback and the sign-in form's requests carry on while the window is minimised.
-- Idle CPU stays near zero: nothing requests a repaint every frame except while something moves (video, an animation, a loader). A loader is one of the moving things: it asks for a frame every 33 ms for as long as it's on screen, as `main`'s animation frames did (the spinner while a page loads, a season's episodes band, the player's loader, the restoring screen). The confused mascot over an empty state is not: it moves for its first 8 s after it appears, holds its rest pose after that and asks for no frames, so an empty page is idle (0 CPU ticks over 10 s here, against about 63 % of one core while the mascot is greeting; `main` animated it for as long as the page was up, at about 3.5 cores on this box).
+- Idle CPU stays near zero: nothing requests a repaint every frame except while something moves (video, an animation, a loader). An animation (`motion.rs`) asks for frames only while it runs: once a page's entry is over, a repaint for a hover or a key draws it at its end state and asks for no more. A loader is one of the moving things: it asks for a frame every 33 ms for as long as it's on screen, as `main`'s animation frames did (the spinner while a page loads, a season's episodes band, the player's loader, the restoring screen). The confused mascot over an empty state is not: it moves for its first 8 s after it appears, holds its rest pose after that and asks for no frames, so an empty page is idle (0 CPU ticks over 10 s here, against about 63 % of one core while the mascot is greeting; `main` animated it for as long as the page was up, at about 3.5 cores on this box).
 
 ### Keyboard
 
@@ -367,7 +368,8 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 
 ### Theme and appearance
 
-- `theme.rs` applies the config's theme (dark, light, or the system's), text size (90–150 % of egui's text styles, or the desktop's: the Windows registry, GNOME's `gsettings`, KDE's `kdeglobals`, read again when the window regains the focus), zoom (Ctrl/Cmd `=`, `-`, `0`, saved as `ui_zoom`), and animations (`animation_time` 0 and no scroll animation when off).
+- `theme.rs` applies the config's theme (dark, light, or the system's), text size (90–150 % of egui's text styles, or the desktop's: the Windows registry, GNOME's `gsettings`, KDE's `kdeglobals`, read again when the window regains the focus), zoom (Ctrl/Cmd `=`, `-`, `0`, saved as `ui_zoom`), and animations (`animation_time` 0 and no scroll animation when off). `theme::animations` is how `motion.rs` and the shelf glide read the setting.
+- `motion.rs` has `main`'s times and curves for what appears: a page rises and fades in, Home's shelves come in one after another, a loaded image fades in over its blurhash, the Watched and Favorite icons pop, a season's band rises in, and the player's prompt slides in while its bars fade in. An animation plays when what it wraps appears (egui memory keyed by pass adjacency, so a frame's several passes count as one appearance); with the setting off everything is drawn at its end state at once.
 - On Linux the desktop's colour scheme comes from the XDG portal (`theme::SystemTheme`), read on tokio; Windows and macOS let egui/winit follow the system.
 - Colours come from egui's style. The player stays dark over the video in both themes and takes its colours from `theme::over_video` (`Color32` constants).
 - Settings raises `AppEvent::AppearanceChanged` after saving an appearance setting; the app calls `theme::apply` (the appearance is the app's, so it applies on the sign-in screen too).

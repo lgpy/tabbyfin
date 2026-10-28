@@ -39,6 +39,7 @@ use jellyfin::models::{BaseItemKind, ImageType};
 
 use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
+use crate::motion;
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, SubtitleChoice, UiCommand, Version};
 use crate::task;
 use crate::theme::{self, over_video};
@@ -100,6 +101,14 @@ const SETTINGS_W: f32 = 380.;
 const TRACK_ROW_H: f32 = 28.;
 const TRACK_ROWS: f32 = 5.;
 
+/// What the player's one prompt shows. Each kind slides in when it appears, as `main`'s ids did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PromptKind {
+    Skip,
+    UpNext,
+    Resume,
+}
+
 /// The player, while a playback session shows.
 pub struct PlayerPage {
     /// The playing session's video, with the session's number: a new session (the next episode,
@@ -126,6 +135,13 @@ pub struct PlayerPage {
     /// Seek-bar previews, once the session knows the server has tiles for this version.
     trickplay: Option<Trickplay>,
     controls_visible: bool,
+    /// The controls appeared since the last frame drawn, so they fade in (as `main`'s did each
+    /// time they showed), and when they did.
+    controls_appeared: bool,
+    controls_since: Option<f64>,
+    /// The prompt showing, and when it appeared: each kind slides in when it appears, as
+    /// `main`'s did.
+    prompt_in: Option<(PromptKind, f64)>,
     hide_controls: task::Deadline,
     /// A menu is open, which keeps the controls up.
     menu_open: bool,
@@ -149,7 +165,10 @@ impl PlayerPage {
             auto_skip: config.auto_skip_intro.unwrap_or(false),
             auto_skipped: None,
             trickplay: None,
-            controls_visible: true,
+            controls_visible: false,
+            controls_appeared: false,
+            controls_since: None,
+            prompt_in: None,
             hide_controls: task::Deadline::default(),
             menu_open: false,
             settings_tab: SettingsTab::Audio,
@@ -187,6 +206,11 @@ impl PlayerPage {
             .now_playing()
             .map(|state| View::read(state, menus, self.show_remaining));
 
+        let now = ui.input(|input| input.time);
+        if std::mem::take(&mut self.controls_appeared) || self.controls_since.is_none() {
+            self.controls_since = Some(now);
+        }
+
         let rect = ui.max_rect();
         let top = Rect::from_min_size(rect.min, vec2(rect.width(), TOP_BAR_H));
         let bottom = Rect::from_min_max(pos2(rect.left(), rect.bottom() - BOTTOM_BAR_H), rect.right_bottom());
@@ -206,8 +230,11 @@ impl PlayerPage {
             loader(ui, rect);
         }
         if self.controls_visible {
-            self.top_bar(ui, &view, cx, top);
-            self.controls(ui, &view, cx, bottom);
+            let alpha = self.controls_alpha(ui.ctx(), now);
+            motion::faded(ui, alpha, |ui| {
+                self.top_bar(ui, &view, cx, top);
+                self.controls(ui, &view, cx, bottom);
+            });
         }
         self.prompt(ui, &view, cx);
         if let Some(response) = response {
@@ -236,6 +263,19 @@ impl PlayerPage {
         };
         let response = video.show(ui);
         (Some(response), video.has_frame(), video.import_failed())
+    }
+
+    /// The controls' opacity at `now`: they fade in over [`motion::FADE`] after they show, as
+    /// `main`'s did. Asks for the frames while they fade.
+    fn controls_alpha(&self, ctx: &egui::Context, now: f64) -> f32 {
+        if !theme::animations(ctx) {
+            return 1.;
+        }
+        let alpha = motion::progress(self.controls_since.unwrap_or(now), now, 0., motion::FADE);
+        if alpha < 1. {
+            ctx.request_repaint();
+        }
+        alpha
     }
 
     /// The bar while no session is running (a reconnect, or the next item loading): Back stops
@@ -281,6 +321,8 @@ impl PlayerPage {
         self.auto_skip = config.auto_skip_intro.unwrap_or(false);
         self.show_remaining = config.show_remaining_time.unwrap_or(false);
         self.show_controls();
+        // A new item's prompt slides in again, as it did under `main`'s page per session.
+        self.prompt_in = None;
     }
 
     /// With the setting on, skips each intro or recap once when it starts. Not in a SyncPlay
@@ -332,6 +374,9 @@ impl PlayerPage {
     /// Shows the controls, and hides them again after a few seconds without the mouse moving,
     /// unless paused or a menu is open.
     fn show_controls(&mut self) {
+        if !self.controls_visible {
+            self.controls_appeared = true;
+        }
         self.controls_visible = true;
         self.hide_controls.set(HIDE_CONTROLS_AFTER);
     }
@@ -834,23 +879,53 @@ impl PlayerPage {
     }
 
     /// The skip button or the up-next card, bottom right, above the controls when they show.
+    /// Each kind slides in when it appears, as `main`'s did.
     fn prompt(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
-        if view.skippable.is_none() && !view.show_up_next && view.resume.is_none() {
+        let kind = if view.skippable.is_some() {
+            PromptKind::Skip
+        } else if view.show_up_next {
+            PromptKind::UpNext
+        } else if view.resume.is_some() {
+            PromptKind::Resume
+        } else {
+            self.prompt_in = None;
             return;
-        }
+        };
+        let now = ui.input(|input| input.time);
+        let started = match self.prompt_in {
+            Some((shown, started)) if shown == kind => started,
+            _ => now,
+        };
+        self.prompt_in = Some((kind, started));
+        // Sliding in from the right while it fades, as `main`'s `motion::slide_in` did.
+        let (slide, alpha) = if theme::animations(ui.ctx()) {
+            let t = motion::progress(started, now, 0., motion::ENTER);
+            if t < 1. {
+                ui.ctx().request_repaint();
+            }
+            (motion::LIFT * 2. * (1. - t), t)
+        } else {
+            (0., 1.)
+        };
         let bottom = if self.controls_visible {
             PROMPT_ABOVE_CONTROLS
         } else {
             PROMPT_AT_THE_EDGE
         };
         egui::Area::new(prompt_id())
-            .anchor(Align2::RIGHT_BOTTOM, vec2(-PROMPT_MARGIN, -bottom))
+            .anchor(Align2::RIGHT_BOTTOM, vec2(-PROMPT_MARGIN + slide, -bottom))
             .order(egui::Order::Middle)
+            // The slide starts off the window's edge; without this egui holds the card on
+            // screen and nothing moves.
+            .constrain(false)
             // Takes clicks meant for the video behind it.
             .sense(Sense::CLICK)
             .show(ui.ctx(), |ui| {
                 ui.style_mut().visuals = egui::Visuals::dark();
                 ui.style_mut().visuals.override_text_color = Some(over_video::FOREGROUND);
+                if alpha < 1. {
+                    ui.set_opacity(alpha);
+                }
                 if let Some(segment) = view.skippable {
                     let button =
                         egui::Button::new(icon_text(ui, ICON_SKIP_NEXT, segment.kind.skip_label())).sense(Sense::CLICK);
@@ -1687,9 +1762,24 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, SEEK_STEP, VOLUME_STEP, delay_text, scroll_steps, time_at,
+        MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, VOLUME_STEP, delay_text, scroll_steps, time_at,
         wheel_notches,
     };
+
+    #[test]
+    fn the_controls_are_up_on_the_players_first_frame() {
+        // `new` reads the player's settings from the config, so it needs a directory of its own.
+        let _config = crate::ui_tests::ConfigDir::new("player-first-frame");
+        let page = PlayerPage::new();
+        // The page opens with them up (and the timer running), so the first session shows them
+        // on its first frame; `controls_appeared` is what starts their fade there.
+        assert!(page.controls_visible);
+        assert!(page.controls_appeared);
+        assert!(
+            page.controls_since.is_none(),
+            "the fade starts on the first frame drawn"
+        );
+    }
 
     // `main`'s input gave three lines per notch and its tests counted those lines; egui gives
     // one line per notch, so the same tests count notches.
