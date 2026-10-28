@@ -11,9 +11,9 @@
 //!   or popup is open. Every key is egui's then — except the app's own ([`Scope::App`], the
 //!   zoom), which are taken first whatever holds the focus: Ctrl/Cmd with `=`, `-` and `0` type
 //!   and press nothing. The code that owns such a widget reads the
-//!   keys it uses itself (the search box's Down and Enter, a dialog's Up and Down), and a text
-//!   field that uses Up and Down stops egui moving focus with them
-//!   (`Memory::set_focus_lock_filter`).
+//!   keys it uses itself (the search box's Esc, Down, Enter and Tab, a menu's arrow keys and
+//!   Enter, a dialog's Up and Down), and a text field that uses Up and Down stops egui moving
+//!   focus with them (`Memory::set_focus_lock_filter`).
 //! - **the app**, otherwise: [`take`] removes every press bound in an active [`Scope`] from
 //!   egui's input, so egui never sees them, and the shell routes them before anything is drawn.
 //!   Keys without a binding stay with egui.
@@ -218,11 +218,37 @@ fn take_bound(input: &mut egui::RawInput, scopes: &[Scope]) -> Vec<Press> {
     taken
 }
 
+/// Takes presses of `key` with exactly `modifiers` out of egui's input, for the widgets that
+/// read a key themselves while egui keeps the keyboard (the search box, the account menu) and
+/// want the plain key only. [`egui::InputState::consume_key`] matches modifiers logically, so
+/// Shift or Alt with the key would count as the key alone and, say, Alt+Down would open the
+/// results or move the menu highlight. `modifiers` match as in [`Press::action`].
+pub fn take_exact(ctx: &egui::Context, modifiers: Modifiers, key: Key) -> bool {
+    let mut taken = false;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let egui::Event::Key {
+                key: pressed,
+                pressed: true,
+                modifiers: pressed_modifiers,
+                ..
+            } = *event
+            else {
+                return true;
+            };
+            let matches = pressed == key && pressed_modifiers.matches_exact(modifiers);
+            taken |= matches;
+            !matches
+        });
+    });
+    taken
+}
+
 #[cfg(test)]
 mod tests {
     use egui::{Event, Key, Modifiers, RawInput};
 
-    use super::{Action, BINDINGS, Press, Scope, take, take_bound};
+    use super::{Action, BINDINGS, Press, Scope, take, take_bound, take_exact};
     use crate::browse::Move;
 
     fn press(key: Key, modifiers: Modifiers) -> Press {
@@ -377,6 +403,37 @@ mod tests {
                 key_event(Key::Space, Modifiers::NONE, true),
                 Event::Text(" ".into()),
             ]
+        );
+    }
+
+    #[test]
+    fn exact_keys_ignore_extra_modifiers() {
+        let ctx = egui::Context::default();
+        let alt = Modifiers::ALT;
+        let ctrl = Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        ctx.input_mut(|input| {
+            input.events = vec![
+                key_event(Key::ArrowDown, alt, true),
+                key_event(Key::ArrowDown, Modifiers::NONE, true),
+                key_event(Key::F, ctrl, true),
+                key_event(Key::Tab, Modifiers::SHIFT, true),
+            ];
+        });
+        // Alt+Down isn't Down, Shift+Tab isn't Tab.
+        assert!(!take_exact(&ctx, Modifiers::NONE, Key::Tab));
+        assert!(take_exact(&ctx, Modifiers::NONE, Key::ArrowDown));
+        assert!(!take_exact(&ctx, Modifiers::NONE, Key::ArrowDown));
+        assert!(take_exact(&ctx, Modifiers::SHIFT, Key::Tab));
+        // Ctrl (or Cmd) and F, which is what the search shortcut binds.
+        assert!(take_exact(&ctx, Modifiers::COMMAND, Key::F));
+        // Only what matched went: Alt+Down is still egui's.
+        assert_eq!(
+            ctx.input(|input| input.events.clone()),
+            [key_event(Key::ArrowDown, alt, true)]
         );
     }
 }
