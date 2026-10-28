@@ -16,7 +16,11 @@
 //! keys are `keys::Scope::Player`, routed by the shell; the shell's Back stops playback. The
 //! menus are pointer-only (egui's popups take no keys), and every widget here is non-focusable
 //! (`Sense::CLICK` without `FOCUSABLE`, U8's rule for its dialogs): a Tab that gave egui the
-//! focus would take every key from the player (`keys.rs`).
+//! focus would take every key from the player (`keys.rs`). So none of them draws a focus ring:
+//! the player's widgets are clicked, not tabbed to, and Tab stays the app's. They do register
+//! AccessKit info (`Response::widget_info`), so a screen reader — and the headless tests that
+//! query by label — sees each button's name, a tab's or row's selected state, and a slider's
+//! value, even though no keyboard focus ever lands on them.
 //!
 //! Auto-skip and the clock's "time left" are config settings read when the page opens; the clock
 //! saves its choice when clicked.
@@ -25,7 +29,7 @@ use std::time::Duration;
 
 use egui::{
     Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Id, Layout, Margin, Rect, RectAlign, Response, RichText,
-    Sense, Stroke, StrokeKind, TextStyle, Ui, UiBuilder, Vec2, pos2, vec2,
+    Sense, Stroke, StrokeKind, TextStyle, Ui, UiBuilder, Vec2, WidgetInfo, accesskit::Role, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -774,6 +778,8 @@ impl PlayerPage {
         };
         let response = ui.allocate_rect(rect, Sense::CLICK | Sense::DRAG);
         let shown = self.scrub.unwrap_or(view.position);
+        // A slider to AccessKit, in seconds; the player's keys and the pointer are how it moves.
+        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), shown.as_secs_f64(), "Seek"));
         let fraction = (shown.as_secs_f64() / duration.as_secs_f64()).clamp(0., 1.) as f32;
         let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
@@ -857,6 +863,8 @@ impl PlayerPage {
         } else {
             view.volume
         };
+        // A slider to AccessKit, in percent.
+        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), volume, "Volume"));
         let fraction = (volume / 100.).clamp(0., 1.) as f32;
         let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
@@ -1024,6 +1032,15 @@ impl PlayerPage {
                             ui.allocate_exact_size(vec2(ui.available_width(), CHAPTER_THUMB_H + 8.), Sense::CLICK);
                         let current = menu.current == Some(chapter.index);
                         let tokens = theme::tokens_of(ui);
+                        let name = chapter
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| format!("Chapter {}", chapter.index + 1));
+                        let start = timestamp(chapter.start);
+                        // The row's name for a screen reader: the chapter and when it starts.
+                        row.widget_info(|| {
+                            WidgetInfo::selected(Role::Button, ui.is_enabled(), current, format!("{name}, {start}"))
+                        });
                         if current {
                             ui.painter().rect_filled(rect, CornerRadius::same(8), tokens.accent);
                         } else if row.hovered() {
@@ -1033,10 +1050,6 @@ impl PlayerPage {
                         let image =
                             Rect::from_min_size(rect.min + vec2(4., 4.), vec2(CHAPTER_THUMB_W, CHAPTER_THUMB_H));
                         crate::widgets::image::show(ui, &mut cx.services.images, image, request.as_ref(), None, 4);
-                        let name = chapter
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| format!("Chapter {}", chapter.index + 1));
                         ui.painter().text(
                             pos2(image.right() + 12., image.top() + 2.),
                             Align2::LEFT_TOP,
@@ -1047,7 +1060,7 @@ impl PlayerPage {
                         ui.painter().text(
                             pos2(image.right() + 12., image.top() + 24.),
                             Align2::LEFT_TOP,
-                            timestamp(chapter.start),
+                            start,
                             theme::text::font(ui, "xs"),
                             tokens.muted_foreground,
                         );
@@ -1518,9 +1531,13 @@ fn toggle_fullscreen(ctx: &egui::Context) {
 
 /// A control-bar button: an icon in a square, filled with the accent while its menu is open and
 /// half of it under the pointer, as gpui-kit's ghost button is. Not focusable: egui's focus would
-/// take every key from the player (`keys.rs`), as U8's dialogs avoid for their buttons.
+/// take every key from the player (`keys.rs`), as U8's dialogs avoid for their buttons. Its
+/// AccessKit name is the tooltip's text without the key hint, so a screen reader reads "Back"
+/// rather than "Back (Esc)".
 fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str, active: bool) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::CLICK);
+    let name = tooltip.split(" (").next().unwrap_or(tooltip);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), name));
     let tokens = theme::tokens_of(ui);
     let fill = if active {
         tokens.accent
@@ -1636,6 +1653,7 @@ fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>
         left += icon_size + gap;
     }
     painter.galley(pos2(left, rect.center().y - galley.size().y / 2.), galley, fg);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), label));
     response
 }
 
@@ -1691,7 +1709,9 @@ fn settings_tabs(ui: &mut egui::Ui, current: SettingsTab) -> Option<SettingsTab>
 }
 
 /// One tab of [`settings_tabs`]: 24 points high, its label at `text_sm` with 10 points either
-/// side, and an 18-point pill in the background colour behind the selected one.
+/// side, and an 18-point pill in the background colour behind the selected one. A selectable tab
+/// to AccessKit, with its selected state, though not keyboard-focusable like the rest of the
+/// player's widgets.
 fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
     let tokens = theme::tokens_of(ui);
     let color = if selected {
@@ -1702,6 +1722,7 @@ fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
     let font = theme::text::font(ui, "sm");
     let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
     let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 20., 24.), Sense::CLICK);
+    response.widget_info(|| WidgetInfo::selected(Role::Tab, ui.is_enabled(), selected, text));
     let painter = ui.painter();
     if selected {
         let pill = Rect::from_center_size(rect.center(), vec2(rect.width(), 18.));
@@ -1712,7 +1733,9 @@ fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
 }
 
 /// The speed choices, as `main`'s segmented outline toggle group: 24-point segments joined into
-/// one outlined control, the chosen one filled with the accent. Returns the speed clicked.
+/// one outlined control, the chosen one filled with the accent. Returns the speed clicked. Each
+/// segment is a radio button to AccessKit with its selected state; the group's own rect only
+/// senses hover, so it can't take a click or focus meant for a segment.
 fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
     let tokens = theme::tokens_of(ui);
     let font = theme::text::font(ui, "sm");
@@ -1727,13 +1750,14 @@ fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
         })
         .collect();
     let total: f32 = widths.iter().sum();
-    let (rect, _) = ui.allocate_exact_size(vec2(total, 24.), Sense::CLICK);
+    let (rect, _) = ui.allocate_exact_size(vec2(total, 24.), Sense::hover());
     let mut chosen = None;
     let mut left = rect.left();
     for (index, &speed) in Adjustments::SPEEDS.iter().enumerate() {
         let segment = Rect::from_min_size(pos2(left, rect.top()), vec2(widths[index], rect.height()));
         let response = ui.interact(segment, ui.scope_id().with(("player_speed", index)), Sense::CLICK);
         let selected = (speed - current).abs() < 1e-6;
+        response.widget_info(|| WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected, &labels[index]));
         let fill = if selected {
             tokens.accent
         } else if response.hovered() {
@@ -1790,6 +1814,7 @@ fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
     let font = theme::text::font(ui, "sm");
     let galley = ui.painter().layout_no_wrap(text.to_owned(), font, tokens.foreground);
     let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 16., 24.), Sense::CLICK);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), text));
     let fill = if response.is_pointer_button_down_on() {
         tokens.accent
     } else if response.hovered() {
@@ -1807,6 +1832,14 @@ fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
 /// `main`'s was. Drawn by the page (not an egui widget) so it can't take the keyboard.
 fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(VERSION_W, VERSION_H), Sense::CLICK);
+    // A combo box to AccessKit, as egui's own is: the name is its value, "Version" its label.
+    response.widget_info(|| {
+        let mut info = WidgetInfo::new(Role::ComboBox);
+        info.enabled = ui.is_enabled();
+        info.label = Some("Version".to_owned());
+        info.current_text_value = Some(name.to_owned());
+        info
+    });
     let tokens = theme::tokens_of(ui);
     let painter = ui.painter().clone();
     let fill = if response.hovered() {
@@ -1903,10 +1936,12 @@ fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], sele
 
 /// A track row: a check in a fixed slot (so the labels line up), then the name. The row itself
 /// has no fill when it's the selected track (only the check marks it), and the accent under the
-/// pointer, as `main`'s list had it.
+/// pointer, as `main`'s list had it. A radio button to AccessKit, with its selected state: one
+/// track of the list plays at a time.
 fn check_row(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
     let tokens = theme::tokens_of(ui);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), TRACK_ROW_H), Sense::CLICK);
+    response.widget_info(|| WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected, label));
     let painter = ui.painter();
     if response.hovered() {
         painter.rect_filled(rect, CornerRadius::same(8), tokens.accent);
@@ -2001,9 +2036,123 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, VOLUME_STEP, delay_text, scroll_steps, time_at,
-        wheel_notches,
+        CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, SETTINGS_W, SettingsTab,
+        VOLUME_STEP, check_row, delay_text, menu_frame, scroll_steps, settings_id, settings_tabs, sized_control,
+        time_at, toggle_menu, wheel_notches,
     };
+
+    /// The menu's painted widgets still say what they are to assistive technology: an open
+    /// settings menu's tabs and track rows expose their labels and their selected state through
+    /// AccessKit, and an AccessKit click still picks one, even though none of them is
+    /// keyboard-focusable (the player's keys are `keys.rs`'s, not egui's).
+    #[test]
+    fn an_open_menu_exposes_its_tabs_and_rows() {
+        use egui::accesskit::{Role, Toggled};
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::{NodeT as _, Queryable as _};
+
+        struct Menu {
+            tab: SettingsTab,
+            track: usize,
+        }
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(480., 320.))
+            .allow_missing_glyphs()
+            .with_accessibility_check(false)
+            .with_context_setup(|ctx| {
+                egui_material_icons::initialize(ctx);
+                crate::theme::apply(ctx, &crate::config::Config::default());
+            })
+            .build_ui_state(
+                |ui, menu: &mut Menu| {
+                    let trigger = sized_control(ui, ICON_SETTINGS, CONTROL, "Playback settings", true);
+                    if trigger.clicked() {
+                        // As the player's own triggers do: a popup remembered by id is toggled
+                        // by the page rather than by `Popup::menu`'s click handling.
+                        toggle_menu(ui.ctx(), settings_id());
+                    }
+                    egui::Popup::menu(&trigger)
+                        .id(settings_id())
+                        .open_memory(None::<egui::SetOpenCommand>)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .width(SETTINGS_W + 24.)
+                        .frame(menu_frame(ui))
+                        .show(|ui| {
+                            ui.set_width(SETTINGS_W);
+                            if let Some(choice) = settings_tabs(ui, menu.tab) {
+                                menu.tab = choice;
+                            }
+                            if check_row(ui, "English - AAC - Mono - Default", menu.track == 0).clicked() {
+                                menu.track = 0;
+                            }
+                            if check_row(ui, "Japanese - AAC - Mono", menu.track == 1).clicked() {
+                                menu.track = 1;
+                            }
+                        });
+                },
+                Menu {
+                    tab: SettingsTab::Audio,
+                    track: 0,
+                },
+            );
+        harness.step();
+
+        // The trigger is a labelled button; its tooltip's key hint isn't part of the name.
+        let trigger = harness.get_by_label("Playback settings");
+        assert_eq!(trigger.accesskit_node().role(), Role::Button);
+        trigger.click();
+        // A frame per queued event (hover, press, release), then one for the menu to draw: its
+        // AccessKit nodes are registered with its first full frame.
+        harness.step();
+        harness.step();
+
+        // The open menu's tab bar: each tab's name, exactly one selected.
+        let audio = harness.get_by_label("Audio");
+        assert_eq!(audio.accesskit_node().role(), Role::Tab);
+        assert_eq!(audio.accesskit_node().toggled(), Some(Toggled::True));
+        assert_eq!(
+            harness.get_by_label("Subtitles").accesskit_node().toggled(),
+            Some(Toggled::False)
+        );
+        // Its track rows: the playing one checked, the others not.
+        let english = harness.get_by_label("English - AAC - Mono - Default");
+        assert_eq!(english.accesskit_node().role(), Role::RadioButton);
+        assert_eq!(english.accesskit_node().toggled(), Some(Toggled::True));
+        assert_eq!(
+            harness.get_by_label("Japanese - AAC - Mono").accesskit_node().toggled(),
+            Some(Toggled::False)
+        );
+
+        // An AccessKit click on a tab and then on a row still selects it, and the menu reports it.
+        harness.get_by_label("Subtitles").click();
+        harness.step();
+        harness.step();
+        assert_eq!(harness.state().tab, SettingsTab::Subtitles);
+        assert_eq!(
+            harness.get_by_label("Audio").accesskit_node().toggled(),
+            Some(Toggled::False)
+        );
+        assert_eq!(
+            harness.get_by_label("Subtitles").accesskit_node().toggled(),
+            Some(Toggled::True)
+        );
+        harness.get_by_label("Japanese - AAC - Mono").click();
+        harness.step();
+        harness.step();
+        assert_eq!(harness.state().track, 1);
+        assert_eq!(
+            harness
+                .get_by_label("English - AAC - Mono - Default")
+                .accesskit_node()
+                .toggled(),
+            Some(Toggled::False)
+        );
+        assert_eq!(
+            harness.get_by_label("Japanese - AAC - Mono").accesskit_node().toggled(),
+            Some(Toggled::True)
+        );
+    }
 
     #[test]
     fn the_controls_are_up_on_the_players_first_frame() {
