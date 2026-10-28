@@ -86,6 +86,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ The skip button and up-next card **click** correctly (they sit above the controls when those are visible).
 - ⬜ Autoplay off in Settings: the episode ends and the player closes.
 
+✅ The egui build (U10), on 12.2: the skip button during the intro, Enter skipping it (0:01 → 0:12), `auto_skip_intro = true` skipping the 10 s intro by itself, the up-next card from the Outro with its countdown, Esc dismissing it (no autoplay) and Esc again stopping, autoplay into the next episode, and PgUp to the previous chapter. Screenshots and the gaps in §29.
+
 ## 5. Live connection (2.4.1)
 
 ✅ The websocket on 12.2 and 10.11 (`cargo run -p jellyfin --example socket`), a 150 s keep-alive hold; Home refreshing when an item is marked watched from elsewhere.
@@ -217,6 +219,8 @@ The development harness cannot send mouse input. The cursor hiding uses `App::hi
 - ✅ **Cursor and controls**: after 3 s without movement both disappear while playing; any movement brings both back; neither happens while paused.
 - ✅ The wheel over the control bars does not change the volume.
 
+✅ The egui build (U10): the controls hide after 3 s while playing, stay while paused, and come back with any key that acts on the player; the *hidden display*'s pointer went nowhere, so the click, wheel, trackpad and cursor rows above are unchecked there (§29).
+
 ## 11. Volume and mute in reports (2.2.4)
 
 ✅ Against the 12.2 dev server: three volume-down presses and `m` inside the app left `VolumeLevel = 85` and `IsMuted = true` in the session's `PlayState` (`GET /Sessions`). The 10.11 spec carries the same fields on `PlaybackProgressInfo` (checked), not run at runtime.
@@ -246,6 +250,8 @@ The development harness cannot send mouse input. The cursor hiding uses `App::hi
 - ✅ **Hovering the seek bar** shows the time under the mouse, close to where a click would seek.
 - ⬜ **Clicking the clock** switches to the time left, and the choice survives a restart.
 - ⬜ The next episode keeps the speed and size and drops the delays; a **SyncPlay** group shows "Normal in SyncPlay" and stays at 1×.
+
+✅ The egui build (U10): `]` twice set 1.5× (the badge next to the clock), `x` twice the subtitle delay (+0.2 s, shown by the settings menu opened for the screenshot only), and `show_remaining_time = true` in the config showed "-0:31 / 1:00" after the chapter's name. The menu's buttons and the clock's click are unchecked (no pointer; §29).
 
 ## 14. Theme (4.3)
 
@@ -282,6 +288,8 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ A remote **previous** from the dashboard: restarts the item, or within 5 s goes to the previous one.
 - ⬜ A movie in **several collections** uses the first the server lists.
 
+✅ The egui build (U10): Shift+P on S02E02 played S02E01 and Shift+N came back (the buttons appear for an item that has them, with their tooltips); clicking them is unchecked (§29).
+
 ## 16. Image memory (6.6)
 
 ✅ With the budget lowered to 1 MB and the keep-recent window to 1 s (a local build only): leaving Home for an item page and a library, and coming back, dropped 10, 10 and 9 images, and Home's images reloaded from disk and showed correctly.
@@ -299,12 +307,16 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ An item **without tiles** shows only the time; a version switch shows the new version's tiles.
 - ⬜ **10.11** (the same endpoints) with tiles generated.
 
+⬜ The egui build (U10) draws the seek bar's hover time and thumbnail from the same `Trickplay` (the page polls it every frame); the pointer can't be driven here, so hovering and scrubbing are unchecked (§29).
+
 ## 18. Resume prompt (2.1.10)
 
 ✅ With `TABBYFIN_KEYS` against 12.2: Shift+P from S01E02 resumed S01E01 at 0:25 with "Resumed from 0:25 · Start over", and Enter restarted it from 0:00.
 
 - ⬜ **Autoplay** into an episode with a resume point shows the card, and it goes away by itself after 10 s.
 - ⬜ Clicking **Start over**; in a **SyncPlay** group it's a group seek.
+
+✅ The egui build (U10): Shift+N to Second Movie resumed at 0:25 with "Resumed from 0:25 · Start over", and Enter started over from 0:00 (§29).
 
 ## 19. Subtitle appearance (4.2)
 
@@ -391,3 +403,21 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **With a mouse**: the bar's buttons, a click on the bar's Back leaving no keyboard in the bar, opening the account menu by clicking the user button and a click outside closing it, and a click on the page hiding the bar's ring.
 - ⬜ **Fullscreen while playing** (Xvfb has no window manager, so fullscreen does nothing there): *closed again when the player closes by itself*.
 - ⬜ U4's real results page: its `at_edge` must return `false` for Up and Shift+Tab at the first row (the shell then focuses the box), and `enter_results` `true` once it has a row. Esc over another page leaving the box open with its text.
+
+## 29. Player page (U10)
+
+**egui (U10)**, against the 12.2 dev server with `TABBYFIN_ROUTE=play:<id>` and `TABBYFIN_KEYS`; screenshots in `U10-scratch/`. Video was software frames (llvmpipe), as before.
+
+✅ The page draws V1's video with `main`'s bars over it: the top bar (Back, "Series · S1:E1 · name", the SyncPlay and Transcoding badges) and the bottom bar (seek bar with chapter marks, play/pause, ±10 s, mute, volume slider, the clock with the chapter's name, a speed badge, previous/next, chapters, settings, fullscreen) (`play11-autoskip.png`, `play3-keys.png`, `play23-timeleft.png`). The controls go after 3 s without mouse movement while playing (`play1.png`, `play4-upnext.png`), stay while paused (`play3-keys.png`) and with a menu open (`play17-settings.png`), and the page keeps the last frame with the spinner while the next item's session loads (`play13-resume.png`). While a session waits to reconnect, a bar with Back says "Starting playback…" (not triggered here).
+
+✅ Keys (`play3-keys.png`, `play10-prev.png`, `play10-next.png`): Space, `]`/`[`, `x`/`z`, PgUp/PgDn, Shift+P/Shift+N, Enter (skip / *Play now* / *Start over*), Esc (fullscreen → up-next card → stop). The up-next card (`play4-upnext.png`, `play7-card.png`), Esc cancelling it (`play7-cancelled.png`) and the player closing (`play7-closed.png`); the resume card (`play14-resume.png`, `play16-resume-paused.png`) and Enter starting over (`play16-startedover.png`); the skip button (`play8-skip.png`) and Enter after it (`play8-skipped.png`); auto-skip from the config (`play11-autoskip.png`); autoplay keeping the page into the next episode's resume point (`play25-autoplay.png`).
+
+✅ Round 2, on Test Movie (three versions, chapters "Intro"/"Episode"/"Credits" from the dev media): the clock's chapter name is the *chapter's*, not the item's kind — "· Intro" at 0:01 and "· Credits" at 0:52 on the movie (`r2-movie-intro.png`, `r2-movie-episode.png`); `main` did the same (`render_controls` appends `current_chapter`'s name with no kind check), so a movie mid-chapter reads "· Episode" because that is what the dev media calls its middle chapter. The version picker appears because the movie has three versions, now as a 140×28 bordered select with a caret and a "Version" tooltip (`r2-movie-intro.png`) instead of the 40 px filled box it was. A remote `Message` (a toast) over the player kept its look, and Tab with the toast up didn't take the keyboard: Space still reached the group as a Pause (`r2-toast-tab.png`).
+
+✅ The badges: SyncPlay in a group joined with `TABBYFIN_SYNCPLAY=u10test`, its pause reaching the group (`play22-syncplay.png`), and Transcoding with `max_streaming_bitrate = 400000` (`play21-transcode.png`). The menus, opened by temporary code for the screenshots (the harness can't click): the settings menu's Audio, Subtitles and General tabs, its track lists (the check on the playing track), the delay and size steppers and the speed row (`play17-settings.png`, `play20-settings-subtitles.png`, `play19-settings-general.png`), and the chapters menu with the dev setup's chapter images, names, starts and the current chapter highlighted (`play18-chapters.png`). While a menu is open egui keeps the keys (§3), so `]` and `x` did nothing until it closed.
+
+- ⬜ **With a mouse**: a click on the video pauses (a double click toggles fullscreen and puts the pause back); the wheel changes the volume by one notch per 5 % (nothing over the bars; the notch conversion is unit-tested in round 2); the seek bar's hover time and trickplay thumbnail, dragging it (the controls stay up while it's held, round 2), its chapter marks and clicking it; clicking the clock (time left, remembered); the volume slider (it sends only changes and the release, round 2); the chapter, settings and version menus from their buttons; the skip, *Play now*, *Cancel* and *Start over* buttons; the previous/next tooltips.
+- ⬜ A second **version** of an item (the dev library has one per item): the picker appears and switching restarts at the same position.
+- ⬜ **Fullscreen** (`f`, its button, Esc leaving it first): the hidden display has no window manager.
+- ⬜ A **reconnect** (Back over the last frame) and the fallback to software frames after a failed GPU import: neither was triggered here (the import only fails on real drivers).
+- ⬜ A **10.11** server, and real GPU frames on Linux (V2's own check) and Windows (V3) with the controls over them.

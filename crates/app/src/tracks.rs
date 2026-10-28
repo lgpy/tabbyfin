@@ -1,6 +1,5 @@
-//! Audio and subtitle track choices of a media source, for the player's settings menu, and the
-//! versions of an item for its page's picker. The pickers themselves arrive with U10 (tracks)
-//! and U6 (versions).
+//! Audio and subtitle track choices of a media source, for the player's settings menu (`U10`
+//! draws them), and the versions of an item for its page's picker (U6).
 
 use jellyfin::models::{MediaSourceInfo, MediaStream, MediaStreamType};
 
