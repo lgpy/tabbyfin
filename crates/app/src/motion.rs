@@ -54,25 +54,30 @@ pub fn shelf_delay(index: usize) -> f64 {
     SHELF_STAGGER * index as f64
 }
 
-/// The time `id` last appeared: now, unless it was drawn in the previous frame. A page that comes
+/// The time `id` last appeared: now, unless it was drawn in the previous pass. A page that comes
 /// back on top, a card scrolled out and back, an image that finished loading after its card went
 /// away: each starts its animation again, as `main`'s element state did.
+///
+/// Passes, not frames: egui can run several passes in one frame (a discard pass for a `Grid` or a
+/// popup's sizing, say), and an element drawn in both is one appearance. Counting frames, the
+/// second pass would read as the same frame and start the animation over. An element drawn only
+/// in the second pass of a frame is still drawn in consecutive passes, so it keeps its start too.
 pub fn appear(ctx: &egui::Context, id: impl std::hash::Hash + std::fmt::Debug) -> f64 {
     #[derive(Clone, Copy)]
     struct Seen {
         started: f64,
-        frame: u64,
+        pass: u64,
     }
 
     let id = Id::unique(("motion-appear", id));
-    let frame = ctx.cumulative_frame_nr();
+    let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
     let seen = ctx.data(|data| data.get_temp::<Seen>(id));
-    let mut seen = match seen.filter(|seen| seen.frame + 1 == frame) {
+    let mut seen = match seen.filter(|seen| seen.pass + 1 == pass) {
         Some(seen) => seen,
-        None => Seen { started: now, frame },
+        None => Seen { started: now, pass },
     };
-    seen.frame = frame;
+    seen.pass = pass;
     ctx.data_mut(|data| data.insert_temp(id, seen));
     seen.started
 }
@@ -263,6 +268,28 @@ mod tests {
             pass_at(&ctx, time, |ui| seen.push(appear(ui.ctx(), "page")));
         }
         assert_eq!(seen, [0., 0., 0.]);
+    }
+
+    #[test]
+    fn a_discard_pass_is_the_same_appearance() {
+        let ctx = Context::default();
+        let mut seen = Vec::new();
+        let mut output = ctx.run_ui(
+            RawInput {
+                time: Some(0.),
+                ..Default::default()
+            },
+            |ui| {
+                seen.push(appear(ui.ctx(), "page"));
+                if ui.ctx().current_pass_index() == 0 {
+                    // A second pass in the same frame, as a Grid's or a popup's sizing pass.
+                    ui.ctx().request_discard("test");
+                }
+            },
+        );
+        output.textures_delta.clear();
+        assert_eq!(seen.len(), 2, "the frame ran two passes");
+        assert_eq!(seen, [0., 0.], "both passes are the same appearance");
     }
 
     #[test]
