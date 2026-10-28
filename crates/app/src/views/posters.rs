@@ -107,6 +107,10 @@ impl Page for PostersPage {
         browse::on_key(self, action, cx)
     }
 
+    fn hide_cursor(&mut self) {
+        self.cursor.hide();
+    }
+
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         if self.loaded_at != Some(cx.services.user_data) {
             self.reload(cx);
