@@ -45,6 +45,7 @@ use crate::theme::{self, over_video};
 use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
+use crate::widgets::mascot;
 use crate::widgets::text::{card_text, timestamp};
 use crate::widgets::video::Video;
 
@@ -59,6 +60,9 @@ pub const PIXELS_PER_NOTCH: f32 = 90.;
 /// The most volume steps one wheel event makes, so a fast flick on a free-spinning wheel or a
 /// trackpad's burst of pixels can't jump the volume from silent to full.
 pub const MAX_STEPS_PER_SCROLL: f32 = 4.;
+
+/// The mascot's size over the video, as on `main`.
+const LOADER_SIZE: f32 = 128.;
 
 /// How long the controls stay up without the mouse moving (and while nothing is paused).
 const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
@@ -192,14 +196,14 @@ impl PlayerPage {
         }
         let Some(view) = view else {
             // Between sessions (a reconnect, or the next item still loading): the last frame
-            // stays, with the spinner over it and a bar to leave by.
-            spinner(ui, rect);
+            // stays, with the loader over it and a bar to leave by.
+            loader(ui, rect);
             self.reconnecting_bar(ui, cx, top);
             self.settle(ui, false);
             return;
         };
         if view.loading || !has_frame {
-            spinner(ui, rect);
+            loader(ui, rect);
         }
         if self.controls_visible {
             self.top_bar(ui, &view, cx, top);
@@ -1638,15 +1642,15 @@ fn gradient(painter: &egui::Painter, rect: Rect, top: Color32, bottom: Color32) 
     painter.add(egui::Shape::mesh(mesh));
 }
 
-/// A spinner in the middle of the video, until the first frame has loaded.
-fn spinner(ui: &mut egui::Ui, rect: Rect) {
-    let spinner = Rect::from_center_size(rect.center(), vec2(48., 48.));
+/// The mascot in the middle of the video, until the first frame has loaded.
+fn loader(ui: &mut egui::Ui, rect: Rect) {
+    let loader = Rect::from_center_size(rect.center(), Vec2::splat(LOADER_SIZE));
     let mut child = ui.new_child(
         UiBuilder::new()
-            .max_rect(spinner)
-            .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
+            .max_rect(loader)
+            .layout(Layout::top_down(Align::Center)),
     );
-    child.add(egui::Spinner::new().size(48.).color(over_video::MUTED_FOREGROUND));
+    mascot::loader(&mut child, LOADER_SIZE);
 }
 
 /// The time `x` along `rect` names, clamped to the bar's ends.
