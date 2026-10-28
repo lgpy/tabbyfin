@@ -1,12 +1,6 @@
 //! The Settings page by keyboard: Tab puts egui's focus on a picker and Left and Right step it,
-//! saving the same value a click gives.
-//!
-//! X3's sweep couldn't step the theme or the text size with Tab and the arrows. It wasn't the
-//! page: a picker only steps towards a choice it has, and X3 pressed Right on the theme picker
-//! while it showed *Dark*, the last of the three, so there was nowhere to go; the earlier runs
-//! had used two or three Tabs, still in the top bar's buttons. The test below pins both halves:
-//! the page's first Tab is the theme picker and the second the text size picker, and the steps
-//! go where the config says.
+//! saving the same value a click gives. A picker only steps towards a choice it has, so an arrow
+//! at either end of its list does nothing.
 
 use egui::Key;
 
