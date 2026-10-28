@@ -87,6 +87,7 @@ crates/app/src/
 ├── nav.rs           Route, NavRequest
 ├── debug.rs         TABBYFIN_KEYS replay, TABBYFIN_ROUTE parsing (compiled in debug builds only)
 ├── browse.rs        the keyboard cursor and its egui wiring
+├── smooth_scroll.rs the shelves' glide, and the wheel's instant step with animations off
 ├── config.rs, credentials.rs, session.rs, update.rs, markers.rs
 ├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
 ├── playback.rs, syncplay.rs, remote.rs, live.rs   services
@@ -335,6 +336,7 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 - `views::open(route, cx)` makes the page for a route. Pages navigate by pushing `NavRequest::Push(route)` / `Back` into `cx.nav`; the shell applies them after drawing and requests a repaint, so the new page shows at once.
 - Loading (see `views/home.rs`): a page keeps a `Load<T>` (`widgets/text.rs`), an `Option<Task<…>>` and `loaded_at: Option<u64>`. `show` starts a load when `loaded_at != Some(services.user_data)` — the first load, Retry (`None`) and watch data changing elsewhere — then polls the task; what's on screen stays until new data arrives. A page under others doesn't reload in the background: it catches up when it's back on top. Owners keep a generation counter (library pages, playback sessions) and drop results for an older one.
 - While a page loads it shows the mascot (`widgets/mascot.rs`): `main`'s jellycat, every outline tessellated once with `lyon_tessellation` into an `egui::Mesh` and posed per frame (egui fills convex paths only, and these are concave). What R3 settled about it is at the end of `docs/egui-migration.md`'s [restyle backlog](egui-migration.md#briefs).
+- Scrolling feels as on `main` (`smooth_scroll.rs`): egui already eases a wheel step over frames and leaves trackpad deltas alone; with the animations setting off, `App::raw_input_hook` splits a wheel step into the deltas egui applies at once. A shelf's arrows glide a page over (`smooth_scroll::Glide`, `main`'s `glide_by`) and its drag follows the pointer 1:1 and stops with it, taking no wheel, as `main`'s rail drag did. What R5 settled about it is at the end of `docs/egui-migration.md`'s [restyle backlog](egui-migration.md#briefs).
 
 ### Top bar
 

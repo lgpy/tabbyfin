@@ -298,7 +298,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ `theme = "system"` follows the system on Windows and macOS (egui/winit), switching while the app runs included; on a real GNOME and KDE desktop through the real portal, including Ubuntu 22.04's portal 1.14 (`Read` only).
 - ⬜ Settings (U9) changing the theme, the text size (to the system's included, which then reads it) and the animations while the app runs, through `AppEvent::AppearanceChanged`; nothing raises it yet.
 - ⬜ A system text size changed while the app runs on Windows (`reg`) and GNOME (`gsettings`), applied when the window gets the focus back.
-- ⬜ Animations off (`animations = false`) makes a page change, a fade or a scroll jump; only the style values are unit-tested.
+- ⬜ Animations off (`animations = false`) makes a page change or a fade jump; only the style values are unit-tested. A shelf's arrow jump and the wheel's instant step are covered (`ui_tests/shelf.rs`'s `with_animations_off_the_arrow_jumps`, `smooth_scroll.rs`'s wheel tests); R2's page entry and fades aren't yet.
 
 ## 15. Previous and next (2.1.9)
 
@@ -423,8 +423,10 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 - ⬜ **Right-click** opening the menu at the pointer, and *Play*, *Play for a series or season*, *Watched*, *Favorite* and *Add to playlist…* from it (U5 and U6 wire it for their pages; Home's cards open U8's dialog already).
 - ⬜ Card text not stealing the card's click, right-click and drag (architecturally checked: with `style.interaction.selectable_labels = false` a label senses hover only, and egui's hit-test gives the click to the card under it).
-- ⬜ **A drag** sideways scrolling a shelf and not counting as a click on the card it ends on, the wheel over a shelf scrolling the page, and a click hiding the cursor.
-- ⬜ The page arrows paging by a whole row on a big shelf, and Shift+wheel scrolling one sideways.
+✅ **egui (R5)**, against 12.2, keyboard only (`R5-scratch/`): Down walked Home's shelves with the page easing between them (`home-mid-scroll.png` mid-animation, `home-rest.png` at rest), Test Movie's page scrolled from its chapters on to Extras the same way (`item-mid-scroll.png`, `item-rest.png`), and the 10,000-item fake library's grid walked a dozen rows (`gridf/g10.png` partway, `grid-rest.png` at rest) — the keyboard's reveal-into-view still lands each card on screen. The 12.2 server's own libraries have 2–6 items, so only the fake library's grid scrolls. Idle CPU after each scroll stopped was 0 ticks over 10 s. The wheel, the glide and the drag need a pointer and are covered headless below.
+
+- ✅ **R5, headless** (`ui_tests/shelf.rs`): a press and a move drag a shelf 1:1, a release leaves it where it stopped (no coasting), dragging back past the start clamps there (no rubber band), the wheel over the row doesn't move it, and a click hides the cursor. Untested with a real pointer: the closed hand, a drag ending on another card waking that card (a drag doesn't click), and Shift+wheel (which now scrolls the page, as on `main`, rather than a row).
+- ✅ **R5, headless**: an arrow glides a shelf a page over (the first frame is a step, then it eases to its end, then nothing repaints), a second click while it moves isn't needed (the maths' test covers aiming further), and with animations off the arrow jumps in one frame. The same test steps the harness at 60 fps because `egui_kittest`'s default step is a quarter second.
 - ⬜ Person cards; episode cards in a season's row were drawn with U7 (§25) but not clicked, and cards' hover dimming still needs a real pointer. Chapter cards and their cursor were checked in U6 (`TESTING.md` §22).
 
 ## 27. Playlist dialogs (U8)
