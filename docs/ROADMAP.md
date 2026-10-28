@@ -3,7 +3,7 @@
 What's missing and what still needs work, as of 2026-10-15. Done items are marked ✅ and kept for context.
 
 - **Egui:** the app runs on egui/eframe, drawn with wgpu, with mpv's frames imported into wgpu (§7). The migration from GPUI is done; its plan and task list stay in `docs/egui-migration.md` until the branch merges into `main`, and `docs/PLAN.md` §2–§6 describe what was built.
-- **Egui branch: accepted differences** (X3's sweep, 2026-10-28). The egui app matches `main`'s features except for these, accepted for now: egui's default look until the restyle (`docs/egui-migration.md`, Restyle backlog), with spinners instead of the mascot loader; popups (the item menu, the player's settings menu, the Settings pickers' lists) take the pointer only, while the pickers step with Left/Right; Tab passes the top bar's buttons before the page. In WSL debug builds it idles at 0 % CPU (`main` ~0.8 %), plays software video at about 60 % of `main`'s CPU, and holds about half of `main`'s memory on a 10,000-item library.
+- **Egui branch: accepted differences** (X3's sweep, 2026-10-28). The egui app matches `main`'s features except for these, accepted for now: egui's default look until the restyle (`docs/egui-migration.md`, Restyle backlog); popups (the item menu, the player's settings menu, the Settings pickers' lists) take the pointer only, while the pickers step with Left/Right; Tab passes the top bar's buttons before the page. In WSL debug builds it idles at 0 % CPU (`main` ~0.8 %), plays software video at about 60 % of `main`'s CPU, and holds about half of `main`'s memory on a 10,000-item library.
 - `docs/PLAN.md` describes the architecture, and `docs/in-app-video.md` the video pipeline. This document only lists gaps.
 - **Priority:**
   - **P1:** needed before calling it v1.
@@ -174,18 +174,18 @@ The GPUI UI was replaced in place: `crates/app` is an eframe app drawn with wgpu
 
 - **Done:** the foundation (services, tasks, keys, toasts, the window and theme), the pages (Home, search, libraries with sort and filters, the item page with its children and playlist editing, Settings, the player), sign-in and accounts, SyncPlay, remote control and the websocket, Linux and Windows GPU video, packaging and CI, `egui_kittest` UI tests, and the parity sweep with its fixes. `docs/egui-migration.md` has the task list and what each task settled.
 - **What stayed the same:** `crates/jellyfin`, the player crate and its host process, the config file and where tokens live, every dev knob, and Jellyfin 10.11 as the minimum.
-- **What's different:** egui's default look (a spinner where the mascot was), pointer-only menus except where the shell or a page reads their keys, and Tab reaching the top bar's buttons before the page. All three are in the accepted differences above.
+- **What's different:** egui's default look, pointer-only menus except where the shell or a page reads their keys, and Tab reaching the top bar's buttons before the page. All three are in the accepted differences above.
 - **What's still open:** the same hardware and release-build checks as before (`docs/TESTING.md`), now against the egui build.
 
 ### Restyle backlog
 
-Starting from egui's default look, in this order. None of it is started.
+Starting from egui's default look, in this order. Marked ✅ where it has landed.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
 | R1 | **Theme tokens** | P2 | M | Colours, radii, spacing and fonts like the old app, with the app's own text-style table that the text size setting scales (today `theme::apply_text_size` scales egui's). Also the card's hover dim, the played badge's and the watched/favorite icons' colours, and the person card's initials size. |
 | R2 | **Animations** | P3 | S | Page entry, staggered shelves, image fade-in, toggle pop, prompt slide-in, controls fade. The animations setting turns them off. |
-| R3 | **The mascot loader** | P3 | M | The old loader's jellycat, tessellated into egui meshes (`lyon_tessellation`): egui fills convex paths only, and its outlines are concave. The three faces, blink and flick timing. Spinners until then. |
+| R3 | ✅ **The mascot loader** | P3 | M | The old loader's jellycat is back: `widgets/mascot.rs` tessellates its outlines once with `lyon_tessellation` into egui meshes (egui fills convex paths only, and they're concave) and poses those meshes per frame, so a page's loader, an empty state's mascot and the player's loader look and move as on `main`, at 0 % CPU with the animations setting off. A loader repaints at 30 fps for as long as it's up, as `main`'s animation frames did, but an empty page's confused mascot only moves for its first 8 s after it appears and then holds its rest pose with no repaints at all (0 CPU ticks over 10 s) — unlike `main`, which kept animating it, because an empty page is idle. The faces, blink and flick timing came over unchanged; the pose moves the cached meshes with affine transforms and per-vertex shifts, so nothing is tessellated again (the tentacle wave lands the drawing's points exactly where `main`'s did, the ear flick is fitted to them, and the edges aren't antialiased, which epaint can't feather in a mesh). |
 | R4 | **Search box** | P3 | S | Opening out of its button and closing back. |
 | R5 | **Scroll feel** | P3 | M | Wheel smoothing and shelf glide; today a drag-scrollable row shows the grabbing cursor and coasts or rubber-bands on release. |
 | R6 | **Player overlay polish** | P3 | S | Gradients, button sizes and icon sizes of the player's bars and menus. |
