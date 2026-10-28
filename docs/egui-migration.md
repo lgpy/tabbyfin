@@ -1,6 +1,6 @@
 # Moving Tabbyfin to egui: plan
 
-**Status (2026-10-28):** every task is done — waves 0–5, X3 and its fix tasks (X5–X7), and X2 (the docs) — so the `egui` branch is ready to merge into `main`. This file's task list and §6 notes are kept until it has: `docs/PLAN.md` is the architecture reference from then on. The restyle (R1–R6, [below](#restyle-backlog)) runs on `egui` before that merge, in two waves.
+**Status (2026-10-28):** every task is done — waves 0–5, X3 and its fix tasks (X5–X7), and X2 (the docs) — so the `egui` branch is ready to merge into `main`. This file's task list and §6 notes are kept until it has: `docs/PLAN.md` is the architecture reference from then on. The restyle (R1–R6, [below](#restyle-backlog)) runs on `egui` before that merge, in two waves; R1 (the theme tokens) has landed.
 
 **Approach:** replace in place. The first task (F1) deletes the GPUI code from `crates/app` and sets up the egui app. Every later task ports one piece back. The old code stays readable on `main`:
 
@@ -650,7 +650,7 @@ After X3, once the egui app matches `main`'s features. Same tiers and worktree f
 
 | ID | Item | Tier | Does it | Review | Wave |
 |---|---|---|---|---|---|
-| R1 | Theme tokens: colours, radii, spacing, fonts like `main` (gpui-kit's look), with the app's own text-style table that the text size setting scales (`theme::apply_text_size` scales egui's until then); the card's hover dim, the played badge's and the watched/favorite icons' colours, and the person card's initials size | C+R | pi xhigh | Opus medium | A |
+| ✅ R1 | Theme tokens: colours, radii, spacing, fonts like `main` (gpui-kit's look), with the app's own text-style table that the text size setting scales; the card's hover dim, the played badge's and the watched/favorite icons' colours, and the person card's initials size (landed; see [R1's decisions](#r1s-decisions)) | C+R | pi xhigh | Opus medium | A |
 | R3 | The mascot loader (`main`'s `mascot.rs`): tessellate its paths with `lyon_tessellation` into `egui::Mesh`es; the three faces, blink and flick timing | C+R | pi high | Opus medium | A |
 | R5 | Scroll feel: wheel smoothing and shelf glide like `smooth_scroll.rs`; the grabbing cursor and release coasting a drag-scrollable row has now | C | pi high | — | A |
 | R2 | Animations: page entry, staggered shelves, image fade-in, toggle pop, prompt slide-in, controls fade | C | pi high | — | B |
@@ -669,3 +669,15 @@ Every brief implies §4's four rules. The old look's source is `main`'s files pl
 - **R2:** `main`'s `motion.rs` and its callers; the animations setting turns each off.
 - **R4:** `main`'s `views/shell.rs` search box; the keyboard's open and close (`keys.rs`) stay as they are.
 - **R6:** `main`'s `views/player.rs` bars and menus; colours from `theme::over_video`.
+
+#### R1's decisions
+
+The tokens are gpui-kit 0.7.3's *Default Light* and *Default Dark* with the overrides `main`'s `theme.rs` made (radius 10, radius_lg 12, light `muted_foreground` `0x525252`), in [`Tokens`](../../crates/app/src/theme.rs) as literal `Color32`s: the palette is a transcription of the JSON themes and its fallbacks (`button` and its hover/active are the resolved blends gpui-kit computes), not a runtime derivation. `visuals(&tokens)` turns them into egui's `Visuals` for both themes, and `spacing()` into egui's `Spacing`; widgets that paint themselves ask `theme::tokens_of(ui)`, and `theme::tokens(visuals)` picks the set by `dark_mode`, so the player's forced `Visuals::dark` over the video gets the dark ones. Sizes that `main` drew in `dp` (the item title's 40, the letter bar's 11, the action icons) stay fixed; everything else reads the [`text`](../../crates/app/src/theme.rs) table, which is `main`'s gpui scale installed as named `egui::TextStyle`s (`"xs"` … `"2xl"`, with `Small`/`Body`/`Button`/`Heading` mapped onto them), so `apply_text_size` scales one table.
+
+Judgment calls inside the task:
+- **egui's `selection` colour stays gpui's text selection** (`#55a0fc` light, `#1d4ed8` dark), because egui has one colour for text selection and for selected controls too. `main`'s selected rows and checked toggles used `accent`, so those call sites pass `theme::selected(ui, on, button)`, which fills the button with `accent` (and `Button::fill` overrides what `selected` would paint); `theme::selected` is the one place to change if R2–R6 need another.
+- **The token set is narrower than gpui-kit's**: the fields are the roles the app draws with (`background` … `scrollbar`, plus `group_box`, `red` and `overlay`). No `blue`/`magenta`/`yellow` bases or the button-variant colours nothing uses.
+- **Families stay egui's**: the proportional and monospace fonts egui bundles and the material-icons font. `main` used the system UI font, which egui only gets by bundling one (decided against in F1); the sizes and colours match, the glyphs don't.
+- **The look's spacing is `main`'s too**, since the screenshots are the check: a 72-point top bar with 40-point buttons and 24-point icons, 24-point page insets with the pages owning them (the central panel adds none), the library's 16 points under its toolbar, and the sign-in form's *Connect*/*Sign in* as full-width primary buttons. The pages' own structural differences from `main` stay (the Settings page is one scrolling page, `main`'s sidebar is gone; the sign-in form sits at the top of the window rather than centred; the search box has no prefix icon).
+- **The bar's buttons are frameless at rest** (`frame_when_inactive(false)`) as `main`'s ghost buttons were; they still show the pointer's accent and the keyboard's ring.
+- **The card's hover dim is the page's background at 20 %**, the egui form of `main`'s `opacity(0.8)` hover, so it dims over a light theme as well as darkening over a dark one.
