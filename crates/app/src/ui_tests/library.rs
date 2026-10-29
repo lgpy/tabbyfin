@@ -23,6 +23,7 @@ fn library_harness(server: &FixtureServer, id: &str) -> PageHarness {
                 id,
                 name: "Movies".into(),
                 collection_type: Some(CollectionType::Movies),
+                newest_first: false,
             },
             cx,
         )
@@ -98,8 +99,11 @@ fn up_from_the_grid_reaches_the_toolbar_and_then_the_top_bar() {
         ui.state().handled.last().copied().unwrap_or_default(),
         "Up left the page"
     );
-    // The toolbar's second control is the order button: Enter flips the order and the page
-    // remembers it.
+    // The toolbar ends with the sort picker and the order button, five controls on from the
+    // rating picker the cursor came up to: Enter flips the order and the page remembers it.
+    for _ in 0..5 {
+        ui.press(Key::ArrowRight);
+    }
     ui.press(Key::Enter);
     assert!(saved_view().descending, "Enter on the order button sorted descending");
     // Nothing is above the toolbar's only row: Up goes to the top bar.
@@ -165,10 +169,17 @@ fn the_toolbar_steps_through_its_choices() {
     wait_for_page(&mut ui);
 
     // The first Shift+Tab only shows the cursor on the grid; the second moves it to the
-    // toolbar's first control, the sort picker.
+    // toolbar's first control, the progress picker. Enter steps the filter.
     ui.press_modifiers(Modifiers::SHIFT, Key::Tab);
     ui.press_modifiers(Modifiers::SHIFT, Key::Tab);
+    ui.press(Key::Enter);
+    assert_eq!(saved_view().filter, crate::views::library::FILTERS[1].0);
 
+    // Right six times (rating, genres and tags, year, resolution and *Clear filters*, which
+    // the filter just brought): the sort picker.
+    for _ in 0..6 {
+        ui.press(Key::ArrowRight);
+    }
     ui.press(Key::Enter);
     let view = saved_view();
     assert_eq!(view.sort, crate::views::library::SORTS[1].0, "the sort stepped on");
@@ -189,14 +200,8 @@ fn the_toolbar_steps_through_its_choices() {
         "stepping wraps round"
     );
 
-    // Right twice from the sort picker: the Show picker. Enter steps the filter.
+    // Right once: the order button. Enter flips the order.
     ui.press(Key::ArrowRight);
-    ui.press(Key::ArrowRight);
-    ui.press(Key::Enter);
-    assert_eq!(saved_view().filter, crate::views::library::FILTERS[1].0);
-
-    // Left once: the order button. Enter flips the order.
-    ui.press(Key::ArrowLeft);
     let descending = saved_view().descending;
     ui.press(Key::Enter);
     assert_eq!(saved_view().descending, !descending);
