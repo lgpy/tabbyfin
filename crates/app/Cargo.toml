@@ -64,13 +64,13 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 [features]
 # Compiles a disposable mockup file into the UI tests (`src/ui_tests/mod.rs`).
-mockup = []
+mockup = ["egui_kittest/wgpu", "egui_kittest/snapshot"]
 
 [dev-dependencies]
 # The UI tests (`src/ui_tests/`): egui driven headless through AccessKit, no GPU and no
 # snapshots. `wiremock` serves the fixtures the pages read, as `crates/jellyfin/tests/http.rs`
 # does.
-egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
+egui_kittest = "0.37"
 wiremock = "0.6.5"
 
 [build-dependencies]
