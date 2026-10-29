@@ -1,23 +1,34 @@
 ---
 name: ui-mockup
-description: Render a mockup of a tabbyfin UI (a widget, menu, page or variant) as a real egui screenshot and open it as an HTML gallery for the user to look at. Use when asked for a mockup, a design preview, or "what would X look like", before or while building UI.
+description: Render a mockup of a tabbyfin UI (a widget, menu, page or variant) as a real egui screenshot and open it as an HTML page for the user to look at. Use when asked for a mockup, a design preview, or "what would X look like", before or while building UI.
 ---
 
 # UI mockups
 
-Mockups are egui rendered headless by `egui_kittest` (wgpu on lavapipe, no GPU or window needed), so they use the app's real theme, fonts and widgets. Each one is a **disposable `.rs` file outside the repo** (your scratch or temp dir, e.g. `$CLAUDE_JOB_DIR/tmp/`), never a file in `src/`.
+Mockups are egui rendered headless by `egui_kittest` (wgpu on lavapipe, no GPU or window needed), so they use the app's real theme, fonts and widgets. Each one is a **disposable `.rs` file outside the repo** (your scratch or temp dir), never a file in `src/`. `render.py` turns it into a page that explains the design, not just a folder of images: the user reads it to decide, so it carries the brief and what changed. The decisions you need from the user go in your reply, not on the page.
 
 ## Workflow
 
 1. Copy `.agents/skills/ui-mockup/template.rs` to a temp dir and edit it. It is compiled inside the app crate (as `ui_tests::scratch`, only with the `mockup` feature), so `crate::theme`, `crate::widgets`, the pages and `crate::ui_tests::build_harness` are all usable, with fixture data like the other `ui_tests`.
-   - One `#[test] fn mockup_<name>()` per image, each calling `mockup("<name>", size, state, |ui, state| { … })`. For variants, one test each (`menu_a`, `menu_b`), so they land side by side in the gallery.
-   - A new design means writing the egui code; keep it in the temp file until the user picks a direction, then move it into the app.
-   - Wrap a page in `egui::CentralPanel::default().show(ui, …)` to get its background. For the other theme, set it on the `Config` passed to `crate::theme::apply`, or make one mockup per theme.
-2. Run `python3 -I .agents/skills/ui-mockup/render.py <file>`. It compiles the file with `--features mockup`, runs its tests, writes `target/mockups/*.png` and `index.html`, and opens the gallery (`wslview` on WSL). Pass `--no-open` to skip opening.
-3. Look at the PNGs yourself first (Read the image) and fix obvious problems before telling the user. Say where the gallery is: `target/mockups/index.html`.
+   - One `#[test] fn mockup_<name>()` per mockup, each calling `Mockup::new("<group>.<variant>").show(|| state, |ui, state| { … })` (`ui_tests/mockups.rs`). `.themes(Themes::Both)` renders it in both themes, which the page shows as one mockup with a theme toggle. `state` is made fresh per theme; keep a page (`Option<Login>`, say) there rather than captured in the closure.
+   - A signed-in page: `Mockup::new("series.now").page(&server, |cx| crate::views::open(route, cx))`, with a `FixtureServer` given the fixtures the page asks for (as the page tests in `ui_tests/item.rs` do). It draws in the shell's frame, without the top bar. `.behind(|ui| …)` paints under the page instead of the panel's fill (a backdrop the page would sit on).
+   - Content that comes from the server: `.until("<label>")` steps frames until something with that label is drawn, then renders.
+   - Every render holds a `ConfigDir`, so a page that saves to the config writes to a temporary one, never the user's.
+   - Every mockup is `mockups::WINDOW` in size unless it asks otherwise with `.size(…)`. Keep the mockups you compare at the same size.
+   - A new design means writing the egui code; keep it in the temp file until the user picks a direction, then move it into the app. Change the file with Edit between rounds rather than writing it again.
+   - Wrap a page in `egui::CentralPanel::default().show(ui, …)` to get its background.
+2. Write the page's words as comments in the same file (the template shows each):
+   - **Intro:** the file's leading `//` block: what was asked and what the proposal changes. Paragraphs, `- ` lists, `**bold**` and `` `code` `` work.
+   - **Sections:** a `// ## Title` block before a group's first test names that section and says what to look at.
+   - **Captions:** a test's `///` doc comment, first line the title and the rest what differs from the other variant and why.
+3. Render today's screen next to a proposal: name both in one group (`welcome.now`, `welcome.cozy`; a variant called `now` is tagged "Today" and goes first). A group of exactly two same-size mockups gets side by side, swipe and flip comparison, picked (with the theme) from the floating options button at the page's bottom right. Alternatives go in one group too (`accounts.rows`, `accounts.tiles`).
+4. Run `python3 -I .agents/skills/ui-mockup/render.py <file>`. It compiles the file with `--features mockup`, runs its tests, and writes `target/mockups/<file stem>/`: a PNG per mockup and theme, `index.html`, and the previous run's PNGs as `*.prev.png` wherever they changed (each figure gets a "Previous render" toggle, so a fix round shows its before and after). It opens the page (`wslview` on WSL); pass `--no-open` to skip that. Its output is already short (errors one line each, failed tests' panics, which renders are new, changed or unchanged), so run it as it is, without piping it through `grep` or `tail`. It warns when a group mixes sizes: fix that before showing it. In a fix round that touches one group, `--only <group>` renders just that group (`--only accounts,welcome` for more) and keeps the others' last renders on the page.
+5. Check the run by reading `preview.png` (the path follows `look at:`), which has every new or changed render on one sheet, at the cost of one image. Don't Read the separate PNGs: each costs as much as the whole sheet. Unchanged renders don't need another look. For detail (an edge, text, alignment), `render.py <file> --zoom <name>[.light]:x,y,w,h` draws that region, in the mockup's points, at full resolution into `zoom.png` without re-rendering. Check that the layout holds, the pair lines up, and the edges are smooth, and fix obvious problems before telling the user. Give the user the page as the markdown link `[<file stem> mockups](<url>)`, with the URL exactly as `render.py` printed it after `page:`. It's an `http://localhost:8737/…` URL from a small server `render.py` starts for `target/mockups` and reuses: terminals don't open `file://` links on a click, and WSL forwards `localhost` to the Windows browser. Then ask the decisions you need from the user in the reply, not on the page.
+6. To publish it, publish that folder as an artifact as it is (`index.html` as the page, the PNGs in `files`); don't write a second page by hand. The page already meets the artifact contract.
 
 ## Notes
 
+- PNGs are 2 pixels per point, rendered at twice that and scaled down: the headless renderer has no multisampling, and the mascot's meshes rely on it for smooth edges.
 - Hover, pointer-only menus and animations aren't captured; open the thing by default in the mockup (or `ui.run()` after the state change) to show a state.
 - The first run compiles the app's tests with the feature, which takes a while; later runs are quick. Don't run it in parallel with other cargo builds (this WSL crashes on parallel builds).
-- `target/mockups/` is gitignored and keeps earlier renders for comparison; delete it to start clean. Mockups are throwaway: don't add them to `docs/` or the roadmap, and don't commit the temp file.
+- `target/mockups/` is gitignored. Mockups are throwaway: don't add them to `docs/` or the roadmap, and don't commit the temp file.
