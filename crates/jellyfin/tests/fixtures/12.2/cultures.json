@@ -1,0 +1,4472 @@
+[
+  {
+    "DisplayName": "Abkhazian",
+    "Name": "Abkhazian",
+    "ThreeLetterISOLanguageName": "abk",
+    "ThreeLetterISOLanguageNames": [
+      "abk"
+    ],
+    "TwoLetterISOLanguageName": "ab"
+  },
+  {
+    "DisplayName": "Achinese",
+    "Name": "Achinese",
+    "ThreeLetterISOLanguageName": "ace",
+    "ThreeLetterISOLanguageNames": [
+      "ace"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Acoli",
+    "Name": "Acoli",
+    "ThreeLetterISOLanguageName": "ach",
+    "ThreeLetterISOLanguageNames": [
+      "ach"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Adangme",
+    "Name": "Adangme",
+    "ThreeLetterISOLanguageName": "ada",
+    "ThreeLetterISOLanguageNames": [
+      "ada"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Adyghe; Adygei",
+    "Name": "Adyghe; Adygei",
+    "ThreeLetterISOLanguageName": "ady",
+    "ThreeLetterISOLanguageNames": [
+      "ady"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Afar",
+    "Name": "Afar",
+    "ThreeLetterISOLanguageName": "aar",
+    "ThreeLetterISOLanguageNames": [
+      "aar"
+    ],
+    "TwoLetterISOLanguageName": "aa"
+  },
+  {
+    "DisplayName": "Afrihili",
+    "Name": "Afrihili",
+    "ThreeLetterISOLanguageName": "afh",
+    "ThreeLetterISOLanguageNames": [
+      "afh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Afrikaans",
+    "Name": "Afrikaans",
+    "ThreeLetterISOLanguageName": "afr",
+    "ThreeLetterISOLanguageNames": [
+      "afr"
+    ],
+    "TwoLetterISOLanguageName": "af"
+  },
+  {
+    "DisplayName": "Afro-Asiatic languages",
+    "Name": "Afro-Asiatic languages",
+    "ThreeLetterISOLanguageName": "afa",
+    "ThreeLetterISOLanguageNames": [
+      "afa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Ainu",
+    "Name": "Ainu",
+    "ThreeLetterISOLanguageName": "ain",
+    "ThreeLetterISOLanguageNames": [
+      "ain"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Akan",
+    "Name": "Akan",
+    "ThreeLetterISOLanguageName": "aka",
+    "ThreeLetterISOLanguageNames": [
+      "aka"
+    ],
+    "TwoLetterISOLanguageName": "ak"
+  },
+  {
+    "DisplayName": "Akkadian",
+    "Name": "Akkadian",
+    "ThreeLetterISOLanguageName": "akk",
+    "ThreeLetterISOLanguageNames": [
+      "akk"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Albanian",
+    "Name": "Albanian",
+    "ThreeLetterISOLanguageName": "sqi",
+    "ThreeLetterISOLanguageNames": [
+      "sqi",
+      "alb"
+    ],
+    "TwoLetterISOLanguageName": "sq"
+  },
+  {
+    "DisplayName": "Aleut",
+    "Name": "Aleut",
+    "ThreeLetterISOLanguageName": "ale",
+    "ThreeLetterISOLanguageNames": [
+      "ale"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Algonquian languages",
+    "Name": "Algonquian languages",
+    "ThreeLetterISOLanguageName": "alg",
+    "ThreeLetterISOLanguageNames": [
+      "alg"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Altaic languages",
+    "Name": "Altaic languages",
+    "ThreeLetterISOLanguageName": "tut",
+    "ThreeLetterISOLanguageNames": [
+      "tut"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Amharic",
+    "Name": "Amharic",
+    "ThreeLetterISOLanguageName": "amh",
+    "ThreeLetterISOLanguageNames": [
+      "amh"
+    ],
+    "TwoLetterISOLanguageName": "am"
+  },
+  {
+    "DisplayName": "Angika",
+    "Name": "Angika",
+    "ThreeLetterISOLanguageName": "anp",
+    "ThreeLetterISOLanguageNames": [
+      "anp"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Apache languages",
+    "Name": "Apache languages",
+    "ThreeLetterISOLanguageName": "apa",
+    "ThreeLetterISOLanguageNames": [
+      "apa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Arabic",
+    "Name": "Arabic",
+    "ThreeLetterISOLanguageName": "ara",
+    "ThreeLetterISOLanguageNames": [
+      "ara"
+    ],
+    "TwoLetterISOLanguageName": "ar"
+  },
+  {
+    "DisplayName": "Aragonese",
+    "Name": "Aragonese",
+    "ThreeLetterISOLanguageName": "arg",
+    "ThreeLetterISOLanguageNames": [
+      "arg"
+    ],
+    "TwoLetterISOLanguageName": "an"
+  },
+  {
+    "DisplayName": "Arapaho",
+    "Name": "Arapaho",
+    "ThreeLetterISOLanguageName": "arp",
+    "ThreeLetterISOLanguageNames": [
+      "arp"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Arawak",
+    "Name": "Arawak",
+    "ThreeLetterISOLanguageName": "arw",
+    "ThreeLetterISOLanguageNames": [
+      "arw"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Armenian",
+    "Name": "Armenian",
+    "ThreeLetterISOLanguageName": "hye",
+    "ThreeLetterISOLanguageNames": [
+      "hye",
+      "arm"
+    ],
+    "TwoLetterISOLanguageName": "hy"
+  },
+  {
+    "DisplayName": "Aromanian; Arumanian; Macedo-Romanian",
+    "Name": "Aromanian; Arumanian; Macedo-Romanian",
+    "ThreeLetterISOLanguageName": "rup",
+    "ThreeLetterISOLanguageNames": [
+      "rup"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Artificial languages",
+    "Name": "Artificial languages",
+    "ThreeLetterISOLanguageName": "art",
+    "ThreeLetterISOLanguageNames": [
+      "art"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Assamese",
+    "Name": "Assamese",
+    "ThreeLetterISOLanguageName": "asm",
+    "ThreeLetterISOLanguageNames": [
+      "asm"
+    ],
+    "TwoLetterISOLanguageName": "as"
+  },
+  {
+    "DisplayName": "Asturian; Bable; Leonese; Asturleonese",
+    "Name": "Asturian; Bable; Leonese; Asturleonese",
+    "ThreeLetterISOLanguageName": "ast",
+    "ThreeLetterISOLanguageNames": [
+      "ast"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Athapascan languages",
+    "Name": "Athapascan languages",
+    "ThreeLetterISOLanguageName": "ath",
+    "ThreeLetterISOLanguageNames": [
+      "ath"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Australian languages",
+    "Name": "Australian languages",
+    "ThreeLetterISOLanguageName": "aus",
+    "ThreeLetterISOLanguageNames": [
+      "aus"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Austronesian languages",
+    "Name": "Austronesian languages",
+    "ThreeLetterISOLanguageName": "map",
+    "ThreeLetterISOLanguageNames": [
+      "map"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Avaric",
+    "Name": "Avaric",
+    "ThreeLetterISOLanguageName": "ava",
+    "ThreeLetterISOLanguageNames": [
+      "ava"
+    ],
+    "TwoLetterISOLanguageName": "av"
+  },
+  {
+    "DisplayName": "Avestan",
+    "Name": "Avestan",
+    "ThreeLetterISOLanguageName": "ave",
+    "ThreeLetterISOLanguageNames": [
+      "ave"
+    ],
+    "TwoLetterISOLanguageName": "ae"
+  },
+  {
+    "DisplayName": "Awadhi",
+    "Name": "Awadhi",
+    "ThreeLetterISOLanguageName": "awa",
+    "ThreeLetterISOLanguageNames": [
+      "awa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Aymara",
+    "Name": "Aymara",
+    "ThreeLetterISOLanguageName": "aym",
+    "ThreeLetterISOLanguageNames": [
+      "aym"
+    ],
+    "TwoLetterISOLanguageName": "ay"
+  },
+  {
+    "DisplayName": "Azerbaijani",
+    "Name": "Azerbaijani",
+    "ThreeLetterISOLanguageName": "aze",
+    "ThreeLetterISOLanguageNames": [
+      "aze"
+    ],
+    "TwoLetterISOLanguageName": "az"
+  },
+  {
+    "DisplayName": "Balinese",
+    "Name": "Balinese",
+    "ThreeLetterISOLanguageName": "ban",
+    "ThreeLetterISOLanguageNames": [
+      "ban"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Baltic languages",
+    "Name": "Baltic languages",
+    "ThreeLetterISOLanguageName": "bat",
+    "ThreeLetterISOLanguageNames": [
+      "bat"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Baluchi",
+    "Name": "Baluchi",
+    "ThreeLetterISOLanguageName": "bal",
+    "ThreeLetterISOLanguageNames": [
+      "bal"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bambara",
+    "Name": "Bambara",
+    "ThreeLetterISOLanguageName": "bam",
+    "ThreeLetterISOLanguageNames": [
+      "bam"
+    ],
+    "TwoLetterISOLanguageName": "bm"
+  },
+  {
+    "DisplayName": "Bamileke languages",
+    "Name": "Bamileke languages",
+    "ThreeLetterISOLanguageName": "bai",
+    "ThreeLetterISOLanguageNames": [
+      "bai"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Banda languages",
+    "Name": "Banda languages",
+    "ThreeLetterISOLanguageName": "bad",
+    "ThreeLetterISOLanguageNames": [
+      "bad"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bantu (Other)",
+    "Name": "Bantu (Other)",
+    "ThreeLetterISOLanguageName": "bnt",
+    "ThreeLetterISOLanguageNames": [
+      "bnt"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Basa",
+    "Name": "Basa",
+    "ThreeLetterISOLanguageName": "bas",
+    "ThreeLetterISOLanguageNames": [
+      "bas"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bashkir",
+    "Name": "Bashkir",
+    "ThreeLetterISOLanguageName": "bak",
+    "ThreeLetterISOLanguageNames": [
+      "bak"
+    ],
+    "TwoLetterISOLanguageName": "ba"
+  },
+  {
+    "DisplayName": "Basque",
+    "Name": "Basque",
+    "ThreeLetterISOLanguageName": "eus",
+    "ThreeLetterISOLanguageNames": [
+      "eus",
+      "baq"
+    ],
+    "TwoLetterISOLanguageName": "eu"
+  },
+  {
+    "DisplayName": "Batak languages",
+    "Name": "Batak languages",
+    "ThreeLetterISOLanguageName": "btk",
+    "ThreeLetterISOLanguageNames": [
+      "btk"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Beja; Bedawiyet",
+    "Name": "Beja; Bedawiyet",
+    "ThreeLetterISOLanguageName": "bej",
+    "ThreeLetterISOLanguageNames": [
+      "bej"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Belarusian",
+    "Name": "Belarusian",
+    "ThreeLetterISOLanguageName": "bel",
+    "ThreeLetterISOLanguageNames": [
+      "bel"
+    ],
+    "TwoLetterISOLanguageName": "be"
+  },
+  {
+    "DisplayName": "Bemba",
+    "Name": "Bemba",
+    "ThreeLetterISOLanguageName": "bem",
+    "ThreeLetterISOLanguageNames": [
+      "bem"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bengali",
+    "Name": "Bengali",
+    "ThreeLetterISOLanguageName": "ben",
+    "ThreeLetterISOLanguageNames": [
+      "ben"
+    ],
+    "TwoLetterISOLanguageName": "bn"
+  },
+  {
+    "DisplayName": "Berber languages",
+    "Name": "Berber languages",
+    "ThreeLetterISOLanguageName": "ber",
+    "ThreeLetterISOLanguageNames": [
+      "ber"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bhojpuri",
+    "Name": "Bhojpuri",
+    "ThreeLetterISOLanguageName": "bho",
+    "ThreeLetterISOLanguageNames": [
+      "bho"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bihari languages",
+    "Name": "Bihari languages",
+    "ThreeLetterISOLanguageName": "bih",
+    "ThreeLetterISOLanguageNames": [
+      "bih"
+    ],
+    "TwoLetterISOLanguageName": "bh"
+  },
+  {
+    "DisplayName": "Bikol",
+    "Name": "Bikol",
+    "ThreeLetterISOLanguageName": "bik",
+    "ThreeLetterISOLanguageNames": [
+      "bik"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bini; Edo",
+    "Name": "Bini; Edo",
+    "ThreeLetterISOLanguageName": "bin",
+    "ThreeLetterISOLanguageNames": [
+      "bin"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bislama",
+    "Name": "Bislama",
+    "ThreeLetterISOLanguageName": "bis",
+    "ThreeLetterISOLanguageNames": [
+      "bis"
+    ],
+    "TwoLetterISOLanguageName": "bi"
+  },
+  {
+    "DisplayName": "Blin; Bilin",
+    "Name": "Blin; Bilin",
+    "ThreeLetterISOLanguageName": "byn",
+    "ThreeLetterISOLanguageNames": [
+      "byn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Blissymbols; Blissymbolics; Bliss",
+    "Name": "Blissymbols; Blissymbolics; Bliss",
+    "ThreeLetterISOLanguageName": "zbl",
+    "ThreeLetterISOLanguageNames": [
+      "zbl"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bosnian",
+    "Name": "Bosnian",
+    "ThreeLetterISOLanguageName": "bos",
+    "ThreeLetterISOLanguageNames": [
+      "bos"
+    ],
+    "TwoLetterISOLanguageName": "bs"
+  },
+  {
+    "DisplayName": "Braj",
+    "Name": "Braj",
+    "ThreeLetterISOLanguageName": "bra",
+    "ThreeLetterISOLanguageNames": [
+      "bra"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Breton",
+    "Name": "Breton",
+    "ThreeLetterISOLanguageName": "bre",
+    "ThreeLetterISOLanguageNames": [
+      "bre"
+    ],
+    "TwoLetterISOLanguageName": "br"
+  },
+  {
+    "DisplayName": "Buginese",
+    "Name": "Buginese",
+    "ThreeLetterISOLanguageName": "bug",
+    "ThreeLetterISOLanguageNames": [
+      "bug"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Bulgarian",
+    "Name": "Bulgarian",
+    "ThreeLetterISOLanguageName": "bul",
+    "ThreeLetterISOLanguageNames": [
+      "bul"
+    ],
+    "TwoLetterISOLanguageName": "bg"
+  },
+  {
+    "DisplayName": "Buriat",
+    "Name": "Buriat",
+    "ThreeLetterISOLanguageName": "bua",
+    "ThreeLetterISOLanguageNames": [
+      "bua"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Burmese",
+    "Name": "Burmese",
+    "ThreeLetterISOLanguageName": "mya",
+    "ThreeLetterISOLanguageNames": [
+      "mya",
+      "bur"
+    ],
+    "TwoLetterISOLanguageName": "my"
+  },
+  {
+    "DisplayName": "Caddo",
+    "Name": "Caddo",
+    "ThreeLetterISOLanguageName": "cad",
+    "ThreeLetterISOLanguageNames": [
+      "cad"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Catalan; Valencian",
+    "Name": "Catalan; Valencian",
+    "ThreeLetterISOLanguageName": "cat",
+    "ThreeLetterISOLanguageNames": [
+      "cat"
+    ],
+    "TwoLetterISOLanguageName": "ca"
+  },
+  {
+    "DisplayName": "Caucasian languages",
+    "Name": "Caucasian languages",
+    "ThreeLetterISOLanguageName": "cau",
+    "ThreeLetterISOLanguageNames": [
+      "cau"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Cebuano",
+    "Name": "Cebuano",
+    "ThreeLetterISOLanguageName": "ceb",
+    "ThreeLetterISOLanguageNames": [
+      "ceb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Celtic languages",
+    "Name": "Celtic languages",
+    "ThreeLetterISOLanguageName": "cel",
+    "ThreeLetterISOLanguageNames": [
+      "cel"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Central American Indian languages",
+    "Name": "Central American Indian languages",
+    "ThreeLetterISOLanguageName": "cai",
+    "ThreeLetterISOLanguageNames": [
+      "cai"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Central Khmer",
+    "Name": "Central Khmer",
+    "ThreeLetterISOLanguageName": "khm",
+    "ThreeLetterISOLanguageNames": [
+      "khm"
+    ],
+    "TwoLetterISOLanguageName": "km"
+  },
+  {
+    "DisplayName": "Chagatai",
+    "Name": "Chagatai",
+    "ThreeLetterISOLanguageName": "chg",
+    "ThreeLetterISOLanguageNames": [
+      "chg"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Chamic languages",
+    "Name": "Chamic languages",
+    "ThreeLetterISOLanguageName": "cmc",
+    "ThreeLetterISOLanguageNames": [
+      "cmc"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Chamorro",
+    "Name": "Chamorro",
+    "ThreeLetterISOLanguageName": "cha",
+    "ThreeLetterISOLanguageNames": [
+      "cha"
+    ],
+    "TwoLetterISOLanguageName": "ch"
+  },
+  {
+    "DisplayName": "Chechen",
+    "Name": "Chechen",
+    "ThreeLetterISOLanguageName": "che",
+    "ThreeLetterISOLanguageNames": [
+      "che"
+    ],
+    "TwoLetterISOLanguageName": "ce"
+  },
+  {
+    "DisplayName": "Cherokee",
+    "Name": "Cherokee",
+    "ThreeLetterISOLanguageName": "chr",
+    "ThreeLetterISOLanguageNames": [
+      "chr"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Cheyenne",
+    "Name": "Cheyenne",
+    "ThreeLetterISOLanguageName": "chy",
+    "ThreeLetterISOLanguageNames": [
+      "chy"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Chibcha",
+    "Name": "Chibcha",
+    "ThreeLetterISOLanguageName": "chb",
+    "ThreeLetterISOLanguageNames": [
+      "chb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Chichewa; Chewa; Nyanja",
+    "Name": "Chichewa; Chewa; Nyanja",
+    "ThreeLetterISOLanguageName": "nya",
+    "ThreeLetterISOLanguageNames": [
+      "nya"
+    ],
+    "TwoLetterISOLanguageName": "ny"
+  },
+  {
+    "DisplayName": "Chinese",
+    "Name": "Chinese",
+    "ThreeLetterISOLanguageName": "zho",
+    "ThreeLetterISOLanguageNames": [
+      "zho",
+      "chi"
+    ],
+    "TwoLetterISOLanguageName": "zh"
+  },
+  {
+    "DisplayName": "Chinese (Bilingual)",
+    "Name": "Chinese (Bilingual)",
+    "ThreeLetterISOLanguageName": "zho",
+    "ThreeLetterISOLanguageNames": [
+      "zho",
+      "chi"
+    ],
+    "TwoLetterISOLanguageName": "ze"
+  },
+  {
+    "DisplayName": "Chinese (Hong Kong)",
+    "Name": "zh-hk",
+    "ThreeLetterISOLanguageName": "zho",
+    "ThreeLetterISOLanguageNames": [
+      "zho",
+      "chi"
+    ],
+    "TwoLetterISOLanguageName": "zh-hk"
+  },
+  {
+    "DisplayName": "Chinese (Simplified)",
+    "Name": "zh-cn",
+    "ThreeLetterISOLanguageName": "zho",
+    "ThreeLetterISOLanguageNames": [
+      "zho",
+      "chi"
+    ],
+    "TwoLetterISOLanguageName": "zh-cn"
+  },
+  {
+    "DisplayName": "Chinese (Traditional)",
+    "Name": "zh-tw",
+    "ThreeLetterISOLanguageName": "zho",
+    "ThreeLetterISOLanguageNames": [
+      "zho",
+      "chi"
+    ],
+    "TwoLetterISOLanguageName": "zh-tw"
+  },
+  {
+    "DisplayName": "Chinook jargon",
+    "Name": "Chinook jargon",
+    "ThreeLetterISOLanguageName": "chn",
+    "ThreeLetterISOLanguageNames": [
+      "chn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Chipewyan; Dene Suline",
+    "Name": "Chipewyan; Dene Suline",
+    "ThreeLetterISOLanguageName": "chp",
+    "ThreeLetterISOLanguageNames": [
+      "chp"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Choctaw",
+    "Name": "Choctaw",
+    "ThreeLetterISOLanguageName": "cho",
+    "ThreeLetterISOLanguageNames": [
+      "cho"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Church Slavic; Old Slavonic; Church Slavonic; Old Bulgarian; Old Church Slavonic",
+    "Name": "Church Slavic; Old Slavonic; Church Slavonic; Old Bulgarian; Old Church Slavonic",
+    "ThreeLetterISOLanguageName": "chu",
+    "ThreeLetterISOLanguageNames": [
+      "chu"
+    ],
+    "TwoLetterISOLanguageName": "cu"
+  },
+  {
+    "DisplayName": "Chuukese",
+    "Name": "Chuukese",
+    "ThreeLetterISOLanguageName": "chk",
+    "ThreeLetterISOLanguageNames": [
+      "chk"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Chuvash",
+    "Name": "Chuvash",
+    "ThreeLetterISOLanguageName": "chv",
+    "ThreeLetterISOLanguageNames": [
+      "chv"
+    ],
+    "TwoLetterISOLanguageName": "cv"
+  },
+  {
+    "DisplayName": "Classical Newari; Old Newari; Classical Nepal Bhasa",
+    "Name": "Classical Newari; Old Newari; Classical Nepal Bhasa",
+    "ThreeLetterISOLanguageName": "nwc",
+    "ThreeLetterISOLanguageNames": [
+      "nwc"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Classical Syriac",
+    "Name": "Classical Syriac",
+    "ThreeLetterISOLanguageName": "syc",
+    "ThreeLetterISOLanguageNames": [
+      "syc"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Coptic",
+    "Name": "Coptic",
+    "ThreeLetterISOLanguageName": "cop",
+    "ThreeLetterISOLanguageNames": [
+      "cop"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Cornish",
+    "Name": "Cornish",
+    "ThreeLetterISOLanguageName": "cor",
+    "ThreeLetterISOLanguageNames": [
+      "cor"
+    ],
+    "TwoLetterISOLanguageName": "kw"
+  },
+  {
+    "DisplayName": "Corsican",
+    "Name": "Corsican",
+    "ThreeLetterISOLanguageName": "cos",
+    "ThreeLetterISOLanguageNames": [
+      "cos"
+    ],
+    "TwoLetterISOLanguageName": "co"
+  },
+  {
+    "DisplayName": "Cree",
+    "Name": "Cree",
+    "ThreeLetterISOLanguageName": "cre",
+    "ThreeLetterISOLanguageNames": [
+      "cre"
+    ],
+    "TwoLetterISOLanguageName": "cr"
+  },
+  {
+    "DisplayName": "Creek",
+    "Name": "Creek",
+    "ThreeLetterISOLanguageName": "mus",
+    "ThreeLetterISOLanguageNames": [
+      "mus"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Creoles and pidgins ",
+    "Name": "Creoles and pidgins ",
+    "ThreeLetterISOLanguageName": "crp",
+    "ThreeLetterISOLanguageNames": [
+      "crp"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Creoles and pidgins, English based",
+    "Name": "Creoles and pidgins, English based",
+    "ThreeLetterISOLanguageName": "cpe",
+    "ThreeLetterISOLanguageNames": [
+      "cpe"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Creoles and pidgins, French-based ",
+    "Name": "Creoles and pidgins, French-based ",
+    "ThreeLetterISOLanguageName": "cpf",
+    "ThreeLetterISOLanguageNames": [
+      "cpf"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Creoles and pidgins, Portuguese-based ",
+    "Name": "Creoles and pidgins, Portuguese-based ",
+    "ThreeLetterISOLanguageName": "cpp",
+    "ThreeLetterISOLanguageNames": [
+      "cpp"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Crimean Tatar; Crimean Turkish",
+    "Name": "Crimean Tatar; Crimean Turkish",
+    "ThreeLetterISOLanguageName": "crh",
+    "ThreeLetterISOLanguageNames": [
+      "crh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Croatian",
+    "Name": "Croatian",
+    "ThreeLetterISOLanguageName": "hrv",
+    "ThreeLetterISOLanguageNames": [
+      "hrv"
+    ],
+    "TwoLetterISOLanguageName": "hr"
+  },
+  {
+    "DisplayName": "Cushitic languages",
+    "Name": "Cushitic languages",
+    "ThreeLetterISOLanguageName": "cus",
+    "ThreeLetterISOLanguageNames": [
+      "cus"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Czech",
+    "Name": "Czech",
+    "ThreeLetterISOLanguageName": "ces",
+    "ThreeLetterISOLanguageNames": [
+      "ces",
+      "cze"
+    ],
+    "TwoLetterISOLanguageName": "cs"
+  },
+  {
+    "DisplayName": "Dakota",
+    "Name": "Dakota",
+    "ThreeLetterISOLanguageName": "dak",
+    "ThreeLetterISOLanguageNames": [
+      "dak"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Danish",
+    "Name": "Danish",
+    "ThreeLetterISOLanguageName": "dan",
+    "ThreeLetterISOLanguageNames": [
+      "dan"
+    ],
+    "TwoLetterISOLanguageName": "da"
+  },
+  {
+    "DisplayName": "Dargwa",
+    "Name": "Dargwa",
+    "ThreeLetterISOLanguageName": "dar",
+    "ThreeLetterISOLanguageNames": [
+      "dar"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Delaware",
+    "Name": "Delaware",
+    "ThreeLetterISOLanguageName": "del",
+    "ThreeLetterISOLanguageNames": [
+      "del"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Dinka",
+    "Name": "Dinka",
+    "ThreeLetterISOLanguageName": "din",
+    "ThreeLetterISOLanguageNames": [
+      "din"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Divehi; Dhivehi; Maldivian",
+    "Name": "Divehi; Dhivehi; Maldivian",
+    "ThreeLetterISOLanguageName": "div",
+    "ThreeLetterISOLanguageNames": [
+      "div"
+    ],
+    "TwoLetterISOLanguageName": "dv"
+  },
+  {
+    "DisplayName": "Dogri",
+    "Name": "Dogri",
+    "ThreeLetterISOLanguageName": "doi",
+    "ThreeLetterISOLanguageNames": [
+      "doi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Dogrib",
+    "Name": "Dogrib",
+    "ThreeLetterISOLanguageName": "dgr",
+    "ThreeLetterISOLanguageNames": [
+      "dgr"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Dravidian languages",
+    "Name": "Dravidian languages",
+    "ThreeLetterISOLanguageName": "dra",
+    "ThreeLetterISOLanguageNames": [
+      "dra"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Duala",
+    "Name": "Duala",
+    "ThreeLetterISOLanguageName": "dua",
+    "ThreeLetterISOLanguageNames": [
+      "dua"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Dutch, Middle (ca.1050-1350)",
+    "Name": "Dutch, Middle (ca.1050-1350)",
+    "ThreeLetterISOLanguageName": "dum",
+    "ThreeLetterISOLanguageNames": [
+      "dum"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Dutch; Flemish",
+    "Name": "Dutch; Flemish",
+    "ThreeLetterISOLanguageName": "nld",
+    "ThreeLetterISOLanguageNames": [
+      "nld",
+      "dut"
+    ],
+    "TwoLetterISOLanguageName": "nl"
+  },
+  {
+    "DisplayName": "Dyula",
+    "Name": "Dyula",
+    "ThreeLetterISOLanguageName": "dyu",
+    "ThreeLetterISOLanguageNames": [
+      "dyu"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Dzongkha",
+    "Name": "Dzongkha",
+    "ThreeLetterISOLanguageName": "dzo",
+    "ThreeLetterISOLanguageNames": [
+      "dzo"
+    ],
+    "TwoLetterISOLanguageName": "dz"
+  },
+  {
+    "DisplayName": "Eastern Frisian",
+    "Name": "Eastern Frisian",
+    "ThreeLetterISOLanguageName": "frs",
+    "ThreeLetterISOLanguageNames": [
+      "frs"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Efik",
+    "Name": "Efik",
+    "ThreeLetterISOLanguageName": "efi",
+    "ThreeLetterISOLanguageNames": [
+      "efi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Egyptian (Ancient)",
+    "Name": "Egyptian (Ancient)",
+    "ThreeLetterISOLanguageName": "egy",
+    "ThreeLetterISOLanguageNames": [
+      "egy"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Ekajuk",
+    "Name": "Ekajuk",
+    "ThreeLetterISOLanguageName": "eka",
+    "ThreeLetterISOLanguageNames": [
+      "eka"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Elamite",
+    "Name": "Elamite",
+    "ThreeLetterISOLanguageName": "elx",
+    "ThreeLetterISOLanguageNames": [
+      "elx"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "English",
+    "Name": "English",
+    "ThreeLetterISOLanguageName": "eng",
+    "ThreeLetterISOLanguageNames": [
+      "eng"
+    ],
+    "TwoLetterISOLanguageName": "en"
+  },
+  {
+    "DisplayName": "English, Middle (1100-1500)",
+    "Name": "English, Middle (1100-1500)",
+    "ThreeLetterISOLanguageName": "enm",
+    "ThreeLetterISOLanguageNames": [
+      "enm"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "English, Old (ca.450-1100)",
+    "Name": "English, Old (ca.450-1100)",
+    "ThreeLetterISOLanguageName": "ang",
+    "ThreeLetterISOLanguageNames": [
+      "ang"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Erzya",
+    "Name": "Erzya",
+    "ThreeLetterISOLanguageName": "myv",
+    "ThreeLetterISOLanguageNames": [
+      "myv"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Esperanto",
+    "Name": "Esperanto",
+    "ThreeLetterISOLanguageName": "epo",
+    "ThreeLetterISOLanguageNames": [
+      "epo"
+    ],
+    "TwoLetterISOLanguageName": "eo"
+  },
+  {
+    "DisplayName": "Estonian",
+    "Name": "Estonian",
+    "ThreeLetterISOLanguageName": "est",
+    "ThreeLetterISOLanguageNames": [
+      "est"
+    ],
+    "TwoLetterISOLanguageName": "et"
+  },
+  {
+    "DisplayName": "Ewe",
+    "Name": "Ewe",
+    "ThreeLetterISOLanguageName": "ewe",
+    "ThreeLetterISOLanguageNames": [
+      "ewe"
+    ],
+    "TwoLetterISOLanguageName": "ee"
+  },
+  {
+    "DisplayName": "Ewondo",
+    "Name": "Ewondo",
+    "ThreeLetterISOLanguageName": "ewo",
+    "ThreeLetterISOLanguageNames": [
+      "ewo"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Fang",
+    "Name": "Fang",
+    "ThreeLetterISOLanguageName": "fan",
+    "ThreeLetterISOLanguageNames": [
+      "fan"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Fanti",
+    "Name": "Fanti",
+    "ThreeLetterISOLanguageName": "fat",
+    "ThreeLetterISOLanguageNames": [
+      "fat"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Faroese",
+    "Name": "Faroese",
+    "ThreeLetterISOLanguageName": "fao",
+    "ThreeLetterISOLanguageNames": [
+      "fao"
+    ],
+    "TwoLetterISOLanguageName": "fo"
+  },
+  {
+    "DisplayName": "Fijian",
+    "Name": "Fijian",
+    "ThreeLetterISOLanguageName": "fij",
+    "ThreeLetterISOLanguageNames": [
+      "fij"
+    ],
+    "TwoLetterISOLanguageName": "fj"
+  },
+  {
+    "DisplayName": "Filipino; Pilipino",
+    "Name": "Filipino; Pilipino",
+    "ThreeLetterISOLanguageName": "fil",
+    "ThreeLetterISOLanguageNames": [
+      "fil"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Finnish",
+    "Name": "Finnish",
+    "ThreeLetterISOLanguageName": "fin",
+    "ThreeLetterISOLanguageNames": [
+      "fin"
+    ],
+    "TwoLetterISOLanguageName": "fi"
+  },
+  {
+    "DisplayName": "Finno-Ugrian languages",
+    "Name": "Finno-Ugrian languages",
+    "ThreeLetterISOLanguageName": "fiu",
+    "ThreeLetterISOLanguageNames": [
+      "fiu"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Fon",
+    "Name": "Fon",
+    "ThreeLetterISOLanguageName": "fon",
+    "ThreeLetterISOLanguageNames": [
+      "fon"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "French",
+    "Name": "French",
+    "ThreeLetterISOLanguageName": "fra",
+    "ThreeLetterISOLanguageNames": [
+      "fra",
+      "fre"
+    ],
+    "TwoLetterISOLanguageName": "fr"
+  },
+  {
+    "DisplayName": "French (Canada)",
+    "Name": "fr-ca",
+    "ThreeLetterISOLanguageName": "frc",
+    "ThreeLetterISOLanguageNames": [
+      "frc"
+    ],
+    "TwoLetterISOLanguageName": "fr-ca"
+  },
+  {
+    "DisplayName": "French, Middle (ca.1400-1600)",
+    "Name": "French, Middle (ca.1400-1600)",
+    "ThreeLetterISOLanguageName": "frm",
+    "ThreeLetterISOLanguageNames": [
+      "frm"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "French, Old (842-ca.1400)",
+    "Name": "French, Old (842-ca.1400)",
+    "ThreeLetterISOLanguageName": "fro",
+    "ThreeLetterISOLanguageNames": [
+      "fro"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Friulian",
+    "Name": "Friulian",
+    "ThreeLetterISOLanguageName": "fur",
+    "ThreeLetterISOLanguageNames": [
+      "fur"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Fulah",
+    "Name": "Fulah",
+    "ThreeLetterISOLanguageName": "ful",
+    "ThreeLetterISOLanguageNames": [
+      "ful"
+    ],
+    "TwoLetterISOLanguageName": "ff"
+  },
+  {
+    "DisplayName": "Ga",
+    "Name": "Ga",
+    "ThreeLetterISOLanguageName": "gaa",
+    "ThreeLetterISOLanguageNames": [
+      "gaa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Gaelic; Scottish Gaelic",
+    "Name": "Gaelic; Scottish Gaelic",
+    "ThreeLetterISOLanguageName": "gla",
+    "ThreeLetterISOLanguageNames": [
+      "gla"
+    ],
+    "TwoLetterISOLanguageName": "gd"
+  },
+  {
+    "DisplayName": "Galibi Carib",
+    "Name": "Galibi Carib",
+    "ThreeLetterISOLanguageName": "car",
+    "ThreeLetterISOLanguageNames": [
+      "car"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Galician",
+    "Name": "Galician",
+    "ThreeLetterISOLanguageName": "glg",
+    "ThreeLetterISOLanguageNames": [
+      "glg"
+    ],
+    "TwoLetterISOLanguageName": "gl"
+  },
+  {
+    "DisplayName": "Ganda",
+    "Name": "Ganda",
+    "ThreeLetterISOLanguageName": "lug",
+    "ThreeLetterISOLanguageNames": [
+      "lug"
+    ],
+    "TwoLetterISOLanguageName": "lg"
+  },
+  {
+    "DisplayName": "Gayo",
+    "Name": "Gayo",
+    "ThreeLetterISOLanguageName": "gay",
+    "ThreeLetterISOLanguageNames": [
+      "gay"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Gbaya",
+    "Name": "Gbaya",
+    "ThreeLetterISOLanguageName": "gba",
+    "ThreeLetterISOLanguageNames": [
+      "gba"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Geez",
+    "Name": "Geez",
+    "ThreeLetterISOLanguageName": "gez",
+    "ThreeLetterISOLanguageNames": [
+      "gez"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Georgian",
+    "Name": "Georgian",
+    "ThreeLetterISOLanguageName": "kat",
+    "ThreeLetterISOLanguageNames": [
+      "kat",
+      "geo"
+    ],
+    "TwoLetterISOLanguageName": "ka"
+  },
+  {
+    "DisplayName": "German",
+    "Name": "German",
+    "ThreeLetterISOLanguageName": "deu",
+    "ThreeLetterISOLanguageNames": [
+      "deu",
+      "ger"
+    ],
+    "TwoLetterISOLanguageName": "de"
+  },
+  {
+    "DisplayName": "German, Middle High (ca.1050-1500)",
+    "Name": "German, Middle High (ca.1050-1500)",
+    "ThreeLetterISOLanguageName": "gmh",
+    "ThreeLetterISOLanguageNames": [
+      "gmh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "German, Old High (ca.750-1050)",
+    "Name": "German, Old High (ca.750-1050)",
+    "ThreeLetterISOLanguageName": "goh",
+    "ThreeLetterISOLanguageNames": [
+      "goh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Germanic languages",
+    "Name": "Germanic languages",
+    "ThreeLetterISOLanguageName": "gem",
+    "ThreeLetterISOLanguageNames": [
+      "gem"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Gilbertese",
+    "Name": "Gilbertese",
+    "ThreeLetterISOLanguageName": "gil",
+    "ThreeLetterISOLanguageNames": [
+      "gil"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Gondi",
+    "Name": "Gondi",
+    "ThreeLetterISOLanguageName": "gon",
+    "ThreeLetterISOLanguageNames": [
+      "gon"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Gorontalo",
+    "Name": "Gorontalo",
+    "ThreeLetterISOLanguageName": "gor",
+    "ThreeLetterISOLanguageNames": [
+      "gor"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Gothic",
+    "Name": "Gothic",
+    "ThreeLetterISOLanguageName": "got",
+    "ThreeLetterISOLanguageNames": [
+      "got"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Grebo",
+    "Name": "Grebo",
+    "ThreeLetterISOLanguageName": "grb",
+    "ThreeLetterISOLanguageNames": [
+      "grb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Greek, Ancient (to 1453)",
+    "Name": "Greek, Ancient (to 1453)",
+    "ThreeLetterISOLanguageName": "grc",
+    "ThreeLetterISOLanguageNames": [
+      "grc"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Greek, Modern (1453-)",
+    "Name": "Greek, Modern (1453-)",
+    "ThreeLetterISOLanguageName": "ell",
+    "ThreeLetterISOLanguageNames": [
+      "ell",
+      "gre"
+    ],
+    "TwoLetterISOLanguageName": "el"
+  },
+  {
+    "DisplayName": "Guarani",
+    "Name": "Guarani",
+    "ThreeLetterISOLanguageName": "grn",
+    "ThreeLetterISOLanguageNames": [
+      "grn"
+    ],
+    "TwoLetterISOLanguageName": "gn"
+  },
+  {
+    "DisplayName": "Gujarati",
+    "Name": "Gujarati",
+    "ThreeLetterISOLanguageName": "guj",
+    "ThreeLetterISOLanguageNames": [
+      "guj"
+    ],
+    "TwoLetterISOLanguageName": "gu"
+  },
+  {
+    "DisplayName": "Gwich'in",
+    "Name": "Gwich'in",
+    "ThreeLetterISOLanguageName": "gwi",
+    "ThreeLetterISOLanguageNames": [
+      "gwi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Haida",
+    "Name": "Haida",
+    "ThreeLetterISOLanguageName": "hai",
+    "ThreeLetterISOLanguageNames": [
+      "hai"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Haitian; Haitian Creole",
+    "Name": "Haitian; Haitian Creole",
+    "ThreeLetterISOLanguageName": "hat",
+    "ThreeLetterISOLanguageNames": [
+      "hat"
+    ],
+    "TwoLetterISOLanguageName": "ht"
+  },
+  {
+    "DisplayName": "Hausa",
+    "Name": "Hausa",
+    "ThreeLetterISOLanguageName": "hau",
+    "ThreeLetterISOLanguageNames": [
+      "hau"
+    ],
+    "TwoLetterISOLanguageName": "ha"
+  },
+  {
+    "DisplayName": "Hawaiian",
+    "Name": "Hawaiian",
+    "ThreeLetterISOLanguageName": "haw",
+    "ThreeLetterISOLanguageNames": [
+      "haw"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Hebrew",
+    "Name": "Hebrew",
+    "ThreeLetterISOLanguageName": "heb",
+    "ThreeLetterISOLanguageNames": [
+      "heb"
+    ],
+    "TwoLetterISOLanguageName": "he"
+  },
+  {
+    "DisplayName": "Herero",
+    "Name": "Herero",
+    "ThreeLetterISOLanguageName": "her",
+    "ThreeLetterISOLanguageNames": [
+      "her"
+    ],
+    "TwoLetterISOLanguageName": "hz"
+  },
+  {
+    "DisplayName": "Hiligaynon",
+    "Name": "Hiligaynon",
+    "ThreeLetterISOLanguageName": "hil",
+    "ThreeLetterISOLanguageNames": [
+      "hil"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Himachali languages; Western Pahari languages",
+    "Name": "Himachali languages; Western Pahari languages",
+    "ThreeLetterISOLanguageName": "him",
+    "ThreeLetterISOLanguageNames": [
+      "him"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Hindi",
+    "Name": "Hindi",
+    "ThreeLetterISOLanguageName": "hin",
+    "ThreeLetterISOLanguageNames": [
+      "hin"
+    ],
+    "TwoLetterISOLanguageName": "hi"
+  },
+  {
+    "DisplayName": "Hiri Motu",
+    "Name": "Hiri Motu",
+    "ThreeLetterISOLanguageName": "hmo",
+    "ThreeLetterISOLanguageNames": [
+      "hmo"
+    ],
+    "TwoLetterISOLanguageName": "ho"
+  },
+  {
+    "DisplayName": "Hittite",
+    "Name": "Hittite",
+    "ThreeLetterISOLanguageName": "hit",
+    "ThreeLetterISOLanguageNames": [
+      "hit"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Hmong; Mong",
+    "Name": "Hmong; Mong",
+    "ThreeLetterISOLanguageName": "hmn",
+    "ThreeLetterISOLanguageNames": [
+      "hmn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Hungarian",
+    "Name": "Hungarian",
+    "ThreeLetterISOLanguageName": "hun",
+    "ThreeLetterISOLanguageNames": [
+      "hun"
+    ],
+    "TwoLetterISOLanguageName": "hu"
+  },
+  {
+    "DisplayName": "Hupa",
+    "Name": "Hupa",
+    "ThreeLetterISOLanguageName": "hup",
+    "ThreeLetterISOLanguageNames": [
+      "hup"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Iban",
+    "Name": "Iban",
+    "ThreeLetterISOLanguageName": "iba",
+    "ThreeLetterISOLanguageNames": [
+      "iba"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Icelandic",
+    "Name": "Icelandic",
+    "ThreeLetterISOLanguageName": "isl",
+    "ThreeLetterISOLanguageNames": [
+      "isl",
+      "ice"
+    ],
+    "TwoLetterISOLanguageName": "is"
+  },
+  {
+    "DisplayName": "Ido",
+    "Name": "Ido",
+    "ThreeLetterISOLanguageName": "ido",
+    "ThreeLetterISOLanguageNames": [
+      "ido"
+    ],
+    "TwoLetterISOLanguageName": "io"
+  },
+  {
+    "DisplayName": "Igbo",
+    "Name": "Igbo",
+    "ThreeLetterISOLanguageName": "ibo",
+    "ThreeLetterISOLanguageNames": [
+      "ibo"
+    ],
+    "TwoLetterISOLanguageName": "ig"
+  },
+  {
+    "DisplayName": "Ijo languages",
+    "Name": "Ijo languages",
+    "ThreeLetterISOLanguageName": "ijo",
+    "ThreeLetterISOLanguageNames": [
+      "ijo"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Iloko",
+    "Name": "Iloko",
+    "ThreeLetterISOLanguageName": "ilo",
+    "ThreeLetterISOLanguageNames": [
+      "ilo"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Indic languages",
+    "Name": "Indic languages",
+    "ThreeLetterISOLanguageName": "inc",
+    "ThreeLetterISOLanguageNames": [
+      "inc"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Indo-European languages",
+    "Name": "Indo-European languages",
+    "ThreeLetterISOLanguageName": "ine",
+    "ThreeLetterISOLanguageNames": [
+      "ine"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Indonesian",
+    "Name": "Indonesian",
+    "ThreeLetterISOLanguageName": "ind",
+    "ThreeLetterISOLanguageNames": [
+      "ind"
+    ],
+    "TwoLetterISOLanguageName": "id"
+  },
+  {
+    "DisplayName": "Ingush",
+    "Name": "Ingush",
+    "ThreeLetterISOLanguageName": "inh",
+    "ThreeLetterISOLanguageNames": [
+      "inh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Interlingua (International Auxiliary Language Association)",
+    "Name": "Interlingua (International Auxiliary Language Association)",
+    "ThreeLetterISOLanguageName": "ina",
+    "ThreeLetterISOLanguageNames": [
+      "ina"
+    ],
+    "TwoLetterISOLanguageName": "ia"
+  },
+  {
+    "DisplayName": "Interlingue; Occidental",
+    "Name": "Interlingue; Occidental",
+    "ThreeLetterISOLanguageName": "ile",
+    "ThreeLetterISOLanguageNames": [
+      "ile"
+    ],
+    "TwoLetterISOLanguageName": "ie"
+  },
+  {
+    "DisplayName": "Inuktitut",
+    "Name": "Inuktitut",
+    "ThreeLetterISOLanguageName": "iku",
+    "ThreeLetterISOLanguageNames": [
+      "iku"
+    ],
+    "TwoLetterISOLanguageName": "iu"
+  },
+  {
+    "DisplayName": "Inupiaq",
+    "Name": "Inupiaq",
+    "ThreeLetterISOLanguageName": "ipk",
+    "ThreeLetterISOLanguageNames": [
+      "ipk"
+    ],
+    "TwoLetterISOLanguageName": "ik"
+  },
+  {
+    "DisplayName": "Iranian languages",
+    "Name": "Iranian languages",
+    "ThreeLetterISOLanguageName": "ira",
+    "ThreeLetterISOLanguageNames": [
+      "ira"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Irish",
+    "Name": "Irish",
+    "ThreeLetterISOLanguageName": "gle",
+    "ThreeLetterISOLanguageNames": [
+      "gle"
+    ],
+    "TwoLetterISOLanguageName": "ga"
+  },
+  {
+    "DisplayName": "Irish, Middle (900-1200)",
+    "Name": "Irish, Middle (900-1200)",
+    "ThreeLetterISOLanguageName": "mga",
+    "ThreeLetterISOLanguageNames": [
+      "mga"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Irish, Old (to 900)",
+    "Name": "Irish, Old (to 900)",
+    "ThreeLetterISOLanguageName": "sga",
+    "ThreeLetterISOLanguageNames": [
+      "sga"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Iroquoian languages",
+    "Name": "Iroquoian languages",
+    "ThreeLetterISOLanguageName": "iro",
+    "ThreeLetterISOLanguageNames": [
+      "iro"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Italian",
+    "Name": "Italian",
+    "ThreeLetterISOLanguageName": "ita",
+    "ThreeLetterISOLanguageNames": [
+      "ita"
+    ],
+    "TwoLetterISOLanguageName": "it"
+  },
+  {
+    "DisplayName": "Japanese",
+    "Name": "Japanese",
+    "ThreeLetterISOLanguageName": "jpn",
+    "ThreeLetterISOLanguageNames": [
+      "jpn"
+    ],
+    "TwoLetterISOLanguageName": "ja"
+  },
+  {
+    "DisplayName": "Javanese",
+    "Name": "Javanese",
+    "ThreeLetterISOLanguageName": "jav",
+    "ThreeLetterISOLanguageNames": [
+      "jav"
+    ],
+    "TwoLetterISOLanguageName": "jv"
+  },
+  {
+    "DisplayName": "Judeo-Arabic",
+    "Name": "Judeo-Arabic",
+    "ThreeLetterISOLanguageName": "jrb",
+    "ThreeLetterISOLanguageNames": [
+      "jrb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Judeo-Persian",
+    "Name": "Judeo-Persian",
+    "ThreeLetterISOLanguageName": "jpr",
+    "ThreeLetterISOLanguageNames": [
+      "jpr"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kabardian",
+    "Name": "Kabardian",
+    "ThreeLetterISOLanguageName": "kbd",
+    "ThreeLetterISOLanguageNames": [
+      "kbd"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kabyle",
+    "Name": "Kabyle",
+    "ThreeLetterISOLanguageName": "kab",
+    "ThreeLetterISOLanguageNames": [
+      "kab"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kachin; Jingpho",
+    "Name": "Kachin; Jingpho",
+    "ThreeLetterISOLanguageName": "kac",
+    "ThreeLetterISOLanguageNames": [
+      "kac"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kalaallisut; Greenlandic",
+    "Name": "Kalaallisut; Greenlandic",
+    "ThreeLetterISOLanguageName": "kal",
+    "ThreeLetterISOLanguageNames": [
+      "kal"
+    ],
+    "TwoLetterISOLanguageName": "kl"
+  },
+  {
+    "DisplayName": "Kalmyk; Oirat",
+    "Name": "Kalmyk; Oirat",
+    "ThreeLetterISOLanguageName": "xal",
+    "ThreeLetterISOLanguageNames": [
+      "xal"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kamba",
+    "Name": "Kamba",
+    "ThreeLetterISOLanguageName": "kam",
+    "ThreeLetterISOLanguageNames": [
+      "kam"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kannada",
+    "Name": "Kannada",
+    "ThreeLetterISOLanguageName": "kan",
+    "ThreeLetterISOLanguageNames": [
+      "kan"
+    ],
+    "TwoLetterISOLanguageName": "kn"
+  },
+  {
+    "DisplayName": "Kanuri",
+    "Name": "Kanuri",
+    "ThreeLetterISOLanguageName": "kau",
+    "ThreeLetterISOLanguageNames": [
+      "kau"
+    ],
+    "TwoLetterISOLanguageName": "kr"
+  },
+  {
+    "DisplayName": "Kara-Kalpak",
+    "Name": "Kara-Kalpak",
+    "ThreeLetterISOLanguageName": "kaa",
+    "ThreeLetterISOLanguageNames": [
+      "kaa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Karachay-Balkar",
+    "Name": "Karachay-Balkar",
+    "ThreeLetterISOLanguageName": "krc",
+    "ThreeLetterISOLanguageNames": [
+      "krc"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Karelian",
+    "Name": "Karelian",
+    "ThreeLetterISOLanguageName": "krl",
+    "ThreeLetterISOLanguageNames": [
+      "krl"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Karen languages",
+    "Name": "Karen languages",
+    "ThreeLetterISOLanguageName": "kar",
+    "ThreeLetterISOLanguageNames": [
+      "kar"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kashmiri",
+    "Name": "Kashmiri",
+    "ThreeLetterISOLanguageName": "kas",
+    "ThreeLetterISOLanguageNames": [
+      "kas"
+    ],
+    "TwoLetterISOLanguageName": "ks"
+  },
+  {
+    "DisplayName": "Kashubian",
+    "Name": "Kashubian",
+    "ThreeLetterISOLanguageName": "csb",
+    "ThreeLetterISOLanguageNames": [
+      "csb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kawi",
+    "Name": "Kawi",
+    "ThreeLetterISOLanguageName": "kaw",
+    "ThreeLetterISOLanguageNames": [
+      "kaw"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kazakh",
+    "Name": "Kazakh",
+    "ThreeLetterISOLanguageName": "kaz",
+    "ThreeLetterISOLanguageNames": [
+      "kaz"
+    ],
+    "TwoLetterISOLanguageName": "kk"
+  },
+  {
+    "DisplayName": "Khasi",
+    "Name": "Khasi",
+    "ThreeLetterISOLanguageName": "kha",
+    "ThreeLetterISOLanguageNames": [
+      "kha"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Khoisan languages",
+    "Name": "Khoisan languages",
+    "ThreeLetterISOLanguageName": "khi",
+    "ThreeLetterISOLanguageNames": [
+      "khi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Khotanese; Sakan",
+    "Name": "Khotanese; Sakan",
+    "ThreeLetterISOLanguageName": "kho",
+    "ThreeLetterISOLanguageNames": [
+      "kho"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kikuyu; Gikuyu",
+    "Name": "Kikuyu; Gikuyu",
+    "ThreeLetterISOLanguageName": "kik",
+    "ThreeLetterISOLanguageNames": [
+      "kik"
+    ],
+    "TwoLetterISOLanguageName": "ki"
+  },
+  {
+    "DisplayName": "Kimbundu",
+    "Name": "Kimbundu",
+    "ThreeLetterISOLanguageName": "kmb",
+    "ThreeLetterISOLanguageNames": [
+      "kmb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kinyarwanda",
+    "Name": "Kinyarwanda",
+    "ThreeLetterISOLanguageName": "kin",
+    "ThreeLetterISOLanguageNames": [
+      "kin"
+    ],
+    "TwoLetterISOLanguageName": "rw"
+  },
+  {
+    "DisplayName": "Kirghiz; Kyrgyz",
+    "Name": "Kirghiz; Kyrgyz",
+    "ThreeLetterISOLanguageName": "kir",
+    "ThreeLetterISOLanguageNames": [
+      "kir"
+    ],
+    "TwoLetterISOLanguageName": "ky"
+  },
+  {
+    "DisplayName": "Klingon; tlhIngan-Hol",
+    "Name": "Klingon; tlhIngan-Hol",
+    "ThreeLetterISOLanguageName": "tlh",
+    "ThreeLetterISOLanguageNames": [
+      "tlh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Komi",
+    "Name": "Komi",
+    "ThreeLetterISOLanguageName": "kom",
+    "ThreeLetterISOLanguageNames": [
+      "kom"
+    ],
+    "TwoLetterISOLanguageName": "kv"
+  },
+  {
+    "DisplayName": "Kongo",
+    "Name": "Kongo",
+    "ThreeLetterISOLanguageName": "kon",
+    "ThreeLetterISOLanguageNames": [
+      "kon"
+    ],
+    "TwoLetterISOLanguageName": "kg"
+  },
+  {
+    "DisplayName": "Konkani",
+    "Name": "Konkani",
+    "ThreeLetterISOLanguageName": "kok",
+    "ThreeLetterISOLanguageNames": [
+      "kok"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Korean",
+    "Name": "Korean",
+    "ThreeLetterISOLanguageName": "kor",
+    "ThreeLetterISOLanguageNames": [
+      "kor"
+    ],
+    "TwoLetterISOLanguageName": "ko"
+  },
+  {
+    "DisplayName": "Kosraean",
+    "Name": "Kosraean",
+    "ThreeLetterISOLanguageName": "kos",
+    "ThreeLetterISOLanguageNames": [
+      "kos"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kpelle",
+    "Name": "Kpelle",
+    "ThreeLetterISOLanguageName": "kpe",
+    "ThreeLetterISOLanguageNames": [
+      "kpe"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kru languages",
+    "Name": "Kru languages",
+    "ThreeLetterISOLanguageName": "kro",
+    "ThreeLetterISOLanguageNames": [
+      "kro"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kuanyama; Kwanyama",
+    "Name": "Kuanyama; Kwanyama",
+    "ThreeLetterISOLanguageName": "kua",
+    "ThreeLetterISOLanguageNames": [
+      "kua"
+    ],
+    "TwoLetterISOLanguageName": "kj"
+  },
+  {
+    "DisplayName": "Kumyk",
+    "Name": "Kumyk",
+    "ThreeLetterISOLanguageName": "kum",
+    "ThreeLetterISOLanguageNames": [
+      "kum"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kurdish",
+    "Name": "Kurdish",
+    "ThreeLetterISOLanguageName": "kur",
+    "ThreeLetterISOLanguageNames": [
+      "kur"
+    ],
+    "TwoLetterISOLanguageName": "ku"
+  },
+  {
+    "DisplayName": "Kurukh",
+    "Name": "Kurukh",
+    "ThreeLetterISOLanguageName": "kru",
+    "ThreeLetterISOLanguageNames": [
+      "kru"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Kutenai",
+    "Name": "Kutenai",
+    "ThreeLetterISOLanguageName": "kut",
+    "ThreeLetterISOLanguageNames": [
+      "kut"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Ladino",
+    "Name": "Ladino",
+    "ThreeLetterISOLanguageName": "lad",
+    "ThreeLetterISOLanguageNames": [
+      "lad"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Lahnda",
+    "Name": "Lahnda",
+    "ThreeLetterISOLanguageName": "lah",
+    "ThreeLetterISOLanguageNames": [
+      "lah"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Lamba",
+    "Name": "Lamba",
+    "ThreeLetterISOLanguageName": "lam",
+    "ThreeLetterISOLanguageNames": [
+      "lam"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Land Dayak languages",
+    "Name": "Land Dayak languages",
+    "ThreeLetterISOLanguageName": "day",
+    "ThreeLetterISOLanguageNames": [
+      "day"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Lao",
+    "Name": "Lao",
+    "ThreeLetterISOLanguageName": "lao",
+    "ThreeLetterISOLanguageNames": [
+      "lao"
+    ],
+    "TwoLetterISOLanguageName": "lo"
+  },
+  {
+    "DisplayName": "Latin",
+    "Name": "Latin",
+    "ThreeLetterISOLanguageName": "lat",
+    "ThreeLetterISOLanguageNames": [
+      "lat"
+    ],
+    "TwoLetterISOLanguageName": "la"
+  },
+  {
+    "DisplayName": "Latvian",
+    "Name": "Latvian",
+    "ThreeLetterISOLanguageName": "lav",
+    "ThreeLetterISOLanguageNames": [
+      "lav"
+    ],
+    "TwoLetterISOLanguageName": "lv"
+  },
+  {
+    "DisplayName": "Lezghian",
+    "Name": "Lezghian",
+    "ThreeLetterISOLanguageName": "lez",
+    "ThreeLetterISOLanguageNames": [
+      "lez"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Limburgan; Limburger; Limburgish",
+    "Name": "Limburgan; Limburger; Limburgish",
+    "ThreeLetterISOLanguageName": "lim",
+    "ThreeLetterISOLanguageNames": [
+      "lim"
+    ],
+    "TwoLetterISOLanguageName": "li"
+  },
+  {
+    "DisplayName": "Lingala",
+    "Name": "Lingala",
+    "ThreeLetterISOLanguageName": "lin",
+    "ThreeLetterISOLanguageNames": [
+      "lin"
+    ],
+    "TwoLetterISOLanguageName": "ln"
+  },
+  {
+    "DisplayName": "Lithuanian",
+    "Name": "Lithuanian",
+    "ThreeLetterISOLanguageName": "lit",
+    "ThreeLetterISOLanguageNames": [
+      "lit"
+    ],
+    "TwoLetterISOLanguageName": "lt"
+  },
+  {
+    "DisplayName": "Lojban",
+    "Name": "Lojban",
+    "ThreeLetterISOLanguageName": "jbo",
+    "ThreeLetterISOLanguageNames": [
+      "jbo"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Low German; Low Saxon; German, Low; Saxon, Low",
+    "Name": "Low German; Low Saxon; German, Low; Saxon, Low",
+    "ThreeLetterISOLanguageName": "nds",
+    "ThreeLetterISOLanguageNames": [
+      "nds"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Lower Sorbian",
+    "Name": "Lower Sorbian",
+    "ThreeLetterISOLanguageName": "dsb",
+    "ThreeLetterISOLanguageNames": [
+      "dsb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Lozi",
+    "Name": "Lozi",
+    "ThreeLetterISOLanguageName": "loz",
+    "ThreeLetterISOLanguageNames": [
+      "loz"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Luba-Katanga",
+    "Name": "Luba-Katanga",
+    "ThreeLetterISOLanguageName": "lub",
+    "ThreeLetterISOLanguageNames": [
+      "lub"
+    ],
+    "TwoLetterISOLanguageName": "lu"
+  },
+  {
+    "DisplayName": "Luba-Lulua",
+    "Name": "Luba-Lulua",
+    "ThreeLetterISOLanguageName": "lua",
+    "ThreeLetterISOLanguageNames": [
+      "lua"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Luiseno",
+    "Name": "Luiseno",
+    "ThreeLetterISOLanguageName": "lui",
+    "ThreeLetterISOLanguageNames": [
+      "lui"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Lunda",
+    "Name": "Lunda",
+    "ThreeLetterISOLanguageName": "lun",
+    "ThreeLetterISOLanguageNames": [
+      "lun"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Luo (Kenya and Tanzania)",
+    "Name": "Luo (Kenya and Tanzania)",
+    "ThreeLetterISOLanguageName": "luo",
+    "ThreeLetterISOLanguageNames": [
+      "luo"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Lushai",
+    "Name": "Lushai",
+    "ThreeLetterISOLanguageName": "lus",
+    "ThreeLetterISOLanguageNames": [
+      "lus"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Luxembourgish; Letzeburgesch",
+    "Name": "Luxembourgish; Letzeburgesch",
+    "ThreeLetterISOLanguageName": "ltz",
+    "ThreeLetterISOLanguageNames": [
+      "ltz"
+    ],
+    "TwoLetterISOLanguageName": "lb"
+  },
+  {
+    "DisplayName": "Macedonian",
+    "Name": "Macedonian",
+    "ThreeLetterISOLanguageName": "mkd",
+    "ThreeLetterISOLanguageNames": [
+      "mkd",
+      "mac"
+    ],
+    "TwoLetterISOLanguageName": "mk"
+  },
+  {
+    "DisplayName": "Madurese",
+    "Name": "Madurese",
+    "ThreeLetterISOLanguageName": "mad",
+    "ThreeLetterISOLanguageNames": [
+      "mad"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Magahi",
+    "Name": "Magahi",
+    "ThreeLetterISOLanguageName": "mag",
+    "ThreeLetterISOLanguageNames": [
+      "mag"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Maithili",
+    "Name": "Maithili",
+    "ThreeLetterISOLanguageName": "mai",
+    "ThreeLetterISOLanguageNames": [
+      "mai"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Makasar",
+    "Name": "Makasar",
+    "ThreeLetterISOLanguageName": "mak",
+    "ThreeLetterISOLanguageNames": [
+      "mak"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Malagasy",
+    "Name": "Malagasy",
+    "ThreeLetterISOLanguageName": "mlg",
+    "ThreeLetterISOLanguageNames": [
+      "mlg"
+    ],
+    "TwoLetterISOLanguageName": "mg"
+  },
+  {
+    "DisplayName": "Malay",
+    "Name": "Malay",
+    "ThreeLetterISOLanguageName": "msa",
+    "ThreeLetterISOLanguageNames": [
+      "msa",
+      "may"
+    ],
+    "TwoLetterISOLanguageName": "ms"
+  },
+  {
+    "DisplayName": "Malayalam",
+    "Name": "Malayalam",
+    "ThreeLetterISOLanguageName": "mal",
+    "ThreeLetterISOLanguageNames": [
+      "mal"
+    ],
+    "TwoLetterISOLanguageName": "ml"
+  },
+  {
+    "DisplayName": "Maltese",
+    "Name": "Maltese",
+    "ThreeLetterISOLanguageName": "mlt",
+    "ThreeLetterISOLanguageNames": [
+      "mlt"
+    ],
+    "TwoLetterISOLanguageName": "mt"
+  },
+  {
+    "DisplayName": "Manchu",
+    "Name": "Manchu",
+    "ThreeLetterISOLanguageName": "mnc",
+    "ThreeLetterISOLanguageNames": [
+      "mnc"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mandar",
+    "Name": "Mandar",
+    "ThreeLetterISOLanguageName": "mdr",
+    "ThreeLetterISOLanguageNames": [
+      "mdr"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mandingo",
+    "Name": "Mandingo",
+    "ThreeLetterISOLanguageName": "man",
+    "ThreeLetterISOLanguageNames": [
+      "man"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Manipuri",
+    "Name": "Manipuri",
+    "ThreeLetterISOLanguageName": "mni",
+    "ThreeLetterISOLanguageNames": [
+      "mni"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Manobo languages",
+    "Name": "Manobo languages",
+    "ThreeLetterISOLanguageName": "mno",
+    "ThreeLetterISOLanguageNames": [
+      "mno"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Manx",
+    "Name": "Manx",
+    "ThreeLetterISOLanguageName": "glv",
+    "ThreeLetterISOLanguageNames": [
+      "glv"
+    ],
+    "TwoLetterISOLanguageName": "gv"
+  },
+  {
+    "DisplayName": "Maori",
+    "Name": "Maori",
+    "ThreeLetterISOLanguageName": "mri",
+    "ThreeLetterISOLanguageNames": [
+      "mri",
+      "mao"
+    ],
+    "TwoLetterISOLanguageName": "mi"
+  },
+  {
+    "DisplayName": "Mapudungun; Mapuche",
+    "Name": "Mapudungun; Mapuche",
+    "ThreeLetterISOLanguageName": "arn",
+    "ThreeLetterISOLanguageNames": [
+      "arn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Marathi",
+    "Name": "Marathi",
+    "ThreeLetterISOLanguageName": "mar",
+    "ThreeLetterISOLanguageNames": [
+      "mar"
+    ],
+    "TwoLetterISOLanguageName": "mr"
+  },
+  {
+    "DisplayName": "Mari",
+    "Name": "Mari",
+    "ThreeLetterISOLanguageName": "chm",
+    "ThreeLetterISOLanguageNames": [
+      "chm"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Marshallese",
+    "Name": "Marshallese",
+    "ThreeLetterISOLanguageName": "mah",
+    "ThreeLetterISOLanguageNames": [
+      "mah"
+    ],
+    "TwoLetterISOLanguageName": "mh"
+  },
+  {
+    "DisplayName": "Marwari",
+    "Name": "Marwari",
+    "ThreeLetterISOLanguageName": "mwr",
+    "ThreeLetterISOLanguageNames": [
+      "mwr"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Masai",
+    "Name": "Masai",
+    "ThreeLetterISOLanguageName": "mas",
+    "ThreeLetterISOLanguageNames": [
+      "mas"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mayan languages",
+    "Name": "Mayan languages",
+    "ThreeLetterISOLanguageName": "myn",
+    "ThreeLetterISOLanguageNames": [
+      "myn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mende",
+    "Name": "Mende",
+    "ThreeLetterISOLanguageName": "men",
+    "ThreeLetterISOLanguageNames": [
+      "men"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mi'kmaq; Micmac",
+    "Name": "Mi'kmaq; Micmac",
+    "ThreeLetterISOLanguageName": "mic",
+    "ThreeLetterISOLanguageNames": [
+      "mic"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Minangkabau",
+    "Name": "Minangkabau",
+    "ThreeLetterISOLanguageName": "min",
+    "ThreeLetterISOLanguageNames": [
+      "min"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mirandese",
+    "Name": "Mirandese",
+    "ThreeLetterISOLanguageName": "mwl",
+    "ThreeLetterISOLanguageNames": [
+      "mwl"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mohawk",
+    "Name": "Mohawk",
+    "ThreeLetterISOLanguageName": "moh",
+    "ThreeLetterISOLanguageNames": [
+      "moh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Moksha",
+    "Name": "Moksha",
+    "ThreeLetterISOLanguageName": "mdf",
+    "ThreeLetterISOLanguageNames": [
+      "mdf"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mon-Khmer languages",
+    "Name": "Mon-Khmer languages",
+    "ThreeLetterISOLanguageName": "mkh",
+    "ThreeLetterISOLanguageNames": [
+      "mkh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mongo",
+    "Name": "Mongo",
+    "ThreeLetterISOLanguageName": "lol",
+    "ThreeLetterISOLanguageNames": [
+      "lol"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Mongolian",
+    "Name": "Mongolian",
+    "ThreeLetterISOLanguageName": "mon",
+    "ThreeLetterISOLanguageNames": [
+      "mon"
+    ],
+    "TwoLetterISOLanguageName": "mn"
+  },
+  {
+    "DisplayName": "Mossi",
+    "Name": "Mossi",
+    "ThreeLetterISOLanguageName": "mos",
+    "ThreeLetterISOLanguageNames": [
+      "mos"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Multiple languages",
+    "Name": "Multiple languages",
+    "ThreeLetterISOLanguageName": "mul",
+    "ThreeLetterISOLanguageNames": [
+      "mul"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Munda languages",
+    "Name": "Munda languages",
+    "ThreeLetterISOLanguageName": "mun",
+    "ThreeLetterISOLanguageNames": [
+      "mun"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "N'Ko",
+    "Name": "N'Ko",
+    "ThreeLetterISOLanguageName": "nqo",
+    "ThreeLetterISOLanguageNames": [
+      "nqo"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nahuatl languages",
+    "Name": "Nahuatl languages",
+    "ThreeLetterISOLanguageName": "nah",
+    "ThreeLetterISOLanguageNames": [
+      "nah"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nauru",
+    "Name": "Nauru",
+    "ThreeLetterISOLanguageName": "nau",
+    "ThreeLetterISOLanguageNames": [
+      "nau"
+    ],
+    "TwoLetterISOLanguageName": "na"
+  },
+  {
+    "DisplayName": "Navajo; Navaho",
+    "Name": "Navajo; Navaho",
+    "ThreeLetterISOLanguageName": "nav",
+    "ThreeLetterISOLanguageNames": [
+      "nav"
+    ],
+    "TwoLetterISOLanguageName": "nv"
+  },
+  {
+    "DisplayName": "Ndebele, North; North Ndebele",
+    "Name": "Ndebele, North; North Ndebele",
+    "ThreeLetterISOLanguageName": "nde",
+    "ThreeLetterISOLanguageNames": [
+      "nde"
+    ],
+    "TwoLetterISOLanguageName": "nd"
+  },
+  {
+    "DisplayName": "Ndebele, South; South Ndebele",
+    "Name": "Ndebele, South; South Ndebele",
+    "ThreeLetterISOLanguageName": "nbl",
+    "ThreeLetterISOLanguageNames": [
+      "nbl"
+    ],
+    "TwoLetterISOLanguageName": "nr"
+  },
+  {
+    "DisplayName": "Ndonga",
+    "Name": "Ndonga",
+    "ThreeLetterISOLanguageName": "ndo",
+    "ThreeLetterISOLanguageNames": [
+      "ndo"
+    ],
+    "TwoLetterISOLanguageName": "ng"
+  },
+  {
+    "DisplayName": "Neapolitan",
+    "Name": "Neapolitan",
+    "ThreeLetterISOLanguageName": "nap",
+    "ThreeLetterISOLanguageNames": [
+      "nap"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nepal Bhasa; Newari",
+    "Name": "Nepal Bhasa; Newari",
+    "ThreeLetterISOLanguageName": "new",
+    "ThreeLetterISOLanguageNames": [
+      "new"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nepali",
+    "Name": "Nepali",
+    "ThreeLetterISOLanguageName": "nep",
+    "ThreeLetterISOLanguageNames": [
+      "nep"
+    ],
+    "TwoLetterISOLanguageName": "ne"
+  },
+  {
+    "DisplayName": "Nias",
+    "Name": "Nias",
+    "ThreeLetterISOLanguageName": "nia",
+    "ThreeLetterISOLanguageNames": [
+      "nia"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Niger-Kordofanian languages",
+    "Name": "Niger-Kordofanian languages",
+    "ThreeLetterISOLanguageName": "nic",
+    "ThreeLetterISOLanguageNames": [
+      "nic"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nilo-Saharan languages",
+    "Name": "Nilo-Saharan languages",
+    "ThreeLetterISOLanguageName": "ssa",
+    "ThreeLetterISOLanguageNames": [
+      "ssa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Niuean",
+    "Name": "Niuean",
+    "ThreeLetterISOLanguageName": "niu",
+    "ThreeLetterISOLanguageNames": [
+      "niu"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "No linguistic content; Not applicable",
+    "Name": "No linguistic content; Not applicable",
+    "ThreeLetterISOLanguageName": "zxx",
+    "ThreeLetterISOLanguageNames": [
+      "zxx"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nogai",
+    "Name": "Nogai",
+    "ThreeLetterISOLanguageName": "nog",
+    "ThreeLetterISOLanguageNames": [
+      "nog"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Norse, Old",
+    "Name": "Norse, Old",
+    "ThreeLetterISOLanguageName": "non",
+    "ThreeLetterISOLanguageNames": [
+      "non"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "North American Indian languages",
+    "Name": "North American Indian languages",
+    "ThreeLetterISOLanguageName": "nai",
+    "ThreeLetterISOLanguageNames": [
+      "nai"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Northern Frisian",
+    "Name": "Northern Frisian",
+    "ThreeLetterISOLanguageName": "frr",
+    "ThreeLetterISOLanguageNames": [
+      "frr"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Northern Sami",
+    "Name": "Northern Sami",
+    "ThreeLetterISOLanguageName": "sme",
+    "ThreeLetterISOLanguageNames": [
+      "sme"
+    ],
+    "TwoLetterISOLanguageName": "se"
+  },
+  {
+    "DisplayName": "Norwegian",
+    "Name": "Norwegian",
+    "ThreeLetterISOLanguageName": "nor",
+    "ThreeLetterISOLanguageNames": [
+      "nor"
+    ],
+    "TwoLetterISOLanguageName": "no"
+  },
+  {
+    "DisplayName": "Norwegian (Bokmal)",
+    "Name": "Norwegian (Bokmal)",
+    "ThreeLetterISOLanguageName": "nob",
+    "ThreeLetterISOLanguageNames": [
+      "nob"
+    ],
+    "TwoLetterISOLanguageName": "nb"
+  },
+  {
+    "DisplayName": "Norwegian (Nynorsk)",
+    "Name": "Norwegian (Nynorsk)",
+    "ThreeLetterISOLanguageName": "nno",
+    "ThreeLetterISOLanguageNames": [
+      "nno"
+    ],
+    "TwoLetterISOLanguageName": "nn"
+  },
+  {
+    "DisplayName": "Nubian languages",
+    "Name": "Nubian languages",
+    "ThreeLetterISOLanguageName": "nub",
+    "ThreeLetterISOLanguageNames": [
+      "nub"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nyamwezi",
+    "Name": "Nyamwezi",
+    "ThreeLetterISOLanguageName": "nym",
+    "ThreeLetterISOLanguageNames": [
+      "nym"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nyankole",
+    "Name": "Nyankole",
+    "ThreeLetterISOLanguageName": "nyn",
+    "ThreeLetterISOLanguageNames": [
+      "nyn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nyoro",
+    "Name": "Nyoro",
+    "ThreeLetterISOLanguageName": "nyo",
+    "ThreeLetterISOLanguageNames": [
+      "nyo"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Nzima",
+    "Name": "Nzima",
+    "ThreeLetterISOLanguageName": "nzi",
+    "ThreeLetterISOLanguageNames": [
+      "nzi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Occitan (post 1500); Proven\u00e7al",
+    "Name": "Occitan (post 1500); Proven\u00e7al",
+    "ThreeLetterISOLanguageName": "oci",
+    "ThreeLetterISOLanguageNames": [
+      "oci"
+    ],
+    "TwoLetterISOLanguageName": "oc"
+  },
+  {
+    "DisplayName": "Official Aramaic (700-300 BCE); Imperial Aramaic (700-300 BCE)",
+    "Name": "Official Aramaic (700-300 BCE); Imperial Aramaic (700-300 BCE)",
+    "ThreeLetterISOLanguageName": "arc",
+    "ThreeLetterISOLanguageNames": [
+      "arc"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Ojibwa",
+    "Name": "Ojibwa",
+    "ThreeLetterISOLanguageName": "oji",
+    "ThreeLetterISOLanguageNames": [
+      "oji"
+    ],
+    "TwoLetterISOLanguageName": "oj"
+  },
+  {
+    "DisplayName": "Oriya",
+    "Name": "Oriya",
+    "ThreeLetterISOLanguageName": "ori",
+    "ThreeLetterISOLanguageNames": [
+      "ori"
+    ],
+    "TwoLetterISOLanguageName": "or"
+  },
+  {
+    "DisplayName": "Oromo",
+    "Name": "Oromo",
+    "ThreeLetterISOLanguageName": "orm",
+    "ThreeLetterISOLanguageNames": [
+      "orm"
+    ],
+    "TwoLetterISOLanguageName": "om"
+  },
+  {
+    "DisplayName": "Osage",
+    "Name": "Osage",
+    "ThreeLetterISOLanguageName": "osa",
+    "ThreeLetterISOLanguageNames": [
+      "osa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Ossetian; Ossetic",
+    "Name": "Ossetian; Ossetic",
+    "ThreeLetterISOLanguageName": "oss",
+    "ThreeLetterISOLanguageNames": [
+      "oss"
+    ],
+    "TwoLetterISOLanguageName": "os"
+  },
+  {
+    "DisplayName": "Otomian languages",
+    "Name": "Otomian languages",
+    "ThreeLetterISOLanguageName": "oto",
+    "ThreeLetterISOLanguageNames": [
+      "oto"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Pahlavi",
+    "Name": "Pahlavi",
+    "ThreeLetterISOLanguageName": "pal",
+    "ThreeLetterISOLanguageNames": [
+      "pal"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Palauan",
+    "Name": "Palauan",
+    "ThreeLetterISOLanguageName": "pau",
+    "ThreeLetterISOLanguageNames": [
+      "pau"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Pali",
+    "Name": "Pali",
+    "ThreeLetterISOLanguageName": "pli",
+    "ThreeLetterISOLanguageNames": [
+      "pli"
+    ],
+    "TwoLetterISOLanguageName": "pi"
+  },
+  {
+    "DisplayName": "Pampanga; Kapampangan",
+    "Name": "Pampanga; Kapampangan",
+    "ThreeLetterISOLanguageName": "pam",
+    "ThreeLetterISOLanguageNames": [
+      "pam"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Pangasinan",
+    "Name": "Pangasinan",
+    "ThreeLetterISOLanguageName": "pag",
+    "ThreeLetterISOLanguageNames": [
+      "pag"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Panjabi; Punjabi",
+    "Name": "Panjabi; Punjabi",
+    "ThreeLetterISOLanguageName": "pan",
+    "ThreeLetterISOLanguageNames": [
+      "pan"
+    ],
+    "TwoLetterISOLanguageName": "pa"
+  },
+  {
+    "DisplayName": "Papiamento",
+    "Name": "Papiamento",
+    "ThreeLetterISOLanguageName": "pap",
+    "ThreeLetterISOLanguageNames": [
+      "pap"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Papuan languages",
+    "Name": "Papuan languages",
+    "ThreeLetterISOLanguageName": "paa",
+    "ThreeLetterISOLanguageNames": [
+      "paa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Pedi; Sepedi; Northern Sotho",
+    "Name": "Pedi; Sepedi; Northern Sotho",
+    "ThreeLetterISOLanguageName": "nso",
+    "ThreeLetterISOLanguageNames": [
+      "nso"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Persian",
+    "Name": "Persian",
+    "ThreeLetterISOLanguageName": "fas",
+    "ThreeLetterISOLanguageNames": [
+      "fas",
+      "per"
+    ],
+    "TwoLetterISOLanguageName": "fa"
+  },
+  {
+    "DisplayName": "Persian, Old (ca.600-400 B.C.)",
+    "Name": "Persian, Old (ca.600-400 B.C.)",
+    "ThreeLetterISOLanguageName": "peo",
+    "ThreeLetterISOLanguageNames": [
+      "peo"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Philippine languages",
+    "Name": "Philippine languages",
+    "ThreeLetterISOLanguageName": "phi",
+    "ThreeLetterISOLanguageNames": [
+      "phi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Phoenician",
+    "Name": "Phoenician",
+    "ThreeLetterISOLanguageName": "phn",
+    "ThreeLetterISOLanguageNames": [
+      "phn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Pohnpeian",
+    "Name": "Pohnpeian",
+    "ThreeLetterISOLanguageName": "pon",
+    "ThreeLetterISOLanguageNames": [
+      "pon"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Polish",
+    "Name": "Polish",
+    "ThreeLetterISOLanguageName": "pol",
+    "ThreeLetterISOLanguageNames": [
+      "pol"
+    ],
+    "TwoLetterISOLanguageName": "pl"
+  },
+  {
+    "DisplayName": "Portuguese",
+    "Name": "Portuguese",
+    "ThreeLetterISOLanguageName": "por",
+    "ThreeLetterISOLanguageNames": [
+      "por"
+    ],
+    "TwoLetterISOLanguageName": "pt"
+  },
+  {
+    "DisplayName": "Portuguese (Brazil)",
+    "Name": "pt-br",
+    "ThreeLetterISOLanguageName": "por",
+    "ThreeLetterISOLanguageNames": [
+      "por"
+    ],
+    "TwoLetterISOLanguageName": "pt-br"
+  },
+  {
+    "DisplayName": "Portuguese (Portugal)",
+    "Name": "pt-pt",
+    "ThreeLetterISOLanguageName": "por",
+    "ThreeLetterISOLanguageNames": [
+      "por"
+    ],
+    "TwoLetterISOLanguageName": "pt-pt"
+  },
+  {
+    "DisplayName": "Prakrit languages",
+    "Name": "Prakrit languages",
+    "ThreeLetterISOLanguageName": "pra",
+    "ThreeLetterISOLanguageNames": [
+      "pra"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Proven\u00e7al, Old (to 1500)",
+    "Name": "Proven\u00e7al, Old (to 1500)",
+    "ThreeLetterISOLanguageName": "pro",
+    "ThreeLetterISOLanguageNames": [
+      "pro"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Pushto; Pashto",
+    "Name": "Pushto; Pashto",
+    "ThreeLetterISOLanguageName": "pus",
+    "ThreeLetterISOLanguageNames": [
+      "pus"
+    ],
+    "TwoLetterISOLanguageName": "ps"
+  },
+  {
+    "DisplayName": "Quechua",
+    "Name": "Quechua",
+    "ThreeLetterISOLanguageName": "que",
+    "ThreeLetterISOLanguageNames": [
+      "que"
+    ],
+    "TwoLetterISOLanguageName": "qu"
+  },
+  {
+    "DisplayName": "Rajasthani",
+    "Name": "Rajasthani",
+    "ThreeLetterISOLanguageName": "raj",
+    "ThreeLetterISOLanguageNames": [
+      "raj"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Rapanui",
+    "Name": "Rapanui",
+    "ThreeLetterISOLanguageName": "rap",
+    "ThreeLetterISOLanguageNames": [
+      "rap"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Rarotongan; Cook Islands Maori",
+    "Name": "Rarotongan; Cook Islands Maori",
+    "ThreeLetterISOLanguageName": "rar",
+    "ThreeLetterISOLanguageNames": [
+      "rar"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Reserved for local use",
+    "Name": "Reserved for local use",
+    "ThreeLetterISOLanguageName": "qaa-qtz",
+    "ThreeLetterISOLanguageNames": [
+      "qaa-qtz"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Romance languages",
+    "Name": "Romance languages",
+    "ThreeLetterISOLanguageName": "roa",
+    "ThreeLetterISOLanguageNames": [
+      "roa"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Romanian; Moldavian; Moldovan",
+    "Name": "Romanian; Moldavian; Moldovan",
+    "ThreeLetterISOLanguageName": "ron",
+    "ThreeLetterISOLanguageNames": [
+      "ron",
+      "rum"
+    ],
+    "TwoLetterISOLanguageName": "ro"
+  },
+  {
+    "DisplayName": "Romansh",
+    "Name": "Romansh",
+    "ThreeLetterISOLanguageName": "roh",
+    "ThreeLetterISOLanguageNames": [
+      "roh"
+    ],
+    "TwoLetterISOLanguageName": "rm"
+  },
+  {
+    "DisplayName": "Romany",
+    "Name": "Romany",
+    "ThreeLetterISOLanguageName": "rom",
+    "ThreeLetterISOLanguageNames": [
+      "rom"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Rundi",
+    "Name": "Rundi",
+    "ThreeLetterISOLanguageName": "run",
+    "ThreeLetterISOLanguageNames": [
+      "run"
+    ],
+    "TwoLetterISOLanguageName": "rn"
+  },
+  {
+    "DisplayName": "Russian",
+    "Name": "Russian",
+    "ThreeLetterISOLanguageName": "rus",
+    "ThreeLetterISOLanguageNames": [
+      "rus"
+    ],
+    "TwoLetterISOLanguageName": "ru"
+  },
+  {
+    "DisplayName": "Salishan languages",
+    "Name": "Salishan languages",
+    "ThreeLetterISOLanguageName": "sal",
+    "ThreeLetterISOLanguageNames": [
+      "sal"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Samaritan Aramaic",
+    "Name": "Samaritan Aramaic",
+    "ThreeLetterISOLanguageName": "sam",
+    "ThreeLetterISOLanguageNames": [
+      "sam"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sami (Inari)",
+    "Name": "Sami (Inari)",
+    "ThreeLetterISOLanguageName": "smn",
+    "ThreeLetterISOLanguageNames": [
+      "smn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sami (Lule)",
+    "Name": "Sami (Lule)",
+    "ThreeLetterISOLanguageName": "smj",
+    "ThreeLetterISOLanguageNames": [
+      "smj"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sami (Skolt)",
+    "Name": "Sami (Skolt)",
+    "ThreeLetterISOLanguageName": "sms",
+    "ThreeLetterISOLanguageNames": [
+      "sms"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sami languages",
+    "Name": "Sami languages",
+    "ThreeLetterISOLanguageName": "smi",
+    "ThreeLetterISOLanguageNames": [
+      "smi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Samoan",
+    "Name": "Samoan",
+    "ThreeLetterISOLanguageName": "smo",
+    "ThreeLetterISOLanguageNames": [
+      "smo"
+    ],
+    "TwoLetterISOLanguageName": "sm"
+  },
+  {
+    "DisplayName": "Sandawe",
+    "Name": "Sandawe",
+    "ThreeLetterISOLanguageName": "sad",
+    "ThreeLetterISOLanguageNames": [
+      "sad"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sango",
+    "Name": "Sango",
+    "ThreeLetterISOLanguageName": "sag",
+    "ThreeLetterISOLanguageNames": [
+      "sag"
+    ],
+    "TwoLetterISOLanguageName": "sg"
+  },
+  {
+    "DisplayName": "Sanskrit",
+    "Name": "Sanskrit",
+    "ThreeLetterISOLanguageName": "san",
+    "ThreeLetterISOLanguageNames": [
+      "san"
+    ],
+    "TwoLetterISOLanguageName": "sa"
+  },
+  {
+    "DisplayName": "Santali",
+    "Name": "Santali",
+    "ThreeLetterISOLanguageName": "sat",
+    "ThreeLetterISOLanguageNames": [
+      "sat"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sardinian",
+    "Name": "Sardinian",
+    "ThreeLetterISOLanguageName": "srd",
+    "ThreeLetterISOLanguageNames": [
+      "srd"
+    ],
+    "TwoLetterISOLanguageName": "sc"
+  },
+  {
+    "DisplayName": "Sasak",
+    "Name": "Sasak",
+    "ThreeLetterISOLanguageName": "sas",
+    "ThreeLetterISOLanguageNames": [
+      "sas"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Scots",
+    "Name": "Scots",
+    "ThreeLetterISOLanguageName": "sco",
+    "ThreeLetterISOLanguageNames": [
+      "sco"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Selkup",
+    "Name": "Selkup",
+    "ThreeLetterISOLanguageName": "sel",
+    "ThreeLetterISOLanguageNames": [
+      "sel"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Semitic languages",
+    "Name": "Semitic languages",
+    "ThreeLetterISOLanguageName": "sem",
+    "ThreeLetterISOLanguageNames": [
+      "sem"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Serbian",
+    "Name": "Serbian",
+    "ThreeLetterISOLanguageName": "srp",
+    "ThreeLetterISOLanguageNames": [
+      "srp"
+    ],
+    "TwoLetterISOLanguageName": "sr"
+  },
+  {
+    "DisplayName": "Serer",
+    "Name": "Serer",
+    "ThreeLetterISOLanguageName": "srr",
+    "ThreeLetterISOLanguageNames": [
+      "srr"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Shan",
+    "Name": "Shan",
+    "ThreeLetterISOLanguageName": "shn",
+    "ThreeLetterISOLanguageNames": [
+      "shn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Shona",
+    "Name": "Shona",
+    "ThreeLetterISOLanguageName": "sna",
+    "ThreeLetterISOLanguageNames": [
+      "sna"
+    ],
+    "TwoLetterISOLanguageName": "sn"
+  },
+  {
+    "DisplayName": "Sichuan Yi; Nuosu",
+    "Name": "Sichuan Yi; Nuosu",
+    "ThreeLetterISOLanguageName": "iii",
+    "ThreeLetterISOLanguageNames": [
+      "iii"
+    ],
+    "TwoLetterISOLanguageName": "ii"
+  },
+  {
+    "DisplayName": "Sicilian",
+    "Name": "Sicilian",
+    "ThreeLetterISOLanguageName": "scn",
+    "ThreeLetterISOLanguageNames": [
+      "scn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sidamo",
+    "Name": "Sidamo",
+    "ThreeLetterISOLanguageName": "sid",
+    "ThreeLetterISOLanguageNames": [
+      "sid"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sign Languages",
+    "Name": "Sign Languages",
+    "ThreeLetterISOLanguageName": "sgn",
+    "ThreeLetterISOLanguageNames": [
+      "sgn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Siksika",
+    "Name": "Siksika",
+    "ThreeLetterISOLanguageName": "bla",
+    "ThreeLetterISOLanguageNames": [
+      "bla"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sindhi",
+    "Name": "Sindhi",
+    "ThreeLetterISOLanguageName": "snd",
+    "ThreeLetterISOLanguageNames": [
+      "snd"
+    ],
+    "TwoLetterISOLanguageName": "sd"
+  },
+  {
+    "DisplayName": "Sinhala; Sinhalese",
+    "Name": "Sinhala; Sinhalese",
+    "ThreeLetterISOLanguageName": "sin",
+    "ThreeLetterISOLanguageNames": [
+      "sin"
+    ],
+    "TwoLetterISOLanguageName": "si"
+  },
+  {
+    "DisplayName": "Sino-Tibetan languages",
+    "Name": "Sino-Tibetan languages",
+    "ThreeLetterISOLanguageName": "sit",
+    "ThreeLetterISOLanguageNames": [
+      "sit"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Siouan languages",
+    "Name": "Siouan languages",
+    "ThreeLetterISOLanguageName": "sio",
+    "ThreeLetterISOLanguageNames": [
+      "sio"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Slave (Athapascan)",
+    "Name": "Slave (Athapascan)",
+    "ThreeLetterISOLanguageName": "den",
+    "ThreeLetterISOLanguageNames": [
+      "den"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Slavic languages",
+    "Name": "Slavic languages",
+    "ThreeLetterISOLanguageName": "sla",
+    "ThreeLetterISOLanguageNames": [
+      "sla"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Slovak",
+    "Name": "Slovak",
+    "ThreeLetterISOLanguageName": "slk",
+    "ThreeLetterISOLanguageNames": [
+      "slk",
+      "slo"
+    ],
+    "TwoLetterISOLanguageName": "sk"
+  },
+  {
+    "DisplayName": "Slovenian",
+    "Name": "Slovenian",
+    "ThreeLetterISOLanguageName": "slv",
+    "ThreeLetterISOLanguageNames": [
+      "slv"
+    ],
+    "TwoLetterISOLanguageName": "sl"
+  },
+  {
+    "DisplayName": "Sogdian",
+    "Name": "Sogdian",
+    "ThreeLetterISOLanguageName": "sog",
+    "ThreeLetterISOLanguageNames": [
+      "sog"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Somali",
+    "Name": "Somali",
+    "ThreeLetterISOLanguageName": "som",
+    "ThreeLetterISOLanguageNames": [
+      "som"
+    ],
+    "TwoLetterISOLanguageName": "so"
+  },
+  {
+    "DisplayName": "Songhai languages",
+    "Name": "Songhai languages",
+    "ThreeLetterISOLanguageName": "son",
+    "ThreeLetterISOLanguageNames": [
+      "son"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Soninke",
+    "Name": "Soninke",
+    "ThreeLetterISOLanguageName": "snk",
+    "ThreeLetterISOLanguageNames": [
+      "snk"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sorbian languages",
+    "Name": "Sorbian languages",
+    "ThreeLetterISOLanguageName": "wen",
+    "ThreeLetterISOLanguageNames": [
+      "wen"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sotho, Southern",
+    "Name": "Sotho, Southern",
+    "ThreeLetterISOLanguageName": "sot",
+    "ThreeLetterISOLanguageNames": [
+      "sot"
+    ],
+    "TwoLetterISOLanguageName": "st"
+  },
+  {
+    "DisplayName": "South American Indian (Other)",
+    "Name": "South American Indian (Other)",
+    "ThreeLetterISOLanguageName": "sai",
+    "ThreeLetterISOLanguageNames": [
+      "sai"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Southern Altai",
+    "Name": "Southern Altai",
+    "ThreeLetterISOLanguageName": "alt",
+    "ThreeLetterISOLanguageNames": [
+      "alt"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Southern Sami",
+    "Name": "Southern Sami",
+    "ThreeLetterISOLanguageName": "sma",
+    "ThreeLetterISOLanguageNames": [
+      "sma"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Spanish; Castilian",
+    "Name": "Spanish; Castilian",
+    "ThreeLetterISOLanguageName": "spa",
+    "ThreeLetterISOLanguageNames": [
+      "spa"
+    ],
+    "TwoLetterISOLanguageName": "es"
+  },
+  {
+    "DisplayName": "Spanish; Latin",
+    "Name": "es-419",
+    "ThreeLetterISOLanguageName": "spa",
+    "ThreeLetterISOLanguageNames": [
+      "spa"
+    ],
+    "TwoLetterISOLanguageName": "es-419"
+  },
+  {
+    "DisplayName": "Sranan Tongo",
+    "Name": "Sranan Tongo",
+    "ThreeLetterISOLanguageName": "srn",
+    "ThreeLetterISOLanguageNames": [
+      "srn"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Standard Moroccan Tamazight",
+    "Name": "Standard Moroccan Tamazight",
+    "ThreeLetterISOLanguageName": "zgh",
+    "ThreeLetterISOLanguageNames": [
+      "zgh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sukuma",
+    "Name": "Sukuma",
+    "ThreeLetterISOLanguageName": "suk",
+    "ThreeLetterISOLanguageNames": [
+      "suk"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sumerian",
+    "Name": "Sumerian",
+    "ThreeLetterISOLanguageName": "sux",
+    "ThreeLetterISOLanguageNames": [
+      "sux"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Sundanese",
+    "Name": "Sundanese",
+    "ThreeLetterISOLanguageName": "sun",
+    "ThreeLetterISOLanguageNames": [
+      "sun"
+    ],
+    "TwoLetterISOLanguageName": "su"
+  },
+  {
+    "DisplayName": "Susu",
+    "Name": "Susu",
+    "ThreeLetterISOLanguageName": "sus",
+    "ThreeLetterISOLanguageNames": [
+      "sus"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Swahili",
+    "Name": "Swahili",
+    "ThreeLetterISOLanguageName": "swa",
+    "ThreeLetterISOLanguageNames": [
+      "swa"
+    ],
+    "TwoLetterISOLanguageName": "sw"
+  },
+  {
+    "DisplayName": "Swati",
+    "Name": "Swati",
+    "ThreeLetterISOLanguageName": "ssw",
+    "ThreeLetterISOLanguageNames": [
+      "ssw"
+    ],
+    "TwoLetterISOLanguageName": "ss"
+  },
+  {
+    "DisplayName": "Swedish",
+    "Name": "Swedish",
+    "ThreeLetterISOLanguageName": "swe",
+    "ThreeLetterISOLanguageNames": [
+      "swe"
+    ],
+    "TwoLetterISOLanguageName": "sv"
+  },
+  {
+    "DisplayName": "Swiss German; Alemannic; Alsatian",
+    "Name": "Swiss German; Alemannic; Alsatian",
+    "ThreeLetterISOLanguageName": "gsw",
+    "ThreeLetterISOLanguageNames": [
+      "gsw"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Syriac",
+    "Name": "Syriac",
+    "ThreeLetterISOLanguageName": "syr",
+    "ThreeLetterISOLanguageNames": [
+      "syr"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tagalog",
+    "Name": "Tagalog",
+    "ThreeLetterISOLanguageName": "tgl",
+    "ThreeLetterISOLanguageNames": [
+      "tgl"
+    ],
+    "TwoLetterISOLanguageName": "tl"
+  },
+  {
+    "DisplayName": "Tahitian",
+    "Name": "Tahitian",
+    "ThreeLetterISOLanguageName": "tah",
+    "ThreeLetterISOLanguageNames": [
+      "tah"
+    ],
+    "TwoLetterISOLanguageName": "ty"
+  },
+  {
+    "DisplayName": "Tai languages",
+    "Name": "Tai languages",
+    "ThreeLetterISOLanguageName": "tai",
+    "ThreeLetterISOLanguageNames": [
+      "tai"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tajik",
+    "Name": "Tajik",
+    "ThreeLetterISOLanguageName": "tgk",
+    "ThreeLetterISOLanguageNames": [
+      "tgk"
+    ],
+    "TwoLetterISOLanguageName": "tg"
+  },
+  {
+    "DisplayName": "Tamashek",
+    "Name": "Tamashek",
+    "ThreeLetterISOLanguageName": "tmh",
+    "ThreeLetterISOLanguageNames": [
+      "tmh"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tamil",
+    "Name": "Tamil",
+    "ThreeLetterISOLanguageName": "tam",
+    "ThreeLetterISOLanguageNames": [
+      "tam"
+    ],
+    "TwoLetterISOLanguageName": "ta"
+  },
+  {
+    "DisplayName": "Tatar",
+    "Name": "Tatar",
+    "ThreeLetterISOLanguageName": "tat",
+    "ThreeLetterISOLanguageNames": [
+      "tat"
+    ],
+    "TwoLetterISOLanguageName": "tt"
+  },
+  {
+    "DisplayName": "Telugu",
+    "Name": "Telugu",
+    "ThreeLetterISOLanguageName": "tel",
+    "ThreeLetterISOLanguageNames": [
+      "tel"
+    ],
+    "TwoLetterISOLanguageName": "te"
+  },
+  {
+    "DisplayName": "Tereno",
+    "Name": "Tereno",
+    "ThreeLetterISOLanguageName": "ter",
+    "ThreeLetterISOLanguageNames": [
+      "ter"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tetum",
+    "Name": "Tetum",
+    "ThreeLetterISOLanguageName": "tet",
+    "ThreeLetterISOLanguageNames": [
+      "tet"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Thai",
+    "Name": "Thai",
+    "ThreeLetterISOLanguageName": "tha",
+    "ThreeLetterISOLanguageNames": [
+      "tha"
+    ],
+    "TwoLetterISOLanguageName": "th"
+  },
+  {
+    "DisplayName": "Tibetan",
+    "Name": "Tibetan",
+    "ThreeLetterISOLanguageName": "bod",
+    "ThreeLetterISOLanguageNames": [
+      "bod",
+      "tib"
+    ],
+    "TwoLetterISOLanguageName": "bo"
+  },
+  {
+    "DisplayName": "Tigre",
+    "Name": "Tigre",
+    "ThreeLetterISOLanguageName": "tig",
+    "ThreeLetterISOLanguageNames": [
+      "tig"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tigrinya",
+    "Name": "Tigrinya",
+    "ThreeLetterISOLanguageName": "tir",
+    "ThreeLetterISOLanguageNames": [
+      "tir"
+    ],
+    "TwoLetterISOLanguageName": "ti"
+  },
+  {
+    "DisplayName": "Timne",
+    "Name": "Timne",
+    "ThreeLetterISOLanguageName": "tem",
+    "ThreeLetterISOLanguageNames": [
+      "tem"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tiv",
+    "Name": "Tiv",
+    "ThreeLetterISOLanguageName": "tiv",
+    "ThreeLetterISOLanguageNames": [
+      "tiv"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tlingit",
+    "Name": "Tlingit",
+    "ThreeLetterISOLanguageName": "tli",
+    "ThreeLetterISOLanguageNames": [
+      "tli"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tok Pisin",
+    "Name": "Tok Pisin",
+    "ThreeLetterISOLanguageName": "tpi",
+    "ThreeLetterISOLanguageNames": [
+      "tpi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tokelau",
+    "Name": "Tokelau",
+    "ThreeLetterISOLanguageName": "tkl",
+    "ThreeLetterISOLanguageNames": [
+      "tkl"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tonga (Nyasa)",
+    "Name": "Tonga (Nyasa)",
+    "ThreeLetterISOLanguageName": "tog",
+    "ThreeLetterISOLanguageNames": [
+      "tog"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tonga (Tonga Islands)",
+    "Name": "Tonga (Tonga Islands)",
+    "ThreeLetterISOLanguageName": "ton",
+    "ThreeLetterISOLanguageNames": [
+      "ton"
+    ],
+    "TwoLetterISOLanguageName": "to"
+  },
+  {
+    "DisplayName": "Tsimshian",
+    "Name": "Tsimshian",
+    "ThreeLetterISOLanguageName": "tsi",
+    "ThreeLetterISOLanguageNames": [
+      "tsi"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tsonga",
+    "Name": "Tsonga",
+    "ThreeLetterISOLanguageName": "tso",
+    "ThreeLetterISOLanguageNames": [
+      "tso"
+    ],
+    "TwoLetterISOLanguageName": "ts"
+  },
+  {
+    "DisplayName": "Tswana",
+    "Name": "Tswana",
+    "ThreeLetterISOLanguageName": "tsn",
+    "ThreeLetterISOLanguageNames": [
+      "tsn"
+    ],
+    "TwoLetterISOLanguageName": "tn"
+  },
+  {
+    "DisplayName": "Tumbuka",
+    "Name": "Tumbuka",
+    "ThreeLetterISOLanguageName": "tum",
+    "ThreeLetterISOLanguageNames": [
+      "tum"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tupi languages",
+    "Name": "Tupi languages",
+    "ThreeLetterISOLanguageName": "tup",
+    "ThreeLetterISOLanguageNames": [
+      "tup"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Turkish",
+    "Name": "Turkish",
+    "ThreeLetterISOLanguageName": "tur",
+    "ThreeLetterISOLanguageNames": [
+      "tur"
+    ],
+    "TwoLetterISOLanguageName": "tr"
+  },
+  {
+    "DisplayName": "Turkish, Ottoman (1500-1928)",
+    "Name": "Turkish, Ottoman (1500-1928)",
+    "ThreeLetterISOLanguageName": "ota",
+    "ThreeLetterISOLanguageNames": [
+      "ota"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Turkmen",
+    "Name": "Turkmen",
+    "ThreeLetterISOLanguageName": "tuk",
+    "ThreeLetterISOLanguageNames": [
+      "tuk"
+    ],
+    "TwoLetterISOLanguageName": "tk"
+  },
+  {
+    "DisplayName": "Tuvalu",
+    "Name": "Tuvalu",
+    "ThreeLetterISOLanguageName": "tvl",
+    "ThreeLetterISOLanguageNames": [
+      "tvl"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Tuvinian",
+    "Name": "Tuvinian",
+    "ThreeLetterISOLanguageName": "tyv",
+    "ThreeLetterISOLanguageNames": [
+      "tyv"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Twi",
+    "Name": "Twi",
+    "ThreeLetterISOLanguageName": "twi",
+    "ThreeLetterISOLanguageNames": [
+      "twi"
+    ],
+    "TwoLetterISOLanguageName": "tw"
+  },
+  {
+    "DisplayName": "Udmurt",
+    "Name": "Udmurt",
+    "ThreeLetterISOLanguageName": "udm",
+    "ThreeLetterISOLanguageNames": [
+      "udm"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Ugaritic",
+    "Name": "Ugaritic",
+    "ThreeLetterISOLanguageName": "uga",
+    "ThreeLetterISOLanguageNames": [
+      "uga"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Uighur; Uyghur",
+    "Name": "Uighur; Uyghur",
+    "ThreeLetterISOLanguageName": "uig",
+    "ThreeLetterISOLanguageNames": [
+      "uig"
+    ],
+    "TwoLetterISOLanguageName": "ug"
+  },
+  {
+    "DisplayName": "Ukrainian",
+    "Name": "Ukrainian",
+    "ThreeLetterISOLanguageName": "ukr",
+    "ThreeLetterISOLanguageNames": [
+      "ukr"
+    ],
+    "TwoLetterISOLanguageName": "uk"
+  },
+  {
+    "DisplayName": "Umbundu",
+    "Name": "Umbundu",
+    "ThreeLetterISOLanguageName": "umb",
+    "ThreeLetterISOLanguageNames": [
+      "umb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Uncoded languages",
+    "Name": "Uncoded languages",
+    "ThreeLetterISOLanguageName": "mis",
+    "ThreeLetterISOLanguageNames": [
+      "mis"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Undetermined",
+    "Name": "Undetermined",
+    "ThreeLetterISOLanguageName": "und",
+    "ThreeLetterISOLanguageNames": [
+      "und"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Upper Sorbian",
+    "Name": "Upper Sorbian",
+    "ThreeLetterISOLanguageName": "hsb",
+    "ThreeLetterISOLanguageNames": [
+      "hsb"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Urdu",
+    "Name": "Urdu",
+    "ThreeLetterISOLanguageName": "urd",
+    "ThreeLetterISOLanguageNames": [
+      "urd"
+    ],
+    "TwoLetterISOLanguageName": "ur"
+  },
+  {
+    "DisplayName": "Uzbek",
+    "Name": "Uzbek",
+    "ThreeLetterISOLanguageName": "uzb",
+    "ThreeLetterISOLanguageNames": [
+      "uzb"
+    ],
+    "TwoLetterISOLanguageName": "uz"
+  },
+  {
+    "DisplayName": "Vai",
+    "Name": "Vai",
+    "ThreeLetterISOLanguageName": "vai",
+    "ThreeLetterISOLanguageNames": [
+      "vai"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Venda",
+    "Name": "Venda",
+    "ThreeLetterISOLanguageName": "ven",
+    "ThreeLetterISOLanguageNames": [
+      "ven"
+    ],
+    "TwoLetterISOLanguageName": "ve"
+  },
+  {
+    "DisplayName": "Vietnamese",
+    "Name": "Vietnamese",
+    "ThreeLetterISOLanguageName": "vie",
+    "ThreeLetterISOLanguageNames": [
+      "vie"
+    ],
+    "TwoLetterISOLanguageName": "vi"
+  },
+  {
+    "DisplayName": "Volap\u00fck",
+    "Name": "Volap\u00fck",
+    "ThreeLetterISOLanguageName": "vol",
+    "ThreeLetterISOLanguageNames": [
+      "vol"
+    ],
+    "TwoLetterISOLanguageName": "vo"
+  },
+  {
+    "DisplayName": "Votic",
+    "Name": "Votic",
+    "ThreeLetterISOLanguageName": "vot",
+    "ThreeLetterISOLanguageNames": [
+      "vot"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Wakashan languages",
+    "Name": "Wakashan languages",
+    "ThreeLetterISOLanguageName": "wak",
+    "ThreeLetterISOLanguageNames": [
+      "wak"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Walamo",
+    "Name": "Walamo",
+    "ThreeLetterISOLanguageName": "wal",
+    "ThreeLetterISOLanguageNames": [
+      "wal"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Walloon",
+    "Name": "Walloon",
+    "ThreeLetterISOLanguageName": "wln",
+    "ThreeLetterISOLanguageNames": [
+      "wln"
+    ],
+    "TwoLetterISOLanguageName": "wa"
+  },
+  {
+    "DisplayName": "Waray",
+    "Name": "Waray",
+    "ThreeLetterISOLanguageName": "war",
+    "ThreeLetterISOLanguageNames": [
+      "war"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Washo",
+    "Name": "Washo",
+    "ThreeLetterISOLanguageName": "was",
+    "ThreeLetterISOLanguageNames": [
+      "was"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Welsh",
+    "Name": "Welsh",
+    "ThreeLetterISOLanguageName": "cym",
+    "ThreeLetterISOLanguageNames": [
+      "cym",
+      "wel"
+    ],
+    "TwoLetterISOLanguageName": "cy"
+  },
+  {
+    "DisplayName": "Western Frisian",
+    "Name": "Western Frisian",
+    "ThreeLetterISOLanguageName": "fry",
+    "ThreeLetterISOLanguageNames": [
+      "fry"
+    ],
+    "TwoLetterISOLanguageName": "fy"
+  },
+  {
+    "DisplayName": "Wolof",
+    "Name": "Wolof",
+    "ThreeLetterISOLanguageName": "wol",
+    "ThreeLetterISOLanguageNames": [
+      "wol"
+    ],
+    "TwoLetterISOLanguageName": "wo"
+  },
+  {
+    "DisplayName": "Xhosa",
+    "Name": "Xhosa",
+    "ThreeLetterISOLanguageName": "xho",
+    "ThreeLetterISOLanguageNames": [
+      "xho"
+    ],
+    "TwoLetterISOLanguageName": "xh"
+  },
+  {
+    "DisplayName": "Yakut",
+    "Name": "Yakut",
+    "ThreeLetterISOLanguageName": "sah",
+    "ThreeLetterISOLanguageNames": [
+      "sah"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Yao",
+    "Name": "Yao",
+    "ThreeLetterISOLanguageName": "yao",
+    "ThreeLetterISOLanguageNames": [
+      "yao"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Yapese",
+    "Name": "Yapese",
+    "ThreeLetterISOLanguageName": "yap",
+    "ThreeLetterISOLanguageNames": [
+      "yap"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Yiddish",
+    "Name": "Yiddish",
+    "ThreeLetterISOLanguageName": "yid",
+    "ThreeLetterISOLanguageNames": [
+      "yid"
+    ],
+    "TwoLetterISOLanguageName": "yi"
+  },
+  {
+    "DisplayName": "Yoruba",
+    "Name": "Yoruba",
+    "ThreeLetterISOLanguageName": "yor",
+    "ThreeLetterISOLanguageNames": [
+      "yor"
+    ],
+    "TwoLetterISOLanguageName": "yo"
+  },
+  {
+    "DisplayName": "Yupik languages",
+    "Name": "Yupik languages",
+    "ThreeLetterISOLanguageName": "ypk",
+    "ThreeLetterISOLanguageNames": [
+      "ypk"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Zande languages",
+    "Name": "Zande languages",
+    "ThreeLetterISOLanguageName": "znd",
+    "ThreeLetterISOLanguageNames": [
+      "znd"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Zapotec",
+    "Name": "Zapotec",
+    "ThreeLetterISOLanguageName": "zap",
+    "ThreeLetterISOLanguageNames": [
+      "zap"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Zaza; Dimili; Dimli; Kirdki; Kirmanjki; Zazaki",
+    "Name": "Zaza; Dimili; Dimli; Kirdki; Kirmanjki; Zazaki",
+    "ThreeLetterISOLanguageName": "zza",
+    "ThreeLetterISOLanguageNames": [
+      "zza"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Zenaga",
+    "Name": "Zenaga",
+    "ThreeLetterISOLanguageName": "zen",
+    "ThreeLetterISOLanguageNames": [
+      "zen"
+    ],
+    "TwoLetterISOLanguageName": ""
+  },
+  {
+    "DisplayName": "Zhuang; Chuang",
+    "Name": "Zhuang; Chuang",
+    "ThreeLetterISOLanguageName": "zha",
+    "ThreeLetterISOLanguageNames": [
+      "zha"
+    ],
+    "TwoLetterISOLanguageName": "za"
+  },
+  {
+    "DisplayName": "Zulu",
+    "Name": "Zulu",
+    "ThreeLetterISOLanguageName": "zul",
+    "ThreeLetterISOLanguageNames": [
+      "zul"
+    ],
+    "TwoLetterISOLanguageName": "zu"
+  },
+  {
+    "DisplayName": "Zuni",
+    "Name": "Zuni",
+    "ThreeLetterISOLanguageName": "zun",
+    "ThreeLetterISOLanguageNames": [
+      "zun"
+    ],
+    "TwoLetterISOLanguageName": ""
+  }
+]

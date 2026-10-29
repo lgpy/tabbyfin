@@ -213,3 +213,54 @@ async fn the_bitrate_test_times_the_download() {
     let bits = client(&server).await.bitrate_test(500_000).await.expect("bitrate test");
     assert!((3_000_000..4_100_000).contains(&bits), "{bits} bit/s");
 }
+
+/// The server replaces the whole user configuration, so an update sends back what it read with
+/// only the changed fields different, including the ones the client doesn't model.
+#[tokio::test]
+async fn a_configuration_update_keeps_the_fields_it_doesnt_change() {
+    let server = MockServer::start().await;
+    let user = json!({
+        "Id": "user",
+        "Name": "dev",
+        "Configuration": {
+            "CastReceiverId": "F007D354",
+            "OrderedViews": ["a", "b"],
+            "SubtitleMode": "Default",
+            "HidePlayedInLatest": true,
+        },
+    });
+    Mock::given(method("GET"))
+        .and(path("/Users/Me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&user))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/Users/Configuration"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let changes = jellyfin::models::UserConfigurationChanges {
+        subtitle_mode: Some(jellyfin::models::SubtitleMode::Off),
+        audio_language_preference: Some("jpn".into()),
+        ..Default::default()
+    };
+    client(&server)
+        .await
+        .update_user_configuration(&changes)
+        .await
+        .expect("update");
+
+    let requests = server.received_requests().await.expect("recording is on");
+    let post = requests.iter().find(|r| r.method.as_str() == "POST").expect("a POST");
+    assert_eq!(
+        body(post),
+        json!({
+            "CastReceiverId": "F007D354",
+            "OrderedViews": ["a", "b"],
+            "SubtitleMode": "None",
+            "HidePlayedInLatest": true,
+            "AudioLanguagePreference": "jpn",
+        })
+    );
+}
