@@ -96,7 +96,7 @@ crates/app/src/
 ├── theme.rs         appearance: theme, text size, zoom, animations, over_video; `theme::apply` is called at launch
 ├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
 ├── ui_tests/        the headless UI tests (egui_kittest)
-├── widgets/         text (Load<T>), card, image, shelf, menu, state, video
+├── widgets/         text (Load<T>), card, image, shelf, menu, popup, select, dialog, button, state, mascot, video
 └── views/           mod (Page, PageCx, open), shell, home, login, search, library, value_filters, item, settings, player, dialogs
 ```
 

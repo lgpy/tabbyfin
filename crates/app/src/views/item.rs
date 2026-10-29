@@ -25,7 +25,7 @@
 use egui::text::LayoutJob;
 use egui::{
     Align, Align2, Color32, CornerRadius, Direction, FontId, Id, Label, Layout, Margin, Rect, RectAlign, Response,
-    RichText, Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, WidgetText, pos2, vec2,
+    RichText, Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -57,7 +57,7 @@ use crate::widgets::text::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, runtime_text,
     timestamp,
 };
-use crate::widgets::{card, image, mascot, select, shelf, state};
+use crate::widgets::{button, card, image, mascot, select, shelf, state};
 
 /// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
 pub fn shuffle<T>(items: &mut [T]) {
@@ -1703,24 +1703,8 @@ fn action_button(ui: &Ui, look: &ActionLook) -> egui::Button<'static> {
     } else {
         tokens.foreground
     };
-    let mut job = LayoutJob::default();
-    // The icon is bigger than the label, so both are centred on the line's middle: left to the
-    // baseline, the 24-point glyph sits low beside a 14-point label.
-    let centered = |font_id| TextFormat {
-        font_id,
-        color,
-        valign: Align::Center,
-        ..Default::default()
-    };
-    job.append(
-        look.icon.codepoint,
-        0.,
-        centered(FontId::new(ACTION_ICON, look.icon.font_family())),
-    );
-    if let Some(label) = &look.label {
-        job.append(&format!("  {label}"), 0., centered(body));
-    }
-    egui::Button::new(WidgetText::LayoutJob(job.into()))
+    let label = look.label.as_deref().unwrap_or_default();
+    egui::Button::new(button::icon_text(look.icon, ACTION_ICON, label, body, color))
         .sense(Sense::CLICK)
         .min_size(vec2(ACTION_SIZE, ACTION_SIZE))
 }
