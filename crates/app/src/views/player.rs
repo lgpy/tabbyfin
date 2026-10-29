@@ -50,6 +50,7 @@ use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
 use crate::widgets::mascot;
+use crate::widgets::popup::{Entry, Opened, PopupMenu};
 use crate::widgets::text::{card_text, timestamp};
 use crate::widgets::video::Video;
 
@@ -742,7 +743,7 @@ impl PlayerPage {
                 if let Some(name) = view.version_picker() {
                     let picker = version_picker(ui, name);
                     if picker.clicked() {
-                        toggle_menu(ui.ctx(), versions_id());
+                        PopupMenu::toggle(ui.ctx(), versions_id(), Opened::Pointer);
                     }
                     versions_button = Some(picker);
                 }
@@ -766,7 +767,7 @@ impl PlayerPage {
             self.settings_menu(ui, response, view, cx);
         }
         if let Some(response) = &versions_button {
-            self.versions_menu(ui, response, view, cx);
+            self.versions_menu(response, view, cx);
         }
     }
 
@@ -1212,32 +1213,19 @@ impl PlayerPage {
 
     /// The version picker's menu: the item's versions, the playing one checked. Another version
     /// restarts the stream at the current position.
-    fn versions_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
-        if !egui::Popup::is_id_open(cx.ctx, versions_id()) {
-            return;
-        }
-        let mut chosen = None;
-        egui::Popup::menu(response)
-            .id(versions_id())
-            .open_memory(None::<egui::SetOpenCommand>)
+    fn versions_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
+        let entries: Vec<Entry> = view
+            .versions
+            .iter()
+            .map(|version| Entry::new(&version.name).checked(version.id == view.source_id))
+            .collect();
+        let shown = PopupMenu::new(versions_id())
             .align(RectAlign::TOP_END)
-            .align_alternatives(&[])
-            .gap(4.)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .width(240.)
-            .frame(menu_frame(ui))
-            .show(|ui| {
-                for version in &view.versions {
-                    let current = version.id == view.source_id;
-                    if check_row(ui, &version.name, current).clicked() {
-                        chosen = Some(version.id.clone());
-                    }
-                }
-            });
-        if let Some(id) = chosen {
-            egui::Popup::close_id(cx.ctx, versions_id());
+            .show(response, &entries);
+        if let Some(index) = shown.chosen {
             cx.services.reload(PlayOptions {
-                media_source_id: Some(id),
+                media_source_id: Some(view.versions[index].id.clone()),
                 ..Default::default()
             });
         }

@@ -19,8 +19,8 @@
 //! whenever it next draws, since a reload would fail too while the server is down. The icons pop
 //! as the item turns watched or favorite, as `main`'s did ([`crate::motion`]).
 //!
-//! The More menu is drawn by the page rather than egui's menu buttons, so the keyboard can walk
-//! it (`more_menu_keys`), as it could on `main`; egui keeps the keys while the popup is open.
+//! The More and version menus are [`PopupMenu`]s, so the keyboard can walk them, as it could
+//! on `main`; Enter on More opens its menu with the first entry highlighted.
 
 use egui::text::LayoutJob;
 use egui::{
@@ -41,7 +41,7 @@ use crate::item_menu::{
     Mark, PlaylistEdit, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played,
     resume_point,
 };
-use crate::keys::{self, Action, Scope};
+use crate::keys::{Action, Scope};
 use crate::motion;
 use crate::nav::{NavRequest, Route};
 use crate::playback::PlayOptions;
@@ -52,6 +52,7 @@ use crate::toasts::Toast;
 use crate::views::dialogs::{AddToPlaylist, DeletePlaylist, EditPlaylist};
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction, RefusedMarks};
+use crate::widgets::popup::{Entry, Opened, PopupMenu};
 use crate::widgets::text::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, runtime_text,
     timestamp,
@@ -359,12 +360,9 @@ pub struct ItemPage {
     reveal_band: Option<BandReveal>,
     /// The open season's episodes request; the next season's replaces it, which cancels it.
     episodes: Option<Task<jellyfin::Result<jellyfin::models::QueryResult<BaseItemDto>>>>,
-    /// The More menu's highlight while the keyboard is on it (`None` when a click opened it,
-    /// until an arrow key picks one).
-    more_highlight: Option<usize>,
-    /// The More menu was asked for this frame (the button, or Enter on the cursor): its popup
-    /// opens before the frame draws it.
-    more_requested: bool,
+    /// The More menu was asked for this frame, by the button or by Enter on the cursor (which
+    /// starts its highlight on the first entry): its popup opens before the frame draws it.
+    more_requested: Option<Opened>,
     /// The last [`RefusedMarks`] sequence this page has applied. Refusals after it are taken
     /// back as the page draws, even ones that came while it was off screen; a page made after a
     /// refusal starts at the current sequence.
@@ -392,8 +390,7 @@ impl ItemPage {
             open_season: None,
             reveal_band: None,
             episodes: None,
-            more_highlight: None,
-            more_requested: false,
+            more_requested: None,
             marks_seen,
             add_to_playlist: None,
             edit_playlist: None,
@@ -638,7 +635,7 @@ impl ItemPage {
     fn run_action(&mut self, action: ItemAction, cx: &mut PageCx) {
         match action {
             ItemAction::More => {
-                self.more_requested = true;
+                self.more_requested.get_or_insert(Opened::Pointer);
                 return;
             }
             ItemAction::Resume(position) => {
@@ -711,151 +708,43 @@ impl ItemPage {
         }
     }
 
-    /// Backspace and Alt+Left close an open menu, as they close the account menu and as Esc
-    /// closes any popup. egui keeps the keys while a popup is open, so the shell's Back would
-    /// otherwise never see them.
-    fn menu_back_keys(&mut self, ctx: &egui::Context, menus: [Id; 2]) {
-        if !menus.iter().any(|&id| egui::Popup::is_id_open(ctx, id)) {
-            return;
-        }
-        let back = keys::take_exact(ctx, egui::Modifiers::NONE, egui::Key::Backspace)
-            | keys::take_exact(ctx, egui::Modifiers::ALT, egui::Key::ArrowLeft);
-        if !back {
-            return;
-        }
-        for id in menus {
-            egui::Popup::close_id(ctx, id);
-        }
-        self.more_highlight = None;
-    }
-
-    /// The More menu's keys, which egui keeps while its popup is open: Tab stays in the menu,
-    /// Up and Down move its highlight, Enter picks. Read before anything draws, so egui's focus
-    /// pass can't hand the keyboard to a button behind the menu (Enter would then press that as
-    /// well). Esc and clicks close the popup as egui's popups do.
-    fn more_menu_keys(&mut self, id: Id, cx: &mut PageCx) {
-        if !egui::Popup::is_id_open(cx.ctx, id) {
-            return;
-        }
-        let Load::Loaded(data) = &self.data else {
-            return;
-        };
-        let ctx = cx.ctx;
-        if menu_search_key(ctx, id, cx.nav) {
-            self.more_highlight = None;
-            return;
-        }
-        // Tab and the arrows queued an egui focus move in its focus pass; cancel it.
-        if keys::take_exact(ctx, egui::Modifiers::NONE, egui::Key::Tab)
-            | keys::take_exact(ctx, egui::Modifiers::SHIFT, egui::Key::Tab)
-        {
-            cancel_focus(ctx);
-        }
-        let count = more_actions(&data.item).len();
-        let down = keys::take_exact(ctx, egui::Modifiers::NONE, egui::Key::ArrowDown);
-        let up = keys::take_exact(ctx, egui::Modifiers::NONE, egui::Key::ArrowUp);
-        if down | up {
-            let step = if down { 1 } else { -1 };
-            self.more_highlight = step_highlight(self.more_highlight, step, count);
-            cancel_focus(ctx);
-        }
-        let chosen = if keys::take_exact(ctx, egui::Modifiers::NONE, egui::Key::Enter) {
-            self.more_highlight
-                .and_then(|index| more_actions(&data.item).get(index).copied())
-        } else {
-            None
-        };
-        if let Some(action) = chosen {
-            egui::Popup::close_id(ctx, id);
-            self.more_highlight = None;
-            self.run_action(action, cx);
-        }
-    }
-
-    /// The More menu while it's open: its entries, the keyboard's highlight, and the one chosen
-    /// with the pointer. Returns what was chosen, for the caller to carry out once the menu is
-    /// closed.
+    /// The More menu while it's open: the item's less frequent actions. Returns the one picked,
+    /// for the caller to carry out once the menu is closed.
     fn more_menu(&mut self, response: &Response, id: Id, cx: &mut PageCx) -> Option<ItemAction> {
-        if !egui::Popup::is_id_open(cx.ctx, id) {
-            return None;
-        }
         let Load::Loaded(data) = &self.data else {
             return None;
         };
         let actions = more_actions(&data.item);
-        let highlight = self.more_highlight;
-        let mut chosen = None;
-        egui::Popup::menu(response)
-            .id(id)
-            .open_memory(None::<egui::SetOpenCommand>)
+        let entries: Vec<Entry> = actions.iter().map(|&action| more_entry(action)).collect();
+        let shown = PopupMenu::new(id)
             .align(RectAlign::BOTTOM_END)
-            .align_alternatives(&[])
-            .gap(4.)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .width(MENU_W)
-            .show(|ui| {
-                for (index, &action) in actions.iter().enumerate() {
-                    if action == ItemAction::DeletePlaylist {
-                        ui.separator();
-                    }
-                    let (icon, label) = more_entry(action);
-                    if menu_row(ui, Some(icon), label, highlight == Some(index)).clicked() {
-                        chosen = Some(action);
-                    }
-                }
-            });
-        if chosen.is_some() {
-            egui::Popup::close_id(cx.ctx, id);
-            self.more_highlight = None;
+            .show(response, &entries);
+        if shown.search {
+            cx.nav.push(NavRequest::OpenSearch);
         }
-        chosen
-    }
-
-    /// The version list's keys, which egui keeps while its popup is open: Tab and Shift+Tab
-    /// stay in it (egui's focus pass would otherwise hand the keyboard to a button behind it),
-    /// and Ctrl/Cmd+F closes it and opens the search box, as it does for the More menu.
-    fn versions_menu_keys(ctx: &egui::Context, id: Id, nav: &mut Vec<NavRequest>) {
-        if !egui::Popup::is_id_open(ctx, id) {
-            return;
-        }
-        if keys::take_exact(ctx, egui::Modifiers::NONE, egui::Key::Tab)
-            | keys::take_exact(ctx, egui::Modifiers::SHIFT, egui::Key::Tab)
-        {
-            cancel_focus(ctx);
-        }
-        menu_search_key(ctx, id, nav);
+        shown.chosen.map(|index| actions[index])
     }
 
     /// The version picker's menu while it's open: an item's versions, the chosen one checked.
-    /// Clicking a row picks it; the keyboard changes the choice through the cursor instead
-    /// (Left and Right step, Enter cycles).
+    /// The keyboard can walk it once it's open; on the cursor, the picker changes the choice
+    /// without it (Left and Right step, Enter cycles).
     fn versions_menu(&mut self, response: &Response, id: Id, cx: &mut PageCx) {
-        if !egui::Popup::is_id_open(cx.ctx, id) {
-            return;
-        }
         let Load::Loaded(data) = &self.data else {
             return;
         };
         let sources = &data.item.media_sources;
         let current = self.version.min(sources.len().saturating_sub(1));
-        let mut chosen = None;
-        egui::Popup::menu(response)
-            .id(id)
-            .open_memory(None::<egui::SetOpenCommand>)
-            .align(RectAlign::BOTTOM_START)
-            .align_alternatives(&[])
-            .gap(4.)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .width(PICKER_W)
-            .show(|ui| {
-                for (index, source) in sources.iter().enumerate() {
-                    if menu_row(ui, None, &version_label(source, index), index == current).clicked() {
-                        chosen = Some(index);
-                    }
-                }
-            });
-        if let Some(index) = chosen {
-            egui::Popup::close_id(cx.ctx, id);
+        let entries: Vec<Entry> = sources
+            .iter()
+            .enumerate()
+            .map(|(index, source)| Entry::new(version_label(source, index)).checked(index == current))
+            .collect();
+        let shown = PopupMenu::new(id).width(PICKER_W).show(response, &entries);
+        if shown.search {
+            cx.nav.push(NavRequest::OpenSearch);
+        }
+        if let Some(index) = shown.chosen {
             self.version = index;
             cx.ctx.request_repaint();
         }
@@ -1001,16 +890,11 @@ impl ItemPage {
                 });
         });
 
-        let more_was_open = egui::Popup::is_id_open(cx.ctx, more_id);
         if let Some(action) = asked.action {
             // A second click on More closes its menu, as its trigger did on `main`.
-            if action == ItemAction::More && egui::Popup::is_id_open(cx.ctx, more_id) {
-                egui::Popup::close_id(cx.ctx, more_id);
-                self.more_highlight = None;
+            if action == ItemAction::More && PopupMenu::is_open(cx.ctx, more_id) {
+                PopupMenu::close(cx.ctx, more_id);
             } else {
-                if action == ItemAction::More {
-                    self.more_highlight = None;
-                }
                 self.run_action(action, cx);
             }
         }
@@ -1041,27 +925,23 @@ impl ItemPage {
         }
         if let Some(response) = &asked.version_picker {
             if response.clicked() {
-                toggle_popup(cx.ctx, versions_id);
+                PopupMenu::toggle(cx.ctx, versions_id, Opened::Pointer);
             }
             self.versions_menu(response, versions_id, cx);
         } else {
-            egui::Popup::close_id(cx.ctx, versions_id);
+            PopupMenu::close(cx.ctx, versions_id);
         }
 
         if let Some(response) = &asked.more {
-            if std::mem::take(&mut self.more_requested) {
-                egui::Popup::open_id(cx.ctx, more_id);
+            if let Some(opened) = self.more_requested.take() {
+                PopupMenu::open(cx.ctx, more_id, opened);
             }
             if let Some(action) = self.more_menu(response, more_id, cx) {
                 self.run_action(action, cx);
             }
         } else {
-            egui::Popup::close_id(cx.ctx, more_id);
-            self.more_highlight = None;
-            self.more_requested = false;
-        }
-        if more_was_open && !egui::Popup::is_id_open(cx.ctx, more_id) {
-            self.more_highlight = None;
+            PopupMenu::close(cx.ctx, more_id);
+            self.more_requested = None;
         }
     }
 }
@@ -2048,70 +1928,13 @@ fn fade_to_background(ui: &Ui, band: Rect) {
     ui.painter().add(egui::Shape::mesh(mesh));
 }
 
-/// One row of the More or version menus: `icon` (none for the versions) before the label, the
-/// keyboard's ring while it's highlighted.
-fn menu_row(ui: &mut Ui, icon: Option<MaterialIcon>, label: &str, highlighted: bool) -> Response {
-    let body = TextStyle::Button.resolve(ui.style());
-    let color = theme::tokens_of(ui).foreground;
-    let mut job = LayoutJob::default();
-    if let Some(icon) = icon {
-        job.append(
-            icon.codepoint,
-            0.,
-            TextFormat {
-                font_id: text::icon(ui, icon.font_family()),
-                color,
-                ..Default::default()
-            },
-        );
-        job.append("  ", 0., TextFormat::default());
-    }
-    job.append(
-        label,
-        0.,
-        TextFormat {
-            font_id: body,
-            color,
-            ..Default::default()
-        },
-    );
-    // Not focusable: the page reads the menu's keys itself, and egui's focus pass must not
-    // hand Enter to a button behind the menu.
-    let response = ui.add(
-        egui::Button::new(WidgetText::LayoutJob(job.into()))
-            .frame(false)
-            .sense(Sense::CLICK),
-    );
-    if highlighted {
-        ui.painter().rect_stroke(
-            response.rect,
-            CornerRadius::same(4),
-            Stroke::new(1.5, theme::tokens_of(ui).foreground),
-            StrokeKind::Inside,
-        );
-    }
-    response
-}
-
-fn more_entry(action: ItemAction) -> (MaterialIcon, &'static str) {
+/// A More menu row. Deleting a playlist can't be taken back, so it's set apart and in red.
+fn more_entry(action: ItemAction) -> Entry<'static> {
     match action {
-        ItemAction::AddToPlaylist => (ICON_PLAYLIST_ADD, "Add to playlist…"),
-        ItemAction::EditPlaylist => (ICON_EDIT, "Edit…"),
-        _ => (ICON_DELETE, "Delete playlist…"),
+        ItemAction::AddToPlaylist => Entry::new("Add to playlist…").icon(ICON_PLAYLIST_ADD),
+        ItemAction::EditPlaylist => Entry::new("Edit…").icon(ICON_EDIT),
+        _ => Entry::new("Delete playlist…").icon(ICON_DELETE).danger().separated(),
     }
-}
-
-/// Up and Down in a menu wrap round, as its highlight did on `main`. A menu opened with a
-/// click shows the first entry going down, the last going up.
-fn step_highlight(current: Option<usize>, step: i32, len: usize) -> Option<usize> {
-    if len == 0 {
-        return None;
-    }
-    Some(match current {
-        Some(index) => (index as i32 + step).rem_euclid(len as i32) as usize,
-        None if step > 0 => 0,
-        None => len - 1,
-    })
 }
 
 /// A popup's id, scoped to the page: the shell gives every page its own id scope, so stacked
@@ -2122,35 +1945,6 @@ fn more_menu_id(ui: &Ui) -> Id {
 
 fn versions_menu_id(ui: &Ui) -> Id {
     ui.make_persistent_id("item_versions")
-}
-
-/// Opens a popup, or closes it when it's open: what clicking its button does.
-fn toggle_popup(ctx: &egui::Context, id: Id) {
-    if egui::Popup::is_id_open(ctx, id) {
-        egui::Popup::close_id(ctx, id);
-    } else {
-        egui::Popup::open_id(ctx, id);
-    }
-    ctx.request_repaint();
-}
-
-/// Cancels the focus move egui queued for a Tab or arrow pressed while a page menu is open:
-/// egui's focus pass would otherwise hand the keyboard to a widget behind the menu (Enter would
-/// then press that as well).
-fn cancel_focus(ctx: &egui::Context) {
-    ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
-}
-
-/// Ctrl/Cmd+F in an open page menu: closes it and asks the shell for the search box, as the
-/// account menu does (U1). egui keeps the key while a popup is open, so the shell's search
-/// binding never sees it. Returns whether it was the search key.
-fn menu_search_key(ctx: &egui::Context, id: Id, nav: &mut Vec<NavRequest>) -> bool {
-    if !keys::take_exact(ctx, egui::Modifiers::COMMAND, egui::Key::F) {
-        return false;
-    }
-    egui::Popup::close_id(ctx, id);
-    nav.push(NavRequest::OpenSearch);
-    true
 }
 
 impl Page for ItemPage {
@@ -2177,11 +1971,6 @@ impl Page for ItemPage {
 
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         let now = ui.input(|input| input.time);
-        let more_id = more_menu_id(ui);
-        let versions_id = versions_menu_id(ui);
-        self.menu_back_keys(cx.ctx, [more_id, versions_id]);
-        Self::versions_menu_keys(cx.ctx, versions_id, cx.nav);
-        self.more_menu_keys(more_id, cx);
         if self.loaded_at != Some(cx.services.user_data) {
             self.reload(cx);
         }
@@ -2246,12 +2035,10 @@ impl Page for ItemPage {
         if matches!(self.data, Load::Loaded(_)) {
             self.show_content(ui, cx);
         } else {
-            // Nothing to hang the menus from while the page loads or failed; egui would keep
-            // the keyboard for a popup that isn't drawn.
-            egui::Popup::close_id(cx.ctx, more_menu_id(ui));
-            egui::Popup::close_id(cx.ctx, versions_menu_id(ui));
-            self.more_highlight = None;
-            self.more_requested = false;
+            // Nothing to hang the menus from while the page loads or failed.
+            PopupMenu::close(cx.ctx, more_menu_id(ui));
+            PopupMenu::close(cx.ctx, versions_menu_id(ui));
+            self.more_requested = None;
         }
 
         if let Some(dialog) = &mut self.add_to_playlist
@@ -2307,7 +2094,7 @@ impl Browse for ItemPage {
                 if let Some(&action) = actions.get(position.index) {
                     // Opened from the keyboard, the menu highlights its first entry.
                     if action == ItemAction::More {
-                        self.more_highlight = Some(0);
+                        self.more_requested = Some(Opened::Keyboard);
                     }
                     self.run_action(action, cx);
                 }
@@ -2489,18 +2276,14 @@ async fn similar(client: &Client, item: &BaseItemDto) -> Vec<BaseItemDto> {
 
 #[cfg(test)]
 mod tests {
-    use egui::{Event, Key, Modifiers, Rect, pos2};
+    use egui::{Rect, pos2};
     use jellyfin::Ticks;
     use jellyfin::models::BaseItemDto;
 
-    use super::{
-        CHILDREN, EntryAction, ItemAction, ItemData, ItemPage, band_reveal, item_actions, menu_search_key,
-        step_highlight,
-    };
+    use super::{CHILDREN, EntryAction, ItemAction, ItemData, ItemPage, band_reveal, item_actions};
     use crate::browse::{self, Position, Section};
     use crate::item_menu::{Mark, PlaylistEdit, is_favorite, is_played};
     use crate::keys::Action;
-    use crate::nav::NavRequest;
     use crate::widgets::menu::{REFUSED_MARKS_KEPT, RefusedMarks};
     use crate::widgets::text::Load;
 
@@ -2544,94 +2327,6 @@ mod tests {
                 ItemAction::More,
             ]
         );
-    }
-
-    /// Puts one key press in the context's input and returns it.
-    fn press(ctx: &egui::Context, key: Key, modifiers: Modifiers) -> Event {
-        ctx.input_mut(|input| {
-            input.events = vec![Event::Key {
-                key,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers,
-            }]
-        });
-        ctx.input(|input| input.events[0].clone())
-    }
-
-    /// Ctrl, or Cmd on macOS, as egui-winit reports it.
-    fn command() -> Modifiers {
-        if cfg!(target_os = "macos") {
-            Modifiers {
-                mac_cmd: true,
-                command: true,
-                ..Default::default()
-            }
-        } else {
-            Modifiers {
-                ctrl: true,
-                command: true,
-                ..Default::default()
-            }
-        }
-    }
-
-    #[test]
-    fn backspace_closes_an_open_menu_and_is_otherwise_the_shells() {
-        let ctx = egui::Context::default();
-        let mut page = ItemPage::new("movie".into(), "Movie".into(), 0);
-        let (more, versions) = (egui::Id::unique("more"), egui::Id::unique("versions"));
-
-        // No menu open: Backspace stays in the input for the shell's Back.
-        let event = press(&ctx, Key::Backspace, Modifiers::NONE);
-        page.menu_back_keys(&ctx, [more, versions]);
-        assert_eq!(ctx.input(|input| input.events.clone()), [event]);
-
-        // With one open it closes it and takes the key, as the account menu does.
-        egui::Popup::open_id(&ctx, more);
-        page.menu_back_keys(&ctx, [more, versions]);
-        assert!(!egui::Popup::is_id_open(&ctx, more));
-        assert!(ctx.input(|input| input.events.is_empty()));
-    }
-
-    #[test]
-    fn tab_stays_in_the_version_list_while_it_is_open() {
-        let ctx = egui::Context::default();
-        let id = egui::Id::unique("versions");
-        let mut nav = Vec::new();
-
-        // Closed: Tab is the page's (its next section), not the list's.
-        let event = press(&ctx, Key::Tab, Modifiers::NONE);
-        ItemPage::versions_menu_keys(&ctx, id, &mut nav);
-        assert_eq!(ctx.input(|input| input.events.clone()), [event]);
-
-        // Open: egui would move the keyboard behind the list with it; the list keeps it.
-        egui::Popup::open_id(&ctx, id);
-        press(&ctx, Key::Tab, Modifiers::NONE);
-        ItemPage::versions_menu_keys(&ctx, id, &mut nav);
-        assert!(ctx.input(|input| input.events.is_empty()));
-        assert!(nav.is_empty());
-    }
-
-    #[test]
-    fn ctrl_f_closes_a_menu_and_asks_for_search() {
-        let ctx = egui::Context::default();
-        let id = egui::Id::unique("more");
-        egui::Popup::open_id(&ctx, id);
-        let mut nav = Vec::new();
-        press(&ctx, Key::F, command());
-        assert!(menu_search_key(&ctx, id, &mut nav));
-        assert!(!egui::Popup::is_id_open(&ctx, id));
-        assert_eq!(nav, [NavRequest::OpenSearch]);
-        assert!(ctx.input(|input| input.events.is_empty()));
-
-        // A plain F isn't the search key (and isn't taken).
-        let event = press(&ctx, Key::F, Modifiers::NONE);
-        let mut nav = Vec::new();
-        assert!(!menu_search_key(&ctx, id, &mut nav));
-        assert!(nav.is_empty());
-        assert_eq!(ctx.input(|input| input.events.clone()), [event]);
     }
 
     fn loaded_page(played: bool, favorite: bool, marks_seen: u64) -> ItemPage {
@@ -2694,17 +2389,6 @@ mod tests {
         }
         assert_eq!(many.after(0).count(), REFUSED_MARKS_KEPT);
         assert_eq!(many.sequence(), (REFUSED_MARKS_KEPT + 5) as u64);
-    }
-
-    #[test]
-    fn a_menu_highlight_wraps_round() {
-        assert_eq!(step_highlight(Some(0), 1, 3), Some(1));
-        assert_eq!(step_highlight(Some(2), 1, 3), Some(0));
-        assert_eq!(step_highlight(Some(0), -1, 3), Some(2));
-        // A menu opened with a click: down starts at the top, up at the bottom.
-        assert_eq!(step_highlight(None, 1, 3), Some(0));
-        assert_eq!(step_highlight(None, -1, 3), Some(2));
-        assert_eq!(step_highlight(Some(0), 1, 0), None);
     }
 
     /// A page whose item is of `kind`, with `children` under it.
