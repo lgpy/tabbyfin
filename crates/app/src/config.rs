@@ -145,14 +145,23 @@ pub struct LibraryView {
     pub sort: String,
     pub descending: bool,
     pub filter: String,
-    /// Genre names: items with any of them show (and with any of the tags and ratings, when
-    /// those are set too). Empty shows everything.
+    /// Genre names: items with any of them show (and with any of the tags, when those are set
+    /// too). Empty shows everything.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub genres: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-    /// Official ratings (PG-13…).
+    /// Genres and tags whose items are left out, whatever else they have.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_genres: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_tags: Vec<String>,
+    /// An official rating (PG-13…); `None` shows every rating.
+    #[serde(default)]
+    pub rating: Option<String>,
+    /// The ratings earlier versions ticked any number of; [`LibraryView::upgrade`] keeps the
+    /// first as `rating`.
+    #[serde(default, skip_serializing)]
     pub ratings: Vec<String>,
     /// The one genre earlier versions saved; [`LibraryView::upgrade`] moves it to `genres`.
     #[serde(default, skip_serializing)]
@@ -171,6 +180,14 @@ impl LibraryView {
             && !self.genres.contains(&genre)
         {
             self.genres.push(genre);
+        }
+        if self.rating.is_none() {
+            self.rating = self.ratings.first().cloned();
+        }
+        self.ratings.clear();
+        // Favorites was a progress filter once; it has its own shelf and page now.
+        if self.filter == "favorites" {
+            self.filter = "all".into();
         }
     }
 }

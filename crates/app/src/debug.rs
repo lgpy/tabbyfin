@@ -249,6 +249,7 @@ impl Start {
                     Some("tvshows") => Some(CollectionType::TvShows),
                     _ => None,
                 },
+                newest_first: false,
             })),
             ("person", Some(id)) => Some(Start::Open(Route::Person {
                 id: id.into(),

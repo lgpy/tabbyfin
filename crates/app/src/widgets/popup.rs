@@ -71,7 +71,6 @@ pub struct Entry<'a> {
     icon: Option<MaterialIcon>,
     tint: Option<Color32>,
     checked: Option<bool>,
-    ticked: Option<bool>,
     toggled: Option<bool>,
     detail: Option<Cow<'a, str>>,
     danger: bool,
@@ -85,7 +84,6 @@ impl<'a> Entry<'a> {
             icon: None,
             tint: None,
             checked: None,
-            ticked: None,
             toggled: None,
             detail: None,
             danger: false,
@@ -108,12 +106,6 @@ impl<'a> Entry<'a> {
     /// One of a set of choices, with a check before the chosen one: a version, an account.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = Some(checked);
-        self
-    }
-
-    /// One of any number ticked at once, with a check while it's ticked: a genre to filter by.
-    pub fn ticked(mut self, ticked: bool) -> Self {
-        self.ticked = Some(ticked);
         self
     }
 
@@ -142,11 +134,11 @@ impl<'a> Entry<'a> {
     }
 
     fn has_slot(&self) -> bool {
-        self.icon.is_some() || self.checked.is_some() || self.ticked.is_some()
+        self.icon.is_some() || self.checked.is_some()
     }
 
     fn has_check(&self) -> bool {
-        self.checked == Some(true) || self.ticked == Some(true)
+        self.checked == Some(true)
     }
 }
 
@@ -548,7 +540,7 @@ fn row_info(entry: &Entry, in_menu: bool) -> WidgetInfo {
     } else {
         (Role::RadioButton, Role::CheckBox, Role::Button)
     };
-    match (entry.checked, entry.ticked.or(entry.toggled)) {
+    match (entry.checked, entry.toggled) {
         (Some(checked), _) => WidgetInfo::selected(radio, true, checked, name),
         (None, Some(on)) => WidgetInfo::selected(check_box, true, on, name),
         (None, None) => WidgetInfo::labeled(item, true, name),
@@ -657,12 +649,12 @@ mod tests {
         use egui::accesskit::Role;
 
         let info = |entry: &Entry| super::row_info(entry, false);
-        assert_eq!(info(&Entry::new("Drama").ticked(true)).role, Role::CheckBox);
-        assert_eq!(info(&Entry::new("Drama").ticked(true)).selected, Some(true));
+        assert_eq!(info(&Entry::new("Drama").toggled(true)).role, Role::CheckBox);
+        assert_eq!(info(&Entry::new("Drama").toggled(true)).selected, Some(true));
         assert_eq!(info(&Entry::new("English").checked(false)).role, Role::RadioButton);
         assert_eq!(info(&Entry::new("Watch later")).role, Role::Button);
         assert_eq!(
-            super::row_info(&Entry::new("Drama").ticked(false), true).role,
+            super::row_info(&Entry::new("Drama").toggled(false), true).role,
             Role::MenuItemCheckBox
         );
     }

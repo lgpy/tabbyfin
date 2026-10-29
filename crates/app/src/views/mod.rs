@@ -86,9 +86,14 @@ pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
             id,
             name,
             collection_type,
+            newest_first,
         } => Box::new(library::LibraryPage::new(
             cx,
-            library::Source::Folder { id, collection_type },
+            library::Source::Folder {
+                id,
+                collection_type,
+                newest_first,
+            },
             name,
         )),
         Route::Item { id, name } => {
