@@ -47,6 +47,36 @@ pub fn shelf_with_gaps(
     padding: f32,
     cards: impl FnOnce(&mut Ui),
 ) -> Rect {
+    shelf_inner(ui, id, title, None, gap, title_gap, padding, cards)
+}
+
+/// [`shelf_with_gaps`] with a title that is a link: `opened` is set when it's clicked, for a
+/// row that is a page's front (Home's "Latest Movies" leads to the library).
+#[allow(clippy::too_many_arguments)]
+pub fn shelf_linked(
+    ui: &mut Ui,
+    id: impl Hash + std::fmt::Debug,
+    title: &str,
+    opened: &mut bool,
+    gap: f32,
+    title_gap: f32,
+    padding: f32,
+    cards: impl FnOnce(&mut Ui),
+) -> Rect {
+    shelf_inner(ui, id, title, Some(opened), gap, title_gap, padding, cards)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn shelf_inner(
+    ui: &mut Ui,
+    id: impl Hash + std::fmt::Debug,
+    title: &str,
+    opened: Option<&mut bool>,
+    gap: f32,
+    title_gap: f32,
+    padding: f32,
+    cards: impl FnOnce(&mut Ui),
+) -> Rect {
     // The row's top before the title takes its place: a page scrolls the whole row into view
     // (its title and cards together), as `main`'s `browse::reveal` scrolled a whole section.
     let top = ui.cursor().min;
@@ -67,7 +97,46 @@ pub fn shelf_with_gaps(
         if padding > 0. {
             ui.add_space(padding);
         }
-        ui.label(RichText::new(title).heading().strong());
+        match opened {
+            Some(opened) => {
+                let heading = egui::TextStyle::Heading.resolve(ui.style());
+                let tokens = theme::tokens_of(ui);
+                let strong = ui.visuals().strong_text_color();
+                // A chevron after the title says it leads somewhere. It's the icon font's
+                // outlined chevron, the row's own paging arrows' glyph, centred on the title's
+                // line and a little smaller, so its stroke stays as light as the heading's.
+                let centred = |font_id, color| egui::text::TextFormat {
+                    font_id,
+                    color,
+                    valign: Align::Center,
+                    ..Default::default()
+                };
+                let mut job = egui::text::LayoutJob::default();
+                job.append(title, 0., centred(heading.clone(), strong));
+                job.append(
+                    ICON_CHEVRON_RIGHT.codepoint,
+                    2.,
+                    centred(
+                        egui::FontId::new(heading.size * 0.9, ICON_CHEVRON_RIGHT.outlined().font_family()),
+                        tokens.muted_foreground,
+                    ),
+                );
+                let response = ui
+                    .add(egui::Label::new(job).sense(egui::Sense::click()))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.hovered() {
+                    // The underline says it's a link.
+                    let rect = response.rect;
+                    let y = rect.bottom() - 2.;
+                    let stroke = egui::Stroke::new(1., ui.visuals().text_color());
+                    ui.painter().hline(rect.x_range(), y, stroke);
+                }
+                *opened |= response.clicked();
+            }
+            None => {
+                ui.label(RichText::new(title).heading().strong());
+            }
+        }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if !arrows.shown {
                 return;

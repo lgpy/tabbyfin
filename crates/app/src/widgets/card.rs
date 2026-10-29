@@ -15,7 +15,7 @@ use egui::{
     WidgetText, pos2, vec2,
 };
 use egui_material_icons::FONT_FAMILY;
-use egui_material_icons::icons::ICON_CHECK;
+use egui_material_icons::icons::{ICON_CHECK, ICON_PLAY_ARROW};
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemDto, BaseItemPerson, ChapterInfo, ImageType};
 
@@ -191,7 +191,10 @@ fn picture(
     let (rect, response) = ui.allocate_exact_size(vec2(size.x, size.y + text_height(ui)), Sense::click());
     let image = Rect::from_min_size(rect.min, size);
     image::show(ui, cache, image, request, item, image::RADIUS);
-    if ui.rect_contains_pointer(image) {
+    // `hovered` rather than a bare rectangle test: it also needs the card to be the widget under the
+    // pointer, clipped to what's visible, so a card half hidden by its shelf's edge or covered by
+    // something else doesn't dim (and flicker as the two disagree from frame to frame).
+    if response.hovered() && ui.rect_contains_pointer(image) {
         image::dim(ui, image, image::RADIUS);
     }
     if let Some(item) = item {
@@ -203,6 +206,46 @@ fn picture(
         }
     }
     (response, image)
+}
+
+/// A play button in the middle of `card`'s image while the pointer is on it, for a page whose
+/// cards can be played straight away (Home's). Returns whether it was clicked; the card's own
+/// click then shouldn't open the item.
+///
+/// It's part of the card rather than a widget of its own: one on top would take the hover from
+/// the card, which would stop dimming (and drop the button) as the pointer reached it.
+pub fn play_button(ui: &Ui, card: &Response) -> bool {
+    let image = Rect::from_min_max(
+        card.rect.min,
+        pos2(card.rect.right(), card.rect.bottom() - text_height(ui)),
+    );
+    if !(card.hovered() && ui.rect_contains_pointer(image)) {
+        return false;
+    }
+    let radius = (image.width().min(image.height()) * 0.16).clamp(16., 28.);
+    let center = image.center();
+    let within = |pos: Option<egui::Pos2>| pos.is_some_and(|pos| pos.distance(center) <= radius);
+    let on_it = within(card.hover_pos());
+    let tokens = theme::tokens_of(ui);
+    // The circle goes see-through under the pointer, so it reads as the thing that will be
+    // clicked; the arrow stays solid.
+    let fill = if on_it {
+        tokens.primary.gamma_multiply(0.7)
+    } else {
+        tokens.primary
+    };
+    ui.painter().circle_filled(center, radius, fill);
+    ui.painter().text(
+        center,
+        Align2::CENTER_CENTER,
+        ICON_PLAY_ARROW.codepoint,
+        FontId::new(radius * 1.3, egui::FontFamily::Name(FONT_FAMILY.into())),
+        tokens.primary_foreground,
+    );
+    if on_it {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    card.clicked() && within(card.interact_pointer_pos())
 }
 
 /// The keyboard cursor's ring, inside the card's edge so scrolling containers don't clip it.

@@ -73,7 +73,10 @@ pub fn appear(ctx: &egui::Context, id: impl std::hash::Hash + std::fmt::Debug) -
     let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
     let seen = ctx.data(|data| data.get_temp::<Seen>(id));
-    let mut seen = match seen.filter(|seen| seen.pass + 1 == pass) {
+    // Drawn again in the same pass counts too: two cards for one person (an actor who also
+    // produced) share an image, and the second would otherwise restart the fade the first had
+    // just continued, leaving both stuck near transparent.
+    let mut seen = match seen.filter(|seen| seen.pass == pass || seen.pass + 1 == pass) {
         Some(seen) => seen,
         None => Seen { started: now, pass },
     };

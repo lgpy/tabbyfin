@@ -30,10 +30,10 @@ use egui::{
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_DELETE, ICON_EDIT, ICON_MORE_HORIZ, ICON_MOVIE,
-    ICON_OPEN_IN_NEW, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY, ICON_SHUFFLE,
+    ICON_OPEN_IN_NEW, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY, ICON_SHUFFLE, ICON_STAR,
 };
-use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ItemField, ItemSortBy, MediaSourceInfo};
-use jellyfin::{Client, ItemsQuery, Ticks};
+use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ImageType, ItemField, ItemSortBy, MediaSourceInfo};
+use jellyfin::{Client, ImageRequest, ItemsQuery, Ticks};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
 use crate::images::ImageCache;
@@ -54,8 +54,8 @@ use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction, RefusedMarks};
 use crate::widgets::popup::{Entry, Opened, PopupMenu};
 use crate::widgets::text::{
-    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, runtime_text,
-    timestamp,
+    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, poster_image,
+    runtime_text, timestamp,
 };
 use crate::widgets::{button, card, image, mascot, select, shelf, state};
 
@@ -205,15 +205,20 @@ struct ItemData {
 const SIMILAR_LIMIT: u32 = 12;
 /// The backdrop's height: the header's content starts [`BACKDROP_H`] − 160 down, so the poster
 /// reaches under it.
-const BACKDROP_H: f32 = 340.;
+const BACKDROP_H: f32 = 420.;
 /// The width the backdrop is fetched at, as `main` did. A fixed width keeps the image cache key
 /// (and so the download and its cache entry) the same while the window is resized, maximised or
 /// zoomed; it is scaled to the band it fills.
 const BACKDROP_FILL_W: u32 = 1280;
 /// The narrowest the title gets beside the actions before they move under it.
 const TITLE_MIN_W: f32 = 280.;
+/// The widest the synopsis and the tags run, for a readable line in a wide window. Only a cap:
+/// `set_max_width` would widen a narrower column past the window's edge.
+const TEXT_MAX_W: f32 = 820.;
 const DETAIL_POSTER_W: f32 = 200.;
 const DETAIL_POSTER_H: f32 = 300.;
+/// An episode's still in the header, as tall as two thirds of the poster.
+const DETAIL_STILL_H: f32 = 200.;
 const PICKER_W: f32 = 260.;
 const PICKER_H: f32 = 28.;
 /// The version label's column, as on `main`.
@@ -229,6 +234,8 @@ const BIG_CARD_GAP: f32 = 24.;
 const SHELF_TITLE_GAP: f32 = 16.;
 const ACTION_SIZE: f32 = 48.;
 const ACTION_ICON: f32 = 24.;
+/// The side padding of an action button, level with the 48-point height's own margins.
+const ACTION_PADDING: f32 = 16.;
 /// The item's title, `main`'s fixed 40-point `text_size` (it didn't follow the text size).
 const TITLE_SIZE: f32 = 40.;
 /// Between the action buttons, whose cursor rings take 3 px on each side.
@@ -1405,15 +1412,9 @@ fn header(
     ui.add_space(if backdrop.is_some() { BACKDROP_H - 160. } else { 24. });
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 24.;
-        let (poster, _) = ui.allocate_exact_size(vec2(DETAIL_POSTER_W, DETAIL_POSTER_H), Sense::hover());
-        image::show(
-            ui,
-            images,
-            poster,
-            item.primary_image().as_ref(),
-            Some(item),
-            image::RADIUS,
-        );
+        let (request, size) = header_image(item);
+        let (poster, _) = ui.allocate_exact_size(size, Sense::hover());
+        image::show(ui, images, poster, request.as_ref(), Some(item), image::RADIUS);
         ui.vertical(|ui| {
             if backdrop.is_some() {
                 // Lines the text up beside the poster, as on `main`.
@@ -1423,6 +1424,28 @@ fn header(
         });
     });
     Rect::from_min_max(top, pos2(ui.max_rect().right(), ui.cursor().min.y))
+}
+
+/// The header's picture and its size: the item's poster, or for an episode its own still in a
+/// wide frame (an episode's image is a screen grab, which a tall poster would crop), and its
+/// series' poster when it has no image of its own.
+fn header_image(item: &BaseItemDto) -> (Option<ImageRequest>, egui::Vec2) {
+    let poster = vec2(DETAIL_POSTER_W, DETAIL_POSTER_H);
+    if item.kind != BaseItemKind::Episode {
+        return (item.primary_image(), poster);
+    }
+    match item.image(ImageType::Primary) {
+        // A tall image is a poster after all, and goes in the poster's frame.
+        Some(own) => match item.primary_image_aspect_ratio {
+            Some(ratio) if ratio < 1. => (Some(own), poster),
+            // Episode stills are 16:9 when the server doesn't say.
+            ratio => {
+                let ratio = ratio.unwrap_or(16. / 9.).clamp(1., 2.4) as f32;
+                (Some(own), vec2(DETAIL_STILL_H * ratio, DETAIL_STILL_H))
+            }
+        },
+        None => (poster_image(item), poster),
+    }
 }
 
 /// The title's column: the series line, the title and its actions, the meta line, genres,
@@ -1441,8 +1464,30 @@ fn info_column(
     if matches!(item.kind, BaseItemKind::Episode | BaseItemKind::Season)
         && let Some(series) = &item.series_name
     {
-        // `main`'s series line took the body size; the lines under the title are `text_sm`.
-        ui.label(RichText::new(series).font(text::font(ui, "base")).color(weak));
+        // `main`'s series line took the body size; the lines under the title are `text_sm`. It
+        // opens the series, underlined under the pointer like a link.
+        let label = Label::new(RichText::new(series).font(text::font(ui, "base")).color(weak));
+        match &item.series_id {
+            Some(id) => {
+                let response = ui
+                    .add(label.sense(Sense::click()))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.hovered() {
+                    let rect = response.rect;
+                    ui.painter()
+                        .hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1., weak));
+                }
+                if response.clicked() {
+                    asked.open = Some(Route::Item {
+                        id: id.clone(),
+                        name: series.clone(),
+                    });
+                }
+            }
+            None => {
+                ui.add(label);
+            }
+        }
     }
 
     let episode = data
@@ -1475,7 +1520,26 @@ fn info_column(
 
     let meta = meta_line(item);
     if !meta.is_empty() {
-        ui.label(RichText::new(meta).font(text::font(ui, "sm")).color(weak));
+        let font = text::font(ui, "sm");
+        // The text font has no ★, so the rating's star is drawn from the icon font.
+        let mut job = LayoutJob::default();
+        let format = |font_id| TextFormat {
+            font_id,
+            color: weak,
+            valign: Align::Center,
+            ..Default::default()
+        };
+        for (index, part) in meta.split('★').enumerate() {
+            if index > 0 {
+                job.append(
+                    ICON_STAR.codepoint,
+                    0.,
+                    format(FontId::new(font.size, ICON_STAR.font_family())),
+                );
+            }
+            job.append(part, 0., format(font.clone()));
+        }
+        ui.label(job);
     }
     if !item.genres.is_empty() {
         ui.label(
@@ -1493,7 +1557,7 @@ fn info_column(
     {
         ui.add_space(8.);
         ui.scope(|ui| {
-            ui.set_max_width(820.);
+            ui.set_max_width(ui.available_width().min(TEXT_MAX_W));
             // The synopsis is `main`'s `text_base`, a step above the meta lines.
             ui.add(Label::new(RichText::new(overview.clone()).font(text::font(ui, "base"))).wrap());
         });
@@ -1501,17 +1565,27 @@ fn info_column(
     if !item.tags.is_empty() {
         ui.add_space(16.);
         ui.scope(|ui| {
-            ui.set_max_width(820.);
+            ui.set_max_width(ui.available_width().min(TEXT_MAX_W));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(4., 4.);
                 for tag in &item.tags {
+                    // A frame doesn't wrap as a unit, so its label would break per letter in the
+                    // row's leftover space; start a new row when the whole chip doesn't fit.
+                    let text_width = ui
+                        .painter()
+                        .layout_no_wrap(tag.clone(), text::font(ui, "xs"), weak)
+                        .size()
+                        .x;
+                    if ui.available_size_before_wrap().x < text_width + 16. + 1. {
+                        ui.end_row();
+                    }
                     egui::Frame::NONE
                         .fill(theme::tokens_of(ui).muted)
                         // `main`'s `rounded_lg`, 8 points.
                         .corner_radius(CornerRadius::same(8))
                         .inner_margin(Margin::symmetric(8, 2))
                         .show(ui, |ui| {
-                            ui.label(RichText::new(tag).font(text::font(ui, "xs")).color(weak));
+                            ui.add(Label::new(RichText::new(tag).font(text::font(ui, "xs")).color(weak)).extend());
                         });
                 }
             });
@@ -1661,11 +1735,16 @@ fn actions_row(
                     let response = if look.primary {
                         ui.scope(|ui| {
                             theme::primary_style(ui);
+                            ui.spacing_mut().button_padding.x = ACTION_PADDING;
                             ui.add(action_button(ui, &look))
                         })
                         .inner
                     } else {
-                        ui.add(action_button(ui, &look))
+                        ui.scope(|ui| {
+                            ui.spacing_mut().button_padding.x = ACTION_PADDING;
+                            ui.add(action_button(ui, &look))
+                        })
+                        .inner
                     };
                     let response = response.on_hover_text(look.tooltip.as_str());
                     if action == ItemAction::More {

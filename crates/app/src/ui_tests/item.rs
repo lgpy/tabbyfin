@@ -1,13 +1,13 @@
 //! The item page's seasons through the keyboard: Enter on a season card opens its episodes
 //! band under the seasons, which at the app's window sizes starts below the fold, so the page
-//! scrolls it into view (X5).
+//! scrolls it into view (X5). And an episode's series line, which opens the series.
 
 use egui::Key;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use jellyfin::models::BaseItemDto;
 
-use crate::nav::Route;
+use crate::nav::{NavRequest, Route};
 use crate::ui_tests::{ConfigDir, FixtureServer, PageHarness, PageRun, fixture_json, session};
 
 /// The series the fixtures give two seasons and three episodes.
@@ -72,4 +72,76 @@ fn enter_on_a_season_brings_its_episodes_into_view() {
 
     ui.press(Key::Enter);
     ui.step_until("the band's first episode in view", episode_in_view);
+}
+
+/// The series' first episode, whose page is opened by its id.
+const EPISODE: &str = "14401f7e4f9a2da047069ad4a3124f9c";
+
+/// Clicking the series' name above an episode's title opens the series' page.
+#[test]
+fn an_episodes_series_line_opens_the_series() {
+    let _config = ConfigDir::new("item-series-link");
+    let server = FixtureServer::start();
+    let episodes: serde_json::Value = fixture_json("episodes");
+    let episode = episodes["Items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["Id"] == EPISODE))
+        .expect("the episode in the fixture");
+    server.json_value("GET", "/Items/14401f7e4f9a2da047069ad4a3124f9c", episode);
+    let name = episode["Name"].as_str().unwrap_or_default().to_owned();
+    let mut ui = PageHarness::new(session(&server), move |cx| {
+        crate::views::open(
+            Route::Item {
+                id: EPISODE.to_owned(),
+                name,
+            },
+            cx,
+        )
+    });
+    ui.step_until("the episode's series line", |harness| {
+        harness.query_by_label("Test Show").is_some()
+    });
+
+    let series = ui.harness().get_by_label("Test Show").rect().center();
+    ui.click_at(series);
+    assert_eq!(
+        ui.state().nav,
+        [NavRequest::Push(Route::Item {
+            id: SERIES.to_owned(),
+            name: "Test Show".to_owned(),
+        })]
+    );
+}
+
+/// The movie the fixtures give, whose page has room for tags beside its poster.
+const MOVIE: &str = "d265861eae31cee1d44b13adac305eac";
+
+/// A movie with more tags than one row holds: they wrap onto rows that stay inside the window,
+/// which is narrower than the column's 820-point cap once the poster is beside it.
+#[test]
+fn many_tags_wrap_inside_the_window() {
+    let _config = ConfigDir::new("item-tags-wrap");
+    let server = FixtureServer::start();
+    let mut movie: serde_json::Value = fixture_json("item_movie");
+    movie["Tags"] = (0..40).map(|index| format!("tag {index}")).collect::<Vec<_>>().into();
+    server.json_value("GET", "/Items/d265861eae31cee1d44b13adac305eac", &movie);
+    let name = movie["Name"].as_str().unwrap_or_default().to_owned();
+    let mut ui = PageHarness::new(session(&server), move |cx| {
+        crate::views::open(
+            Route::Item {
+                id: MOVIE.to_owned(),
+                name,
+            },
+            cx,
+        )
+    });
+    ui.step_until("the movie's tags", |harness| harness.query_by_label("tag 0").is_some());
+
+    let window = ui.harness().ctx.input(|input| input.viewport_rect());
+    let rows: Vec<_> = (0..40)
+        .map(|index| ui.harness().get_by_label(&format!("tag {index}")).rect())
+        .inspect(|tag| assert!(tag.max.x <= window.max.x, "{tag:?} runs past {window:?}"))
+        .map(|tag| tag.min.y as i32)
+        .collect();
+    assert!(rows.windows(2).any(|pair| pair[1] > pair[0]), "the tags wrapped");
 }

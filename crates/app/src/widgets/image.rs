@@ -32,12 +32,14 @@ pub fn show(
     blurhash_from: Option<&BaseItemDto>,
     radius: u8,
 ) {
-    show_with_width(ui, cache, rect, request, blurhash_from, radius, None);
+    show_with_width(ui, cache, rect, request, blurhash_from, radius, None, false);
 }
 
 /// [`show`] asking the server for a fixed `width` rather than twice the drawn width: a banner
 /// that fills the window would otherwise be fetched (and kept in the cache) again at every
-/// window size, maximised state or zoom level. It is still scaled to `rect`.
+/// window size, maximised state or zoom level. It is still scaled to `rect`, and cropped from its
+/// top rather than its middle: a backdrop's faces are high in the picture, and the band's
+/// bottom fades into the page anyway.
 pub fn show_at_width(
     ui: &Ui,
     cache: &mut ImageCache,
@@ -47,9 +49,10 @@ pub fn show_at_width(
     radius: u8,
     width: u32,
 ) {
-    show_with_width(ui, cache, rect, request, blurhash_from, radius, Some(width));
+    show_with_width(ui, cache, rect, request, blurhash_from, radius, Some(width), true);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn show_with_width(
     ui: &Ui,
     cache: &mut ImageCache,
@@ -58,6 +61,7 @@ fn show_with_width(
     blurhash_from: Option<&BaseItemDto>,
     radius: u8,
     width: Option<u32>,
+    from_top: bool,
 ) {
     let painter = ui.painter();
     // What shows before the blurhash arrives, or when there's no image at all: `main`'s `muted`
@@ -82,7 +86,7 @@ fn show_with_width(
         // Fading in over the blurhash as it loads, and as its page opens.
         let alpha = motion::image_alpha(ui, &request);
         let mut picture = egui::Image::from_texture(texture)
-            .uv(cover_uv(texture.size_vec2(), rect.size()))
+            .uv(cover_uv(texture.size_vec2(), rect.size(), from_top))
             .corner_radius(CornerRadius::same(radius));
         if alpha < 1. {
             picture = picture.tint(Color32::from_white_alpha((alpha * 255.).round() as u8));
@@ -90,7 +94,7 @@ fn show_with_width(
         picture.paint_at(ui, rect);
     } else if let Some(texture) = &preview {
         egui::Image::from_texture(texture)
-            .uv(cover_uv(texture.size_vec2(), rect.size()))
+            .uv(cover_uv(texture.size_vec2(), rect.size(), from_top))
             .corner_radius(CornerRadius::same(radius))
             .paint_at(ui, rect);
     }
@@ -106,14 +110,18 @@ pub fn dim(ui: &Ui, rect: Rect, radius: u8) {
 }
 
 /// The part of a texture to show so it fills `target` without stretching it: the widest or
-/// tallest centred band of the texture that has `target`'s aspect ratio.
-fn cover_uv(image: Vec2, target: Vec2) -> Rect {
+/// tallest band of the texture that has `target`'s aspect ratio, centred, or at the top when
+/// `from_top` (a band cut from a taller picture keeps its top edge).
+fn cover_uv(image: Vec2, target: Vec2, from_top: bool) -> Rect {
     let scale = (target.x / image.x).max(target.y / image.y);
     let shown = target / scale;
-    Rect::from_center_size(
-        egui::pos2(0.5, 0.5),
-        Vec2::new((shown.x / image.x).clamp(0., 1.), (shown.y / image.y).clamp(0., 1.)),
-    )
+    let size = Vec2::new((shown.x / image.x).clamp(0., 1.), (shown.y / image.y).clamp(0., 1.));
+    let centred = Rect::from_center_size(egui::pos2(0.5, 0.5), size);
+    if from_top {
+        centred.translate(Vec2::new(0., -centred.top()))
+    } else {
+        centred
+    }
 }
 
 #[cfg(test)]
@@ -123,7 +131,7 @@ mod tests {
     use super::cover_uv;
 
     fn uv(size: [f32; 2], target: [f32; 2]) -> Rect {
-        cover_uv(Vec2::from(size), Vec2::from(target))
+        cover_uv(Vec2::from(size), Vec2::from(target), false)
     }
 
     #[test]
@@ -134,6 +142,15 @@ mod tests {
         assert!((poster.width() - 1.).abs() < 1e-6);
         assert!((poster.height() - 146. / 600. / (260. / 400.)).abs() < 1e-6);
         assert!((poster.center().y - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_banner_keeps_the_top_of_its_picture() {
+        // A 16:9 backdrop in a wide, short band: the full width, and the band from the top down.
+        let banner = cover_uv(Vec2::new(1280., 720.), Vec2::new(1280., 400.), true);
+        assert!((banner.width() - 1.).abs() < 1e-6);
+        assert!(banner.top().abs() < 1e-6);
+        assert!((banner.height() - 400. / 720.).abs() < 1e-6);
     }
 
     #[test]
