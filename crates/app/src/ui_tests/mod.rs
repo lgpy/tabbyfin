@@ -19,7 +19,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use egui::{Modifiers, Pos2};
-use egui_kittest::Harness;
+use egui_kittest::{Harness, HarnessBuilder};
 use jellyfin::Client;
 use jellyfin::models::{AuthenticationResult, PublicSystemInfo};
 use serde::de::DeserializeOwned;
@@ -248,6 +248,12 @@ pub fn build_harness<S>(
     state: S,
     frame: impl FnMut(&mut egui::Ui, &mut S) + 'static,
 ) -> Harness<'static, S> {
+    harness_builder(size).build_ui_state(frame, state)
+}
+
+/// [`build_harness`]'s settings, for a harness that needs more of them (a mockup's scale and
+/// theme).
+pub fn harness_builder<S>(size: egui::Vec2) -> HarnessBuilder<S> {
     Harness::builder()
         .with_size(size)
         .allow_missing_glyphs()
@@ -256,7 +262,6 @@ pub fn build_harness<S>(
             egui_material_icons::initialize(ctx);
             crate::theme::apply(ctx, &Config::default());
         })
-        .build_ui_state(frame, state)
 }
 
 /// Steps frames until `done` holds, sleeping between them so a request has time to answer.
