@@ -112,17 +112,22 @@ fn sign_in_steps_from_the_address_to_a_session() {
         harness.query_by_label("Username").is_some()
     });
     // What the server said about itself, above the fields; the address step is gone.
-    assert!(ui.query_by_label("tabbyfin dev · Jellyfin 12.2.0").is_some());
+    assert!(ui.query_by_label("Sign in to tabbyfin dev").is_some());
+    assert!(ui.query_by_label("Jellyfin 12.2.0 at 127.0.0.1").is_some());
     assert!(ui.query_by_label("Connect").is_none());
 
     // The username field takes the keyboard next; the password is one step on from it.
     ui.step();
     ui.get_by_role(Role::TextInput).type_text("dev");
     ui.step();
+    // The mascot watches the username being typed, and shuts its eyes for the password.
+    assert!(ui.state_mut().login_mut().watch().look_at.is_some());
     ui.get_by_role(Role::PasswordInput).focus();
     ui.step();
     ui.get_by_role(Role::PasswordInput).type_text("dev");
     ui.step();
+    let watch = ui.state_mut().login_mut().watch();
+    assert!(watch.eyes_shut && watch.look_at.is_none(), "{watch:?}");
     ui.get_by_label("Sign in").click();
     ui.step();
     step_until(&mut ui, "the sign-in", |harness| harness.state().event.is_some());
@@ -321,7 +326,7 @@ fn a_saved_account_is_offered_and_chosen() {
     let listed = account.clone();
     let mut ui = login_harness(move |ctx| Login::new(ctx, "ui-test-device".into(), vec![listed], false, None));
 
-    assert!(ui.query_by_label("Saved accounts").is_some());
+    assert!(ui.query_by_label("Choose an account").is_some());
     ui.get_by_label(&account.label()).click();
     ui.step();
     match ui.state().event.as_ref() {

@@ -18,13 +18,19 @@ use crate::session::{self, Session, describe_error};
 use crate::task::{self, Deadline, Receiver, Sender, Task};
 use crate::theme;
 use crate::theme::text;
+use crate::widgets::mascot::{self, Watch};
 
 /// How long to keep retrying while the server reports that it is starting up.
 const STARTUP_WAIT: Duration = Duration::from_secs(120);
 const QUICK_CONNECT_POLL: Duration = Duration::from_secs(3);
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 /// The form's width; the window centres it.
-const FORM_WIDTH: f32 = 380.0;
+const FORM_WIDTH: f32 = 400.0;
+/// The mascot's square over the form.
+const MASCOT_SIZE: f32 = 160.0;
+/// How much of the mascot's square the panel comes up into: its shadow sits at the bottom of
+/// the square, so this puts the shadow on the panel's top edge, as though it floats over it.
+const MASCOT_OVERLAP: f32 = 6.0;
 
 pub enum LoginEvent {
     LoggedIn(Box<Session>),
@@ -108,6 +114,8 @@ pub struct Login {
     focus: Option<Field>,
     /// The widget the keyboard was in last frame, so a new one is scrolled into view.
     last_focus: Option<egui::Id>,
+    /// What the mascot does this frame, filled in as the fields are drawn.
+    watch: Watch,
 
     /// Set once the server address has been verified.
     server: Option<(Client, PublicSystemInfo)>,
@@ -156,6 +164,7 @@ impl Login {
             show_password: false,
             focus: if has_url { None } else { Some(Field::Server) },
             last_focus: None,
+            watch: Watch::default(),
             server: None,
             quick_connect_code: None,
             busy: false,
@@ -176,6 +185,12 @@ impl Login {
             login.connect(ctx);
         }
         login
+    }
+
+    /// What the mascot did on the last frame.
+    #[cfg(test)]
+    pub fn watch(&self) -> Watch {
+        self.watch
     }
 
     /// What the form asked the app to do, once.
@@ -262,37 +277,104 @@ impl Login {
     }
 
     fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        // `main`'s sign-in: a `text_2xl` title over a `text_sm` line in the muted colour.
-        ui.label(egui::RichText::new("Tabbyfin").font(text::font(ui, "2xl")).strong());
-        ui.label(
-            egui::RichText::new("Sign in to your Jellyfin server")
-                .font(text::font(ui, "sm"))
-                .color(theme::tokens_of(ui).muted_foreground),
+        // The mascot's place comes first, but it's painted last: the fields tell it where to
+        // look, and its shadow lands on the panel.
+        let top = ui
+            .allocate_space(egui::vec2(ui.available_width(), MASCOT_SIZE - MASCOT_OVERLAP))
+            .1;
+        let mascot = egui::Rect::from_center_size(
+            egui::pos2(top.center().x, top.top() + MASCOT_SIZE / 2.),
+            egui::Vec2::splat(MASCOT_SIZE),
         );
-        ui.add_space(12.0);
+        self.watch = Watch {
+            puzzled: self.error.is_some(),
+            ..Watch::default()
+        };
+        let tokens = theme::tokens_of(ui);
+        egui::Frame::new()
+            .fill(tokens.background)
+            .stroke(egui::Stroke::new(1.0, tokens.border))
+            .corner_radius(tokens.radius_lg)
+            .inner_margin(24.0)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                self.panel(ui, ctx);
+            });
+        if self.can_cancel {
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                if ui.button((ICON_ARROW_BACK, "Back to your account")).clicked() {
+                    self.event = Some(LoginEvent::Cancel);
+                }
+            });
+        }
+        mascot::watching(ui, mascot, self.watch);
+    }
+
+    /// The panel under the mascot: the step's title, what went wrong, and the step's fields.
+    fn panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let title = if self.quick_connect_code.is_some() {
+            "Approve this sign-in".to_owned()
+        } else if let Some((_, info)) = &self.server {
+            format!("Sign in to {}", info.server_name.as_deref().unwrap_or("Jellyfin"))
+        } else if !self.accounts.is_empty() {
+            "Choose an account".to_owned()
+        } else {
+            "Connect to your server".to_owned()
+        };
+        ui.label(egui::RichText::new(title).font(text::font(ui, "2xl")).strong());
+        ui.add_space(2.0);
+        if self.quick_connect_code.is_some() {
+            muted(
+                ui,
+                "In another Jellyfin app where you're signed in, open Quick Connect and enter this code.",
+            );
+        } else if let Some((client, info)) = self.server.clone() {
+            ui.horizontal(|ui| {
+                let host = client.base_url().host_str().unwrap_or_default().to_owned();
+                muted(
+                    ui,
+                    &format!("Jellyfin {} at {host}", info.version.as_deref().unwrap_or("?")),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Change").clicked() {
+                        self.change_server();
+                    }
+                });
+            });
+        } else if !self.accounts.is_empty() {
+            muted(ui, "Continue as one of these, or connect to another server.");
+        } else {
+            muted(
+                ui,
+                &format!("Tabbyfin works with Jellyfin {MIN_SUPPORTED_VERSION} or newer."),
+            );
+        }
+        ui.add_space(16.0);
         if let Some(error) = self.error.clone() {
             error_box(ui, &error);
-            ui.add_space(8.0);
-        }
-        if self.can_cancel {
-            if ui.button((ICON_ARROW_BACK, "Back to your account")).clicked() {
-                self.event = Some(LoginEvent::Cancel);
-            }
-            ui.add_space(4.0);
+            ui.add_space(12.0);
         }
         if let Some(status) = self.status.clone() {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label(status);
             });
-            ui.add_space(4.0);
+            ui.add_space(8.0);
         }
         if let Some(code) = self.quick_connect_code.clone() {
             self.quick_connect_step(ui, &code);
-        } else if let Some((_, info)) = self.server.clone() {
-            self.credentials_step(ui, &info, ctx);
+        } else if self.server.is_some() {
+            self.credentials_step(ui, ctx);
         } else {
             self.server_step(ui, ctx);
+        }
+    }
+
+    /// Points the mascot at `field`'s caret while it has the keyboard.
+    fn watch_field(&mut self, field: &egui::text_edit::TextEditOutput) {
+        if let Some(caret) = caret(field) {
+            self.watch.look_at = Some(caret);
         }
     }
 
@@ -474,8 +556,6 @@ impl Login {
 
     fn server_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if !self.accounts.is_empty() {
-            ui.label(egui::RichText::new("Saved accounts").weak());
-            ui.add_space(4.0);
             for account in self.accounts.clone() {
                 ui.horizontal(|ui| {
                     let width = ui.available_width() - 32.0;
@@ -492,19 +572,18 @@ impl Login {
                     }
                 });
             }
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Or sign in to another").weak());
-            ui.add_space(4.0);
+            ui.add_space(16.0);
         }
 
         field_label(ui, "Server address");
-        let address = ui.add(
-            egui::TextEdit::singleline(&mut self.url)
-                .id(Field::Server.id())
-                .hint_text("jellyfin.example.com or 192.168.1.10:8096")
-                .desired_width(f32::INFINITY)
-                .interactive(!self.busy),
-        );
+        let address = egui::TextEdit::singleline(&mut self.url)
+            .id(Field::Server.id())
+            .hint_text("jellyfin.example.com or 192.168.1.10:8096")
+            .desired_width(f32::INFINITY)
+            .interactive(!self.busy)
+            .show(ui);
+        self.watch_field(&address);
+        let address = address.response.response;
         if self.focus == Some(Field::Server) {
             address.request_focus();
             self.focus = None;
@@ -521,31 +600,15 @@ impl Login {
         }
     }
 
-    fn credentials_step(&mut self, ui: &mut egui::Ui, info: &PublicSystemInfo, ctx: &egui::Context) {
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} · Jellyfin {}",
-                    info.server_name.as_deref().unwrap_or("Jellyfin"),
-                    info.version.as_deref().unwrap_or("?")
-                ))
-                .weak(),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Change").clicked() {
-                    self.change_server();
-                }
-            });
-        });
-        ui.add_space(8.0);
-
+    fn credentials_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         field_label(ui, "Username");
-        let username = ui.add(
-            egui::TextEdit::singleline(&mut self.username)
-                .id(Field::Username.id())
-                .desired_width(f32::INFINITY)
-                .interactive(!self.busy),
-        );
+        let username = egui::TextEdit::singleline(&mut self.username)
+            .id(Field::Username.id())
+            .desired_width(f32::INFINITY)
+            .interactive(!self.busy)
+            .show(ui);
+        self.watch_field(&username);
+        let username = username.response.response;
         if self.focus == Some(Field::Username) {
             username.request_focus();
             self.focus = None;
@@ -556,13 +619,20 @@ impl Login {
         field_label(ui, "Password");
         let mut password_entered = false;
         ui.horizontal(|ui| {
-            let password = ui.add(
-                egui::TextEdit::singleline(&mut self.password)
-                    .id(Field::Password.id())
-                    .password(!self.show_password)
-                    .desired_width(ui.available_width() - 40.0)
-                    .interactive(!self.busy),
-            );
+            let password = egui::TextEdit::singleline(&mut self.password)
+                .id(Field::Password.id())
+                .password(!self.show_password)
+                .desired_width(ui.available_width() - 40.0)
+                .interactive(!self.busy)
+                .show(ui);
+            // A hidden password is none of its business: it shuts its eyes, and opens them to
+            // read along once the password is shown.
+            if self.show_password {
+                self.watch_field(&password);
+            } else if has_keyboard(&password) {
+                self.watch.eyes_shut = true;
+            }
+            let password = password.response.response;
             if self.focus == Some(Field::Password) {
                 password.request_focus();
                 self.focus = None;
@@ -618,9 +688,9 @@ impl Login {
     }
 
     fn quick_connect_step(&mut self, ui: &mut egui::Ui, code: &str) {
-        ui.label("Enter this code in another Jellyfin app where you're signed in, under Quick Connect:");
-        ui.add_space(6.0);
-        ui.label(egui::RichText::new(code).size(32.0).strong());
+        // The code is what the user has to read off, so the mascot looks at it too.
+        let shown = ui.label(egui::RichText::new(code).size(32.0).strong());
+        self.watch.look_at = Some(shown.rect.center());
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.spinner();
@@ -631,6 +701,31 @@ impl Login {
             self.cancel();
         }
     }
+}
+
+/// A line of secondary text: `text_sm` in the muted colour.
+fn muted(ui: &mut egui::Ui, line: &str) {
+    ui.label(
+        egui::RichText::new(line)
+            .font(text::font(ui, "sm"))
+            .color(theme::tokens_of(ui).muted_foreground),
+    );
+}
+
+/// Whether `field` is the widget the keyboard goes to. `Response::has_focus` also asks for the
+/// window to have the OS's focus; the mascot keeps watching the field while it's in the
+/// background, as the field keeps its caret.
+fn has_keyboard(field: &egui::text_edit::TextEditOutput) -> bool {
+    field.response.ctx.memory(|memory| memory.focused()) == Some(field.response.id)
+}
+
+/// Where `field`'s caret is on screen, while the field has the keyboard.
+fn caret(field: &egui::text_edit::TextEditOutput) -> Option<egui::Pos2> {
+    if !has_keyboard(field) {
+        return None;
+    }
+    let cursor = field.cursor_range?.primary;
+    Some(field.galley.pos_from_cursor(cursor).center() + field.galley_pos.to_vec2())
 }
 
 /// A field's name above it, as `main`'s `field_label` had it: `text_sm` in the muted colour.
