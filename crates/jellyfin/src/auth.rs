@@ -1,7 +1,9 @@
 use serde::Serialize;
 
 use crate::client::Query;
-use crate::models::{AuthenticationResult, DisplayPreferences, QuickConnectResult, UserDto};
+use crate::models::{
+    AuthenticationResult, Culture, DisplayPreferences, QuickConnectResult, UserConfigurationChanges, UserDto,
+};
 use crate::{Client, Result};
 
 impl Client {
@@ -51,6 +53,32 @@ impl Client {
 
     pub async fn current_user(&self) -> Result<UserDto> {
         self.get("/Users/Me", &Query::new()).await
+    }
+
+    /// Saves `changes` to the signed-in user's configuration. The server replaces the whole
+    /// configuration with what it's sent, so it's read first and sent back with only the
+    /// changed fields different: the ones [`UserConfiguration`] doesn't model (the cast
+    /// receiver, the ordered views, …) are kept as they are. `POST /Users/Configuration` is
+    /// there since 10.9 and acts on the caller without a `userId`.
+    ///
+    /// [`UserConfiguration`]: crate::models::UserConfiguration
+    pub async fn update_user_configuration(&self, changes: &UserConfigurationChanges) -> Result<()> {
+        let mut user: serde_json::Value = self.get("/Users/Me", &Query::new()).await?;
+        let mut config = match user.get_mut("Configuration").map(serde_json::Value::take) {
+            Some(serde_json::Value::Object(config)) => config,
+            _ => serde_json::Map::new(),
+        };
+        let changed = serde_json::to_value(changes).expect("strings and flags serialize");
+        if let serde_json::Value::Object(changed) = changed {
+            config.extend(changed);
+        }
+        self.post_no_content("/Users/Configuration", &Query::new(), Some(&config))
+            .await
+    }
+
+    /// The languages the server knows, for a language preference's choices.
+    pub async fn cultures(&self) -> Result<Vec<Culture>> {
+        self.get("/Localization/Cultures", &Query::new()).await
     }
 
     /// Display preferences another client stored on the server, e.g. `("usersettings",

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Ticks;
 
@@ -38,7 +38,9 @@ pub struct UserDto {
     pub configuration: Option<UserConfiguration>,
 }
 
-/// The user's preferences kept by the server (the web client's Settings → Home and Display).
+/// The user's preferences kept by the server (the web client's Settings → Home, Display and
+/// Playback). The server applies the track ones itself: `PlaybackInfo` picks the default audio
+/// and subtitle streams from them. Change them with [`crate::Client::update_user_configuration`].
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct UserConfiguration {
@@ -48,6 +50,113 @@ pub struct UserConfiguration {
     /// Library ids without a "Latest" row on Home.
     #[serde(default, deserialize_with = "nullable")]
     pub latest_items_excludes: Vec<String>,
+    /// The preferred audio language, a three-letter ISO 639-2 code; `None` or empty for the
+    /// file's own default.
+    pub audio_language_preference: Option<String>,
+    /// Plays the file's default audio track rather than one in the preferred language.
+    #[serde(default, deserialize_with = "nullable")]
+    pub play_default_audio_track: bool,
+    /// The preferred subtitle language, as [`Self::audio_language_preference`].
+    pub subtitle_language_preference: Option<String>,
+    #[serde(default)]
+    pub subtitle_mode: SubtitleMode,
+    /// Whether an audio or subtitle track picked by hand is picked again for the next episode
+    /// of the series.
+    #[serde(default, deserialize_with = "nullable")]
+    pub remember_audio_selections: bool,
+    #[serde(default, deserialize_with = "nullable")]
+    pub remember_subtitle_selections: bool,
+    /// Leaves watched items out of Home's "Latest" rows (`/Items/Latest` applies it).
+    #[serde(default, deserialize_with = "nullable")]
+    pub hide_played_in_latest: bool,
+}
+
+/// Changes to a [`UserConfiguration`]: the fields that are `Some` are written, the rest stay
+/// as the server has them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UserConfigurationChanges {
+    /// An empty string clears the preference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_language_preference: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub play_default_audio_track: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle_language_preference: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle_mode: Option<SubtitleMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remember_audio_selections: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remember_subtitle_selections: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide_played_in_latest: Option<bool>,
+}
+
+impl UserConfigurationChanges {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Adds `later`'s changes, which win over these where both change a field.
+    pub fn merge(&mut self, later: Self) {
+        fn take<T>(field: &mut Option<T>, later: Option<T>) {
+            if later.is_some() {
+                *field = later;
+            }
+        }
+        take(&mut self.audio_language_preference, later.audio_language_preference);
+        take(&mut self.play_default_audio_track, later.play_default_audio_track);
+        take(
+            &mut self.subtitle_language_preference,
+            later.subtitle_language_preference,
+        );
+        take(&mut self.subtitle_mode, later.subtitle_mode);
+        take(&mut self.remember_audio_selections, later.remember_audio_selections);
+        take(
+            &mut self.remember_subtitle_selections,
+            later.remember_subtitle_selections,
+        );
+        take(&mut self.hide_played_in_latest, later.hide_played_in_latest);
+    }
+
+    /// Applies the changes to `config`, as the server will once they're saved.
+    pub fn apply(&self, config: &mut UserConfiguration) {
+        if let Some(language) = &self.audio_language_preference {
+            config.audio_language_preference = Some(language.clone());
+        }
+        if let Some(language) = &self.subtitle_language_preference {
+            config.subtitle_language_preference = Some(language.clone());
+        }
+        let flags = [
+            (self.play_default_audio_track, &mut config.play_default_audio_track),
+            (self.remember_audio_selections, &mut config.remember_audio_selections),
+            (
+                self.remember_subtitle_selections,
+                &mut config.remember_subtitle_selections,
+            ),
+            (self.hide_played_in_latest, &mut config.hide_played_in_latest),
+        ];
+        for (change, field) in flags {
+            if let Some(value) = change {
+                *field = value;
+            }
+        }
+        if let Some(mode) = self.subtitle_mode {
+            config.subtitle_mode = mode;
+        }
+    }
+}
+
+/// A language the server knows, from `/Localization/Cultures`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Culture {
+    #[serde(default)]
+    pub display_name: String,
+    /// The code the language preferences store, as the web client saves it.
+    #[serde(rename = "ThreeLetterISOLanguageName")]
+    pub three_letter_iso_language_name: Option<String>,
 }
 
 /// A client's stored display preferences. Only the free-form `CustomPrefs` are used.
@@ -434,6 +543,28 @@ wire_enum!(
         Intro = "Intro",
     }
 );
+
+wire_enum!(
+    /// Which subtitle track `PlaybackInfo` turns on by default, from
+    /// [`UserConfiguration::subtitle_language_preference`]: `Default` the ones flagged default
+    /// or forced, `Always` the preferred language's whatever the audio, `Smart` the preferred
+    /// language's when the audio is in another, `Off` (`None` on the wire) none until one is
+    /// picked.
+    SubtitleMode {
+        Default = "Default",
+        Always = "Always",
+        OnlyForced = "OnlyForced",
+        Off = "None",
+        Smart = "Smart",
+    }
+);
+
+/// For [`UserConfigurationChanges`]. `Other` is never written; it goes back as `Default`.
+impl Serialize for SubtitleMode {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str().unwrap_or("Default"))
+    }
+}
 
 wire_enum!(ItemSortBy {
     Default = "Default",
