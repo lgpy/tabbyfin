@@ -37,6 +37,7 @@ use crate::views::{Page, PageCx};
 pub mod item;
 pub mod library;
 pub mod login;
+pub mod menus;
 pub mod settings;
 pub mod shelf;
 pub mod toasts;

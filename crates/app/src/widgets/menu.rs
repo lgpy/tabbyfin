@@ -12,14 +12,16 @@
 //! [`Services::apply_menu_requests`], which `Services::tick` calls, so no page owns a task for
 //! it.
 //!
-//! egui's menus don't take keys, so the context menu is pointer-only for now, like the account
-//! menu (S1); the item page's own More menu draws and reads its keys itself (`views/item.rs`).
+//! It's a [`PopupMenu`] opened by a right-click, so once open the keyboard walks it like any other
+//! menu. One menu is shared by every card (only one can be open), so the card that opened it is
+//! remembered and only that one draws it.
 
 use std::collections::VecDeque;
 
-use egui::text::LayoutJob;
-use egui::{Button, Response, RichText, TextFormat, Ui, WidgetText};
-use egui_material_icons::icons::{ICON_CHECK, ICON_CHECK_CIRCLE, ICON_FAVORITE, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD};
+use egui::{Id, Response, RichText, Ui};
+use egui_material_icons::icons::{
+    ICON_CHECK, ICON_CHECK_CIRCLE, ICON_FAVORITE, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY,
+};
 
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 
@@ -27,9 +29,9 @@ use crate::item_menu::{self, Mark, can_add_to_playlist, can_mark, is_favorite, i
 use crate::playback::PlayOptions;
 use crate::services::{Marked, Services, Shuffled, UpNext};
 use crate::theme;
-use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::item::shuffle;
+use crate::widgets::popup::{Entry, PopupMenu};
 use crate::widgets::text::timestamp;
 
 /// What a choice in [`item_menu`] asks for.
@@ -51,67 +53,63 @@ pub fn item_menu(response: &Response, item: &BaseItemDto) -> Option<MenuAction> 
     if !can_mark(item) {
         return None;
     }
-    let mut chosen = None;
-    response.context_menu(|ui| {
-        if let Some(action) = entries(ui, item) {
-            chosen = Some(action);
-            ui.close();
-        }
-    });
-    chosen
-}
-
-/// The menu's entries for `item`, in a `Ui`: what the context menu shows, and what the item
-/// page's *More* menu will show (U6).
-pub fn entries(ui: &mut Ui, item: &BaseItemDto) -> Option<MenuAction> {
-    let mut chosen = None;
+    let ctx = &response.ctx;
+    let id = Id::unique("item_context_menu");
+    let owner = id.with("owner");
+    let opening = response.secondary_clicked();
+    if opening {
+        ctx.data_mut(|data| data.insert_temp(owner, response.id));
+    } else if ctx.data(|data| data.get_temp::<Id>(owner)) != Some(response.id) {
+        return None;
+    }
+    let tokens = theme::tokens(&ctx.global_style().visuals);
+    let mut actions = Vec::new();
+    let mut entries = Vec::new();
     if is_playable(item) {
         match resume_point(item) {
             Some(position) => {
-                if icon_entry(
-                    ui,
-                    ICON_PLAY_ARROW,
-                    &format!("Resume from {}", timestamp(position.into())),
-                )
-                .clicked()
-                {
-                    chosen = Some(MenuAction::Play { start: Some(position) });
-                }
-                if ui.button("Play from beginning").clicked() {
-                    chosen = Some(MenuAction::Play { start: None });
-                }
+                actions.push(MenuAction::Play { start: Some(position) });
+                entries.push(Entry::new(format!("Resume from {}", timestamp(position.into()))).icon(ICON_PLAY_ARROW));
+                actions.push(MenuAction::Play { start: None });
+                entries.push(Entry::new("Play from beginning").icon(ICON_REPLAY));
             }
             None => {
-                if icon_entry(ui, ICON_PLAY_ARROW, "Play").clicked() {
-                    chosen = Some(MenuAction::Play { start: None });
-                }
+                actions.push(MenuAction::Play { start: None });
+                entries.push(Entry::new("Play").icon(ICON_PLAY_ARROW));
             }
         }
-        ui.separator();
     } else if matches!(item.kind, BaseItemKind::Series | BaseItemKind::Season) {
         // Which episode, and whether it resumes, takes a request; the item page's button shows
         // it, and this asks the page to play it.
-        if icon_entry(ui, ICON_PLAY_ARROW, "Play").clicked() {
-            chosen = Some(MenuAction::UpNext);
-        }
-        ui.separator();
+        actions.push(MenuAction::UpNext);
+        entries.push(Entry::new("Play").icon(ICON_PLAY_ARROW));
     }
-    // Checked like the item page's toggles, with the same names.
-    let mut played = is_played(item);
-    if ui.checkbox(&mut played, "Watched").clicked() {
-        chosen = Some(MenuAction::Mark(Mark::Played(played)));
-    }
-    let mut favorite = is_favorite(item);
-    if ui.checkbox(&mut favorite, "Favorite").clicked() {
-        chosen = Some(MenuAction::Mark(Mark::Favorite(favorite)));
-    }
+    // Named and drawn like the item page's toggles: the icon shows whether it's on.
+    let played = is_played(item);
+    actions.push(MenuAction::Mark(Mark::Played(!played)));
+    let watched = if played {
+        Entry::new("Watched").icon(ICON_CHECK_CIRCLE).tint(tokens.success)
+    } else {
+        Entry::new("Watched").icon(ICON_CHECK.outlined())
+    };
+    entries.push(watched.toggled(played).separated());
+    let favorite = is_favorite(item);
+    actions.push(MenuAction::Mark(Mark::Favorite(!favorite)));
+    let heart = if favorite {
+        Entry::new("Favorite").icon(ICON_FAVORITE).tint(tokens.red)
+    } else {
+        Entry::new("Favorite").icon(ICON_FAVORITE.outlined())
+    };
+    entries.push(heart.toggled(favorite));
     if can_add_to_playlist(item) {
-        ui.separator();
-        if icon_entry(ui, ICON_PLAYLIST_ADD, "Add to playlist…").clicked() {
-            chosen = Some(MenuAction::AddToPlaylist);
-        }
+        actions.push(MenuAction::AddToPlaylist);
+        entries.push(Entry::new("Add to playlist…").icon(ICON_PLAYLIST_ADD).separated());
     }
-    chosen
+    let chosen = PopupMenu::new(id)
+        .opening_at_pointer(opening)
+        .show(response, &entries)
+        .chosen;
+    chosen.map(|index| actions[index])
 }
 
 /// Watched's icon: a check, filled in green once it's watched (`main`'s `success`).
@@ -130,32 +128,6 @@ pub fn favorite_icon(ui: &Ui, favorite: bool) -> RichText {
     } else {
         ICON_FAVORITE.outlined().rich_text()
     }
-}
-
-/// A menu entry with `icon` before its label, as `main`'s menu items had.
-fn icon_entry(ui: &mut Ui, icon: egui_material_icons::MaterialIcon, label: &str) -> Response {
-    let icon_font = text::icon(ui, icon.font_family());
-    let color = theme::tokens_of(ui).foreground;
-    let mut job = LayoutJob::default();
-    job.append(
-        icon.codepoint,
-        0.,
-        TextFormat {
-            font_id: icon_font,
-            color,
-            ..Default::default()
-        },
-    );
-    job.append(
-        &format!("  {label}"),
-        0.,
-        TextFormat {
-            font_id: text::font(ui, "base"),
-            color,
-            ..Default::default()
-        },
-    );
-    ui.add(Button::new(WidgetText::LayoutJob(job.into())))
 }
 
 /// How many refused marks the services remember. A page left off screen catches up with the
