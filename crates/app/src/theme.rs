@@ -461,6 +461,9 @@ fn visuals(tokens: &Tokens) -> egui::Visuals {
     };
     let corner_radius = egui::CornerRadius::same(tokens.radius);
     visuals.dark_mode = tokens.dark;
+    // Unhinted glyphs: hinting snaps stems to whole pixels, which at a scale of 1 reads as jagged,
+    // unantialiased text.
+    visuals.text_options.font_hinting = false;
 
     visuals.override_text_color = None;
     // A hint or a card's subtitle: `main`'s muted_foreground, not a dimmed body colour.

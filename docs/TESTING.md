@@ -4,9 +4,9 @@ Things that work in development but haven't been tested where it matters: on rea
 
 Tick an item when it's been tried; note the hardware, OS and server version, and file anything that fails. Roadmap numbers refer to [`ROADMAP.md`](ROADMAP.md).
 
-**The app now runs on egui** (ROADMAP §7). Every UI check below was first recorded on a GPUI build, and those ✅ marks stay as history. The egui build needs each UI check re-checked; entries that name the egui task that ran them (U3, U4, U5, … , X3, X5, X6) were recorded on the egui build, and the rest are the old build's results. Hardware, packaging and server checks are unaffected by the migration and stay as they are.
+**The app runs on egui** (ROADMAP §7). The checks marked ✅ were run on the egui build, or don't depend on the UI (the API examples); the old GPUI build's results have been removed.
 
-**Legend:** ✅ tested in development (on a GPUI build unless the entry says otherwise) · ⬜ still to test
+**Legend:** ✅ tested in development · ⬜ still to test
 
 ---
 
@@ -14,61 +14,33 @@ Tick an item when it's been tried; note the hardware, OS and server version, and
 
 Everything below was built and run only as Linux debug builds. Use a CI package (`mise run ci:build`), unzipped over the old copy.
 
-- ✅ **Player controls don't pause the video when clicked** (the `.occlude()` fix). Click the volume slider, the pickers, -10s/+10s and Fullscreen; playback must keep going.
 - ⬜ **Log file:** *Settings → Storage → Logs → Open folder* opens the folder, today's `tabbyfin.*.log` exists and has no colour codes in it.
 - ⬜ **Settings → Playback:** the autoplay switch and the bitrate picker are remembered after a restart.
-- ⬜ **Settings panel** (gpui-kit's `Settings`): every sidebar page and sub-entry opens, the search box filters items, a page's reset button puts its switches back to their defaults, and *Clear* empties the image cache. Seen so far only in screenshots (Appearance, Playback, Storage, Account).
 - ⬜ **Everything in §2–§6** at least once on Windows, since the GPU and ANGLE paths only exist there.
 
 ## 2. Keyboard navigation (3.1)
 
-✅ Home shelves, library grid, search (the top bar's search button opens into a box, which opens the results as you type; Enter or Down into them, Up back to the box, Esc closes them), item page buttons, seasons and episodes, Back keeping the cursor; Enter on Resume plays and Esc returns focus to the item page.
-
-✅ Item page pickers by keyboard (Test Movie: version to 720p rebuilt the track pickers, then audio and subtitles stepped), and W on a season's first episode (watched off and on again on the server).
-
 - ⬜ With a **real keyboard**: the ring appears on the first arrow key, a mouse click hides it.
-✅ Top bar and library toolbar by keyboard: Up from Home's first row into the top bar and back down (the cursor returns to its card), the account menu's highlight, a SyncPlay group created and the menu reopened with Leave highlighted, Esc closing the menu then the top bar; the library's Show stepped to Unwatched and *Clear filters*, the cursor staying in the toolbar.
 
 ✅ **egui (U3)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U3-scratch/`): Down walks Home's shelves and the page scrolls the whole shelf into view, downwards and back up (`home-keys4.png`, `home-keys-up.png`); Enter on the first card opened Collections and Esc came back to Home with the ring on the same card (`home-enter-stub.png`, `home-back.png`).
 
 ✅ **egui (U4)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U4-scratch/`): `TABBYFIN_ROUTE=search:test` shows the three groups — Movies and Shows as posters, Episodes as stills — two rows of four episodes in a 1280 px window, sorted by name (`u4-search-test2.png`); Enter in the box moved the cursor onto the first result and two Downs walked it Movies → Shows → Episodes and scrolled the Episodes group into view (`u4-search-episodes.png`); a fourth Down moved inside the episode grid to its second row, kept on screen (`u4-search-grid-row2.png`); Up and Shift+Tab from the first row went back into the box with typing continuing there (`test` → `testx`, `test` → `testy`: `u4-search-typed-x.png`, `u4-search-shifttab.png`), the debounced search then showing *No results.*; Enter on a result opened its item page and Esc came back to the results with the box focused and typing going in again (`u4-search-open-item.png`, `u4-search-back.png`); Enter with no results kept the keyboard in the box (`zzz` → `zzzq`, `u4-search-noresults-enter.png`); Ctrl+F then typing `test` from Home opened the results (`u4-search-typed-from-home.png`) and backspacing the box empty closed them again (`u4-search-cleared.png`). Idle CPU on the results page was 0 ticks over 10 s.
 
-✅ The account menu is a gpui-kit `PopupMenu`: Enter on the user button opens it, Down highlights the accounts, *Add account…* and *Sign out*, Enter on *Add account…* shows sign-in, and Esc closes it with the keyboard back on the user button.
-
 - ⬜ With a real keyboard: the top bar after mouse use (a click elsewhere hides its ring), and the account menu switching to another saved account.
 - ⬜ Changing a picker by keyboard and then by mouse (or the other way) keeps them in step, and playing after a keyboard change uses the chosen version and tracks.
 - ⬜ A **large library** (hundreds of items): the grid scrolls to keep the selection visible, including rows that are still loading.
-- ⬜ **Window resize** while the cursor is in the library grid or search results (the column count changes).
 - ⬜ Clicking a picker or the search box and then pressing arrow keys doesn't move the cursor unexpectedly.
 
 ## 2b. Library sort and filter, favorites, cast (3.2–3.4)
 
-✅ Saved sort and filter views (date added + favorites, name + all), the Favorite button by keyboard and the Home shelf, the cast shelf with initials and roles, a person page.
-
-- ⬜ **Picking a sort or filter with the mouse** reloads the grid from the top and is remembered when the library is opened again; the order button flips it (and reshuffles for Random).
-✅ The genres, tags and ratings dialog by keyboard: Comedy, then Documentary too, then the multi-version tag (Second Movie; both; Test Movie only), remembered per library. The dev setup gives the two movies different genres, tags and ratings.
-
-- ⬜ **Genre, year and resolution menus** picked with the mouse: each narrows the grid, they combine with Show and the letter bar, *Clear filters* resets them, and they're remembered per library. (Checked with values set in the config: Documentary + 2020s + 4K on 12.2.)
 - ⬜ A library with **real metadata** (TMDb): sorting by rating, release date and runtime gives sensible orders; cast **photos** show.
 - ⬜ A person page for someone in **many** movies and shows.
 - ⬜ Favoriting from another device shows up in the Home shelf (via the live connection).
-- ⬜ The player's chapter list with the mouse: a click seeks to the chapter (the list was only seen opened, with the current chapter highlighted).
-
-✅ The *Chapters* shelf on 12.2: images on both versions' servers, and the second chapter by keyboard started playback at 0:10.
-
-✅ Playlist editing on 12.2 with the keyboard: Alt+Down then Delete on the first entry (the server's order matched), *Add to playlist* to an existing playlist, again (says it's already there), to a new one, and *Delete playlist*. The API round trip is in the `smoke` example (both versions).
-
-✅ *Edit* on a playlist by keyboard: renamed, shared with everyone (the server's `OpenAccess`), and the `smoke` example checks private creation, rename and sharing on both versions.
 
 ✅ **egui (U7, round 2)**, against 12.2 through a local proxy that holds playlist requests for 2.5 s: two Deletes on Test Playlist (S02E01, then S01E01) followed by Esc 1.5 s before the first request left — the page was gone, and both edits still reached the server in order (`/Playlists/…/Items` ended as [Second Movie]); the same with a `dev2`-owned playlist: the refused Delete answered after Back, Home showed "This playlist belongs to someone else; it can't be changed." and the server's order was unchanged (`r2-refused-after-back.png`). A refused move on an open page still reloads it to the server's order with the toast (`r2-refused.png`). Five Alt+Ups 30 ms apart still end in the order shown after the page's reload (`r2-playlist-order.png`). Down into a playlist's first entry or a collection's first card keeps the page's header in view (`r2-playlist-order.png`, `r2-collection.png`), and Tab into an open season's band scrolls just enough to show the band with the seasons above still there (`r2-band.png`).
 
 ✅ **egui (U7)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U7-scratch/`): fast repeated moves on a playlist end in the order shown, checked with a reload — five Alt+Up presses 30 ms apart on the third of three entries moved it to the top, the page reloaded to the server's order (`playlist-alt-up5.png`; `/Playlists/…/Items` gave S01E01, Second Movie, S02E01), and two Alt+Down presses on the first entry did the same downwards earlier (`playlist-after-move.png`); Delete removed the highlighted movie and left the cursor on the row that took its place (`playlist-delete.png`); a `dev2`-owned playlist shared with `dev` refused Alt+Down with "This playlist belongs to someone else; it can't be changed." and the page reloaded showing the server's order unchanged (`playlist-refused-toast.png`, the toast logged too). The rows carry the image, "S1:E2 · name" (or the movie's name with the year on the runtime line), three lines of overview and the Watched toggle; the entry buttons and tooltips are there but pointer-only.
 
-✅ The item page's *More* menu by keyboard: Enter on *More* opens it (a `PopupMenu` in a controlled popover, since `DropdownMenu` only opens on a click); on a playlist it holds *Edit…* and, past a separator, *Delete playlist…*; on a movie *Add to playlist…*, whose dialog opens with the keyboard in its list. *Watched* and *Favorite* are `Toggle`s, pressed while on (a favorite movie shows *Favorite* filled).
-
-✅ The context menu's contents and commands, built in place of the *More* menu by temporary code (the harness can't right-click): on a resumable movie *Resume from 0:29*, *Play from beginning*, *Watched*, *Favorite* (checked) and *Add to playlist…*; Enter on *Watched* marked it on the server and the page's toggle turned on. Home, the library grid and search lay out as before with the menus attached.
-
-✅ State shown as pressed, not as `primary` or as a changing label: the SyncPlay button is selected while in a group; the group panel's *Shuffle* and *Repeat* are `Toggle`s (Repeat's tooltip says which mode), with the keyboard's ring on them; the player's speeds are a segmented `ToggleGroup` with the current one checked; an episode row's watched button is a `Toggle`, pressed for watched episodes. Seen with a scripted SyncPlay member's queue, a paused player with its settings open by temporary code, and Season 1.
 - ⬜ With the mouse: clicking a speed (and the checked one, which stays), *Shuffle* and *Repeat* cycling off, all, one.
 - ⬜ **Context menus with a real mouse**: right-click on a Home card, a library poster, a search result, a season and an episode row; *Add to playlist…* opens its dialog with the keyboard in it; a library or person card has no menu.
 
@@ -77,8 +49,6 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ *Play all* while in a SyncPlay group plays the list for the whole group.
 
 ## 3. Transcoding (2.2.1)
-
-✅ On 12.2: playback at a 2 Mbit/s cap (`ContainerBitrateExceedsLimit`), seeking, an embedded subtitle delivered as a file, the English audio track picked before playing, cleanup of the server's encode on stop. On 10.11: the HLS requests with header auth.
 
 - ⬜ **Playing through the app on 10.11** (`mise run dev:min`, sign in to port 8097).
 - ⬜ **Changing audio during a transcode** (restarts at the same position) and **switching to or from an image subtitle** (PGS, burned in, also restarts).
@@ -89,18 +59,15 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ## 4. Skip intro, up-next card, chapters (2.1.1–2.1.3)
 
-✅ With the dev media's chapters (Intro / Episode / Credits): the skip button during the intro, Enter skipping it, PgDn to Credits without ending the file, the up-next card with its countdown, Esc dismissing it (no autoplay), autoplay into the next episode.
-
 - ⬜ **Real media segments** from a plugin: install [Intro Skipper](https://github.com/intro-skipper/intro-skipper) on a server, let it analyse a series, and check "Skip intro" and the up-next card at the credits.
 - ⬜ **Real chapter names**: anime releases (OP/ED chapters), Blu-ray rips with plain "Chapter 1…" names (no skip button should appear).
-- ⬜ The skip button and up-next card **click** correctly (they sit above the controls when those are visible).
 - ⬜ Autoplay off in Settings: the episode ends and the player closes.
 
 ✅ The egui build (U10), on 12.2: the skip button during the intro, Enter skipping it (0:01 → 0:12), `auto_skip_intro = true` skipping the 10 s intro by itself, the up-next card from the Outro with its countdown, Esc dismissing it (no autoplay) and Esc again stopping, autoplay into the next episode, and PgUp to the previous chapter. Screenshots and the gaps in §30.
 
 ## 5. Live connection (2.4.1)
 
-✅ The websocket on 12.2 and 10.11 (`cargo run -p jellyfin --example socket`), a 150 s keep-alive hold; Home refreshing when an item is marked watched from elsewhere.
+✅ The websocket on 12.2 and 10.11 (`cargo run -p jellyfin --example socket`), a 150 s keep-alive hold.
 
 ✅ The egui build (P3): `GET /Sessions` shows the session with `SupportsMediaControl: true` and the general commands reported on connect (so the dashboard offers a remote); unmarking an item as played from REST (as another device would) made Home drop its badge and progress bar about a second later; five episodes marked at once (a series) gave one refresh (`watch data changed elsewhere: pages refresh` once, ~0.5 s after the burst's first `UserDataChanged`); a change while something was playing gave none, and the page caught up when playback ended. Idle CPU stayed at 0 ticks over 10 s with the timer armed.
 
@@ -110,8 +77,6 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ The app shows up in *Dashboard → Activity / Sessions* as a session that can play video.
 
 ## 5b. Network drops (2.2.2)
-
-✅ In development: a server restart mid-play (ffmpeg reconnects, no interruption), and a 30 s outage with a tiny cache (EOF at 0:30, reconnect after 2 s, resumed at 0:30 to the end).
 
 - ⬜ **Wi-Fi off for 10 s and for a minute** on a laptop, with the normal cache: playback continues, or reconnects with the "Reconnecting…" notice.
 - ⬜ A **transcoded** stream (HLS) through an outage.
@@ -127,10 +92,6 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Text size following the system** on Windows (Settings → Accessibility → Text size), GNOME (Large Text) and KDE (System Settings → Fonts), both at launch and when changed while the app runs (it applies on switching back to the app). Tried in WSL: fixed sizes (130%, 150%), and KDE's font size from a stand-in `kdeglobals`, at launch and changed after launch.
 
 ## 6. SyncPlay (2.4.3–2.4.6)
-
-✅ Against the scripted member (`cargo run -p jellyfin --example syncplay`): following the group (load, Ready, Unpause, Pause, Unpause, Seek, Stop) and leading it (Play on an item page, Space, →, Esc); the popover in and out of a group; drift correction catching up 0.8 s.
-
-✅ Also against it: an audio change during a transcode (remote command) reported `Buffering`, the member paused, and both resumed at 18.6 s after the reload; shuffle, repeat and moving an entry from the SyncPlay menu by keyboard reached it as queue updates.
 
 ✅ The egui build (P2) against the scripted member: following (load, Ready, Pause, Unpause, Seek, Stop), leading (`TABBYFIN_ROUTE=play:` with `TABBYFIN_SYNCPLAY`, then Space, Space, →, Esc), joining a group that's already playing, the next episode after an episode's end, a version switch through the reload path (from a temporary hook, since the player page is U10: `Buffering`, the server had the app seek to the group's position, both resumed), switching account and quitting while in a group (the member saw the app leave), and drift catching up 0.8 s in 13 s. In WSL, check the clocks first (`docs/egui-migration.md` §6): this VM's monotonic clock ran 8% slow, which makes mpv look 8% fast to drift correction.
 
@@ -153,38 +114,26 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 - ⬜ **Notifications** for members joining and leaving, and Leave from the popover.
 - ⬜ A member **with a slow connection** or a transcode (bitrate limit on one side): the group waits for it, and it stays in sync.
 - ⬜ **Drift on real hardware**: `RUST_LOG=tabbyfin::syncplay=debug` logs the drift each second; check it stays under ~0.1 s, and tune the thresholds in `syncplay.rs` if needed.
-- ⬜ Known gaps, check how badly they behave: changing audio during a transcode, switching version, and the next-episode button while in a group.
 
 ## 7. Video output and hardware (2.3.4, 2.3.5, 1.5)
 
-✅ Windows with an AMD RX 6600: ANGLE zero-copy (`d3d11va`, 4K HEVC 10-bit at ~11% CPU) and the WGL fallback. Linux: only Mesa llvmpipe in WSL (software rendering).
-
-- ⬜ **Windows, NVIDIA** and **Windows, Intel**: the log line `video decoding:` says `d3d11va` and playback is smooth with the 4K HEVC version of Test Movie.
-- ⬜ A **hybrid laptop** (Intel + NVIDIA): video shows (ANGLE and the app must end up on the same GPU).
-- ⬜ (egui branch, V3) **Windows GPU frames on NVIDIA and Intel**: the log says `video output: GPU (ANGLE/D3D11)` and `video: GPU frames`, the picture is right (colours not swapped, not black), resizing and pausing work, no `couldn't import a GPU frame` or `skipped a GPU frame` lines beyond a resize, no tearing in fast motion (sync is `glFinish` plus the ring, no fences); then the same with ANGLE hidden (`OpenGL/D3D11 interop`).
+- ⬜ (egui branch, V3) **Windows GPU frames on NVIDIA and Intel**: `video decoding:` says `d3d11va` and the 4K HEVC version of Test Movie plays smoothly; the log says `video output: GPU (ANGLE/D3D11)` and `video: GPU frames`, the picture is right (colours not swapped, not black), resizing and pausing work, no `couldn't import a GPU frame` or `skipped a GPU frame` lines beyond a resize, no tearing in fast motion (sync is `glFinish` plus the ring, no fences); then the same with ANGLE hidden (`OpenGL/D3D11 interop`).
 - ⬜ (egui branch, V3) A **hybrid laptop** on Windows: the window on either GPU (Windows' per-app graphics preference): `OpenGL ES (ANGLE) context for mpv renderer=` names the window's GPU (`graphics backend=… adapter=`), and with ANGLE hidden the WGL path either shows video or falls back to software frames rather than black.
 - ⬜ (egui branch, V3) A **release build** on Windows: CPU for 4K HEVC 10-bit with ANGLE, app and host together (debug: 14–21%, `docs/in-app-video.md`).
-- ⬜ **Linux, AMD or Intel** (Mesa) and **Linux, NVIDIA** (proprietary driver), on **X11 and Wayland**: GPU video output, not "using software rendering".
-- ⬜ (egui branch, V2) **Linux GPU frames on real hardware**, each of **AMD, Intel and NVIDIA**, each on **X11 and Wayland** (six runs): the log says `video output: GPU (OpenGL/Vulkan interop)` and `video: GPU frames`, the picture is right (not black, not garbled, colours not swapped, not upside down) through the host and with `TABBYFIN_PLAYER=embedded`; resizing during play and pausing; no `couldn't import a GPU frame` / `switching to software frames` in the log (if there is, the fallback kept it playing, but the GPU path doesn't work there); no tearing or flicker in fast motion (sync is `glFinish` plus the 3-image ring, no fences); CPU well under the software path's; `video decoding:` names a hardware decoder (`vaapi-copy`, `nvdec`…) where the GPU has one.
+- ⬜ (egui branch, V2) **Linux GPU frames on real hardware**, each of **AMD, Intel and NVIDIA**, each on **X11 and Wayland** (six runs): the log says `video output: GPU (OpenGL/Vulkan interop)` and `video: GPU frames`, the picture is right (not black, not garbled, colours not swapped, not upside down) through the host and with `TABBYFIN_PLAYER=embedded`; resizing during play and pausing; no `couldn't import a GPU frame` / `switching to software frames` in the log (if there is, the fallback kept it playing, but the GPU path doesn't work there); no tearing or flicker in fast motion (sync is `glFinish` plus the 3-image ring, no fences); CPU well under the software path's; `video decoding:` names a hardware decoder (`vaapi-copy`, `nvdec`…) where the GPU has one; no "a frame's memory never arrived" through the host.
 - ⬜ (egui branch, V2) A **hybrid laptop** on Linux (Intel + AMD or NVIDIA): the log's `OpenGL context for mpv renderer=` names the GPU the window runs on (`graphics backend=… adapter=`), found through EGL's device list when the default display is the other GPU (on WSL that path was only reached by skipping the default display in a temporary build).
-- ⬜ (egui branch, V2) The **Flatpak** with a real GPU: the same, from inside the sandbox (`--device=dri`).
 - ⬜ The `.deb` on a **real Ubuntu desktop** (only tested in a container).
 - ⬜ **macOS** on Apple silicon and Intel: the app starts, signs in, and plays with `brew install mpv` (software video), and the Dock and Finder show the app icon.
 - ⬜ High refresh-rate displays (120/144 Hz): no judder at 24 fps (2.3.7).
 
 ## 7b. Player host process (2.2.3)
 
-✅ Software video (Linux) and ANGLE/D3D11 + d3d11va (Windows, AMD) through the host; killing the host mid-play resumes in a new one on both; no leftover processes after quitting.
-
-- ⬜ **Linux with a real GPU:** GPU frames through the host (Vulkan memory fds over the socket). Watch for "a frame's memory never arrived" in the log.
-- ⬜ **macOS:** playback works through the host (software frames over the pipe), and CPU use is reasonable at 1080p.
-- ⬜ **Windows on NVIDIA and Intel**, and a hybrid laptop: the host's ANGLE device and the app must be on the same adapter for shared handles (egui branch: §7's V3 entries).
 - ⬜ **A release build on Windows** (no console): the host starts without a window flashing up, and its log reaches the app's log file.
 - ⬜ Quitting the app during playback leaves no `tabbyfin --player-host` process behind (Task Manager / `ps`).
 - ✅ (egui branch, V1) Software video in the egui window through the host and embedded: Linux (WSL, llvmpipe) and Windows (RX 6600, `TABBYFIN_VIDEO=software`); resizing re-renders at the new size on both; killing the host mid-play brings the video back in a new one (Linux). GPU frames came with V2 (Linux) and V3 (Windows); see below.
 - ✅ (egui branch, V2) Linux GPU frames on WSL (wgpu on lavapipe, mpv's OpenGL on llvmpipe, `TABBYFIN_VIDEO=gpu`): the picture through the host and embedded, the right way up and in the right colours; resizing (1280×800 → 800×600 → 1600×900, and five more) brings a new ring each time with the app's fd count steady; killing the host mid-play comes back on GPU frames; paused and after leaving the player the app sits at ~0% CPU. Without `TABBYFIN_VIDEO=gpu` the llvmpipe rule keeps software frames, and with `WGPU_BACKEND=gl` the app asks for pixels by itself. A failed import (injected in a temporary build) switched the session to software frames within half a second. Real GPUs: §7.
 - ✅ (egui branch, V3) Windows GPU frames on the RX 6600 (debug builds): ANGLE with `d3d11va` through the host and embedded (1080p H.264 and 4K HEVC 10-bit), and the WGL path with ANGLE hidden (`d3d11va-copy`), in the right colours; resizing (1296×759 → 900×600 → 1100×700 → 900×600 → back) brings a new ring each time with no skipped frames; killing the host mid-play comes back on ANGLE with GPU frames. CPU for 4K HEVC 10-bit with ANGLE: 14–21% of a core for app and host together, 18–19% embedded (GPUI: ~11%); `docs/in-app-video.md` has the table. Other GPUs: §7.
-- ⬜ (egui branch) **macOS:** software video in the egui window (Metal), through the host.
+- ⬜ (egui branch) **macOS:** software video in the egui window (Metal), through the host, at a reasonable CPU use at 1080p.
 - ✅ (egui branch, Linux) Quitting during playback stops it first: the server gets the stop report and the config's `unfinished_playback` is cleared, rather than the next launch reporting it. Closing the window waits up to 3 s for that.
 
 ## 8. Minimum server version (4.6)
@@ -195,18 +144,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ## 9. Window placement (4.4)
 
-✅ In WSLg's X11 (no window manager): a resize and a move are saved to the config half a second later, and a restart reopens at the saved size. The position itself is approximated by the compositor there, so it says little about real desktops.
-
-✅ Minimum size 800×500: a config saved at 600×400 reopens at 800×500. At that size the player's bar has every control on screen, and an item page's title keeps its line with the actions wrapped under it (they sit beside it when there's room; at 640 px wide the title squeezed to a letter a line).
-- ⬜ On a real X11 desktop, whether the window drifts down on each launch: in WSLg the saved `y` grows by the title bar's height (27 px) every run, since the window is placed by its frame but saved by its client area.
-
-✅ On Windows, two 1920×1080 monitors at 100%: a window moved to the second monitor is saved there and reopens on it at its size, and a maximized window reopens maximized on the same monitor at its last windowed size. (Before, the app did not name the display to place on; GPUI assumed the primary monitor and replaced the saved spot with the default 1536×1061 window on the primary.)
-
-- ⬜ **macOS and Linux with a window manager**: the same round trip to a second monitor, through maximize.
-- ⬜ **Mixed DPI** (e.g. a 125% monitor next to a 100% one): the saved spot and size survive.
-- ⬜ **Unplug the second monitor** the window was on: the next launch opens centred at the default size instead of off-screen.
 - ⬜ **Fullscreen playback**, then quit: the next launch opens windowed at the last normal bounds.
-- ⬜ A move or resize followed by **closing the window within half a second**: the new bounds are saved (closing flushes the pending save).
 
 **egui (A1)**, on the egui branch, on X11 without a window manager or compositor (the hidden `:99` display), moves and resizes made with `XMoveResizeWindow`:
 
@@ -233,52 +171,35 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 The development harness cannot send mouse input. The player page hides the cursor with `CursorIcon::None` while the controls are hidden, and the platform brings it back on the next mouse move.
 
-- ✅ **Single click** on the video pauses; a **double click** toggles fullscreen and leaves the video playing (the first click's pause is undone), also in a SyncPlay group, where the group must not end up paused.
-- ✅ **Wheel over the video**: one notch is 5% volume, scrolling down takes it away, and a fast spin follows the wheel rather than the event count.
 - ⬜ **Trackpad** (macOS, or a Windows precision touchpad): small deltas add up instead of being ignored, and one flick does not slam the volume to 0 or 100.
-- ✅ **Cursor and controls**: after 3 s without movement both disappear while playing; any movement brings both back; neither happens while paused.
-- ✅ The wheel over the control bars does not change the volume.
 
 ✅ The egui build (U10): the controls hide after 3 s while playing, stay while paused, and come back with any key that acts on the player; the *hidden display*'s pointer went nowhere, so the click, wheel, trackpad and cursor rows above are unchecked there (§30).
 
 ## 11. Volume and mute in reports (2.2.4)
 
-✅ Against the 12.2 dev server: three volume-down presses and `m` inside the app left `VolumeLevel = 85` and `IsMuted = true` in the session's `PlayState` (`GET /Sessions`). The 10.11 spec carries the same fields on `PlaybackProgressInfo` (checked), not run at runtime.
-
-- ✅ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app (about a second later; the report is batched).
-✅ Re-run after batching the reports: the same check gave `VolumeLevel = 85` and `IsMuted = true` about 3 s after the keys.
+- ⬜ The **web dashboard's session view** shows the app's volume and mute, and they follow a change made in the app (about a second later; the report is batched).
 
 ✅ The egui build (P3), with the dashboard's requests over REST against 12.2: `SetVolume 42`, `Mute`, `Unmute` and `VolumeUp` gave `VolumeLevel = 42`, `IsMuted = true`, `IsMuted = false` and `VolumeLevel = 47` in `/Sessions` (about 1–3 s later, the batch).
 
 ## 12. Remote control (2.2.5)
 
-✅ Against the 12.2 dev server, driving the app's session over REST the way the dashboard does (`POST /Sessions/{id}/Playing…`, `/Command`, `/Message`): play now with a start position, pause, seek, unpause, set volume, mute, unmute, subtitles off, a message (shown as a notification), next and stop all show up in `/Sessions`. Play last plus play next with a series put the series' episodes (expanded by the server) ahead of the movie, and next went to S01E01. The 10.11.11 server sends the same `Play`, `Playstate` and `GeneralCommand` payloads (captured, not run against the app).
-
 ✅ The egui build (P3), same way: play now from 10 s, pause, seek, unpause, volume, mute, unmute, `SetSubtitleStreamIndex 3` and `SetAudioStreamIndex 2` (both in `PlayState`), `PreviousTrack` (back to the start, then to S01E01), a message (a toast, screenshot in the report), play next (series) plus play last (movie), next twice (S01E01, then S01E02), and stop. In a SyncPlay group with the scripted member as dev2, remote pause, unpause and seek reached the member as group commands, remote play next added the episode to the group's queue (`QueueNext` at the member), and remote stop stopped both. Round 2: two play requests sent 25 ms apart, both still fetching (play next Second Movie, then play last Test Movie), played Second Movie and then Test Movie on `NextTrack`, i.e. they applied in the order they were made.
 
-- ✅ From the **web dashboard** (and a phone app): the session shows a remote control, its buttons work, and the volume and tracks it shows follow the app.
+- ⬜ From the **web dashboard** (and a phone app): the session shows a remote control, its buttons work, and the volume and tracks it shows follow the app.
 - ⬜ **Fullscreen** from the dashboard toggles the window (the harness can't check fullscreen; P3 verified the event reaches the app, and winit asks the window manager, which the hidden display doesn't have).
 - ✅ In a **SyncPlay group**: remote pause and seek act on the whole group, and play next/last add to the group's queue (egui build, P3, with the scripted member).
 - ⬜ Changing the **audio track** remotely during a transcode restarts the stream at the same position.
 
 ## 13. Speed, delays, subtitle size and the clock (2.1.5–2.1.7)
 
-✅ With `TABBYFIN_KEYS`: `]` twice set 1.5× (the test pattern's timecode advanced about 1.5 s per second, and the badge showed "1.5×"), and `x` three times set the subtitle delay to +0.3 s, as the menu showed (opened by default for that screenshot only).
-
-- ✅ **Clicking** through the menu: each speed, the delay and size buttons, Reset; the controls stay up while it's open.
-- ✅ **Subtitle delay** and **size** on a real subtitle track (the dev media's text subtitles), and **audio delay** with sound.
-- ✅ **Hovering the seek bar** shows the time under the mouse, close to where a click would seek.
-- ⬜ **Clicking the clock** switches to the time left, and the choice survives a restart.
+- ⬜ **Subtitle delay** and **size** on a real subtitle track (the dev media's text subtitles), and **audio delay** with sound.
 - ⬜ The next episode keeps the speed and size and drops the delays; a **SyncPlay** group shows "Normal in SyncPlay" and stays at 1×.
 
 ✅ The egui build (U10): `]` twice set 1.5× (the badge next to the clock), `x` twice the subtitle delay (+0.2 s, shown by the settings menu opened for the screenshot only), and `show_remaining_time = true` in the config showed "-0:31 / 1:00" after the chapter's name. The menu's buttons and the clock's click are unchecked (no pointer; §30).
 
 ## 14. Theme (4.3)
 
-✅ In WSLg with a config set to light: Home, an item page (the backdrop fades into the light background) and Settings render with the light theme. Set to follow the system, the app came up light, as WSLg reports.
-
 - ⬜ **Switching in Settings** applies at once, without a restart, on every page.
-- ⬜ **Follow the system** on Windows, macOS and a Linux desktop, including switching the system between light and dark while the app runs.
 - ⬜ Every page in light: login, libraries (sort and filter menus), search, seasons and episodes, the SyncPlay popover, notifications.
 
 **egui (A1):**
@@ -296,23 +217,18 @@ The development harness cannot send mouse input. The player page hides the curso
 Accepted on Linux: a launch with `theme = "system"` draws its first frames light until the portal answers (well under a second here), and one with the system's text size draws at 100 % until the background read lands (that read starts a process, `gsettings`, which took several seconds under load here).
 
 - ⬜ `theme = "system"` follows the system on Windows and macOS (egui/winit), switching while the app runs included; on a real GNOME and KDE desktop through the real portal, including Ubuntu 22.04's portal 1.14 (`Read` only).
-- ⬜ Settings (U9) changing the theme, the text size (to the system's included, which then reads it) and the animations while the app runs, through `AppEvent::AppearanceChanged`; nothing raises it yet.
-- ⬜ A system text size changed while the app runs on Windows (`reg`) and GNOME (`gsettings`), applied when the window gets the focus back.
 - ✅ Animations off (`animations = false`) draws every page entry, fade, pop and slide at its end state at once (R2, §34), and the shelf's arrow jumps and the wheel steps at once (R5). The setting being switched while the app runs is still untested (§32's list).
 
 ## 15. Previous and next (2.1.9)
 
-✅ With `TABBYFIN_KEYS` against 12.2: Shift+P on S01E02 played S01E01, Shift+N on Test Movie played Second Movie (the next in Test Collection), and Test Movie ending did not start Second Movie. The smoke test reads a movie's collections on 12.2 and gets none (no route) on 10.11.
-
-- ⬜ The **buttons** and their tooltips, and the up-next card offering a collection's next movie.
+- ⬜ The up-next card offering a collection's next movie.
+- ⬜ A movie ending doesn't start the next one in its collection (only Shift+N does).
 - ⬜ A remote **previous** from the dashboard: restarts the item, or within 5 s goes to the previous one.
 - ⬜ A movie in **several collections** uses the first the server lists.
 
 ✅ The egui build (U10): Shift+P on S02E02 played S02E01 and Shift+N came back (the buttons appear for an item that has them, with their tooltips); clicking them is unchecked (§30).
 
 ## 16. Image memory (6.6)
-
-✅ With the budget lowered to 1 MB and the keep-recent window to 1 s (a local build only): leaving Home for an item page and a library, and coming back, dropped 10, 10 and 9 images, and Home's images reloaded from disk and showed correctly.
 
 ✅ I1 (the egui build's image cache, checked on its temporary posters page before U5 landed; X3 deleted that page): with the budget lowered to 32 MB (a local build only) and `dev/fake-library.py` on :8098 serving 10,000 posters 300 ms apart, `TABBYFIN_ROUTE=posters:<fake library id>` with `TABBYFIN_KEYS="wait down*200"` logged two trims: 39 images dropped but 281 MB left (the 10 s keep-recent rule held the rest), then 259 dropped and 32.6 MB left; the process's RSS went from 563 MB to 432 MB. Only the rows on screen asked for posters: at most 6 loads were in flight, and in a 12 s scroll past about 400 cards with a 300 ms delay only 165 were requested, the rest having scrolled out of the queue before a slot freed. After the scroll stopped, with no input at all, the trim ran on its own: 34 images dropped at 219.8 MB (the keep-recent window), 10 s later 195 more and 32.6 MB left, and the RSS fell from 501 MB to 369 MB.
 
@@ -321,26 +237,20 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ## 17. Seek-bar previews (2.1.4)
 
-✅ Against 12.2 with tiles generated by the dev setup, a hover forced at 0:25 in a local build showed the thumbnail from 0:20 above the time.
-
 - ⬜ **Real hovering** along a long film: thumbnails follow the mouse, appear quickly after the first hover over a sheet's range, and stay on screen at the bar's ends.
 - ⬜ An item **without tiles** shows only the time; a version switch shows the new version's tiles.
 - ⬜ **10.11** (the same endpoints) with tiles generated.
 
-⬜ The egui build (U10) draws the seek bar's hover time and thumbnail from the same `Trickplay` (the page polls it every frame); the pointer can't be driven here, so hovering and scrubbing are unchecked (§30).
-
 ## 18. Resume prompt (2.1.10)
 
-✅ With `TABBYFIN_KEYS` against 12.2: Shift+P from S01E02 resumed S01E01 at 0:25 with "Resumed from 0:25 · Start over", and Enter restarted it from 0:00.
-
 - ⬜ **Autoplay** into an episode with a resume point shows the card, and it goes away by itself after 10 s.
-- ⬜ Clicking **Start over**; in a **SyncPlay** group it's a group seek.
+- ⬜ *Start over* in a **SyncPlay** group is a group seek.
 
 ✅ The egui build (U10): Shift+N to Second Movie resumed at 0:25 with "Resumed from 0:25 · Start over", and Enter started over from 0:00 (§30).
 
 ## 19. Subtitle appearance (4.2)
 
-✅ Linux, libmpv 0.37, with a config set to yellow and a dark box: the embedded SRT showed yellow on a translucent box. The settings page shows the three pickers, and each steps with Left and Right once Tab has focused it (U9 round 2: the size went 100 % → 125 % and back to 75 %, the colour White → Yellow and the style Outline → Dark box, each in the config), the list itself staying pointer-only.
+✅ **egui (U9, round 2)**: the settings page shows the three subtitle pickers, and each steps with Left and Right once Tab has focused it (the size went 100 % → 125 % and back to 75 %, the colour White → Yellow and the style Outline → Dark box, each in the config), the list itself staying pointer-only.
 
 - ⬜ **Windows** (the bundled 0.38+ libmpv, which takes `sub-border-style`): box and outline both look right.
 - ⬜ Changing the **size** in Settings, then in the player's menu: both agree afterwards.
@@ -348,17 +258,12 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ## 20. Alphabet jump (3.9)
 
-✅ In the dev Movies library, typing `t` moved the highlight to Test Movie; the letter bar shows while sorted by name. `nameLessThan` counts the same, case-insensitively, on 10.11 and 12.2.
-
 - ⬜ A **large library**: clicking letters lands on the first item with that letter, ascending and descending, and with a filter (Unwatched…).
 - ⬜ Names with **articles** ("The …"), accents and digits land where the grid sorts them (the server's sort name).
 
 ## 21. Home settings (3.8)
 
-✅ Against 12.2, with Next Up, Continue Watching, My Media and Latest set in that order, Collections hidden from My Media and Shows left out of Latest (stored through the API the way the web client does): Home showed Continue Watching (Next Up was empty), My Media without Collections, Favorites, then Latest Movies and no Latest Shows.
-
 - ⬜ Changing **Settings → Home** in the web client, then reloading Home here (a restart, or anything that refreshes Home).
-- ⬜ **10.11**: the same preferences.
 
 ✅ **egui (U3)**, against 12.2 (`U3-scratch/home-default.png`) and 10.11 (`U3-scratch/home-1011.png`, `home-1011-favorites.png`): the default order drew My Media, Continue Watching (Next Up was empty, so it had no shelf) and then Favorites; with `homesection0`–`2` set through the display preferences API (and put back afterwards) to Next Up, Continue Watching and My Media, Home drew Continue Watching, My Media and Favorites last, without Latest (`home-prefs.png`); Home's cards are 1.2× the other pages' with 24 px gaps between them; on 10.11, with Test Movie favorited, Favorites came just before Latest Shows, and unfavoriting it through the API while the app ran made the shelf go away without a restart (the watch-data refresh, `U3-scratch/home-1011-reloaded.png`); idle CPU on Home was 0 ticks over 10 s.
 
@@ -366,8 +271,6 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ The empty state's line with an account that has **no libraries** (the same `state::empty` widget W1 checked).
 
 ## 22. Item page extras (3.7)
-
-✅ Against 12.2: Test Movie's page shows its genres, studio and tag, a Trailer button, Extras (Trailer, Making of Test Movie) and, with Second Movie unwatched, More like this (Second Movie). Selecting the featurette with the keyboard played it. The setup's metadata step works on 10.11 too.
 
 ✅ **egui (U6)**, against 12.2, keyboard only (`TABBYFIN_KEYS`, screenshots in `U6-scratch/`): Test Movie's page with the backdrop fading into the background, the poster, its genres, studio and tags, and the actions (Play, Trailer, Watched filled green and pressed, Favorite filled red and pressed, More) beside the title (`item-movie.png`); the Version picker under the header stepping 1080p → 720p with Right (`item-version-720.png`) and cycling with Enter (`item-version-final.png`); the Chapters shelf (`item-scrolled-chapters.png`) and the cursor moving on to Extras (`item-scrolled-extras.png`); More opening with the keyboard's highlight and *Add to playlist…* opening U8's dialog (`item-more-menu.png`, `item-add-dialog.png`); a playlist's More menu with *Edit…* and the separated *Delete playlist…*, and *Edit…* opening its dialog (`item-playlist-more2.png`, `item-playlist-edit2.png`); More like this (Second Movie) as a 1.2× poster card on `dev2`'s page, where everything was unplayed and the toggles were unlit (`item-dev2-similar2.png`); Watched marked through the page and shown filled at once, then unmarked again (`item-dev2-top.png`, `item-dev2-unmarked.png`); and the refused mark: behind a local proxy that answers 500 for `/UserPlayedItems` and `/UserFavoriteItems` (not stopping the shared server), Watched showed the change at once and a frame later was back with "The server returned an error (500)." (`item-refused-mark2.png`). Choosing 4K HEVC on the page and pressing Play opened the player on that version (`item-play-4k.png`), and Enter on the "Episode" chapter started the session at 0:10 (checked with `GET /Sessions`: position 20 s ten seconds in); the page reloaded on watch data changed elsewhere, the heart filling in when the API favorited the movie while it was open (`item-userdata-before.png`, `item-userdata-after.png`); in an 820×600 window the actions moved under the title (`item-narrow2.png`). Idle CPU on the page was 0 ticks over 10 s.
 
@@ -383,27 +286,23 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ## 23. Update notice (5.5)
 
-✅ With `TABBYFIN_UPDATE_URL` pointing at a local fake `v9.9.9` release: the notification showed "Version 9.9.9 is out (this is 0.1.0)" with Download, and the check time was saved.
+- ⬜ With `TABBYFIN_UPDATE_URL` pointing at a local fake `v9.9.9` release: the notification shows "Version 9.9.9 is out (this is 0.1.0)" with Download, and the check time is saved.
 
 - ⬜ After the **first published release**: an older build shows the notice once a day; the current one doesn't; *Download* opens the release page; the setting turns it off.
 
 ## 24. Several accounts (4.5)
 
-✅ With `dev` on 12.2 and `dev2` on 10.11 saved (tokens from a scratch config): the sign-in screen lists both; launching with `dev2` current restores it on 10.11; the account menu lists the saved accounts with the current one checked, then *Add account…* and *Sign out*; switching restores the other account with a new websocket; *Add account* shows sign-in with *Back to your account*, which returns to the same session without reconnecting; signing out deletes and revokes the token and leaves `dev2` listed; an unfinished playback recorded for `dev` isn't reported by `dev2`. The menu, switch, add/cancel and sign-out were triggered through temporary test code, since the harness can't click and gpui-kit buttons don't take Enter or Space.
-
 ✅ **egui (S1)**, against 12.2 with `dev` and `dev2` on one server: restoring `dev`; the form's server address (HTTPS tried before HTTP), username and password with Enter moving between them and signing in; Quick Connect, approved through `POST /QuickConnect/Authorize` (the endpoint the web client uses); a saved account's *continue as*; *Add account* keeping the signed-in session, *Back to your account* returning to it, and signing in as `dev2` instead (the waiting session is dropped); *Sign out* revoking the token and dropping the account from the config while `dev2` stays listed; switching accounts; *Remove* on the sign-in screen; removing the *parked* account from the Add-account form, which ends its session and takes *Back to your account* away; an expired session, which keeps the account, deletes the token and prefills the form with the error; a server stopped during restore, which waits and signs back in when it answers. The account menu's choices and the expiry event were driven with temporary test code: egui 0.37 menus don't take the keyboard yet, so the button and menu are pointer-only until U1.
 
 ✅ **egui (X7)**, on the hidden `:99` display with an empty config dir and `TABBYFIN_KEYS` typing the dev server's address at launch (no click, no Tab): the address reached the field (`X7-scratch/X7-1-address-typed-at-launch.png`), Enter connected and the username field was focused for `dev` (`X7-2-credentials-username-typed.png`), Enter moved the keyboard to the password, and Enter there signed in (`X7-3-signed-in.png`). In kittest, a failed connect puts the keyboard back in the address field, and the field keeps it when a row above it goes.
 
-- ⬜ **Clicking** through all of the above (the egui menu needs a pointer for now).
+- ⬜ **Clicking** through all of the above.
 - ⬜ Signing in to a **new server** while another account waits.
 - ⬜ **Sign out with no account left** (the form prefilled with the server and username).
 - ⬜ **Windows and macOS keychains** with two accounts.
 - ⬜ Switching **during playback** and **in a SyncPlay group** (the group is left first).
 
 ## 25. Playing a series or season (3.12)
-
-✅ Against 12.2: Test Show (S1:E1 watched, S1:E2 partway) shows *Resume S1:E2*, *Play from beginning* and *Shuffle*; Enter on it resumed S01E02 at its position.
 
 ✅ **egui (U6)**, against 12.2: Test Show's page shows *Resume S1:E1* (this dev account's S1:E1 now has a resume point), *Play from beginning*, *Shuffle*, Watched and Favorite, named after the episode it plays (`item-series.png`). The children rows (seasons, episodes) are U7's.
 
@@ -424,7 +323,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ **egui (W1, round 2)**, against 12.2, driving the menu's dispatcher (`Services::carry_out`) from temporary code since the harness can't right-click: *Play* on Test Movie resumed it at 0:39 and played (frames logged, 249 in 10 s, the shell's line at the bottom); *Play* on Test Show fetched its episodes and played S1:E2 from 0:37, its resume point (the "Nothing here to play." path is out of reach: the dev server's show has episodes). Stacked pages keep their own ids: the posters page's cursor worked over Home and Esc came back to Home's own cursor.
 
-- ⬜ **Right-click** opening the menu at the pointer, and *Play*, *Play for a series or season*, *Watched*, *Favorite* and *Add to playlist…* from it (U5 and U6 wire it for their pages; Home's cards open U8's dialog already).
+- ⬜ **Right-click** opening the menu at the pointer, and *Play*, *Play* on a series or season, *Watched*, *Favorite* and *Add to playlist…* from it.
 - ⬜ Card text not stealing the card's click, right-click and drag (architecturally checked: with `style.interaction.selectable_labels = false` a label senses hover only, and egui's hit-test gives the click to the card under it).
 ✅ **egui (R5)**, against 12.2, keyboard only (`R5-scratch/`): Down walked Home's shelves with the page easing between them (`home-mid-scroll.png` mid-animation, `home-rest.png` at rest), Test Movie's page scrolled from its chapters on to Extras the same way (`item-mid-scroll.png`, `item-rest.png`), and the 10,000-item fake library's grid walked a dozen rows (`gridf/g10.png` partway, `grid-rest.png` at rest) — the keyboard's reveal-into-view still lands each card on screen. The 12.2 server's own libraries have 2–6 items, so only the fake library's grid scrolls. Idle CPU after each scroll stopped was 0 ticks over 10 s. The wheel, the glide and the drag need a pointer and are covered headless below.
 
@@ -439,7 +338,6 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ **A real pointer**: right-clicking a card, *Add to playlist…* opening the dialog, clicking a playlist row, the Save, Cancel and Delete buttons, the sharing switch, and a click on the backdrop closing the dialog (the same `ModalResponse::should_close` path as Esc).
 - ⬜ A list longer than the 320 px cap scrolling, with the highlight kept on screen.
 - ⬜ The dialogs with the **server down** (the playlist list fails to load) and for an account with **no playlists** ("No playlists yet. Type a name to make one.").
-- ⬜ The dialogs from the **playlist page** (U7); the item page's *More* menu opened *Add to playlist…* on a movie and *Edit…* on a playlist with U6 (`TESTING.md` §22, screenshots in `U6-scratch/`). Until those pages landed, nothing on the keyboard opened *Edit* or *Delete*: the checks above used a temporary `TABBYFIN_DIALOG` hook in `views/home.rs`, which is not in the tree.
 
 ## 28. Top bar and search (U1)
 
@@ -449,10 +347,9 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ **egui (R4)**, against 12.2, keyboard and screen grabs only (`R4-scratch/`): the box closed to its button (`r4-closed-dark.png`, `r4-closed-light.png`) and open with the search icon inside the field at the left, where `main`'s prefix was (`r4-open-dark.png`, `r4-open-light.png`), next to `main`'s own bar (`main-closed-dark.png`, `main-closed-light.png`, `main-open.png`, striped together in `compare-dark.png` and `compare-light.png`). The open/close motion was recorded with a 30 fps screen grab (`r4-motion-dark.mp4`) rather than a screenshot, since `import` can't land inside 260 ms: the box grows from the button's left edge into the middle of the bar while the button fades out (`r4-mid-open-dark-bar.png`), and shrinks back into it with the button fading in (`r4-mid-close-dark-bar.png`). A `TABBYFIN_KEYS` run (Up into the bar, Enter on the bar's Search, typing `abc`, Esc, Esc) opened the box from the button, searched and closed it back into the button (`r4-after-esc.png`, the log in `barkeys.log`), and Down then Right afterwards moved the page's cursor, so closing the box gives the keyboard back (`r4-keys-after-close.png`). With `animations = false` in the config, a lossless 60 fps capture (`r4-animoff.mkv`) shows the box appear and go in a single frame, with the button switching with it and no fade: one frame has the closed bar and the next the open box, and likewise when it closes. Idle CPU with the box closed was 0 ticks over 10 s.
 
-- ⬜ **R4 with a mouse**: the search button and the box's keep the pointer behaviour they had, which nothing here could click.
+- ⬜ **Search box with a mouse**: the always-visible box takes a click, typing and its clear button; nothing here could click it.
 - ⬜ **R4 at real speed**: how the 260 ms morph reads at 60 Hz on a real GPU, and a window resized while the box is opening or closing (the closing box aims at the button's current place).
 - ⬜ **With a mouse**: the bar's buttons, a click on the bar's Back leaving no keyboard in the bar, opening the account menu by clicking the user button and a click outside closing it, and a click on the page hiding the bar's ring.
-- ⬜ **Fullscreen while playing** (Xvfb has no window manager, so fullscreen does nothing there): *closed again when the player closes by itself*.
 - ⬜ U4's results page with a **mouse** (a click on a card opening the item, a right-click giving the item menu), the failed state (the search erroring while the page is up), and a search with the window **resized** while the cursor is in the results (the column count changes, and the cursor may land outside them). Esc over another page leaving the box open with its text.
 
 ## 29. Packaging and CI (X1)
@@ -469,7 +366,6 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - `cargo build -p tabbyfin --target x86_64-pc-windows-gnu` (what `dev/win-run.sh` builds) succeeds; the release MSVC package itself is CI's.
 
 - ⬜ The **GitHub Actions jobs**: this branch isn't pushed (X1 must not push), so `mise run ci:build` couldn't run; the same steps passed locally.
-- ⬜ The `.deb`, AppImage and Flatpak on a **real desktop with a GPU** (the list in §7), and the Windows and macOS packages from CI.
 - ⬜ **Playback** from those packaged builds; the checks above only opened the sign-in screen.
 
 ## 30. Player page (U10)
@@ -506,7 +402,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ A collections folder (`collection_type` none, browsed folder by folder) lists *Test Collection* with only Sort, order and Show (`u5-folder.png`), and `TABBYFIN_ROUTE=person:<id>` opens a `Source::Person` page (toolbar without the value/year/resolution pickers, "Nothing here yet.", `u5-person.png`). Enter on a card opened the U6 stub and Esc came back with the cursor still on that card (`u5-open-item.png`, `u5-back-library.png`).
 
-- ⬜ **With a mouse**: clicking a card, the toolbar's selects (choosing an entry from the popup menu), the letter bar's letters, and the dialog's checkboxes and *Done*. Right-click menus and *Add to playlist…* from a card (U8's dialog; its own checks are §27).
+- ⬜ **With a mouse**: clicking a card, the toolbar's selects (choosing an entry from the popup menu reloads the grid from the top and is remembered; the order button flips it and reshuffles for Random), the letter bar's letters, and the dialog's checkboxes and *Done*. Right-click menus and *Add to playlist…* from a card (U8's dialog; its own checks are §27).
 - ⬜ **Window resize** with the cursor in the grid (the column count changes), and zoom.
 - ⬜ A page request that fails mid-library and is retried after its rows scroll out and back, and the error state's *Retry*.
 - ⬜ Picking sort and filter on **10.11 with a bigger library**, and the resolution choices on 10.11 for HD and SD.
@@ -554,8 +450,8 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 ✅ The open search box (`r1-search-dark.png`), a season's open episodes band (`r1-series-band.png`), the player with its up-next card (`r1-player-dark.png`), and a project's menu rows' and SyncPlay panel's highlights (`accent`).
 
 - ⬜ **The card's hover dim**: `main` faded a card to 80 % under the pointer; here it's the page's background at 20 % over the picture. Needs a mouse (the dim only shows while a card is hovered), in both themes.
+- ⬜ **Home's play button**: hovering a card shows a play button in the middle of its image (larger with the pointing hand over it); clicking it resumes a Continue Watching item, plays a series' next episode, and a click elsewhere on the card still opens its page. Not shown on library cards (My Media). Needs a mouse.
 - ⬜ **Toasts** in both themes: their info, success and error icons take the theme's colours, and the popup frame the tokens' fill, border and radius.
-- ⬜ **Light and dark on Windows and macOS**, including following the system's appearance there (only Linux was checked; the portal is Linux's stand-in).
 - ⬜ **A person card's initials** at the table's `text_2xl` (the dev library's items have no cast to show one).
 - ⬜ **The card title's baseline** and the action buttons' centred icon and label at 90 % and 150 % zoom.
 - ⬜ **With a mouse**: a primary button's hover and press (the sign-in form's *Connect*, the item page's *Resume*), and a picker's open list highlighting its current choice with the theme's `accent` (the list is pointer-only, §32).
@@ -596,10 +492,6 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 ✅ **AccessKit:** the painted widgets name themselves, with a role and their state — the bars' control buttons (their tooltip without its key hint: "Back", "Play", "Playback settings"), the prompt's buttons, the settings tabs (`Tab`, selected), the track and version rows (`RadioButton`, checked), the speed segments, the steppers, the version picker (`ComboBox`, its value the version's name) and the two sliders (`Slider`, in seconds or percent). `views::player::tests::an_open_menu_exposes_its_tabs_and_rows` opens the real settings popup headless, checks the labels and the selected state by query, and picks another tab and row by AccessKit click. None of them is keyboard-focusable (U8's rule, as for its dialogs), so Tab still belongs to the player and no focus ring is drawn; the speed group's own rect only senses hover, so it can't take a segment's click.
 
 - ⬜ **With a mouse**: the hover fills of the control buttons, the ghost buttons and the track rows; the slider hover (gpui-kit grows a 3-point ring around the thumb under the pointer — not ported), dragging either slider; the seek bar's hover time and trickplay thumbnail at their new place over the bar; the menus from their buttons; the dots and dividers of the speed group.
-- ⬜ **`main`'s light theme**: `main` drew the player's slider and control icons with the light theme (a near-black seek bar and black icons over the picture, `main-light-paused.png`); the egui player stays dark in both themes (U10's rule), so the light-theme screens are the dark ones here.
-- ⬜ **The tab-switch animation** (gpui-kit's sliding pill) isn't ported: the pill moves with the click, at once.
-- ⬜ **The icon glyphs** stay the Material ones (a gear for Settings, a list for Chapters), as R1 settled; only their sizes and colours match `main`'s Lucide icons.
-- ⬜ A **10.11** server and real GPU frames under the overlay: the video path there is V1–V3's.
 
 ## 36. Layout details (R7)
 

@@ -23,6 +23,7 @@ use jellyfin::{Client, ItemsQuery};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
 use crate::images::ImageCache;
+use crate::item_menu::{is_playable, resume_point};
 use crate::keys::{Action, Scope};
 use crate::motion;
 use crate::nav::{NavRequest, Route};
@@ -168,6 +169,8 @@ struct Shelf<'a> {
     title: String,
     items: &'a [BaseItemDto],
     landscape: bool,
+    /// Where the title leads: a Latest shelf's library.
+    link: Option<Route>,
 }
 
 /// A shelf's identity, so each row keeps its own scroll position.
@@ -196,11 +199,11 @@ fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
             HomeSection::NextUp => shelves.push(row(ShelfId::NextUp, "Next Up".to_owned(), &data.next_up, true)),
             HomeSection::Latest => {
                 shelves.push(favorites());
-                shelves.extend(
-                    data.latest.iter().enumerate().map(|(i, (view, items))| {
-                        row(ShelfId::Latest(i), format!("Latest {}", view.name), items, false)
-                    }),
-                );
+                shelves.extend(data.latest.iter().enumerate().map(|(i, (view, items))| {
+                    let mut shelf = row(ShelfId::Latest(i), format!("Latest {}", view.name), items, false);
+                    shelf.link = Some(Route::for_item(view));
+                    shelf
+                }));
             }
         }
     }
@@ -217,6 +220,7 @@ fn row<'a>(id: ShelfId, title: String, items: &'a [BaseItemDto], landscape: bool
         title,
         items,
         landscape,
+        link: None,
     }
 }
 
@@ -349,8 +353,9 @@ fn show_shelves(
                     if index > 0 {
                         ui.add_space(SHELF_GAP);
                     }
+                    let mut title_clicked = false;
                     let shelf = motion::enter(ui, ("shelf", row.id), motion::shelf_delay(index), |ui| {
-                        shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, shelf::PADDING, |ui| {
+                        let body = |ui: &mut egui::Ui| {
                             cards(
                                 ui,
                                 row.items,
@@ -361,8 +366,25 @@ fn show_shelves(
                                 &mut *images,
                                 &mut asked,
                             );
-                        })
+                        };
+                        if row.link.is_some() {
+                            shelf::shelf_linked(
+                                ui,
+                                row.id,
+                                &row.title,
+                                &mut title_clicked,
+                                CARD_GAP,
+                                TITLE_GAP,
+                                shelf::PADDING,
+                                body,
+                            )
+                        } else {
+                            shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, shelf::PADDING, body)
+                        }
                     });
+                    if title_clicked {
+                        asked.open = row.link.clone();
+                    }
                     if moved && selected.is_some_and(|position| position.section == index) {
                         target = Some(shelf);
                     }
@@ -388,10 +410,10 @@ fn act(action: MenuAction, item: &BaseItemDto, dialog: &mut Option<AddToPlaylist
     }
 }
 
-/// One shelf's cards, in the cursor's section: a click (or Enter) opens the item's page and a
-/// right-click its menu. Home's cards are [`CARD_SCALE`] times the other pages' size. `moved`
-/// says a key moved the cursor this frame, so the selected card scrolls into view inside its
-/// shelf.
+/// One shelf's cards, in the cursor's section: a click (or Enter) opens the item's page, the
+/// play button in its middle plays it, and a right-click opens its menu. Home's cards are
+/// [`CARD_SCALE`] times the other pages' size. `moved` says a key moved the cursor this frame,
+/// so the selected card scrolls into view inside its shelf.
 #[allow(clippy::too_many_arguments)]
 fn cards(
     ui: &mut egui::Ui,
@@ -413,12 +435,30 @@ fn cards(
         if selected && moved {
             response.scroll_to_me(None);
         }
-        if response.clicked() {
+        if let Some(action) = play_action(item)
+            && card::play_button(ui, &response)
+        {
+            asked.menu = Some((action, item.clone()));
+        } else if response.clicked() {
             asked.open = Some(Route::for_item(item));
         }
         if let Some(action) = menu::item_menu(&response, item) {
             asked.menu = Some((action, item.clone()));
         }
+    }
+}
+
+/// What a card's play button does: the item from where it was left (Continue Watching resumes),
+/// or a series' or season's next episode. Nothing for what can't be played (a library).
+fn play_action(item: &BaseItemDto) -> Option<MenuAction> {
+    if is_playable(item) {
+        Some(MenuAction::Play {
+            start: resume_point(item),
+        })
+    } else if matches!(item.kind, BaseItemKind::Series | BaseItemKind::Season) {
+        Some(MenuAction::UpNext)
+    } else {
+        None
     }
 }
 

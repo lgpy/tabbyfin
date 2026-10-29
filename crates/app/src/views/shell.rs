@@ -17,9 +17,7 @@
 //! The search box is the bar's only text field: typing opens the results page (or comes back
 //! to it from a page opened from them), clearing it closes them, and Enter or Down moves into
 //! the results, which hand Up and Shift+Tab back to the box; Esc gives the keyboard back to the
-//! page. Closed, the box is a button with the others on the right; opening, it grows out of that
-//! button into the middle of the bar, and it shrinks back into it as it closes, as on `main`
-//! (`main`'s `motion::morph`, 260 ms eased out, with the button fading the other way).
+//! page. It is always in the middle of the bar, with no button to open it first.
 //!
 //! While a playback session shows, [`views::player::PlayerPage`] takes the window: no top bar,
 //! the video and its controls filling it, and the player's keys working. Going back stops
@@ -112,37 +110,6 @@ impl Highlight {
     }
 }
 
-/// The box opening out of the search button, or closing back into it: `main`'s `motion::morph`,
-/// over `motion::ENTER` and its easing. It runs on `InputState::time`, so a frame dropped or a
-/// slow one doesn't stretch it, and the shell asks for a repaint only while it runs.
-#[derive(Clone, Copy, Debug)]
-struct SearchMotion {
-    /// Closing (into the button) rather than opening (out of it).
-    closing: bool,
-    /// When it started, in `egui::InputState::time` seconds.
-    started: f64,
-    /// The box's rectangle it moves out of: the button's when it opens, the place it was last
-    /// drawn when it closes. It moves to the button, or to its place in the middle of the bar.
-    from: Rect,
-}
-
-impl SearchMotion {
-    /// How far it has run, 0 at the start and 1 at the end, eased as `main` eased it.
-    fn progress(&self, now: f64) -> f32 {
-        motion::progress(self.started, now, 0., motion::ENTER)
-    }
-}
-
-/// The box's rectangle `t` of the way from `from` to `to`, with the same 40-point height at
-/// either end.
-fn lerp_rect(from: Rect, to: Rect, t: f32) -> Rect {
-    let mix = |a: f32, b: f32| a + (b - a) * t;
-    Rect::from_min_max(
-        egui::pos2(mix(from.min.x, to.min.x), mix(from.min.y, to.min.y)),
-        egui::pos2(mix(from.max.x, to.max.x), mix(from.max.y, to.max.y)),
-    )
-}
-
 /// The top bar's controls, in the order the keyboard walks them from the left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BarItem {
@@ -212,17 +179,8 @@ pub struct Shell {
     bar_key: Option<BarItem>,
     /// The search box's text.
     search_text: String,
-    /// The box is in the bar rather than closed to its button. It also stays while it has
-    /// text, as on `main`.
-    search_open: bool,
     /// The box takes the keyboard when it draws next (opened from the bar, Ctrl+F or a route).
     want_search_focus: bool,
-    /// Where the search button was drawn, and where the open box was: the places the box opens
-    /// out of and closes back into (as `main`'s `search_button` and `search_slot`).
-    search_button: Option<Rect>,
-    search_slot: Option<Rect>,
-    /// The box opening out of the button or closing back into it, while it moves.
-    search_motion: Option<SearchMotion>,
     /// The box had the keyboard when the last frame ended: what this frame's key routing saw
     /// (`keys::take` runs before egui changes the focus). The box's own keys are read on this
     /// rather than `Memory::has_focus`, which later events in the frame could have changed.
@@ -263,11 +221,7 @@ impl Shell {
             accounts: Vec::new(),
             bar_key: None,
             search_text: String::new(),
-            search_open: false,
             want_search_focus: false,
-            search_button: None,
-            search_slot: None,
-            search_motion: None,
             search_focused: false,
             syncplay_highlight: None,
             syncplay_scroll: false,
@@ -302,9 +256,6 @@ impl Shell {
         self.bar_key = None;
         self.want_search_focus = false;
         self.search_focused = false;
-        // A box on its way out or in stops with the bar gone: it would be stale when the bar
-        // comes back.
-        self.search_motion = None;
         self.syncplay_highlight = None;
         self.syncplay_scroll = false;
         egui::Popup::close_id(ctx, account_menu_id());
@@ -654,65 +605,19 @@ impl Shell {
         ctx.request_repaint();
     }
 
-    /// Puts the keyboard in the search box, opening it if it's the button. The page's cursor
-    /// goes, so Esc back to the page shows it where it was instead of moving it a row.
+    /// Puts the keyboard in the search box. The page's cursor goes, so Esc back to the page
+    /// shows it where it was instead of moving it a row.
     fn focus_search(&mut self, cx: &mut PageCx) {
-        // A box on its way back into the button turns round and opens again, as on `main`.
-        let closing = self.search_motion.is_some_and(|motion| motion.closing);
-        if !self.search_shown() || closing {
-            self.start_search_motion(false, cx.ctx);
-        }
-        self.search_open = true;
         self.want_search_focus = true;
         self.bar_key = None;
         self.top_mut().hide_cursor();
         cx.ctx.request_repaint();
     }
 
-    /// Turns the box back into the button, unless something's typed in it (it stays open with
-    /// the results), and moves it back there. `main`'s `close_search`.
-    fn close_search(&mut self, ctx: &egui::Context) {
-        let was_open = std::mem::take(&mut self.search_open);
-        if !was_open || !self.search_text.trim().is_empty() {
-            return;
-        }
-        // The field is on its way out: a widget that stops drawing mustn't keep egui's
-        // keyboard, or the app would stop taking its own keys (`keys::egui_wants_keys`).
+    /// Gives the keyboard up, so the page's keys work again.
+    fn leave_search(&mut self, ctx: &egui::Context) {
         ctx.memory_mut(|memory| memory.surrender_focus(Id::unique(SEARCH_ID)));
-        self.start_search_motion(true, ctx);
         ctx.request_repaint();
-    }
-
-    /// Starts the box opening out of the button or closing back into it. Without the button's
-    /// place (the box opened before the bar ever drew) or with the animations setting off, the
-    /// box just appears or goes, as `main`'s did without the button's position.
-    fn start_search_motion(&mut self, closing: bool, ctx: &egui::Context) {
-        let from = if closing { self.search_slot } else { self.search_button };
-        let Some(from) = from.filter(|_| theme::animations(ctx)) else {
-            self.search_motion = None;
-            return;
-        };
-        self.search_motion = Some(SearchMotion {
-            closing,
-            started: ctx.input(|input| input.time),
-            from,
-        });
-        ctx.request_repaint();
-    }
-
-    /// Ends the box's motion once it has run its time (or the animations setting went off), and
-    /// asks for the next frame only while it runs.
-    fn step_search_motion(&mut self, ctx: &egui::Context) {
-        let Some(motion) = self.search_motion else {
-            return;
-        };
-        let now = ctx.input(|input| input.time);
-        if !theme::animations(ctx) || motion.progress(now) >= 1. {
-            // Closed, the box is the button again; open, it stays where it has arrived.
-            self.search_motion = None;
-        } else {
-            ctx.request_repaint();
-        }
     }
 
     /// The Settings button: opens Settings, or closes it (back to the page before) when it's on
@@ -748,14 +653,6 @@ impl Shell {
         self.search_page() == Some(self.stack.len() - 1)
     }
 
-    /// Whether the box is in the bar rather than the search button (it stays while it has
-    /// text, as on `main`, and while it closes back into the button).
-    fn search_shown(&self) -> bool {
-        self.search_open
-            || !self.search_text.trim().is_empty()
-            || self.search_motion.is_some_and(|motion| motion.closing)
-    }
-
     /// The box changed: the results open as soon as there's a term (or come back from a page
     /// opened from them), and close when it's empty.
     fn search_changed(&mut self, cx: &mut PageCx) {
@@ -786,7 +683,7 @@ impl Shell {
     /// before the box draws, so they don't also move its caret. Modifiers match exactly: Shift
     /// or Alt with a key is the widget's own (Alt+Down mustn't open the results).
     fn search_box_keys(&mut self, cx: &mut PageCx) {
-        if !self.search_shown() || !self.search_focused {
+        if !self.search_focused {
             return;
         }
         let ctx = cx.ctx;
@@ -811,8 +708,7 @@ impl Shell {
         if self.top_is_search() {
             self.stack.pop();
             self.search_text.clear();
-            self.close_search(cx.ctx);
-            cx.ctx.request_repaint();
+            self.leave_search(cx.ctx);
         } else {
             self.leave_top_bar(cx);
         }
@@ -836,42 +732,21 @@ impl Shell {
     }
 
     /// Draws the bar, a fixed height of it: the icon, Back and the title on the left, the
-    /// buttons on the right, and the open search box between them (opening out of the search
-    /// button's place, and shrinking back into it as it closes).
+    /// buttons on the right, and the search box between them, always there.
     fn top_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
-        self.step_search_motion(cx.ctx);
         self.search_box_keys(cx);
         self.syncplay_panel_keys(cx);
         let can_go_back = self.can_go_back();
         let keyboard = self.bar_key;
-        let box_shown = self.search_shown();
-        // The button shows while the box is closed, and fades out under the box as it opens (in
-        // as it closes), so one turns into the other, as on `main`.
-        let now = ui.input(|input| input.time);
-        let (button_opacity, box_motion) = match self.search_motion {
-            Some(motion) => {
-                let t = motion.progress(now);
-                if motion.closing {
-                    (t, Some(t))
-                } else {
-                    (1. - t, Some(t))
-                }
-            }
-            None => (1., None),
-        };
-        let button_shown = !box_shown || self.search_motion.is_some();
         let in_group = cx.services.in_group();
         let title = self.top().title().to_owned();
         let logo = self.logo.clone();
         let gap = ui.spacing().item_spacing.x;
 
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), BAR_H), Sense::hover());
-        // The right-hand side: the account, Settings, SyncPlay and the search button (whose
-        // slot is kept while the box is open, so the other three keep their places as on
-        // `main`).
-        let buttons_w = 4. * BAR_BUTTON + 3. * gap;
-        // With the box open both sides grow alike, which keeps the box in the middle of the bar.
-        // It shrinks when the window or the zoom leaves no room for one next to the icon, Back
+        // The right-hand side: the account, Settings and SyncPlay.
+        let buttons_w = 3. * BAR_BUTTON + 2. * gap;
+        // Both sides grow alike, which keeps the box in the middle of the bar. It shrinks when the window or the zoom leaves no room for one next to the icon, Back
         // and a title on the left and the buttons on the right.
         let icon_and_back = LOGO + BAR_BUTTON + 2. * gap;
         let box_w = (bar.width() * 0.5)
@@ -879,11 +754,7 @@ impl Shell {
             .min(bar.width() - 2. * buttons_w - 4. * gap)
             .min(bar.width() - 2. * (icon_and_back + 60.) - 4. * gap)
             .max(120.);
-        let side = if box_shown {
-            ((bar.width() - box_w) * 0.5 - 2. * gap).max(0.)
-        } else {
-            bar.width() - buttons_w - 2. * gap
-        };
+        let side = ((bar.width() - box_w) * 0.5 - 2. * gap).max(0.);
         let right_w = side.max(buttons_w);
 
         let left = Rect::from_min_size(bar.min, vec2(side, bar.height()));
@@ -952,45 +823,11 @@ impl Shell {
                     self.toggle_syncplay_panel(cx);
                 }
                 self.syncplay_panel(&syncplay, ui, cx);
-                // The search button, or its empty slot while the box has the middle of the bar.
-                if button_shown {
-                    let search = motion::faded(ui, button_opacity, |ui| {
-                        bar_button(ui, ICON_SEARCH, "Search", keyboard == Some(BarItem::Search), false)
-                    });
-                    self.search_button = Some(search.rect);
-                    if search.clicked() {
-                        self.focus_search(cx);
-                    }
-                } else {
-                    let (rect, _) = ui.allocate_exact_size(vec2(BAR_BUTTON, BAR_BUTTON), Sense::hover());
-                    self.search_button = Some(rect);
-                }
             },
         );
 
-        if box_shown {
-            let resting = Rect::from_center_size(bar.center(), vec2(box_w, BAR_BUTTON));
-            // While it moves: out of the button into its place, with the button fading the other
-            // way, or back into the button (where it was last drawn) from its place.
-            let (rect, opacity) = match (self.search_motion, box_motion) {
-                (Some(motion), Some(t)) => {
-                    let to = if motion.closing {
-                        self.search_button.unwrap_or(resting)
-                    } else {
-                        resting
-                    };
-                    let opacity = if motion.closing { 1. - t } else { t };
-                    (lerp_rect(motion.from, to, t), opacity)
-                }
-                _ => (resting, 1.),
-            };
-            self.search_slot = Some(rect);
-            let moving = box_motion.is_some();
-            self.search_box(ui, rect, opacity, moving, keyboard == Some(BarItem::Search), cx);
-        } else {
-            self.search_focused = false;
-            self.search_slot = None;
-        }
+        let rect = Rect::from_center_size(bar.center(), vec2(box_w, BAR_BUTTON));
+        self.search_box(ui, rect, keyboard == Some(BarItem::Search), cx);
 
         // A click on the page takes the keyboard out of the bar, as it hides the page's cursor.
         let pressed_outside = ui.input(|input| input.pointer.any_pressed())
@@ -1203,15 +1040,7 @@ impl Shell {
     /// The search box, centred in the bar while it's open; `rect` is where it is while it opens
     /// or closes, `opacity` its fade with the button, and `clip` holds the field to that
     /// rectangle while it moves (the field can't get as narrow as the button).
-    fn search_box(
-        &mut self,
-        ui: &mut egui::Ui,
-        rect: Rect,
-        opacity: f32,
-        clip: bool,
-        highlighted: bool,
-        cx: &mut PageCx,
-    ) {
+    fn search_box(&mut self, ui: &mut egui::Ui, rect: Rect, highlighted: bool, cx: &mut PageCx) {
         // `Memory::has_focus`, not `Response::has_focus`: the latter also wants the window to be
         // focused, which an Xvfb display without a window manager never is.
         let focused = ui.ctx().memory(|memory| memory.has_focus(Id::unique(SEARCH_ID)));
@@ -1229,68 +1058,61 @@ impl Shell {
                     .max_rect(rect)
                     .layout(Layout::left_to_right(Align::Center)),
                 |ui| {
-                    if clip {
-                        // Only while it moves: otherwise the field's focus ring would be cut in
-                        // half by its own rectangle.
-                        ui.set_clip_rect(rect.intersect(ui.clip_rect()));
-                    }
                     // The box locks the focus keys: egui must neither move the keyboard on
                     // Tab nor drop it on Esc before the box reads Esc (`search_box_keys`), or
                     // the app would stop getting keys until something was clicked.
-                    motion::faded(ui, opacity, |ui| {
-                        // `main`'s field was `cleanable`: a clear button at its right end while
-                        // it had text, which leaves the text room as the prefix icon does.
-                        let clear = !self.search_text.is_empty();
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut self.search_text)
-                                .id(Id::unique(SEARCH_ID))
-                                .hint_text("Search")
-                                .desired_width(rect.width())
-                                // `main`'s 40-point field: a `text_sm` line with 10 points above
-                                // and below it, and the icon's room on the left.
-                                .margin(egui::Margin {
-                                    left: text_inset,
-                                    right: if clear { clear_inset } else { 10 },
-                                    top: 9,
-                                    bottom: 9,
-                                })
-                                .event_filter(egui::EventFilter {
-                                    tab: true,
-                                    horizontal_arrows: true,
-                                    vertical_arrows: true,
-                                    escape: true,
-                                }),
-                        );
-                        // Drawn over the field, or the field's own background would cover it.
-                        ui.painter().text(
-                            egui::pos2(rect.left() + 10. + icon_size / 2., rect.center().y),
-                            Align2::CENTER_CENTER,
-                            ICON_SEARCH.codepoint,
-                            icon.clone(),
-                            theme::tokens_of(ui).muted_foreground,
-                        );
-                        if clear {
-                            let center = egui::pos2(rect.right() - 10. - icon_size / 2., rect.center().y);
-                            // Not focusable (R6's rule for painted controls): a Tab that gave egui
-                            // the keyboard would take the box's keys. Its AccessKit name says what
-                            // it does.
-                            let hit = Rect::from_center_size(center, vec2(icon_size + 8., icon_size + 8.));
-                            let button = ui.interact(hit, Id::unique("top_bar_search_clear"), Sense::CLICK);
-                            button.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), "Clear search"));
-                            // gpui-kit's text button: the foreground at 90 % at rest, and the
-                            // foreground under the pointer.
-                            let tokens = theme::tokens_of(ui);
-                            let color = if button.hovered() {
-                                tokens.foreground
-                            } else {
-                                tokens.foreground.gamma_multiply(0.9)
-                            };
-                            ui.painter()
-                                .text(center, Align2::CENTER_CENTER, ICON_CLOSE.codepoint, icon, color);
-                            clear_clicked = button.clicked();
-                        }
-                        response
-                    })
+                    // `main`'s field was `cleanable`: a clear button at its right end while
+                    // it had text, which leaves the text room as the prefix icon does.
+                    let clear = !self.search_text.is_empty();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.search_text)
+                            .id(Id::unique(SEARCH_ID))
+                            .hint_text("Search")
+                            .desired_width(rect.width())
+                            // `main`'s 40-point field: a `text_sm` line with 10 points above
+                            // and below it, and the icon's room on the left.
+                            .margin(egui::Margin {
+                                left: text_inset,
+                                right: if clear { clear_inset } else { 10 },
+                                top: 9,
+                                bottom: 9,
+                            })
+                            .event_filter(egui::EventFilter {
+                                tab: true,
+                                horizontal_arrows: true,
+                                vertical_arrows: true,
+                                escape: true,
+                            }),
+                    );
+                    // Drawn over the field, or the field's own background would cover it.
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 10. + icon_size / 2., rect.center().y),
+                        Align2::CENTER_CENTER,
+                        ICON_SEARCH.codepoint,
+                        icon.clone(),
+                        theme::tokens_of(ui).muted_foreground,
+                    );
+                    if clear {
+                        let center = egui::pos2(rect.right() - 10. - icon_size / 2., rect.center().y);
+                        // Not focusable (R6's rule for painted controls): a Tab that gave egui
+                        // the keyboard would take the box's keys. Its AccessKit name says what
+                        // it does.
+                        let hit = Rect::from_center_size(center, vec2(icon_size + 8., icon_size + 8.));
+                        let button = ui.interact(hit, Id::unique("top_bar_search_clear"), Sense::CLICK);
+                        button.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), "Clear search"));
+                        // gpui-kit's text button: the foreground at 90 % at rest, and the
+                        // foreground under the pointer.
+                        let tokens = theme::tokens_of(ui);
+                        let color = if button.hovered() {
+                            tokens.foreground
+                        } else {
+                            tokens.foreground.gamma_multiply(0.9)
+                        };
+                        ui.painter()
+                            .text(center, Align2::CENTER_CENTER, ICON_CLOSE.codepoint, icon, color);
+                        clear_clicked = button.clicked();
+                    }
+                    response
                 },
             )
             .inner;
@@ -1312,11 +1134,6 @@ impl Shell {
         self.search_focused = ui.ctx().memory(|memory| memory.has_focus(Id::unique(SEARCH_ID)));
         if response.changed() || clear_clicked {
             self.search_changed(cx);
-        }
-        // Closed, the box goes once it has nothing left to show, as `main`'s did on blur. A
-        // clear click is the one way to empty it without leaving it.
-        if !clear_clicked && response.lost_focus() && self.search_text.trim().is_empty() {
-            self.close_search(cx.ctx);
         }
         if highlighted && !focused {
             ring(ui, &response);
@@ -1356,7 +1173,7 @@ impl Shell {
             && matches!(entry.route, Route::Search)
         {
             self.search_text.clear();
-            self.close_search(cx.ctx);
+            self.leave_search(cx.ctx);
         } else if self.top_is_search() {
             self.focus_search(cx);
         }
@@ -1406,7 +1223,6 @@ impl Shell {
             Some(Start::Search(term)) => {
                 tracing::info!("TABBYFIN_ROUTE: typing {term:?} into the search box");
                 self.search_text = term;
-                self.search_open = true;
                 self.want_search_focus = true;
                 self.search_changed(cx);
             }
@@ -1787,11 +1603,11 @@ fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
 mod tests {
     use jellyfin::{GroupInfo, GroupState, PlayQueue, QueueItem};
 
-    use egui::{Event, Key, Modifiers, RawInput, Rect, pos2};
+    use egui::{Event, Key, Modifiers, RawInput};
 
     use super::{
-        BarItem, Highlight, MenuEntry, SearchMotion, bar_items, bar_step, highlight_step, lerp_rect, move_target,
-        resolve_highlight, syncplay_entries, take_horizontal_keys,
+        BarItem, Highlight, MenuEntry, bar_items, bar_step, highlight_step, move_target, resolve_highlight,
+        syncplay_entries, take_horizontal_keys,
     };
 
     #[test]
@@ -1823,38 +1639,6 @@ mod tests {
         let hole = [BarItem::Search, BarItem::Account];
         assert_eq!(bar_step(&hole, Some(BarItem::Settings), 0), Some(BarItem::Account));
         assert_eq!(bar_step(&[], Some(BarItem::Back), 0), None);
-    }
-
-    #[test]
-    fn the_search_box_moves_out_of_the_button_into_its_place() {
-        // `main`'s numbers at 1280 wide: the button on the right, the box's place in the middle.
-        let button = Rect::from_min_size(pos2(1048., 16.), egui::vec2(40., 40.));
-        let place = Rect::from_min_size(pos2(440., 16.), egui::vec2(400., 40.));
-        assert_eq!(lerp_rect(button, place, 0.), button);
-        assert_eq!(lerp_rect(button, place, 1.), place);
-        // Halfway it is halfway between them, and as tall as either.
-        let half = lerp_rect(button, place, 0.5);
-        assert_eq!(half.left(), 744.);
-        assert_eq!(half.width(), 220.);
-        assert_eq!(half.height(), 40.);
-    }
-
-    #[test]
-    fn the_search_motion_eases_out_and_ends_after_its_time() {
-        let motion = SearchMotion {
-            closing: false,
-            started: 10.,
-            from: Rect::from_min_size(pos2(0., 0.), egui::vec2(40., 40.)),
-        };
-        assert_eq!(motion.progress(10.), 0.);
-        // A clock that went back leaves it at the start rather than behind it.
-        assert_eq!(motion.progress(9.9), 0.);
-        assert_eq!(motion.progress(10. + crate::motion::ENTER), 1.);
-        assert_eq!(motion.progress(100.), 1.);
-        // `main`'s `ease_out_quint`: nearly all the way there when half the time is up.
-        let half = motion.progress(10. + crate::motion::ENTER / 2.);
-        assert!(half > 0.95, "{half}");
-        assert!(half < 1.);
     }
 
     fn group(id: &str) -> GroupInfo {

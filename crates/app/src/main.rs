@@ -131,6 +131,9 @@ fn main() {
         // (Windows, checked before the window exists); a saved spot is used otherwise.
         centered: launch.is_none(),
         wgpu_options: wgpu_options(),
+        // The mascot's meshes are tessellated by lyon, not epaint, so nothing feathers their
+        // edges; multisampling smooths them.
+        multisampling: 4,
         ..Default::default()
     };
     let placement = window::Placement::new(launch);
