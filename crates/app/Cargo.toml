@@ -62,6 +62,10 @@ ash = "0.38"
 # awaited on the app's runtime, never on the UI thread.
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 
+[features]
+# Compiles a disposable mockup file into the UI tests (`src/ui_tests/mod.rs`).
+mockup = []
+
 [dev-dependencies]
 # The UI tests (`src/ui_tests/`): egui driven headless through AccessKit, no GPU and no
 # snapshots. `wiremock` serves the fixtures the pages read, as `crates/jellyfin/tests/http.rs`

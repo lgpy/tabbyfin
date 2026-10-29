@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Render the UI mockups (`crates/app/src/ui_tests/mockups.rs`) and open them as an HTML gallery.
+"""Render a disposable UI mockup file and open the results as an HTML gallery.
 
-    python3 -I .agents/skills/ui-mockup/render.py [filter] [--no-open]
+    python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> [--no-open]
 
-`filter` picks mockup tests by name (default: all `mockup_*`). Output goes to
+The file lives outside the repo (see `template.rs`); it is compiled into the app's UI tests under
+the `mockup` feature and its `mockup_*` tests run. Output goes to
 `target/mockups/`: one PNG per mockup plus `index.html`, newest first. The gallery lists every
 PNG there, so earlier renders stay for comparison; delete the folder to start clean.
 """
@@ -23,9 +24,11 @@ out = root / "target" / "mockups"
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(args) != 1 or not Path(args[0]).is_file():
+        sys.exit(__doc__)
     out.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, TABBYFIN_MOCKUP_DIR=str(out))
-    cmd = ["cargo", "test", "-p", "tabbyfin", args[0] if args else "mockup_", "--", "--ignored"]
+    env = dict(os.environ, TABBYFIN_MOCKUP_DIR=str(out), TABBYFIN_MOCKUP_SRC=str(Path(args[0]).resolve()))
+    cmd = ["cargo", "test", "-p", "tabbyfin", "--features", "mockup", "ui_tests::scratch"]
     started = time.time()
     if subprocess.run(cmd, cwd=root, env=env).returncode != 0:
         sys.exit("mockup render failed")
