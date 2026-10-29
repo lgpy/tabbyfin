@@ -12,8 +12,8 @@
 //! `views/add_to_playlist.rs`, `views/edit_playlist.rs` and `confirm_delete` in `views/item.rs`.
 
 use egui::{
-    Align2, Atom, Button, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, RichText, Sense, Stroke,
-    StrokeKind, TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
+    Align2, Button, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind,
+    TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
 };
 use egui_material_icons::icons::{ICON_ADD, ICON_CHECK, ICON_PLAYLIST_PLAY};
 use jellyfin::ItemsQuery;
@@ -22,9 +22,9 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 use crate::nav::NavRequest;
 use crate::task::Task;
 use crate::theme;
-use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::PageCx;
+use crate::widgets::popup::{self, Entry};
 use crate::widgets::text::Load;
 
 /// How wide the dialogs are, as `main`'s were (420 points).
@@ -175,9 +175,9 @@ impl AddToPlaylist {
                     self.scroll_to_highlight = true;
                 }
 
-                // Up and Down move the highlight; the field has nothing to move to on one line, and
-                // its own focus filter keeps egui from moving focus with them (`TextEdit` locks the
-                // vertical arrows).
+                // Up and Down move the highlight, wrapping round as a menu's does; the field has
+                // nothing to move to on one line, and its own focus filter keeps egui from moving
+                // focus with them (`TextEdit` locks the vertical arrows).
                 let rows = self.rows();
                 self.highlighted = self.highlighted.min(rows.len().saturating_sub(1));
                 let (up, down) = ui.input_mut(|input| {
@@ -187,12 +187,9 @@ impl AddToPlaylist {
                     )
                 });
                 if !rows.is_empty() && !self.busy {
-                    if down {
-                        self.highlighted = (self.highlighted + 1).min(rows.len() - 1);
-                        self.scroll_to_highlight = true;
-                    }
-                    if up {
-                        self.highlighted = self.highlighted.saturating_sub(1);
+                    if up || down {
+                        let step = if down { 1 } else { -1 };
+                        self.highlighted = popup::step(Some(self.highlighted), step, rows.len()).unwrap_or(0);
                         self.scroll_to_highlight = true;
                     }
                     if enter {
@@ -243,10 +240,16 @@ impl AddToPlaylist {
                 );
             }
             Load::Loaded(_) => {
+                let pointer_moved = ui.input(|input| input.pointer.delta() != Vec2::ZERO);
                 for (index, row) in rows.iter().enumerate() {
                     let highlighted = index == self.highlighted;
-                    let response = row_line(ui, row, highlighted);
+                    let response = popup::row(ui, &entry(row), true, highlighted);
                     *measured = response.rect.height();
+                    // The pointer takes the highlight, as it does in a menu, so Enter picks the
+                    // row under it.
+                    if response.hovered() && pointer_moved {
+                        self.highlighted = index;
+                    }
                     if highlighted && std::mem::take(&mut self.scroll_to_highlight) {
                         response.scroll_to_me(Some(egui::Align::Center));
                     }
@@ -625,30 +628,19 @@ fn rows(playlists: &[BaseItemDto], typed: &str) -> Vec<Row> {
     rows
 }
 
-/// One line of the playlist list: the icon, the name, and the entry count at the right end.
-fn row_line(ui: &mut Ui, row: &Row, highlighted: bool) -> Response {
-    let (icon, name, detail) = match row.playlist_id {
-        Some(_) => (
-            ICON_PLAYLIST_PLAY,
-            row.name.clone(),
-            row.entries.map(entry_count).unwrap_or_default(),
-        ),
-        None => (ICON_ADD, format!("New playlist “{}”", row.name), String::new()),
-    };
-    let tokens = theme::tokens_of(ui);
-    let weak = tokens.muted_foreground;
-    let atoms = (
-        icon.rich_text().size(text::BASE).color(weak),
-        RichText::new(format!(" {name}")).font(text::font(ui, "base")),
-        Atom::grow(),
-        RichText::new(detail).font(text::font(ui, "sm")).color(weak),
-    );
-    let width = ui.available_width();
-    let button = Button::new(atoms)
-        .sense(Sense::CLICK)
-        .truncate()
-        .min_size(vec2(width, 0.));
-    ui.add(theme::selected(ui, highlighted, button))
+/// One line of the playlist list, as a menu's row: the icon, the name, and the entry count at
+/// the right end.
+fn entry(row: &Row) -> Entry<'static> {
+    match row.playlist_id {
+        Some(_) => {
+            let entry = Entry::new(row.name.clone()).icon(ICON_PLAYLIST_PLAY);
+            match row.entries {
+                Some(count) => entry.detail(entry_count(count)),
+                None => entry,
+            }
+        }
+        None => Entry::new(format!("New playlist “{}”", row.name)).icon(ICON_ADD),
+    }
 }
 
 /// The sharing switch: a tick box and its label, with the keyboard's ring on it while the

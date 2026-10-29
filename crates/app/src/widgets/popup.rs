@@ -17,7 +17,9 @@
 //! page went, its card scrolled away) is closed by egui at the end of the pass.
 //!
 //! The rows are painted rather than egui buttons, so none of them takes egui's focus (the menu
-//! reads its keys itself), and each tells AccessKit what it is.
+//! reads its keys itself), and each tells AccessKit what it is. Lists that aren't menus (a
+//! dialog's playlists, the player's tracks) draw the same rows with [`row`] and move their
+//! highlight with [`step`], so they look and move like a menu.
 
 use std::borrow::Cow;
 
@@ -67,6 +69,7 @@ pub struct Entry<'a> {
     icon: Option<MaterialIcon>,
     tint: Option<Color32>,
     checked: Option<bool>,
+    ticked: Option<bool>,
     toggled: Option<bool>,
     detail: Option<Cow<'a, str>>,
     danger: bool,
@@ -80,6 +83,7 @@ impl<'a> Entry<'a> {
             icon: None,
             tint: None,
             checked: None,
+            ticked: None,
             toggled: None,
             detail: None,
             danger: false,
@@ -102,6 +106,12 @@ impl<'a> Entry<'a> {
     /// One of a set of choices, with a check before the chosen one: a version, an account.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = Some(checked);
+        self
+    }
+
+    /// One of any number ticked at once, with a check while it's ticked: a genre to filter by.
+    pub fn ticked(mut self, ticked: bool) -> Self {
+        self.ticked = Some(ticked);
         self
     }
 
@@ -130,7 +140,11 @@ impl<'a> Entry<'a> {
     }
 
     fn has_slot(&self) -> bool {
-        self.icon.is_some() || self.checked.is_some()
+        self.icon.is_some() || self.checked.is_some() || self.ticked.is_some()
+    }
+
+    fn has_check(&self) -> bool {
+        self.checked == Some(true) || self.ticked == Some(true)
     }
 }
 
@@ -329,7 +343,7 @@ impl PopupMenu {
                         if entry.separated && index > 0 {
                             separator(ui);
                         }
-                        let height = ROW_H.max(text::font(ui, "sm").size + 20.);
+                        let height = row_height(ui);
                         let (rect, response) = ui.allocate_exact_size(vec2(inner, height), Sense::CLICK);
                         if response.hovered() {
                             hovered = Some(index);
@@ -343,7 +357,7 @@ impl PopupMenu {
                             ui.scroll_to_rect(rect, None);
                         }
                         paint_row(ui, rect, entry, slot, highlighted);
-                        response.widget_info(|| row_info(entry));
+                        response.widget_info(|| row_info(entry, true));
                         if response.clicked() {
                             out.chosen = Some(index);
                         }
@@ -375,9 +389,31 @@ fn reset(ctx: &egui::Context, id: Id, opened: Opened) {
     ctx.data_mut(|data| data.insert_temp(state_id(id), state));
 }
 
+/// One of a menu's rows in a list of the caller's own, `ui`'s width, filled while `highlighted`
+/// or under the pointer. It takes no focus: the list reads its keys itself. `slot` keeps the
+/// icon's room on a row without one, as a menu does once any of its rows has one.
+pub fn row(ui: &mut Ui, entry: &Entry, slot: bool, highlighted: bool) -> Response {
+    let height = row_height(ui);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::CLICK);
+    paint_row(
+        ui,
+        rect,
+        entry,
+        slot || entry.has_slot(),
+        highlighted || response.hovered(),
+    );
+    response.widget_info(|| row_info(entry, false));
+    response
+}
+
+/// A row's height, taller with larger text.
+pub fn row_height(ui: &Ui) -> f32 {
+    ROW_H.max(text::font(ui, "sm").size + 20.)
+}
+
 /// Up and Down wrap round. In a menu opened with a click, Down starts at the top and Up at the
 /// bottom.
-fn step(current: Option<usize>, step: i32, len: usize) -> Option<usize> {
+pub fn step(current: Option<usize>, step: i32, len: usize) -> Option<usize> {
     if len == 0 {
         return None;
     }
@@ -419,7 +455,7 @@ fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlighted: bool) 
 
     let mut x = rect.left() + ROW_INSET;
     if slot {
-        let icon = if entry.checked == Some(true) {
+        let icon = if entry.has_check() {
             Some(ICON_CHECK)
         } else {
             entry.icon
@@ -462,17 +498,23 @@ fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlighted: bool) 
     painter.galley(pos2(x, rect.center().y - galley.size().y / 2.), galley, color);
 }
 
-/// What a row is to AccessKit. Its name has the detail too: two accounts with the same name on
-/// different servers differ only there.
-fn row_info(entry: &Entry) -> WidgetInfo {
+/// What a row is to AccessKit: a menu item in a menu, a radio button, check box or button in a
+/// list of its own. Its name has the detail too: two accounts with the same name on different
+/// servers differ only there.
+fn row_info(entry: &Entry, in_menu: bool) -> WidgetInfo {
     let name = match &entry.detail {
         Some(detail) => format!("{}, {detail}", entry.label),
         None => entry.label.to_string(),
     };
-    match (entry.checked, entry.toggled) {
-        (Some(checked), _) => WidgetInfo::selected(Role::MenuItemRadio, true, checked, name),
-        (None, Some(on)) => WidgetInfo::selected(Role::MenuItemCheckBox, true, on, name),
-        (None, None) => WidgetInfo::labeled(Role::MenuItem, true, name),
+    let (radio, check_box, item) = if in_menu {
+        (Role::MenuItemRadio, Role::MenuItemCheckBox, Role::MenuItem)
+    } else {
+        (Role::RadioButton, Role::CheckBox, Role::Button)
+    };
+    match (entry.checked, entry.ticked.or(entry.toggled)) {
+        (Some(checked), _) => WidgetInfo::selected(radio, true, checked, name),
+        (None, Some(on)) => WidgetInfo::selected(check_box, true, on, name),
+        (None, None) => WidgetInfo::labeled(item, true, name),
     }
 }
 
@@ -571,6 +613,21 @@ mod tests {
         assert!(response.search);
         assert!(left.is_empty());
         assert!(!PopupMenu::is_open(&ctx, id));
+    }
+
+    #[test]
+    fn rows_outside_a_menu_say_what_they_are() {
+        use egui::accesskit::Role;
+
+        let info = |entry: &Entry| super::row_info(entry, false);
+        assert_eq!(info(&Entry::new("Drama").ticked(true)).role, Role::CheckBox);
+        assert_eq!(info(&Entry::new("Drama").ticked(true)).selected, Some(true));
+        assert_eq!(info(&Entry::new("English").checked(false)).role, Role::RadioButton);
+        assert_eq!(info(&Entry::new("Watch later")).role, Role::Button);
+        assert_eq!(
+            super::row_info(&Entry::new("Drama").ticked(false), true).role,
+            Role::MenuItemCheckBox
+        );
     }
 
     #[test]
