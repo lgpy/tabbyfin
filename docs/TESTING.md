@@ -524,3 +524,16 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - ⬜ A favorites-filtered view saved by an older build comes back as *Any progress*, and a saved multi-rating view as its first rating.
 - ⬜ Home's *Latest* title opens the library sorted by *Date added* (descending) for movies, shows and any other library, and opening the library from *My Media* keeps the remembered sort.
 - ⬜ Excluding on a big library (10,000 items, `dev/fake-library.py`): the id listing's time, the letter bar and scrolling with exclusions on, and on 10.11.
+
+## 37. The sign-in mascot
+
+**egui**, against the 12.2 dev server on the hidden display, from an empty config dir (a fresh `device_id`, dark and light), with `TABBYFIN_KEYS` typing the address, `dev` and a wrong password; a screenshot every half second.
+
+✅ The form is one bordered panel under a 160-point mascot whose shadow falls on its top edge, in dark and light. Each step's title says what to do: *Connect to your server* (with the minimum Jellyfin version under it), *Choose an account* with saved accounts, *Sign in to {server}* (with "Jellyfin {version} at {host}" and *Change*), *Approve this sign-in* for Quick Connect. *Back to your account* sits under the panel.
+
+✅ The mascot looks at the caret while the address and the username are typed, down and to the left at an empty field, moving right as the text grows; it shuts its eyes as soon as the password field has the keyboard; the wrong password brings the confused face and question mark, eyes still shut while the password keeps the keyboard. `ui_tests/login.rs` checks the gaze and the shut eyes headless, and `widgets/mascot.rs` the gaze's limits and the lids.
+
+✅ The form follows the focused widget's id, not `Response::has_focus`: egui's `has_focus` also asks for the window to have the OS's focus, which the hidden display never gives, so the mascot didn't react there at first.
+
+- ⬜ **With a mouse and a real keyboard**: *Show password* opening its eyes to read along, then shutting them again; the Quick Connect step looking at the code; the saved-accounts step; the tall form (150 % text, 800×500) with the bigger mascot above it.
+- ⬜ With the **animations setting off**: the eyes jump to their target and shut at once, and nothing repaints while idle.

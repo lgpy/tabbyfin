@@ -6,7 +6,9 @@
 //!
 //! It has three faces, each from its own drawing. A loader shows the cute or the evil one (eyes
 //! cut flat by slanted brows, an "ω" mouth), picked at random when it appears. Empty pages show
-//! the confused one, scratching its head under a question mark.
+//! the confused one, scratching its head under a question mark. The sign-in form's mascot
+//! ([`watching`]) also looks at what's being typed, shuts its eyes for a password, and wears the
+//! confused face over an error.
 //!
 //! Blinks and flicks come from a hash of the time slot rather than stored state: nothing about the
 //! animation is kept per mascot, and two of them never blink or flick in lockstep.
@@ -239,6 +241,73 @@ impl Face {
 /// The size a page draws the mascot at in its loader and over an empty state, as on `main`.
 pub const PAGE: f32 = 96.;
 
+/// How far the eyes move toward what the mascot looks at, in drawing units: under an eye's
+/// radius, so they stay well inside the head. The mouth and cheeks follow half as far, which
+/// reads as the face turning rather than the eyes sliding.
+const LOOK: [f32; 2] = [80., 60.];
+/// Seconds the eyes take to glide to a new target, or to shut.
+const GLANCE: f32 = 0.18;
+
+/// What the sign-in form's mascot does, from what's happening in the form.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Watch {
+    /// The point on screen it looks toward (the caret of the field being typed in), or `None`
+    /// to look ahead.
+    pub look_at: Option<Pos2>,
+    /// Its eyes shut, so it doesn't watch a password being typed.
+    pub eyes_shut: bool,
+    /// The confused face, while the form shows an error.
+    pub puzzled: bool,
+}
+
+/// The mascot in `rect`, doing what `watch` says. Its eyes glide to a new target and shut over
+/// a moment, or jump there with animations off. Painted rather than allocated, so the form can
+/// lay itself out first and the mascot follows this frame's caret.
+pub fn watching(ui: &Ui, rect: Rect, watch: Watch) {
+    let face = if watch.puzzled { Face::Confused } else { Face::Cute };
+    let still = ui.style().animation_time == 0.;
+    let mut pose = if still {
+        Pose::rest()
+    } else {
+        Pose::at(ui.input(|input| input.time))
+    };
+    let glance = if still { 0. } else { GLANCE };
+    let ctx = ui.ctx();
+    let id = ui.scope_id().with("mascot-watch");
+    let target = gaze(rect, watch.look_at);
+    pose.look = [
+        ctx.animate_value_with_time(id.with("x"), target[0], glance),
+        ctx.animate_value_with_time(id.with("y"), target[1], glance),
+    ];
+    let shut = ctx.animate_bool_with_time(id.with("shut"), watch.eyes_shut, glance);
+    pose.eyes = shut_by(pose.eyes, shut);
+    paint(ui, Shapes::get(), &pose, face, rect);
+    if !still {
+        ctx.request_repaint_after(ANIMATION_STEP);
+    }
+}
+
+/// The face's offset toward `at` for a mascot drawn in `rect`. It saturates softly: a target
+/// half the mascot's width away gets half of [`LOOK`], one far off nearly all of it.
+fn gaze(rect: Rect, at: Option<Pos2>) -> [f32; 2] {
+    let Some(at) = at else {
+        return [0., 0.];
+    };
+    let d = at - rect.center();
+    let reach = rect.width() * 0.5;
+    [LOOK[0] * d.x / (d.x.abs() + reach), LOOK[1] * d.y / (d.y.abs() + reach)]
+}
+
+/// `eyes` with the lids `shut` of the way down (0 to 1), the way a blink closes them: squashed
+/// to a third, then closed.
+fn shut_by(eyes: Eyes, shut: f32) -> Eyes {
+    match eyes {
+        _ if shut >= 1. => Eyes::Closed,
+        Eyes::Closed => Eyes::Closed,
+        Eyes::Open(open) => Eyes::Open(open.min(1. - 0.65 * shut)),
+    }
+}
+
 /// The mascot as a loader in a `size` square, animating unless animations are off. Its face is
 /// picked when it appears and kept while it's showing.
 pub fn loader(ui: &mut Ui, size: f32) {
@@ -323,6 +392,8 @@ struct Pose {
     float: f32,
     /// The phase the tentacles wave at, or `None` to hold them in their rest pose.
     phase: Option<f32>,
+    /// Where the eyes look, as an offset in drawing units (see [`LOOK`]).
+    look: [f32; 2],
 }
 
 impl Pose {
@@ -335,6 +406,7 @@ impl Pose {
             low: 0.5,
             float: 0.,
             phase: None,
+            look: [0., 0.],
         }
     }
 
@@ -357,6 +429,7 @@ impl Pose {
             low: (bob + BOB) / (2. * BOB),
             float: QUESTION_FLOAT * (phase - 1.6).sin(),
             phase: Some(phase),
+            look: [0., 0.],
         }
     }
 
@@ -715,6 +788,10 @@ struct Drawn<'a> {
 fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
     let body = pose.body();
     let bob = Affine::translate([0., pose.bob]);
+    // The eyes move with the look and the rest of the face half as far.
+    let [x, y] = pose.look;
+    let eyes_pose = Affine::translate([x, y]).then(body);
+    let face_pose = Affine::translate([x / 2., y / 2.]).then(body);
     let wave = pose.phase.unwrap_or(0.);
     let mut parts = Vec::with_capacity(17);
 
@@ -763,7 +840,7 @@ fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
     for cheek in &shapes.cheeks {
         parts.push(Drawn {
             part: cheek,
-            pose: body,
+            pose: face_pose,
             motion: 0.,
             tint: None,
         });
@@ -776,7 +853,7 @@ fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
     match pose.eyes {
         Eyes::Closed => parts.push(Drawn {
             part: &shapes.lids,
-            pose: body,
+            pose: eyes_pose,
             motion: 0.,
             tint: None,
         }),
@@ -787,7 +864,7 @@ fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
                     // The lid comes down: the eye squashes towards its own middle in the drawings'
                     // space, and then the head's bob and scale move it, as `main`'s clamping of the
                     // evil eye's points did.
-                    pose: Affine::scale(center, [1., open]).then(body),
+                    pose: Affine::scale(center, [1., open]).then(eyes_pose),
                     motion: 0.,
                     tint: None,
                 });
@@ -800,7 +877,7 @@ fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
         } else {
             &shapes.mouth
         },
-        pose: body,
+        pose: face_pose,
         motion: 0.,
         tint: None,
     });
@@ -1046,10 +1123,31 @@ mod tests {
     use egui::{Context, RawInput, UiBuilder, pos2};
 
     use super::{
-        BROWS, EVIL_ODDS, EYES, Eyes, FLICK_EVERY, Face, HEAD, Mesh, Pose, SCRATCHING, SCRATCHING_FRONT, Shapes,
+        BROWS, EVIL_ODDS, EYES, Eyes, FLICK_EVERY, Face, HEAD, LOOK, Mesh, Pose, SCRATCHING, SCRATCHING_FRONT, Shapes,
         TENTACLE_WIDTH, TENTACLES, Tentacle, Vertex, WHITE_UV, below_brow, blink, cubic, flick_shift, flicks, frame,
-        kept_face_with, noise, smooth, wave_shift,
+        gaze, kept_face_with, noise, shut_by, smooth, wave_shift,
     };
+
+    /// The eyes turn toward what's looked at, never past [`LOOK`], and ahead when nothing is.
+    #[test]
+    fn the_gaze_follows_its_target_within_the_head() {
+        let rect = egui::Rect::from_center_size(pos2(500., 300.), egui::Vec2::splat(160.));
+        assert_eq!(gaze(rect, None), [0., 0.]);
+        let [x, y] = gaze(rect, Some(pos2(420., 460.)));
+        assert!(x < 0. && y > 0., "a field below and to the left: {x}, {y}");
+        let [x, y] = gaze(rect, Some(pos2(1e6, -1e6)));
+        assert!(x > 0. && x < LOOK[0] && y < 0. && y > -LOOK[1], "far off: {x}, {y}");
+    }
+
+    /// Shutting the eyes goes the way a blink does, and a blink under way keeps its lower lid.
+    #[test]
+    fn eyes_shut_the_way_they_blink() {
+        assert_eq!(shut_by(Eyes::Open(1.), 0.), Eyes::Open(1.));
+        assert_eq!(shut_by(Eyes::Open(1.), 0.5), Eyes::Open(1. - 0.65 * 0.5));
+        assert_eq!(shut_by(Eyes::Open(0.2), 0.5), Eyes::Open(0.2));
+        assert_eq!(shut_by(Eyes::Open(1.), 1.), Eyes::Closed);
+        assert_eq!(shut_by(Eyes::Closed, 0.), Eyes::Closed);
+    }
 
     #[test]
     fn noise_stays_in_range() {
@@ -1245,6 +1343,7 @@ mod tests {
             low: 0.5,
             float: 0.,
             phase: None,
+            look: [0., 0.],
         };
         let parts = frame(shapes, &pose, Face::Cute);
         let (center, r) = EYES[0];
