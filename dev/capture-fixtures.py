@@ -74,6 +74,7 @@ def main():
     save("media_segments", get(f"/MediaSegments/{episodes['Items'][0]['Id']}"))
     save("syncplay_list", get("/SyncPlay/List"))
     save("utc_time", get("/GetUtcTime"))
+    save("cultures", get("/Localization/Cultures"))
 
     profile = {
         "MaxStreamingBitrate": 2_000_000,

@@ -142,6 +142,16 @@ impl FixtureServer {
         )
     }
 
+    /// Answers `route` with `body`: a response the fixtures only hold inside another one, such
+    /// as an episode out of a season's list.
+    pub fn json_value(&self, http_method: &'static str, route: &'static str, body: &serde_json::Value) {
+        self.respond(
+            http_method,
+            route,
+            ResponseTemplate::new(200).set_body_string(body.to_string()),
+        )
+    }
+
     /// Answers `route` with fixture `name`, only for a request whose JSON body has `body`'s
     /// fields: a sign-in mock that only matches the credentials the test typed.
     pub fn json_for_body(&self, http_method: &'static str, route: &'static str, name: &str, body: serde_json::Value) {
@@ -171,6 +181,17 @@ impl FixtureServer {
                 .mount(&mock)
                 .await;
         });
+    }
+
+    /// The JSON bodies of every `http_method` request to `route` served, in order.
+    pub fn bodies(&self, http_method: &str, route: &str) -> Vec<serde_json::Value> {
+        let mock = self.mock.clone();
+        let requests = block_on(async move { mock.received_requests().await.unwrap_or_default() });
+        requests
+            .iter()
+            .filter(|request| request.method.as_str() == http_method && request.url.path() == route)
+            .map(|request| serde_json::from_slice(&request.body).expect("a JSON body"))
+            .collect()
     }
 
     /// The `sortBy` of every `/Items` request served, in order.
