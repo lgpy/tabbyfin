@@ -6,14 +6,15 @@
 //! backdrop blocks the page, and egui keeps the keyboard while one is open (`keys.rs`): each
 //! dialog reads the keys it uses itself. That's also why its buttons and rows take no focus
 //! (`Sense::CLICK`): Space and Enter belong to the dialog, not to whatever egui would focus.
+//! The frame they share (backdrop, width, title, buttons) is `widgets::dialog`.
 //!
 //! Requests run as `Task`s and report as toasts; a change that worked bumps
 //! `services.user_data`, so the pages showing playlists load again. `main` had
 //! `views/add_to_playlist.rs`, `views/edit_playlist.rs` and `confirm_delete` in `views/item.rs`.
 
 use egui::{
-    Align2, Button, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind,
-    TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
+    Align2, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, TextEdit,
+    TextStyle, Ui, Vec2, pos2, vec2,
 };
 use egui_material_icons::icons::{ICON_ADD, ICON_CHECK, ICON_PLAYLIST_PLAY};
 use jellyfin::ItemsQuery;
@@ -24,6 +25,7 @@ use crate::task::Task;
 use crate::theme;
 use crate::toasts::Toast;
 use crate::views::PageCx;
+use crate::widgets::dialog;
 use crate::widgets::popup::{self, Entry};
 use crate::widgets::text::Load;
 
@@ -149,14 +151,12 @@ impl AddToPlaylist {
 
         let ctx = cx.ctx;
         let mut chosen = None;
-        // `main`'s dialogs dimmed the page under them with the theme's `overlay`.
-        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
-        let modal = egui::Modal::new(egui::Id::unique("add_to_playlist"))
-            .backdrop_color(backdrop)
-            .show(ctx, |ui| {
-                ui.set_width(WIDTH);
-                ui.heading("Add to playlist");
-                ui.add_space(8.);
+        let modal = dialog::show(
+            ctx,
+            egui::Id::unique("add_to_playlist"),
+            WIDTH,
+            "Add to playlist",
+            |ui| {
                 // Enter picks the highlighted line, as `main`'s dialog's Confirm did; the field
                 // never sees it, or it would only give up the focus.
                 let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
@@ -198,7 +198,8 @@ impl AddToPlaylist {
                 }
                 ui.add_space(4.);
                 self.list(ui, &rows, &mut chosen);
-            });
+            },
+        );
 
         if let Some(index) = chosen {
             self.choose(index, cx);
@@ -379,64 +380,50 @@ impl EditPlaylist {
 
         let ctx = cx.ctx;
         let mut save = false;
-        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
-        let modal = egui::Modal::new(egui::Id::unique("edit_playlist"))
-            .backdrop_color(backdrop)
-            .show(ctx, |ui| {
-                ui.set_width(WIDTH);
-                ui.heading("Edit playlist");
-                ui.add_space(8.);
-                // Enter saves, as `main`'s dialog's Confirm did; the field never sees it.
-                let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-                if !self.busy {
-                    self.keys(ui);
-                }
+        let modal = dialog::show(ctx, egui::Id::unique("edit_playlist"), WIDTH, "Edit playlist", |ui| {
+            // Enter saves, as `main`'s dialog's Confirm did; the field never sees it.
+            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+            if !self.busy {
+                self.keys(ui);
+            }
 
-                muted(ui, "Name");
-                let field = ui.add(
-                    TextEdit::singleline(&mut self.typed)
-                        .interactive(!self.busy)
-                        .desired_width(f32::INFINITY),
-                );
-                if std::mem::take(&mut self.focus) {
-                    field.request_focus();
-                }
-                // A click into the name takes the keyboard back from the sharing switch.
-                if field.gained_focus() {
-                    self.field = Field::Name;
-                }
-                ui.add_space(8.);
-                match &self.public {
-                    Load::Loading => muted(ui, "Checking who can see it…"),
-                    Load::Failed(message) => muted(ui, message.clone()),
-                    Load::Loaded(public) => {
-                        let on = *public;
-                        if switch_row(ui, on, self.field == Field::Sharing).clicked() && !self.busy {
-                            self.field = Field::Sharing;
-                            let_keyboard_go(ui);
-                            self.public = Load::Loaded(!on);
-                        }
+            muted(ui, "Name");
+            let field = ui.add(
+                TextEdit::singleline(&mut self.typed)
+                    .interactive(!self.busy)
+                    .desired_width(f32::INFINITY),
+            );
+            if std::mem::take(&mut self.focus) {
+                field.request_focus();
+            }
+            // A click into the name takes the keyboard back from the sharing switch.
+            if field.gained_focus() {
+                self.field = Field::Name;
+            }
+            ui.add_space(8.);
+            match &self.public {
+                Load::Loading => muted(ui, "Checking who can see it…"),
+                Load::Failed(message) => muted(ui, message.clone()),
+                Load::Loaded(public) => {
+                    let on = *public;
+                    if switch_row(ui, on, self.field == Field::Sharing).clicked() && !self.busy {
+                        self.field = Field::Sharing;
+                        let_keyboard_go(ui);
+                        self.public = Load::Loaded(!on);
                     }
                 }
-                ui.add_space(12.);
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let can_save = !self.busy && !self.typed.trim().is_empty();
-                        if ui
-                            .add_enabled(can_save, Button::new("Save").sense(Sense::CLICK))
-                            .clicked()
-                        {
-                            save = true;
-                        }
-                        if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
-                            ui.close();
-                        }
-                    });
-                });
-                if enter && !self.busy && !self.typed.trim().is_empty() {
+            }
+            dialog::buttons(ui, |ui| {
+                let can_save = !self.busy && !self.typed.trim().is_empty();
+                if dialog::button(ui, "Save", can_save).clicked() {
                     save = true;
                 }
+                dialog::cancel(ui);
             });
+            if enter && !self.busy && !self.typed.trim().is_empty() {
+                save = true;
+            }
+        });
 
         if save {
             self.save(cx);
@@ -552,33 +539,20 @@ impl DeletePlaylist {
 
         let ctx = cx.ctx;
         let mut delete = false;
-        let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
-        let modal = egui::Modal::new(egui::Id::unique("delete_playlist"))
-            .backdrop_color(backdrop)
-            .show(ctx, |ui| {
-                ui.set_width(WIDTH);
-                ui.heading(format!("Delete “{}”?", self.name));
-                ui.add_space(8.);
-                ui.label(DELETE_PLAYLIST_NOTE);
-                ui.add_space(12.);
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_enabled(!self.busy, Button::new("Delete").sense(Sense::CLICK))
-                            .clicked()
-                        {
-                            delete = true;
-                        }
-                        if ui.add(Button::new("Cancel").sense(Sense::CLICK)).clicked() {
-                            ui.close();
-                        }
-                    });
-                });
-                // Enter is the confirmation's Delete, as the alert's OK was on `main`.
-                if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) && !self.busy {
+        let title = format!("Delete “{}”?", self.name);
+        let modal = dialog::show(ctx, egui::Id::unique("delete_playlist"), WIDTH, &title, |ui| {
+            ui.label(DELETE_PLAYLIST_NOTE);
+            dialog::buttons(ui, |ui| {
+                if dialog::button(ui, "Delete", !self.busy).clicked() {
                     delete = true;
                 }
+                dialog::cancel(ui);
             });
+            // Enter is the confirmation's Delete, as the alert's OK was on `main`.
+            if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) && !self.busy {
+                delete = true;
+            }
+        });
 
         if delete {
             self.delete(cx);

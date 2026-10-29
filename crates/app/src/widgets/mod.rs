@@ -1,6 +1,8 @@
 //! Widgets the pages share.
 
+pub mod button;
 pub mod card;
+pub mod dialog;
 pub mod image;
 pub mod mascot;
 pub mod menu;

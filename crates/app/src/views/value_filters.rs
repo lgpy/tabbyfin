@@ -7,10 +7,11 @@
 //! next. It's an `egui::Modal`, so its backdrop blocks the page, and egui keeps the keyboard
 //! while it's open (`keys.rs`): the dialog reads the keys it uses itself, as U8's do.
 
-use egui::{Align, Id, Key, Layout, Modifiers, RichText, ScrollArea, Vec2};
+use egui::{Align, Id, Key, Modifiers, RichText, ScrollArea, Vec2};
 
 use crate::config::LibraryView;
 use crate::views::library::{FilterValues, ValueKind};
+use crate::widgets::dialog;
 use crate::widgets::popup::{self, Entry};
 
 /// How tall the list may get before it scrolls, as on `main`.
@@ -58,10 +59,8 @@ impl ValueFilters {
         self.highlighted = self.highlighted.min(entries.len() - 1);
         let mut close = false;
         let mut ticked: Option<(ValueKind, String)> = None;
-        let modal = egui::Modal::new(Id::unique("value_filters")).show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.heading("Genres, tags and ratings");
-            ui.add_space(8.);
+        let title = "Genres, tags and ratings";
+        let modal = dialog::show(ctx, Id::unique("value_filters"), WIDTH, title, |ui| {
             // egui keeps the keyboard while the modal is open (`keys.rs`), so the dialog reads
             // the keys it uses itself.
             let (up, down, space, enter) = ui.input_mut(|input| {
@@ -124,9 +123,8 @@ impl ValueFilters {
                 }
             });
 
-            ui.add_space(8.);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Done").clicked() {
+            dialog::buttons(ui, |ui| {
+                if dialog::button(ui, "Done", true).clicked() {
                     close = true;
                 }
             });
