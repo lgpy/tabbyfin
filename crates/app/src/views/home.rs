@@ -201,7 +201,20 @@ fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
                 shelves.push(favorites());
                 shelves.extend(data.latest.iter().enumerate().map(|(i, (view, items))| {
                     let mut shelf = row(ShelfId::Latest(i), format!("Latest {}", view.name), items, false);
-                    shelf.link = Some(Route::for_item(view));
+                    shelf.link = Some(match Route::for_item(view) {
+                        Route::Library {
+                            id,
+                            name,
+                            collection_type,
+                            ..
+                        } => Route::Library {
+                            id,
+                            name,
+                            collection_type,
+                            newest_first: true,
+                        },
+                        route => route,
+                    });
                     shelf
                 }));
             }

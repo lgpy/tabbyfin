@@ -55,6 +55,8 @@ pub struct ItemsQuery {
     pub fields: Vec<ItemField>,
     pub start_index: Option<u32>,
     pub limit: Option<u32>,
+    /// Leaves the images and the user's watch data out of the answer, for listing ids.
+    pub lean: bool,
 }
 
 impl ItemsQuery {
@@ -83,6 +85,9 @@ impl ItemsQuery {
             .list("fields", &wire_list(&self.fields, ItemField::as_str))
             .opt("startIndex", self.start_index)
             .opt("limit", self.limit);
+        if self.lean {
+            q.push("enableImages", false).push("enableUserData", false);
+        }
         // Names may contain commas, so these lists are the ones the server splits on `|`.
         for (key, values) in [
             ("genres", &self.genres),

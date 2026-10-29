@@ -1,244 +1,451 @@
-//! The library's genres, tags and ratings dialog: tick any number of each. Items with any of
-//! the ticked genres show, and likewise for tags and ratings; different kinds must all match.
-//! Each tick reloads the grid behind the dialog. Up and Down move (wrapping round, as in a menu),
-//! Space ticks, Enter or Esc closes. The values are menu rows (`widgets::popup::row`).
+//! The library's genres and tags popover, hung from the toolbar's button: a search box, the
+//! filters chosen so far, and every genre and tag as a pill. A click on a pill includes its value,
+//! a second excludes it, a third lets it go. Items with any included genre show (and likewise for
+//! tags; the two kinds must both match), and items with any excluded value are left out, whatever
+//! else they have. Each click reloads the grid behind the popover.
 //!
-//! The page keeps the dialog it opened and draws it every frame; [`Outcome`] says what to do
-//! next. It's an `egui::Modal`, so its backdrop blocks the page, and egui keeps the keyboard
-//! while it's open (`keys.rs`): the dialog reads the keys it uses itself, as U8's do.
+//! The search box takes the keyboard while the popover is open: typing narrows the pills, Up
+//! and Down move a highlight through them, Enter cycles the highlighted one, and Esc or a click
+//! outside closes it (egui's popup). The popover's open state is egui's popup memory, so
+//! `keys::egui_wants_keys` leaves the keyboard to it.
 
-use egui::{Align, Id, Key, Modifiers, RichText, ScrollArea, Vec2};
+use egui::accesskit::Role;
+use egui::{
+    Align, Align2, CornerRadius, Id, Key, Modifiers, RectAlign, Response, RichText, ScrollArea, Sense, Stroke,
+    StrokeKind, TextEdit, Ui, WidgetInfo, pos2, vec2,
+};
+use egui_material_icons::icons::{ICON_CHECK, ICON_REMOVE, ICON_SEARCH};
 
 use crate::config::LibraryView;
+use crate::theme::{self, text};
 use crate::views::library::{FilterValues, ValueKind};
-use crate::widgets::dialog;
-use crate::widgets::popup::{self, Entry};
+use crate::widgets::popup;
 
-/// How tall the list may get before it scrolls, as on `main`.
-const LIST_MAX_H: f32 = 420.;
-/// The dialog's width, as on `main`.
+/// The popover's width.
 const WIDTH: f32 = 380.;
+/// How tall the pills may get before they scroll.
+const LIST_MAX_H: f32 = 320.;
+/// A pill's room left and right of its contents, and between its icon and label.
+const PILL_INSET: f32 = 10.;
+const ICON_GAP: f32 = 4.;
+/// The room between pills, across and down.
+const PILL_GAP: f32 = 6.;
+/// The room around the popover's contents, inside the panel's own padding.
+const PAD: f32 = 8.;
 
-/// The dialog's own state: which value the keyboard is on.
+/// Where a value stands in the view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    Off,
+    Included,
+    Excluded,
+}
+
+/// The popover's own state, kept by the page between frames.
 #[derive(Default)]
 pub struct ValueFilters {
-    /// Index into the values; the titles aren't selectable.
-    highlighted: usize,
-    /// Up or Down moved the highlight: bring it back on screen.
+    /// What the search box holds; cleared each time the popover opens.
+    search: String,
+    /// Index into the pills the search leaves, for the keyboard.
+    highlighted: Option<usize>,
+    /// Put the keyboard in the search box on the next frame.
+    focus_search: bool,
+    /// Up or Down moved the highlight: bring it on screen.
     scroll_to_highlight: bool,
 }
 
-/// What the dialog wants the page to do after drawing it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    /// Still open, nothing changed.
-    Stay,
-    /// A value was ticked or unticked: the grid behind reloads.
-    Changed,
-    /// Enter, Esc, a click outside or *Done*: the page drops the dialog.
-    Close,
-}
-
 impl ValueFilters {
-    /// A dialog with its highlight on the first value.
-    pub fn new() -> Self {
-        Self {
-            highlighted: 0,
-            scroll_to_highlight: true,
+    fn id() -> Id {
+        Id::unique("library_value_filters")
+    }
+
+    pub fn is_open(ctx: &egui::Context) -> bool {
+        egui::Popup::is_id_open(ctx, Self::id())
+    }
+
+    /// Opens the popover with an empty search box holding the keyboard.
+    pub fn open(&mut self, ctx: &egui::Context) {
+        *self = Self {
+            focus_search: true,
+            ..Default::default()
+        };
+        egui::Popup::open_id(ctx, Self::id());
+        ctx.request_repaint();
+    }
+
+    /// What clicking its button does.
+    pub fn toggle(&mut self, ctx: &egui::Context) {
+        if Self::is_open(ctx) {
+            egui::Popup::close_id(ctx, Self::id());
+        } else {
+            self.open(ctx);
         }
     }
 
-    /// Draws the dialog over everything. `values` is what the library offers and `view` what's
-    /// ticked now; a tick changes `view` and asks for [`Outcome::Changed`].
-    pub fn show(&mut self, ctx: &egui::Context, values: &FilterValues, view: &mut LibraryView) -> Outcome {
-        let lines = lines(values);
-        let entries = entries(&lines);
-        if entries.is_empty() {
-            return Outcome::Close;
+    /// Draws the popover hung from `anchor` while it's open. `values` is what the library offers
+    /// and `view` what's chosen; a click changes `view` and returns true.
+    pub fn show(&mut self, anchor: &Response, values: &FilterValues, view: &mut LibraryView) -> bool {
+        let mut cycled: Option<(ValueKind, String)> = None;
+        popup::panel(Self::id(), anchor, RectAlign::BOTTOM_START, WIDTH, |ui| {
+            // A frame, not a `horizontal`, which would cap the scroll area's room at one row.
+            egui::Frame::new()
+                .inner_margin(egui::Margin::same(PAD as i8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    cycled = self.contents(ui, values, view);
+                });
+        });
+        let Some((kind, value)) = cycled else {
+            return false;
+        };
+        cycle(view, kind, &value);
+        // The chosen pills above the list come and go: the panel sizes itself again next frame.
+        anchor.ctx.request_repaint();
+        true
+    }
+
+    fn contents(&mut self, ui: &mut Ui, values: &FilterValues, view: &LibraryView) -> Option<(ValueKind, String)> {
+        let mut cycled = None;
+        let shown = matching(values, &self.search);
+
+        // The search box keeps the keyboard; the popover reads the keys it moves the pills with.
+        let (up, down, enter) = ui.input_mut(|input| {
+            (
+                input.consume_key(Modifiers::NONE, Key::ArrowUp),
+                input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                input.consume_key(Modifiers::NONE, Key::Enter),
+            )
+        });
+        if up || down {
+            self.highlighted = popup::step(self.highlighted, if down { 1 } else { -1 }, shown.len());
+            self.scroll_to_highlight = true;
         }
-        self.highlighted = self.highlighted.min(entries.len() - 1);
-        let mut close = false;
-        let mut ticked: Option<(ValueKind, String)> = None;
-        let title = "Genres, tags and ratings";
-        let modal = dialog::show(ctx, Id::unique("value_filters"), WIDTH, title, |ui| {
-            // egui keeps the keyboard while the modal is open (`keys.rs`), so the dialog reads
-            // the keys it uses itself.
-            let (up, down, space, enter) = ui.input_mut(|input| {
-                (
-                    input.consume_key(Modifiers::NONE, Key::ArrowUp),
-                    input.consume_key(Modifiers::NONE, Key::ArrowDown),
-                    input.consume_key(Modifiers::NONE, Key::Space),
-                    input.consume_key(Modifiers::NONE, Key::Enter),
-                )
-            });
-            if enter {
-                close = true;
-            }
-            if up || down {
-                let step = if down { 1 } else { -1 };
-                self.highlighted = popup::step(Some(self.highlighted), step, entries.len()).unwrap_or(0);
-                self.scroll_to_highlight = true;
-            }
-            if space && let Some((kind, value)) = entries.get(self.highlighted) {
-                ticked = Some((*kind, value.clone()));
-            }
+        if enter && let Some((kind, value)) = self.highlighted.and_then(|index| shown.get(index)) {
+            cycled = Some((*kind, value.clone()));
+        }
 
-            ScrollArea::vertical().max_height(LIST_MAX_H).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.;
-                let pointer_moved = ui.input(|input| input.pointer.delta() != Vec2::ZERO);
-                let mut index = 0;
-                let mut first = true;
-                for line in &lines {
-                    match line {
-                        Line::Title(title) => {
-                            if !first {
-                                ui.add_space(12.);
-                            }
-                            ui.label(
-                                RichText::new(*title)
-                                    .font(crate::theme::text::font(ui, "sm"))
-                                    .color(crate::theme::tokens_of(ui).muted_foreground),
-                            );
-                            ui.add_space(4.);
-                        }
-                        Line::Value(kind, value) => {
-                            let checked = chosen(view, *kind).iter().any(|chosen| chosen == value);
-                            let entry = Entry::new(value.as_str()).ticked(checked);
-                            let row = popup::row(ui, &entry, true, index == self.highlighted);
-                            if row.clicked() {
-                                ticked = Some((*kind, value.clone()));
-                            }
-                            // The pointer takes the highlight, as it does in a menu.
-                            if row.hovered() && pointer_moved {
-                                self.highlighted = index;
-                            }
-                            if index == self.highlighted && self.scroll_to_highlight {
-                                row.scroll_to_me(Some(Align::Center));
-                                self.scroll_to_highlight = false;
-                            }
-                            index += 1;
-                        }
+        if self.search_box(ui) {
+            // A different search: the highlight starts over.
+            self.highlighted = None;
+        }
+        self.highlighted = self.highlighted.filter(|&index| index < shown.len());
+
+        let chosen = chosen(view);
+        if !chosen.is_empty() {
+            ui.add_space(10.);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
+                for (kind, value, mark) in &chosen {
+                    if pill(ui, value, *mark, false).clicked() {
+                        cycled = Some((*kind, value.clone()));
                     }
-                    first = false;
                 }
             });
+        }
 
-            dialog::buttons(ui, |ui| {
-                if dialog::button(ui, "Done", true).clicked() {
-                    close = true;
+        ui.add_space(12.);
+        ScrollArea::vertical().max_height(LIST_MAX_H).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.;
+            if shown.is_empty() {
+                let message = format!("No genres or tags match \u{201c}{}\u{201d}.", self.search.trim());
+                ui.label(RichText::new(message).font(text::font(ui, "sm")).color(muted(ui)));
+                return;
+            }
+            let mut index = 0;
+            for (kind, title) in [(ValueKind::Genre, "Genres"), (ValueKind::Tag, "Tags")] {
+                let group: Vec<&String> = shown
+                    .iter()
+                    .filter(|(k, _)| *k == kind)
+                    .map(|(_, value)| value)
+                    .collect();
+                if group.is_empty() {
+                    continue;
                 }
-            });
+                if index > 0 {
+                    ui.add_space(12.);
+                }
+                ui.label(RichText::new(title).font(text::font(ui, "sm")).color(muted(ui)));
+                ui.add_space(6.);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
+                    for value in group {
+                        let highlighted = self.highlighted == Some(index);
+                        let response = pill(ui, value, mark(view, kind, value), highlighted);
+                        if response.clicked() {
+                            cycled = Some((kind, value.clone()));
+                            self.highlighted = Some(index);
+                        }
+                        if highlighted && self.scroll_to_highlight {
+                            response.scroll_to_me(Some(Align::Center));
+                            self.scroll_to_highlight = false;
+                        }
+                        index += 1;
+                    }
+                });
+            }
         });
 
-        let changed = ticked.is_some();
-        if let Some((kind, value)) = ticked {
-            let chosen = chosen_mut(view, kind);
-            match chosen.iter().position(|chosen| *chosen == value) {
-                Some(index) => {
-                    chosen.remove(index);
-                }
-                None => chosen.push(value),
-            }
+        ui.add_space(10.);
+        ui.label(
+            RichText::new("Click once to include, twice to exclude.")
+                .font(text::font(ui, "xs"))
+                .color(muted(ui)),
+        );
+        cycled
+    }
+
+    /// The search box, with its icon inside the left padding as the top bar's and Settings'
+    /// have it. Returns whether its text changed.
+    fn search_box(&mut self, ui: &mut Ui) -> bool {
+        let icon = text::icon(ui, ICON_SEARCH.font_family());
+        let inset = (10. + icon.size + 6.).round() as i8;
+        let response = ui.add(
+            TextEdit::singleline(&mut self.search)
+                .id(Self::id().with("search"))
+                .hint_text("Find a genre or tag")
+                .desired_width(f32::INFINITY)
+                .margin(egui::Margin {
+                    left: inset,
+                    right: 10,
+                    top: 7,
+                    bottom: 7,
+                }),
+        );
+        if std::mem::take(&mut self.focus_search) {
+            response.request_focus();
         }
-        if changed {
-            // The tick wins over a close in the same frame, so the grid reloads before the
-            // dialog goes.
-            return Outcome::Changed;
-        }
-        if close || modal.should_close() {
-            return Outcome::Close;
-        }
-        Outcome::Stay
+        let rect = response.rect;
+        ui.painter().text(
+            pos2(rect.left() + 10. + icon.size / 2., rect.center().y),
+            Align2::CENTER_CENTER,
+            ICON_SEARCH.codepoint,
+            icon,
+            muted(ui),
+        );
+        response.changed()
     }
 }
 
-/// A line of the dialog: a group's title, or a value to tick.
-enum Line {
-    Title(&'static str),
-    Value(ValueKind, String),
-}
-
-fn lines(values: &FilterValues) -> Vec<Line> {
-    let mut lines = Vec::new();
-    for (kind, title, list) in [
-        (ValueKind::Genre, "Genres", &values.genres),
-        (ValueKind::Tag, "Tags", &values.tags),
-        (ValueKind::Rating, "Ratings", &values.ratings),
-    ] {
-        if !list.is_empty() {
-            lines.push(Line::Title(title));
-            lines.extend(list.iter().map(|value| Line::Value(kind, value.clone())));
-        }
+/// What the toolbar's button says: what's chosen, or what it's for.
+pub fn summary(view: &LibraryView) -> String {
+    let chosen = chosen(view);
+    match chosen.as_slice() {
+        [] => "Genres and tags".to_owned(),
+        [one] => describe(one),
+        [one, two] => format!("{}, {}", describe(one), describe(two)),
+        many => format!("{} filters", many.len()),
     }
-    lines
 }
 
-/// The values only, which the keyboard moves through.
-fn entries(lines: &[Line]) -> Vec<(ValueKind, String)> {
-    lines
-        .iter()
-        .filter_map(|line| match line {
-            Line::Value(kind, value) => Some((*kind, value.clone())),
-            Line::Title(_) => None,
-        })
+fn describe((_, value, mark): &(ValueKind, String, Mark)) -> String {
+    match mark {
+        Mark::Excluded => format!("Not {value}"),
+        _ => value.clone(),
+    }
+}
+
+/// The chosen values, included before excluded, genres before tags within each.
+fn chosen(view: &LibraryView) -> Vec<(ValueKind, String, Mark)> {
+    let lists = [
+        (ValueKind::Genre, &view.genres, Mark::Included),
+        (ValueKind::Tag, &view.tags, Mark::Included),
+        (ValueKind::Genre, &view.exclude_genres, Mark::Excluded),
+        (ValueKind::Tag, &view.exclude_tags, Mark::Excluded),
+    ];
+    lists
+        .into_iter()
+        .flat_map(|(kind, list, mark)| list.iter().map(move |value| (kind, value.clone(), mark)))
         .collect()
 }
 
-fn chosen(view: &LibraryView, kind: ValueKind) -> &[String] {
+/// The genres, then the tags, whose names contain `search` (ignoring case).
+fn matching(values: &FilterValues, search: &str) -> Vec<(ValueKind, String)> {
+    let search = search.trim().to_lowercase();
+    [(ValueKind::Genre, &values.genres), (ValueKind::Tag, &values.tags)]
+        .into_iter()
+        .flat_map(|(kind, list)| list.iter().map(move |value| (kind, value)))
+        .filter(|(_, value)| value.to_lowercase().contains(&search))
+        .map(|(kind, value)| (kind, value.clone()))
+        .collect()
+}
+
+fn lists(view: &LibraryView, kind: ValueKind) -> (&Vec<String>, &Vec<String>) {
     match kind {
-        ValueKind::Genre => &view.genres,
-        ValueKind::Tag => &view.tags,
-        ValueKind::Rating => &view.ratings,
+        ValueKind::Genre => (&view.genres, &view.exclude_genres),
+        ValueKind::Tag => (&view.tags, &view.exclude_tags),
     }
 }
 
-fn chosen_mut(view: &mut LibraryView, kind: ValueKind) -> &mut Vec<String> {
+fn lists_mut(view: &mut LibraryView, kind: ValueKind) -> (&mut Vec<String>, &mut Vec<String>) {
     match kind {
-        ValueKind::Genre => &mut view.genres,
-        ValueKind::Tag => &mut view.tags,
-        ValueKind::Rating => &mut view.ratings,
+        ValueKind::Genre => (&mut view.genres, &mut view.exclude_genres),
+        ValueKind::Tag => (&mut view.tags, &mut view.exclude_tags),
     }
+}
+
+pub fn mark(view: &LibraryView, kind: ValueKind, value: &str) -> Mark {
+    let (included, excluded) = lists(view, kind);
+    if included.iter().any(|v| v == value) {
+        Mark::Included
+    } else if excluded.iter().any(|v| v == value) {
+        Mark::Excluded
+    } else {
+        Mark::Off
+    }
+}
+
+/// Off, included, excluded, and off again.
+pub fn cycle(view: &mut LibraryView, kind: ValueKind, value: &str) {
+    let now = mark(view, kind, value);
+    let (included, excluded) = lists_mut(view, kind);
+    included.retain(|v| v != value);
+    excluded.retain(|v| v != value);
+    match now {
+        Mark::Off => included.push(value.to_owned()),
+        Mark::Included => excluded.push(value.to_owned()),
+        Mark::Excluded => {}
+    }
+}
+
+fn muted(ui: &Ui) -> egui::Color32 {
+    theme::tokens_of(ui).muted_foreground
+}
+
+/// A value as a pill: outlined while off, filled in the primary colour with a tick while
+/// included, and in the danger colour with a minus while excluded. `highlighted` rings it for
+/// the keyboard.
+fn pill(ui: &mut Ui, label: &str, mark: Mark, highlighted: bool) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let font = text::font(ui, "sm");
+    let icon = match mark {
+        Mark::Off => None,
+        Mark::Included => Some(ICON_CHECK),
+        Mark::Excluded => Some(ICON_REMOVE),
+    };
+    let icon_font = text::icon(ui, ICON_CHECK.font_family());
+    let icon_w = icon.map_or(0., |_| icon_font.size + ICON_GAP);
+    let painter = ui.painter().clone();
+    let galley = painter.layout_no_wrap(label.to_owned(), font.clone(), tokens.foreground);
+    let height = (font.size + 14.).max(28.);
+    let max_w = ui.available_width().max(height);
+    let width = (galley.size().x + icon_w + 2. * PILL_INSET).min(max_w);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::CLICK);
+    response.widget_info(|| {
+        let state = match mark {
+            Mark::Off => "",
+            Mark::Included => ", included",
+            Mark::Excluded => ", excluded",
+        };
+        WidgetInfo::labeled(Role::Button, true, format!("{label}{state}"))
+    });
+
+    let hovered = response.hovered();
+    let (fill, stroke, color) = match mark {
+        Mark::Off => (
+            if hovered {
+                tokens.accent
+            } else {
+                egui::Color32::TRANSPARENT
+            },
+            Stroke::new(1., tokens.border),
+            tokens.foreground,
+        ),
+        Mark::Included => (
+            if hovered { tokens.primary_hover } else { tokens.primary },
+            Stroke::NONE,
+            tokens.primary_foreground,
+        ),
+        Mark::Excluded => (
+            tokens.danger.gamma_multiply(if hovered { 0.26 } else { 0.16 }),
+            Stroke::new(1., tokens.danger.gamma_multiply(0.7)),
+            tokens.danger,
+        ),
+    };
+    let radius = CornerRadius::same((height / 2.) as u8);
+    painter.rect(rect, radius, fill, stroke, StrokeKind::Inside);
+    if highlighted {
+        painter.rect_stroke(
+            rect.expand(2.),
+            CornerRadius::same((height / 2. + 2.) as u8),
+            Stroke::new(1.5, tokens.foreground),
+            StrokeKind::Outside,
+        );
+    }
+
+    let mut x = rect.left() + PILL_INSET;
+    if let Some(icon) = icon {
+        painter.text(
+            pos2(x + icon_font.size / 2., rect.center().y),
+            Align2::CENTER_CENTER,
+            icon.codepoint,
+            icon_font.clone(),
+            color,
+        );
+        x += icon_w;
+    }
+    // A name too long for the popover ends in an ellipsis.
+    let mut job = egui::text::LayoutJob::single_section(
+        label.to_owned(),
+        egui::TextFormat {
+            font_id: font,
+            color,
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width((rect.right() - PILL_INSET - x).max(0.));
+    let galley = painter.layout_job(job);
+    painter.galley(pos2(x, rect.center().y - galley.size().y / 2.), galley, color);
+    response
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Line, entries, lines};
+    use super::{Mark, cycle, mark, matching, summary};
+    use crate::config::LibraryView;
     use crate::views::library::{FilterValues, ValueKind};
 
-    fn values() -> FilterValues {
-        FilterValues {
-            genres: vec!["Comedy".to_owned(), "Drama".to_owned()],
-            tags: Vec::new(),
-            ratings: vec!["PG".to_owned()],
-        }
+    #[test]
+    fn a_pill_cycles_through_include_exclude_and_off() {
+        let mut view = LibraryView::default();
+        assert_eq!(mark(&view, ValueKind::Genre, "Drama"), Mark::Off);
+        cycle(&mut view, ValueKind::Genre, "Drama");
+        assert_eq!(view.genres, ["Drama"]);
+        cycle(&mut view, ValueKind::Genre, "Drama");
+        assert!(view.genres.is_empty());
+        assert_eq!(view.exclude_genres, ["Drama"]);
+        cycle(&mut view, ValueKind::Genre, "Drama");
+        assert_eq!(mark(&view, ValueKind::Genre, "Drama"), Mark::Off);
+        assert!(view.exclude_genres.is_empty());
+        // The kinds are apart: a tag of the same name is its own.
+        cycle(&mut view, ValueKind::Tag, "Drama");
+        assert_eq!(mark(&view, ValueKind::Genre, "Drama"), Mark::Off);
+        assert_eq!(mark(&view, ValueKind::Tag, "Drama"), Mark::Included);
     }
 
     #[test]
-    fn the_dialog_lists_each_kind_with_values_and_skips_empty_ones() {
-        let lines = lines(&values());
-        let titles: Vec<&str> = lines
-            .iter()
-            .filter_map(|line| match line {
-                Line::Title(title) => Some(*title),
-                Line::Value(..) => None,
-            })
-            .collect();
-        // No tags in the library, so no Tags title.
-        assert_eq!(titles, ["Genres", "Ratings"]);
+    fn the_search_narrows_both_kinds() {
+        let values = FilterValues {
+            genres: vec!["Comedy".to_owned(), "Documentary".to_owned()],
+            tags: vec!["test pattern".to_owned(), "multi-version".to_owned()],
+            ratings: Vec::new(),
+        };
+        assert_eq!(matching(&values, "").len(), 4);
         assert_eq!(
-            entries(&lines),
-            [
-                (ValueKind::Genre, "Comedy".to_owned()),
-                (ValueKind::Genre, "Drama".to_owned()),
-                (ValueKind::Rating, "PG".to_owned()),
-            ]
+            matching(&values, " PATT "),
+            [(ValueKind::Tag, "test pattern".to_owned())]
         );
+        assert_eq!(matching(&values, "do"), [(ValueKind::Genre, "Documentary".to_owned())]);
+        assert!(matching(&values, "western").is_empty());
     }
 
     #[test]
-    fn no_values_means_no_lines() {
-        let lines = lines(&FilterValues::default());
-        assert!(lines.is_empty());
-        assert!(entries(&lines).is_empty());
+    fn the_button_says_whats_chosen() {
+        let mut view = LibraryView::default();
+        assert_eq!(summary(&view), "Genres and tags");
+        view.genres.push("Comedy".to_owned());
+        view.exclude_tags.push("4K".to_owned());
+        assert_eq!(summary(&view), "Comedy, Not 4K");
+        view.tags.push("Kids".to_owned());
+        assert_eq!(summary(&view), "3 filters");
     }
 }

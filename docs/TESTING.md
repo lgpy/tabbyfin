@@ -515,3 +515,12 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 - ⬜ **With a mouse**: the clear button's click (it clears the text, closes the results and keeps the keyboard in the box), its hover colour, and the pointer on Home's arrows after the padding moved into the row.
 - ⬜ The grid, shelves and card lines at **other text sizes and zoom** (the room under a card and the shelf's title row are fixed, the lines scale).
+
+## Library toolbar, rating and genre/tag popover
+
+✅ Against 12.2 (`TABBYFIN_ROUTE=library:<id>:movies`, `TABBYFIN_KEYS` into the popover): the toolbar draws *Any progress*, *Any rating*, *Genres and tags*, *Any year*, *Any resolution* on the left and *Sort*, its picker, the order arrow and the count on the right; the popover opens under its button with the search box focused, genres and tags as pills; Enter on the highlighted pill includes it (✓, white) and again excludes it (−, red; the button reads "Comedy, Not Science Fiction" and the grid drops that movie), the chosen pills sit under the search box. `mise run ci` is green (the UI tests follow the new toolbar order).
+
+- ⬜ **With a mouse**: clicking pills (include, exclude, off), clicking outside and Esc closing the popover, the search box's typing narrowing the pills, and the Clear filters button.
+- ⬜ A favorites-filtered view saved by an older build comes back as *Any progress*, and a saved multi-rating view as its first rating.
+- ⬜ Home's *Latest* title opens the library sorted by *Date added* (descending) for movies, shows and any other library, and opening the library from *My Media* keeps the remembered sort.
+- ⬜ Excluding on a big library (10,000 items, `dev/fake-library.py`): the id listing's time, the letter bar and scrolling with exclusions on, and on 10.11.
