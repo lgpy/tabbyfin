@@ -5,7 +5,7 @@
 
 use egui::Key;
 use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 
 use crate::config::{Config, ThemePreference};
 use crate::nav::Route;
@@ -88,17 +88,20 @@ fn the_menu_opens_a_server_section() {
     serve_the_users_settings(&server);
     let mut ui = settings_harness(&server);
     ui.step();
-    assert!(ui.harness().query_by_label("This device").is_some());
-    assert!(ui.harness().query_by_label("Theme").is_some());
+    assert!(ui.harness().query_all_by_label("This device").next().is_some());
+    assert!(ui.harness().query_all_by_label("Theme").next().is_some());
 
     ui.harness().get_by_label("Languages").click();
     ui.step_until("the user's languages", |harness| {
-        harness.query_by_label("Audio language").is_some()
+        harness.query_all_by_label("Audio language").next().is_some()
     });
-    assert!(ui.harness().query_by_label("Theme").is_none(), "Appearance is closed");
+    assert!(
+        ui.harness().query_all_by_label("Theme").next().is_none(),
+        "Appearance is closed"
+    );
     // The menu's heading and the banner both name the server.
     assert!(ui.harness().query_all_by_label("Jellyfin server").count() >= 1);
-    assert!(ui.harness().query_by_label("Subtitle mode").is_some());
+    assert!(ui.harness().query_all_by_label("Subtitle mode").next().is_some());
 }
 
 /// A search shows the rows it finds from both sides, and the server's subtitle mode, stepped
@@ -116,19 +119,19 @@ fn a_searched_server_setting_saves_to_the_server() {
     ui.step();
     ui.harness().get_by_role(Role::TextInput).type_text("subtitle");
     ui.step_until("the server's subtitle rows", |harness| {
-        harness.query_by_label("Subtitle mode").is_some()
+        harness.query_all_by_label("Subtitle mode").next().is_some()
     });
     assert!(
-        ui.harness().query_by_label("Colour").is_some(),
+        ui.harness().query_all_by_label("Colour").next().is_some(),
         "the device's subtitles"
     );
-    assert!(ui.harness().query_by_label("Theme").is_none(), "not a match");
+    assert!(ui.harness().query_all_by_label("Theme").next().is_none(), "not a match");
 
     // Esc in the box clears the search, and the open section is back.
     ui.press(Key::Escape);
     ui.step();
-    assert!(ui.harness().query_by_label("Theme").is_some());
-    assert!(ui.harness().query_by_label("Subtitle mode").is_none());
+    assert!(ui.harness().query_all_by_label("Theme").next().is_some());
+    assert!(ui.harness().query_all_by_label("Subtitle mode").next().is_none());
 
     // Only the subtitle mode's description says "smart", so it's the one control after the
     // menu. It's on Default; Right steps it to Smart.
@@ -136,7 +139,7 @@ fn a_searched_server_setting_saves_to_the_server() {
     ui.step();
     ui.harness().get_by_role(Role::TextInput).type_text("smart");
     ui.step_until("the subtitle mode", |harness| {
-        harness.query_by_label("Subtitle mode").is_some()
+        harness.query_all_by_label("Subtitle mode").next().is_some()
     });
     tab_from_the_search_box(&mut ui);
     ui.press(Key::ArrowRight);
@@ -151,4 +154,27 @@ fn a_searched_server_setting_saves_to_the_server() {
     assert_eq!(saved[0]["HidePlayedInLatest"], true);
     // The device's config is untouched.
     assert_eq!(Config::load().theme, ThemePreference::Dark);
+}
+
+/// Enter on a picker egui's focus is on opens its list from the keyboard, on its first row; Down
+/// and Enter pick from it as from any menu, and the choice saves as a step would.
+#[test]
+fn enter_opens_a_pickers_list_and_the_keyboard_picks_from_it() {
+    let _config = ConfigDir::new("settings-picker-list");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    ui.press(Key::Tab);
+    tab_from_the_search_box(&mut ui);
+    ui.press(Key::Enter);
+    ui.step();
+    // The list is the theme's choices, the default (dark) checked.
+    let dark = ui.harness().get_by_label("Dark");
+    assert_eq!(dark.accesskit_node().role(), Role::MenuItemRadio);
+    ui.press(Key::ArrowDown);
+    ui.press(Key::Enter);
+    ui.step();
+    assert_eq!(Config::load().theme, ThemePreference::Light);
+    assert!(ui.harness().query_by_label("Dark").is_none(), "the list closed");
 }

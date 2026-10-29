@@ -29,8 +29,8 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_DOWNWARD, ICON_ARROW_DROP_DOWN, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_DELETE, ICON_EDIT, ICON_MORE_HORIZ,
-    ICON_MOVIE, ICON_OPEN_IN_NEW, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY, ICON_SHUFFLE,
+    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_DELETE, ICON_EDIT, ICON_MORE_HORIZ, ICON_MOVIE,
+    ICON_OPEN_IN_NEW, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY, ICON_SHUFFLE,
 };
 use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ItemField, ItemSortBy, MediaSourceInfo};
 use jellyfin::{Client, ItemsQuery, Ticks};
@@ -57,7 +57,7 @@ use crate::widgets::text::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, runtime_text,
     timestamp,
 };
-use crate::widgets::{card, image, mascot, shelf, state};
+use crate::widgets::{card, image, mascot, select, shelf, state};
 
 /// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
 pub fn shuffle<T>(items: &mut [T]) {
@@ -1772,40 +1772,13 @@ fn pickers_row(ui: &mut Ui, data: &ItemData, selected: Option<Position>, version
     Rect::from_min_max(top, pos2(ui.max_rect().right(), ui.cursor().min.y))
 }
 
-/// The version select: a bordered box with the version's name and a caret. Clicking it opens
+/// The version select (`widgets::select`), with the cursor's ring round it. Clicking it opens
 /// the list of versions; the keyboard changes the choice on the cursor instead.
 fn picker(ui: &mut Ui, name: &str, ringed: bool) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(PICKER_W, PICKER_H), Sense::CLICK);
-    let tokens = theme::tokens_of(ui);
-    let fill = if response.hovered() {
-        tokens.accent
-    } else {
-        tokens.button
-    };
-    let stroke = Stroke::new(1., tokens.input);
-    ui.painter()
-        .rect(rect, CornerRadius::same(6), fill, stroke, StrokeKind::Inside);
-    let caret = 16.;
-    let text = rect.shrink2(vec2(10., 2.));
-    let mut child = ui.new_child(
-        UiBuilder::new()
-            .max_rect(Rect::from_min_size(
-                text.min,
-                vec2((text.width() - caret).max(0.), text.height()),
-            ))
-            .layout(Layout::left_to_right(Align::Center)),
-    );
-    child.add(Label::new(RichText::new(name).size(PICKER_H * 0.5)).truncate());
-    ui.painter().text(
-        pos2(rect.right() - 10. - caret / 2., rect.center().y),
-        Align2::CENTER_CENTER,
-        ICON_ARROW_DROP_DOWN.codepoint,
-        FontId::new(caret, ICON_ARROW_DROP_DOWN.font_family()),
-        theme::tokens_of(ui).muted_foreground,
-    );
+    let response = select::button(ui, vec2(PICKER_W, PICKER_H), name, "Version", false);
     if ringed {
         ui.painter().rect_stroke(
-            rect.expand(ACTION_RING_GAP),
+            response.rect.expand(ACTION_RING_GAP),
             CornerRadius::same(8),
             Stroke::new(2., theme::tokens_of(ui).foreground),
             StrokeKind::Outside,

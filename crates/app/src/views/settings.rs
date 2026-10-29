@@ -40,6 +40,7 @@ use crate::theme;
 use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::{Page, PageCx};
+use crate::widgets::select;
 
 /// The theme choices, in the order the picker lists them.
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -1435,10 +1436,10 @@ fn toggle(ui: &mut Ui, search: &Search, row: Row, value: bool) -> Option<bool> {
     flipped
 }
 
-/// The pickers' keys: egui's focus (Tab) puts it on a `ComboBox`, and Left and Right there step
-/// its value to the previous or next choice, stopping at the ends — a 0.37 combo box's list is
-/// pointer-only, so this is how a picker is changed without a mouse. The step comes back from
-/// [`Pickers::choose`] as the same value a click gives, so the page saves it the same way.
+/// The pickers' keys: egui's focus (Tab) puts it on a select (`widgets::select`), and Left and
+/// Right there step its value to the previous or next choice, stopping at the ends, without
+/// opening its list (Enter or Space does that). The step comes back from [`Pickers::choose`] as
+/// the same value a pick from the list gives, so the page saves it the same way.
 #[derive(Default)]
 struct Pickers {
     /// The picker egui had the focus on at the end of the last frame, and the `Id` egui knows
@@ -1488,10 +1489,7 @@ impl Pickers {
             return None;
         }
         let index = options.iter().position(|(value, _)| *value == current);
-        let selected = index
-            .and_then(|index| options.get(index))
-            .or_else(|| options.first())
-            .map_or("", |(_, label)| label.as_ref());
+        let labels: Vec<&str> = options.iter().map(|(_, label)| label.as_ref()).collect();
         let mut picked = None;
         // Left or Right on the focused picker steps it, as picking it from the list would.
         if self.focused.is_some_and(|(focused, _)| focused == id)
@@ -1502,17 +1500,12 @@ impl Pickers {
         }
         let mut focused = None;
         self::row(ui, row, |ui| {
-            let response = egui::ComboBox::from_id_salt(id)
-                .width(PICKER_W)
-                .selected_text(selected)
-                .show_ui(ui, |ui| {
-                    for (value, label) in options {
-                        if theme::selectable_label(ui, *value == current, label.as_ref()).clicked() {
-                            picked = Some(*value);
-                        }
-                    }
-                })
-                .response;
+            // A value not among the choices (a bitrate set by hand) shows the first one.
+            let menu = ui.make_persistent_id(id);
+            let (response, chosen) = select::select(ui, menu, PICKER_W, row.label, &labels, index.unwrap_or(0), true);
+            if let Some(chosen) = chosen {
+                picked = Some(options[chosen].0);
+            }
             // egui's focus is what Tab moves. `Response::has_focus` also wants the window
             // itself to be focused, which never happened on the window-manager-less test
             // display (and adds nothing for a real keyboard: keys need the focus anyway).
