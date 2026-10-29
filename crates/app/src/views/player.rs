@@ -33,9 +33,9 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_ARROW_DROP_DOWN, ICON_CHECK, ICON_FAST_FORWARD, ICON_FAST_REWIND, ICON_FULLSCREEN,
-    ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT, ICON_SETTINGS, ICON_SKIP_NEXT,
-    ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_ARROW_BACK, ICON_FAST_FORWARD, ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE,
+    ICON_PLAY_ARROW, ICON_RESTART_ALT, ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST,
+    ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType};
@@ -50,7 +50,8 @@ use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
 use crate::widgets::mascot;
-use crate::widgets::popup::{Entry, Opened, PopupMenu};
+use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
+use crate::widgets::select;
 use crate::widgets::text::{card_text, timestamp};
 use crate::widgets::video::Video;
 
@@ -110,8 +111,7 @@ const CHAPTER_THUMB_H: f32 = 72.;
 const CHAPTERS_W: f32 = 340.;
 const CHAPTERS_MAX_H: f32 = 420.;
 const SETTINGS_W: f32 = 380.;
-/// A row of a settings tab's track list, and how many show before it scrolls.
-const TRACK_ROW_H: f32 = 28.;
+/// How many rows of a settings tab's track list show before it scrolls.
 const TRACK_ROWS: f32 = 5.;
 
 /// What the player's one prompt shows. Each kind slides in when it appears, as `main`'s ids did.
@@ -1816,49 +1816,10 @@ fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
     response
 }
 
-/// The version picker's button: a small select with the playing version's name and a caret, as
-/// `main`'s was. Drawn by the page (not an egui widget) so it can't take the keyboard.
+/// The version picker's button: the app's select (`widgets::select`), small to fit the control
+/// bar. It takes no focus: the player's keys are `keys.rs`'s.
 fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(VERSION_W, VERSION_H), Sense::CLICK);
-    // A combo box to AccessKit, as egui's own is: the name is its value, "Version" its label.
-    response.widget_info(|| {
-        let mut info = WidgetInfo::new(Role::ComboBox);
-        info.enabled = ui.is_enabled();
-        info.label = Some("Version".to_owned());
-        info.current_text_value = Some(name.to_owned());
-        info
-    });
-    let tokens = theme::tokens_of(ui);
-    let painter = ui.painter().clone();
-    let fill = if response.hovered() {
-        tokens.muted
-    } else {
-        tokens.input_background()
-    };
-    painter.rect(
-        rect,
-        CornerRadius::same(tokens.radius),
-        fill,
-        Stroke::new(1., tokens.input),
-        StrokeKind::Inside,
-    );
-    let caret = 14.;
-    let text = rect.shrink2(vec2(8., 2.));
-    let text_w = (text.width() - caret).max(0.);
-    let mut child = ui.new_child(
-        UiBuilder::new()
-            .max_rect(Rect::from_min_size(text.min, vec2(text_w, text.height())))
-            .layout(Layout::left_to_right(Align::Center)),
-    );
-    child.add(egui::Label::new(RichText::new(name).small()).truncate());
-    painter.text(
-        pos2(rect.right() - 8. - caret / 2., rect.center().y),
-        Align2::CENTER_CENTER,
-        ICON_ARROW_DROP_DOWN.codepoint,
-        FontId::new(caret, ICON_ARROW_DROP_DOWN.font_family()),
-        over_video::MUTED_FOREGROUND,
-    );
-    response.on_hover_text("Version")
+    select::button(ui, vec2(VERSION_W, VERSION_H), name, "Version", false).on_hover_text("Version")
 }
 
 /// A small heading inside a settings tab.
@@ -1911,51 +1872,17 @@ fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], sele
     let mut chosen = None;
     egui::ScrollArea::vertical()
         .id_salt(id)
-        .max_height(TRACK_ROW_H * TRACK_ROWS)
+        .max_height(popup::row_height(ui) * TRACK_ROWS)
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.;
             for choice in choices {
-                if check_row(ui, &choice.label, choice.value == selected).clicked() {
+                let entry = Entry::new(choice.label.as_str()).checked(choice.value == selected);
+                if popup::row(ui, &entry, true, false).clicked() {
                     chosen = Some(choice.value);
                 }
             }
         });
     chosen
-}
-
-/// A track row: a check in a fixed slot (so the labels line up), then the name. The row itself
-/// has no fill when it's the selected track (only the check marks it), and the accent under the
-/// pointer, as `main`'s list had it. A radio button to AccessKit, with its selected state: one
-/// track of the list plays at a time.
-fn check_row(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
-    let tokens = theme::tokens_of(ui);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), TRACK_ROW_H), Sense::CLICK);
-    response.widget_info(|| WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected, label));
-    let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(rect, CornerRadius::same(8), tokens.accent);
-    }
-    let mut check = theme::text::font(ui, "sm");
-    check.family = ICON_CHECK.font_family();
-    let slot = Rect::from_min_size(pos2(rect.left() + 8., rect.top()), vec2(16., rect.height()));
-    painter.text(
-        slot.center(),
-        Align2::CENTER_CENTER,
-        ICON_CHECK.codepoint,
-        check,
-        if selected {
-            tokens.foreground
-        } else {
-            Color32::TRANSPARENT
-        },
-    );
-    let font = theme::text::font(ui, "sm");
-    let galley = painter.layout_no_wrap(label.to_owned(), font, tokens.foreground);
-    painter.galley(
-        pos2(slot.right() + 8., rect.center().y - galley.size().y / 2.),
-        galley,
-        tokens.foreground,
-    );
-    response
 }
 
 /// The text's width at the small style's size, for laying out the top bar.
@@ -2025,9 +1952,10 @@ mod tests {
 
     use super::{
         CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, SETTINGS_W, SettingsTab,
-        VOLUME_STEP, check_row, delay_text, menu_frame, scroll_steps, settings_id, settings_tabs, sized_control,
-        time_at, toggle_menu, wheel_notches,
+        VOLUME_STEP, delay_text, menu_frame, scroll_steps, settings_id, settings_tabs, sized_control, time_at,
+        toggle_menu, wheel_notches,
     };
+    use crate::widgets::popup::{self, Entry};
 
     /// The menu's painted widgets still say what they are to assistive technology: an open
     /// settings menu's tabs and track rows expose their labels and their selected state through
@@ -2071,10 +1999,12 @@ mod tests {
                             if let Some(choice) = settings_tabs(ui, menu.tab) {
                                 menu.tab = choice;
                             }
-                            if check_row(ui, "English - AAC - Mono - Default", menu.track == 0).clicked() {
+                            let entry = Entry::new("English - AAC - Mono - Default").checked(menu.track == 0);
+                            if popup::row(ui, &entry, true, false).clicked() {
                                 menu.track = 0;
                             }
-                            if check_row(ui, "Japanese - AAC - Mono", menu.track == 1).clicked() {
+                            let entry = Entry::new("Japanese - AAC - Mono").checked(menu.track == 1);
+                            if popup::row(ui, &entry, true, false).clicked() {
                                 menu.track = 1;
                             }
                         });

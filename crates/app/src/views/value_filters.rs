@@ -1,18 +1,18 @@
 //! The library's genres, tags and ratings dialog: tick any number of each. Items with any of
 //! the ticked genres show, and likewise for tags and ratings; different kinds must all match.
-//! Each tick reloads the grid behind the dialog. Up and Down move, Space ticks, Enter or Esc
-//! closes.
+//! Each tick reloads the grid behind the dialog. Up and Down move (wrapping round, as in a menu),
+//! Space ticks, Enter or Esc closes. The values are menu rows (`widgets::popup::row`).
 //!
 //! The page keeps the dialog it opened and draws it every frame; [`Outcome`] says what to do
 //! next. It's an `egui::Modal`, so its backdrop blocks the page, and egui keeps the keyboard
 //! while it's open (`keys.rs`): the dialog reads the keys it uses itself, as U8's do.
 
-use egui::{
-    Align, Checkbox, Color32, CornerRadius, Frame, Id, Key, Layout, Margin, Modifiers, RichText, ScrollArea, Ui,
-};
+use egui::{Align, Id, Key, Modifiers, RichText, ScrollArea, Vec2};
 
 use crate::config::LibraryView;
 use crate::views::library::{FilterValues, ValueKind};
+use crate::widgets::dialog;
+use crate::widgets::popup::{self, Entry};
 
 /// How tall the list may get before it scrolls, as on `main`.
 const LIST_MAX_H: f32 = 420.;
@@ -59,10 +59,8 @@ impl ValueFilters {
         self.highlighted = self.highlighted.min(entries.len() - 1);
         let mut close = false;
         let mut ticked: Option<(ValueKind, String)> = None;
-        let modal = egui::Modal::new(Id::unique("value_filters")).show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.heading("Genres, tags and ratings");
-            ui.add_space(8.);
+        let title = "Genres, tags and ratings";
+        let modal = dialog::show(ctx, Id::unique("value_filters"), WIDTH, title, |ui| {
             // egui keeps the keyboard while the modal is open (`keys.rs`), so the dialog reads
             // the keys it uses itself.
             let (up, down, space, enter) = ui.input_mut(|input| {
@@ -78,7 +76,7 @@ impl ValueFilters {
             }
             if up || down {
                 let step = if down { 1 } else { -1 };
-                self.highlighted = (self.highlighted as isize + step).clamp(0, entries.len() as isize - 1) as usize;
+                self.highlighted = popup::step(Some(self.highlighted), step, entries.len()).unwrap_or(0);
                 self.scroll_to_highlight = true;
             }
             if space && let Some((kind, value)) = entries.get(self.highlighted) {
@@ -86,6 +84,8 @@ impl ValueFilters {
             }
 
             ScrollArea::vertical().max_height(LIST_MAX_H).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.;
+                let pointer_moved = ui.input(|input| input.pointer.delta() != Vec2::ZERO);
                 let mut index = 0;
                 let mut first = true;
                 for line in &lines {
@@ -99,15 +99,21 @@ impl ValueFilters {
                                     .font(crate::theme::text::font(ui, "sm"))
                                     .color(crate::theme::tokens_of(ui).muted_foreground),
                             );
+                            ui.add_space(4.);
                         }
                         Line::Value(kind, value) => {
                             let checked = chosen(view, *kind).iter().any(|chosen| chosen == value);
-                            let row = value_row(ui, value, checked, index == self.highlighted);
-                            if row.inner.changed() {
+                            let entry = Entry::new(value.as_str()).ticked(checked);
+                            let row = popup::row(ui, &entry, true, index == self.highlighted);
+                            if row.clicked() {
                                 ticked = Some((*kind, value.clone()));
                             }
+                            // The pointer takes the highlight, as it does in a menu.
+                            if row.hovered() && pointer_moved {
+                                self.highlighted = index;
+                            }
                             if index == self.highlighted && self.scroll_to_highlight {
-                                row.inner.scroll_to_me(Some(Align::Center));
+                                row.scroll_to_me(Some(Align::Center));
                                 self.scroll_to_highlight = false;
                             }
                             index += 1;
@@ -117,9 +123,8 @@ impl ValueFilters {
                 }
             });
 
-            ui.add_space(8.);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Done").clicked() {
+            dialog::buttons(ui, |ui| {
+                if dialog::button(ui, "Done", true).clicked() {
                     close = true;
                 }
             });
@@ -193,25 +198,6 @@ fn chosen_mut(view: &mut LibraryView, kind: ValueKind) -> &mut Vec<String> {
         ValueKind::Tag => &mut view.tags,
         ValueKind::Rating => &mut view.ratings,
     }
-}
-
-/// One value's line: a checkbox, highlighted with the accent colour while the keyboard is on
-/// it.
-fn value_row(ui: &mut Ui, value: &str, checked: bool, highlighted: bool) -> egui::InnerResponse<egui::Response> {
-    let fill = if highlighted {
-        crate::theme::tokens_of(ui).accent
-    } else {
-        Color32::TRANSPARENT
-    };
-    Frame::NONE
-        .fill(fill)
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(Margin::symmetric(6, 3))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let mut checked = checked;
-            ui.add(Checkbox::new(&mut checked, value))
-        })
 }
 
 #[cfg(test)]
