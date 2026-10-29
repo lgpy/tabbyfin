@@ -14,6 +14,8 @@ pub enum Route {
         id: String,
         name: String,
         collection_type: Option<CollectionType>,
+        /// Start sorted by date added, newest first (a *Latest* shelf's title leads here).
+        newest_first: bool,
     },
     /// A detail page: movie, series, season or episode.
     Item {
@@ -36,6 +38,7 @@ impl Route {
                 id: item.id.clone(),
                 name: item.name.clone(),
                 collection_type: item.collection_type,
+                newest_first: false,
             },
             _ => Route::Item {
                 id: item.id.clone(),

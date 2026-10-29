@@ -1,24 +1,29 @@
-//! A library's or person's items as a poster grid, with sort and filter: the toolbar's sort,
-//! filter and resolution choices, the years it can filter by, and where the jump bar's letters
-//! scroll to. Rows are virtualised (`ScrollArea::show_rows`) and pages of [`PAGE_SIZE`] are
-//! fetched as their rows scroll into view, with placeholders until they arrive.
+//! A library's or person's items as a poster grid, with sort and filter: the toolbar's filters
+//! on the left (progress, rating, genres and tags, year, resolution) and the sort on the right,
+//! the values the filters offer, and where the jump bar's letters scroll to. Rows are
+//! virtualised (`ScrollArea::show_rows`) and pages of [`PAGE_SIZE`] are fetched as their rows
+//! scroll into view, with placeholders until they arrive.
 //!
 //! - The view is remembered per library in the config ([`LibraryView`], upgraded once), and
 //!   the library's own genres, tags, ratings and years come from `/Items/Filters`; a remembered
-//!   value the library no longer has stays listed, so what's applied is still shown.
+//!   value the library no longer has stays listed, so what's applied is still shown. Opened
+//!   from Home's *Latest* shelf title, the library starts sorted by date added, newest first.
 //! - Changing the sort or filter bumps a generation: pages fetched before it are dropped.
+//! - Excluded genres and tags have no server parameter. While any are set, the page first lists
+//!   the ids of every item the other filters leave and drops those with an excluded value
+//!   ([`order`]); the grid's pages are then fetched by id from that list.
 //! - The keyboard: the toolbar row, then the grid. Enter on a picker steps it to its next
-//!   choice; on the order button it flips the order, on the filters button it opens the
-//!   dialog, and on *Clear filters* it clears them. Typing a letter while sorted by name jumps
-//!   like the letter bar (`Page::on_text`), highlighting the first item from that letter.
+//!   choice; on the order button it flips the order, on the genres and tags button it opens
+//!   the popover, and on *Clear filters* it clears them. Typing a letter while sorted by name
+//!   jumps like the letter bar (`Page::on_text`), highlighting the first item from that letter.
 //! - Watch data changing elsewhere reloads the pages already loaded, keeping the items on
 //!   screen until the new ones arrive.
 //! - A page that fails is retried when its rows leave the screen and come back, rather than
 //!   every frame while they stay there (`main` asked every frame).
 //!
-//! The dialog is `views/value_filters.rs`; the cards and the item menu are `widgets/`.
+//! The popover is `views/value_filters.rs`; the cards and the item menu are `widgets/`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use egui::{Align, Align2, CornerRadius, FontId, Layout, Response, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
 use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_FILTER_LIST};
@@ -33,7 +38,7 @@ use crate::keys::{Action, Scope};
 use crate::nav::{NavRequest, Route};
 use crate::task::Task;
 use crate::views::dialogs::AddToPlaylist;
-use crate::views::value_filters::{Outcome, ValueFilters};
+use crate::views::value_filters::{self, ValueFilters};
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::{CARD_GAP, POSTER_H, POSTER_W};
@@ -67,12 +72,11 @@ pub const SORTS: [(&str, &str, ItemSortBy, bool); 6] = [
     ("random", "Random", ItemSortBy::Random, false),
 ];
 
-/// Filter choices: config key, label, server filter.
-pub const FILTERS: [(&str, &str, Option<ItemFilter>); 5] = [
-    ("all", "All", None),
+/// Progress choices: config key, label, server filter.
+pub const FILTERS: [(&str, &str, Option<ItemFilter>); 4] = [
+    ("all", "Any progress", None),
     ("unwatched", "Unwatched", Some(ItemFilter::IsUnplayed)),
     ("watched", "Watched", Some(ItemFilter::IsPlayed)),
-    ("favorites", "Favorites", Some(ItemFilter::IsFavorite)),
     ("in-progress", "In progress", Some(ItemFilter::IsResumable)),
 ];
 
@@ -136,7 +140,8 @@ pub fn jump_target(letter: char, descending: bool) -> Jump {
     }
 }
 
-/// The library's genres, tags and official ratings, which the dialog lists to choose from.
+/// The library's genres, tags and official ratings, which the popover and the rating picker
+/// offer.
 #[derive(Clone, Default)]
 pub struct FilterValues {
     pub genres: Vec<String>,
@@ -144,18 +149,11 @@ pub struct FilterValues {
     pub ratings: Vec<String>,
 }
 
-impl FilterValues {
-    pub fn is_empty(&self) -> bool {
-        self.genres.is_empty() && self.tags.is_empty() && self.ratings.is_empty()
-    }
-}
-
-/// The kinds of values in the genres, tags and ratings dialog.
+/// The kinds of values in the genres and tags popover.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueKind {
     Genre,
     Tag,
-    Rating,
 }
 
 /// What the grid lists.
@@ -165,6 +163,8 @@ pub enum Source {
     Folder {
         id: String,
         collection_type: Option<CollectionType>,
+        /// Start sorted by date added, newest first, rather than the remembered sort.
+        newest_first: bool,
     },
     /// Movies and shows a person appears in.
     Person { id: String },
@@ -182,14 +182,15 @@ struct FilterScope {
 /// The toolbar's controls, left to right, as the keyboard cursor sees them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tool {
-    Sort,
-    Order,
     Show,
-    /// Opens the genres, tags and ratings dialog.
+    Rating,
+    /// Opens the genres and tags popover.
     Values,
     Year,
     Resolution,
     Clear,
+    Sort,
+    Order,
 }
 
 /// What a toolbar control asked for, carried out after the toolbar is drawn.
@@ -197,6 +198,7 @@ enum Tool {
 enum ToolAction {
     Sort(usize),
     Show(usize),
+    Rating(usize),
     Year(usize),
     Resolution(usize),
     ToggleOrder,
@@ -211,11 +213,15 @@ struct JumpResult {
     highlight: bool,
     total: usize,
     descending: bool,
-    result: jellyfin::Result<QueryResult<BaseItemDto>>,
+    /// How many of the grid's items sort before the letter.
+    result: jellyfin::Result<usize>,
 }
 
 /// A fetched page's generation, page number and items.
 type PageResult = (u64, usize, jellyfin::Result<QueryResult<BaseItemDto>>);
+/// The ids of the grid's items in order, while genres or tags are excluded, and the generation
+/// they're for.
+type OrderResult = (u64, jellyfin::Result<Vec<String>>);
 
 pub struct LibraryPage {
     title: String,
@@ -239,6 +245,10 @@ pub struct LibraryPage {
     error: Option<String>,
     /// The pages being fetched.
     requests: Vec<Task<PageResult>>,
+    /// While genres or tags are excluded: the ids of the grid's items in order, which pages
+    /// are fetched by. `None` until they arrive, and whenever nothing is excluded.
+    order: Option<Vec<String>>,
+    order_task: Option<Task<OrderResult>>,
     /// The library's genres, tags, ratings and years, while they load.
     values_task: Option<Task<jellyfin::Result<ItemFilterValues>>>,
     /// The count a letter jump needs, while it runs.
@@ -256,20 +266,27 @@ pub struct LibraryPage {
     offset: f32,
     sort_index: usize,
     filter_index: usize,
+    rating_index: usize,
     year_index: usize,
     resolution_index: usize,
     values: FilterValues,
     /// The library's year keys, offered after "Any year".
     years: Vec<String>,
-    dialog: Option<ValueFilters>,
+    value_filters: ValueFilters,
     /// *Add to playlist…* from a card's menu, while it's open.
     add_to_playlist: Option<AddToPlaylist>,
 }
 
 impl LibraryPage {
     pub fn new(cx: &mut PageCx, source: Source, title: String) -> Self {
+        let mut newest = false;
         let (view_key, base_query, filter_scope) = match source {
-            Source::Folder { id, collection_type } => {
+            Source::Folder {
+                id,
+                collection_type,
+                newest_first,
+            } => {
+                newest = newest_first;
                 let (include_item_types, recursive) = match collection_type {
                     Some(CollectionType::Movies) => (vec![BaseItemKind::Movie], true),
                     Some(CollectionType::TvShows) => (vec![BaseItemKind::Series], true),
@@ -314,8 +331,14 @@ impl LibraryPage {
                 ..Default::default()
             });
         view.upgrade();
+        if newest {
+            // Not saved: the remembered sort is back next time, unless the view changes here.
+            view.sort = SORTS[1].0.into();
+            view.descending = SORTS[1].3;
+        }
         let sort_index = SORTS.iter().position(|(key, ..)| *key == view.sort).unwrap_or(0);
         let filter_index = FILTERS.iter().position(|(key, ..)| *key == view.filter).unwrap_or(0);
+        view.filter = FILTERS[filter_index].0.into();
         let resolution_index = view
             .resolution
             .as_ref()
@@ -323,12 +346,13 @@ impl LibraryPage {
             .unwrap_or(0);
         // Until the library's own values arrive, the remembered ones are the only choices.
         let values = FilterValues {
-            genres: view.genres.clone(),
-            tags: view.tags.clone(),
-            ratings: view.ratings.clone(),
+            genres: view.genres.iter().chain(&view.exclude_genres).cloned().collect(),
+            tags: view.tags.iter().chain(&view.exclude_tags).cloned().collect(),
+            ratings: view.rating.iter().cloned().collect(),
         };
         let years: Vec<String> = view.year.iter().cloned().collect();
         let year_index = usize::from(view.year.is_some());
+        let rating_index = usize::from(view.rating.is_some());
         let mut this = Self {
             title,
             client: cx.services.session.client.clone(),
@@ -344,6 +368,8 @@ impl LibraryPage {
             generation: 0,
             error: None,
             requests: Vec::new(),
+            order: None,
+            order_task: None,
             values_task: None,
             jump: None,
             scroll_to: None,
@@ -353,15 +379,16 @@ impl LibraryPage {
             offset: 0.,
             sort_index,
             filter_index,
+            rating_index,
             year_index,
             resolution_index,
             values,
             years,
-            dialog: None,
+            value_filters: ValueFilters::default(),
             add_to_playlist: None,
         };
         this.apply_view();
-        this.request_page(0, cx);
+        this.load(cx);
         this.load_filter_values(cx);
         this
     }
@@ -383,17 +410,35 @@ impl LibraryPage {
                 continue;
             }
             match result {
-                Ok(result) => {
-                    let total = result.total_record_count as usize;
-                    self.total = Some(total);
-                    self.items.resize(total, None);
-                    let start = page * PAGE_SIZE;
-                    for (offset, item) in result.items.into_iter().enumerate() {
-                        if let Some(slot) = self.items.get_mut(start + offset) {
-                            *slot = Some(item);
+                Ok(result) => match &self.order {
+                    // Fetched by id: the server sorts the page by itself, so each item goes
+                    // where the list has it.
+                    Some(order) => {
+                        let start = page * PAGE_SIZE;
+                        let end = (start + PAGE_SIZE).min(order.len());
+                        let at: HashMap<&str, usize> = order[start.min(end)..end]
+                            .iter()
+                            .enumerate()
+                            .map(|(offset, id)| (id.as_str(), start + offset))
+                            .collect();
+                        for item in result.items {
+                            if let Some(&index) = at.get(item.id.as_str()) {
+                                self.items[index] = Some(item);
+                            }
                         }
                     }
-                }
+                    None => {
+                        let total = result.total_record_count as usize;
+                        self.total = Some(total);
+                        self.items.resize(total, None);
+                        let start = page * PAGE_SIZE;
+                        for (offset, item) in result.items.into_iter().enumerate() {
+                            if let Some(slot) = self.items.get_mut(start + offset) {
+                                *slot = Some(item);
+                            }
+                        }
+                    }
+                },
                 Err(err) => {
                     // Asked for again when the rows scroll back into view (`grid`), rather
                     // than every frame while they stay on screen.
@@ -402,6 +447,19 @@ impl LibraryPage {
                     let message = cx.services.handle_error(&err);
                     tracing::warn!(page, "{message}");
                     self.error = Some(message);
+                }
+            }
+        }
+        if let Some((generation, result)) = self.order_task.as_mut().and_then(Task::poll) {
+            self.order_task = None;
+            if generation == self.generation {
+                match result {
+                    Ok(order) => self.apply_order(order, cx),
+                    Err(err) => {
+                        let message = cx.services.handle_error(&err);
+                        tracing::warn!("couldn't list the library's items: {message}");
+                        self.error = Some(message);
+                    }
                 }
             }
         }
@@ -430,11 +488,26 @@ impl LibraryPage {
             }
             found
         };
+        let chosen_genres: Vec<String> = self
+            .view
+            .genres
+            .iter()
+            .chain(&self.view.exclude_genres)
+            .cloned()
+            .collect();
+        let chosen_tags: Vec<String> = self.view.tags.iter().chain(&self.view.exclude_tags).cloned().collect();
+        let chosen_rating: Vec<String> = self.view.rating.iter().cloned().collect();
         self.values = FilterValues {
-            genres: with_chosen(values.genres, &self.view.genres),
-            tags: with_chosen(values.tags, &self.view.tags),
-            ratings: with_chosen(values.official_ratings, &self.view.ratings),
+            genres: with_chosen(values.genres, &chosen_genres),
+            tags: with_chosen(values.tags, &chosen_tags),
+            ratings: with_chosen(values.official_ratings, &chosen_rating),
         };
+        self.rating_index = self
+            .view
+            .rating
+            .as_ref()
+            .and_then(|rating| self.values.ratings.iter().position(|value| value == rating))
+            .map_or(0, |index| index + 1);
         let mut years = year_choices(&values.years);
         if let Some(year) = &self.view.year
             && !years.contains(year)
@@ -483,7 +556,7 @@ impl LibraryPage {
         };
         self.base_query.genres = self.view.genres.clone();
         self.base_query.tags = self.view.tags.clone();
-        self.base_query.official_ratings = self.view.ratings.clone();
+        self.base_query.official_ratings = self.view.rating.iter().cloned().collect();
         self.base_query.years = self.view.year.as_deref().map(years_of).unwrap_or_default();
         let resolution = RESOLUTIONS
             .iter()
@@ -497,9 +570,60 @@ impl LibraryPage {
         self.view.filter != FILTERS[0].0
             || !self.view.genres.is_empty()
             || !self.view.tags.is_empty()
-            || !self.view.ratings.is_empty()
+            || !self.view.exclude_genres.is_empty()
+            || !self.view.exclude_tags.is_empty()
+            || self.view.rating.is_some()
             || self.view.year.is_some()
             || self.view.resolution.is_some()
+    }
+
+    /// Whether genres or tags are excluded, so the grid goes by [`Self::order`].
+    fn excluding(&self) -> bool {
+        self.filter_scope.is_some() && !(self.view.exclude_genres.is_empty() && self.view.exclude_tags.is_empty())
+    }
+
+    /// Loads the grid from the top: its first page, or first the order it's fetched by.
+    fn load(&mut self, cx: &mut PageCx) {
+        if self.excluding() {
+            self.request_order(cx);
+        } else {
+            self.request_page(0, cx);
+        }
+    }
+
+    /// Lists the ids of the grid's items while genres or tags are excluded: every item the
+    /// other filters leave, in the grid's order, less those with an excluded value.
+    fn request_order(&mut self, cx: &mut PageCx) {
+        let client = self.client.clone();
+        let query = ItemsQuery {
+            fields: Vec::new(),
+            start_index: None,
+            limit: None,
+            lean: true,
+            ..self.base_query.clone()
+        };
+        let (genres, tags) = (self.view.exclude_genres.clone(), self.view.exclude_tags.clone());
+        let generation = self.generation;
+        self.order_task = Some(Task::spawn(cx.ctx, async move {
+            (generation, order(&client, query, genres, tags).await)
+        }));
+    }
+
+    /// The order arrived: the grid is that long, and the pages already shown are fetched again
+    /// from it (all of them after a watch-data refresh, else the first).
+    fn apply_order(&mut self, order: Vec<String>, cx: &mut PageCx) {
+        self.total = Some(order.len());
+        self.items.resize(order.len(), None);
+        self.order = Some(order);
+        let mut pages: Vec<usize> = self.pages_requested.drain().collect();
+        if pages.is_empty() {
+            pages.push(0);
+        }
+        self.failed_pages.clear();
+        self.requests.clear();
+        for page in pages {
+            self.request_page(page, cx);
+        }
     }
 
     /// The sort or filter changed: remember it and load the grid again from the top.
@@ -517,6 +641,8 @@ impl LibraryPage {
         self.failed_pages.clear();
         self.visible_pages.clear();
         self.requests.clear();
+        self.order = None;
+        self.order_task = None;
         self.jump = None;
         self.scroll_to = None;
         self.error = None;
@@ -529,7 +655,7 @@ impl LibraryPage {
             self.cursor = Cursor::starting_at(GRID_START);
         }
         self.offset = 0.;
-        self.request_page(0, cx);
+        self.load(cx);
     }
 
     /// The letter bar shows while sorted by name, where names starting with a letter are
@@ -551,22 +677,31 @@ impl LibraryPage {
             Jump::Bottom => return self.land(total.saturating_sub(1), highlight),
             Jump::After(bound) => bound,
         };
+        // Excluding, the server's count would include the excluded items: the names before
+        // the letter are listed and those in the grid counted.
+        let kept: Option<HashSet<String>> = self.order.as_ref().map(|order| order.iter().cloned().collect());
         let query = ItemsQuery {
             name_less_than: Some(bound.to_string()),
             start_index: None,
-            limit: Some(0),
+            limit: if kept.is_some() { None } else { Some(0) },
+            fields: Vec::new(),
+            lean: true,
             ..self.base_query.clone()
         };
         let client = self.client.clone();
         let generation = self.generation;
         self.jump = Some(Task::spawn(cx.ctx, async move {
+            let result = client.items(&query).await.map(|result| match &kept {
+                Some(kept) => result.items.iter().filter(|item| kept.contains(&item.id)).count(),
+                None => result.total_record_count as usize,
+            });
             JumpResult {
                 generation,
                 letter,
                 highlight,
                 total,
                 descending,
-                result: client.items(&query).await,
+                result,
             }
         }));
     }
@@ -576,8 +711,7 @@ impl LibraryPage {
             return;
         }
         match jump.result {
-            Ok(result) => {
-                let before = result.total_record_count as usize;
+            Ok(before) => {
                 let index = if jump.descending {
                     jump.total.saturating_sub(before)
                 } else {
@@ -623,6 +757,15 @@ impl LibraryPage {
                 self.filter_index = index;
                 self.change_view(cx);
             }
+            ToolAction::Rating(index) => {
+                let rating = chosen(&self.values.ratings, index as i32);
+                if self.view.rating == rating {
+                    return;
+                }
+                self.view.rating = rating;
+                self.rating_index = index;
+                self.change_view(cx);
+            }
             ToolAction::Year(index) => {
                 let year = chosen(&self.years, index as i32);
                 if self.view.year == year {
@@ -648,10 +791,7 @@ impl LibraryPage {
                 self.view.descending = !self.view.descending;
                 self.change_view(cx);
             }
-            ToolAction::OpenValues => {
-                self.dialog = Some(ValueFilters::new());
-                cx.ctx.request_repaint();
-            }
+            ToolAction::OpenValues => self.value_filters.toggle(cx.ctx),
             ToolAction::Clear => self.clear_filters(cx),
         }
     }
@@ -661,10 +801,14 @@ impl LibraryPage {
         let action = match tool {
             Tool::Sort => ToolAction::Sort((self.sort_index + 1) % SORTS.len()),
             Tool::Show => ToolAction::Show((self.filter_index + 1) % FILTERS.len()),
+            Tool::Rating => ToolAction::Rating((self.rating_index + 1) % (self.values.ratings.len() + 1)),
             Tool::Year => ToolAction::Year((self.year_index + 1) % (self.years.len() + 1)),
             Tool::Resolution => ToolAction::Resolution((self.resolution_index + 1) % RESOLUTIONS.len()),
             Tool::Order => ToolAction::ToggleOrder,
-            Tool::Values => ToolAction::OpenValues,
+            Tool::Values => {
+                self.value_filters.open(cx.ctx);
+                return;
+            }
             Tool::Clear => ToolAction::Clear,
         };
         self.apply_tool(action, cx);
@@ -674,10 +818,12 @@ impl LibraryPage {
         self.view.filter = FILTERS[0].0.into();
         self.filter_index = 0;
         (self.view.year, self.year_index) = (None, 0);
+        (self.view.rating, self.rating_index) = (None, 0);
         (self.view.resolution, self.resolution_index) = (None, 0);
         self.view.genres.clear();
         self.view.tags.clear();
-        self.view.ratings.clear();
+        self.view.exclude_genres.clear();
+        self.view.exclude_tags.clear();
         self.change_view(cx);
         // The Clear button is gone now; from the keyboard, land on the control before it.
         if self
@@ -685,10 +831,10 @@ impl LibraryPage {
             .selected()
             .is_some_and(|position| position.section == TOOLBAR)
         {
-            let last = self.tools().len().saturating_sub(1);
+            let before = self.tools().iter().position(|tool| *tool == Tool::Sort).unwrap_or(1);
             self.cursor.show_at(Position {
                 section: TOOLBAR,
-                index: last,
+                index: before.saturating_sub(1),
             });
         }
     }
@@ -696,6 +842,13 @@ impl LibraryPage {
     /// Re-fetches the pages already loaded (e.g. for new watched badges), keeping the current
     /// items on screen until the new ones arrive.
     fn refresh(&mut self, cx: &mut PageCx) {
+        // Excluding, the order may have changed too (a watched filter): it comes first, and
+        // brings the pages with it (`apply_order`).
+        if self.order.is_some() {
+            self.requests.clear();
+            self.request_order(cx);
+            return;
+        }
         let pages: Vec<usize> = self.pages_requested.drain().collect();
         self.failed_pages.clear();
         // Requests still running were fetched with the old watch data: let the new ones
@@ -711,29 +864,57 @@ impl LibraryPage {
         self.pages_requested.clear();
         self.failed_pages.clear();
         self.requests.clear();
-        self.request_page(0, cx);
+        if self.order.is_some() {
+            self.request_page(0, cx);
+        } else {
+            self.load(cx);
+        }
     }
 
     fn request_page(&mut self, page: usize, cx: &mut PageCx) {
         if !self.pages_requested.insert(page) {
             return;
         }
-        let client = self.client.clone();
-        let query = ItemsQuery {
-            start_index: Some((page * PAGE_SIZE) as u32),
-            ..self.base_query.clone()
+        let query = match &self.order {
+            Some(order) => {
+                let start = (page * PAGE_SIZE).min(order.len());
+                let end = (start + PAGE_SIZE).min(order.len());
+                // No ids would ask for every item.
+                if start == end {
+                    return;
+                }
+                ItemsQuery {
+                    ids: order[start..end].to_vec(),
+                    start_index: None,
+                    limit: None,
+                    ..self.base_query.clone()
+                }
+            }
+            // Excluding, pages wait for the order.
+            None if self.excluding() => {
+                self.pages_requested.remove(&page);
+                return;
+            }
+            None => ItemsQuery {
+                start_index: Some((page * PAGE_SIZE) as u32),
+                ..self.base_query.clone()
+            },
         };
+        let client = self.client.clone();
         let generation = self.generation;
         self.requests.push(Task::spawn(cx.ctx, async move {
             (generation, page, client.items(&query).await)
         }));
     }
 
-    /// The toolbar's controls shown now, left to right.
+    /// The toolbar's controls shown now, left to right: the filters, then the sort.
     fn tools(&self) -> Vec<Tool> {
-        let mut tools = vec![Tool::Sort, Tool::Order, Tool::Show];
+        let mut tools = vec![Tool::Show];
         if let Some(scope) = &self.filter_scope {
-            if !self.values.is_empty() {
+            if !self.values.ratings.is_empty() {
+                tools.push(Tool::Rating);
+            }
+            if !(self.values.genres.is_empty() && self.values.tags.is_empty()) {
                 tools.push(Tool::Values);
             }
             if !self.years.is_empty() {
@@ -746,36 +927,26 @@ impl LibraryPage {
         if self.filtered() {
             tools.push(Tool::Clear);
         }
+        tools.extend([Tool::Sort, Tool::Order]);
         tools
     }
 
     fn toolbar(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let tools = self.tools();
+        let split = tools.iter().position(|tool| *tool == Tool::Sort).unwrap_or(tools.len());
         let muted = crate::theme::tokens_of(ui).muted_foreground;
         let mut action = None;
-        ui.horizontal_wrapped(|ui| {
+        let mut values_button = None;
+        ui.horizontal(|ui| {
             ui.add_space(GRID_PADDING - RING_GAP);
-            for (index, tool) in tools.iter().copied().enumerate() {
-                if tool == Tool::Show {
-                    ui.add_space(4.);
-                }
-                if let Some(label) = match tool {
-                    Tool::Sort => Some("Sort"),
-                    Tool::Show => Some("Show"),
-                    _ => None,
-                } {
-                    ui.label(
-                        RichText::new(label)
-                            .font(crate::theme::text::font(ui, "sm"))
-                            .color(muted),
-                    );
-                }
-                let (response, control) = Self::tool(ui, tool, &self.view, &self.years, self.tool_index(tool));
-                if let Some(control) = control {
-                    action = Some(control);
-                }
+            for (index, tool) in tools[..split].iter().copied().enumerate() {
+                let (response, control) = self.tool(ui, tool);
+                action = action.or(control);
                 if self.cursor.is_selected(TOOLBAR, index) {
                     ring(ui, &response);
+                }
+                if tool == Tool::Values {
+                    values_button = Some(response);
                 }
             }
             let total = self.total;
@@ -789,54 +960,69 @@ impl LibraryPage {
                             .font(crate::theme::text::font(ui, "sm"))
                             .color(muted),
                     );
+                    ui.add_space(12.);
                 }
+                // Right to left: the order button, the sort picker, then its label.
+                for index in (split..tools.len()).rev() {
+                    let (response, control) = self.tool(ui, tools[index]);
+                    action = action.or(control);
+                    if self.cursor.is_selected(TOOLBAR, index) {
+                        ring(ui, &response);
+                    }
+                }
+                ui.label(
+                    RichText::new("Sort")
+                        .font(crate::theme::text::font(ui, "sm"))
+                        .color(muted),
+                );
             });
         });
+        if let Some(anchor) = values_button
+            && self.value_filters.show(&anchor, &self.values, &mut self.view)
+        {
+            self.change_view(cx);
+        }
         if let Some(action) = action {
             self.apply_tool(action, cx);
         }
     }
 
-    /// The selected index of a picker, for its [`Self::tool`].
-    fn tool_index(&self, tool: Tool) -> usize {
-        match tool {
-            Tool::Sort => self.sort_index,
-            Tool::Show => self.filter_index,
-            Tool::Year => self.year_index,
-            Tool::Resolution => self.resolution_index,
-            Tool::Order | Tool::Values | Tool::Clear => 0,
-        }
-    }
-
-    /// One toolbar control: its response and what it asked for when clicked. A free function
-    /// for the borrow checker: the toolbar draws with `&self` and acts with `&mut self` after.
-    fn tool(
-        ui: &mut Ui,
-        tool: Tool,
-        view: &LibraryView,
-        years: &[String],
-        selected: usize,
-    ) -> (Response, Option<ToolAction>) {
+    /// One toolbar control: its response and what it asked for when clicked.
+    fn tool(&self, ui: &mut Ui, tool: Tool) -> (Response, Option<ToolAction>) {
+        let view = &self.view;
         match tool {
             Tool::Sort => {
                 let labels = SORTS.iter().map(|(_, label, ..)| *label).collect();
-                let (response, index) = picker(ui, "library_sort", "Sort", 160., labels, selected);
+                let (response, index) = picker(ui, "library_sort", "Sort", 150., labels, self.sort_index);
                 (response, index.map(ToolAction::Sort))
             }
             Tool::Show => {
                 let labels = FILTERS.iter().map(|(_, label, ..)| *label).collect();
-                let (response, index) = picker(ui, "library_show", "Show", 140., labels, selected);
+                let (response, index) = picker(ui, "library_show", "Progress", 140., labels, self.filter_index);
                 (response, index.map(ToolAction::Show))
+            }
+            Tool::Rating => {
+                let mut labels = vec!["Any rating"];
+                labels.extend(self.values.ratings.iter().map(String::as_str));
+                let (response, index) = picker(ui, "library_rating", "Rating", 120., labels, self.rating_index);
+                (response, index.map(ToolAction::Rating))
             }
             Tool::Year => {
                 let mut labels = vec!["Any year"];
-                labels.extend(years.iter().map(String::as_str));
-                let (response, index) = picker(ui, "library_year", "Year", 120., labels, selected);
+                labels.extend(self.years.iter().map(String::as_str));
+                let (response, index) = picker(ui, "library_year", "Year", 120., labels, self.year_index);
                 (response, index.map(ToolAction::Year))
             }
             Tool::Resolution => {
                 let labels = RESOLUTIONS.iter().map(|(_, label, ..)| *label).collect();
-                let (response, index) = picker(ui, "library_resolution", "Resolution", 150., labels, selected);
+                let (response, index) = picker(
+                    ui,
+                    "library_resolution",
+                    "Resolution",
+                    150.,
+                    labels,
+                    self.resolution_index,
+                );
                 (response, index.map(ToolAction::Resolution))
             }
             Tool::Order => {
@@ -862,7 +1048,7 @@ impl LibraryPage {
                 (response, action)
             }
             Tool::Values => {
-                let label = values_summary(view);
+                let label = value_filters::summary(view);
                 let response = ui.add(button::with_icon(ui, ICON_FILTER_LIST, &label));
                 let action = response.clicked().then_some(ToolAction::OpenValues);
                 (response, action)
@@ -1033,18 +1219,6 @@ impl LibraryPage {
         {
             self.add_to_playlist = None;
         }
-        if self.dialog.is_some() {
-            let outcome = {
-                let dialog = self.dialog.as_mut().expect("checked");
-                dialog.show(cx.ctx, &self.values, &mut self.view)
-            };
-            match outcome {
-                Outcome::Stay => {}
-                // Each tick reloads the grid behind the dialog.
-                Outcome::Changed => self.change_view(cx),
-                Outcome::Close => self.dialog = None,
-            }
-        }
     }
 }
 
@@ -1163,17 +1337,6 @@ fn picker(
     select::select(ui, id, width, name, &labels, selected, false)
 }
 
-/// What the values button says: what's chosen, or what it's for.
-fn values_summary(view: &LibraryView) -> String {
-    let chosen: Vec<&String> = view.genres.iter().chain(&view.tags).chain(&view.ratings).collect();
-    match chosen.as_slice() {
-        [] => "Genres, tags…".to_owned(),
-        [one] => (*one).clone(),
-        [one, two] => format!("{one}, {two}"),
-        many => format!("{} filters", many.len()),
-    }
-}
-
 /// The keyboard's ring around a toolbar control (`main`'s selection ring).
 fn ring(ui: &Ui, response: &Response) {
     ui.painter().rect_stroke(
@@ -1182,6 +1345,49 @@ fn ring(ui: &Ui, response: &Response) {
         Stroke::new(1.5, crate::theme::tokens_of(ui).foreground),
         StrokeKind::Outside,
     );
+}
+
+/// The ids of what `query` lists, in order, less the items with any of the excluded `genres` or
+/// `tags`. The server can't leave those out itself, so it lists them too, with the same
+/// filters bar the included values, and they're taken off.
+async fn order(
+    client: &Client,
+    query: ItemsQuery,
+    genres: Vec<String>,
+    tags: Vec<String>,
+) -> jellyfin::Result<Vec<String>> {
+    let ids = |query: ItemsQuery| async move {
+        client
+            .items(&query)
+            .await
+            .map(|result| result.items.into_iter().map(|item| item.id).collect::<Vec<_>>())
+    };
+    let apart = |genres: Vec<String>, tags: Vec<String>| ItemsQuery {
+        genres,
+        tags,
+        sort_by: Vec::new(),
+        sort_order: None,
+        ..query.clone()
+    };
+    let (all, with_genres, with_tags) = tokio::try_join!(
+        ids(query.clone()),
+        async {
+            if genres.is_empty() {
+                Ok(Vec::new())
+            } else {
+                ids(apart(genres.clone(), Vec::new())).await
+            }
+        },
+        async {
+            if tags.is_empty() {
+                Ok(Vec::new())
+            } else {
+                ids(apart(Vec::new(), tags.clone())).await
+            }
+        },
+    )?;
+    let excluded: HashSet<String> = with_genres.into_iter().chain(with_tags).collect();
+    Ok(all.into_iter().filter(|id| !excluded.contains(id)).collect())
 }
 
 /// Cards per row that fit `width`, with the toolbar's padding on both sides.
