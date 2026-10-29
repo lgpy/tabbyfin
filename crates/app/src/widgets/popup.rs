@@ -45,9 +45,11 @@ const PAD: f32 = 4.;
 const ROW_H: f32 = 34.;
 /// The room left and right of a row's contents, and between its icon and label.
 const ROW_INSET: f32 = 10.;
+/// [`ROW_INSET`], for a panel's own text to line up with its rows.
+pub const INSET: f32 = ROW_INSET;
 /// The icon or check slot before the labels: kept on every row once one row has an icon, so the
 /// labels line up.
-const SLOT_W: f32 = 18.;
+pub const SLOT_W: f32 = 18.;
 /// The room between the panel and what it hangs from.
 const GAP: f32 = 6.;
 /// How far the panel travels out of its button as it opens, and how long it takes.
@@ -286,30 +288,6 @@ impl PopupMenu {
             out.chosen = Some(index);
         }
 
-        // Opening, the panel fades in and moves out of what it hangs from.
-        let t = if theme::animations(&ctx) {
-            let now = ctx.input(|input| input.time);
-            let t = motion::progress(motion::appear(&ctx, id), now, 0., OPEN);
-            if t < 1. {
-                ctx.request_repaint();
-            }
-            t
-        } else {
-            1.
-        };
-
-        let tokens = theme::tokens(&ctx.global_style().visuals);
-        let frame = egui::Frame::new()
-            .fill(tokens.popover)
-            .stroke(Stroke::new(1., tokens.border))
-            .corner_radius(CornerRadius::same(tokens.radius_lg))
-            .inner_margin(Margin::same(PAD as i8))
-            .shadow(egui::epaint::Shadow {
-                offset: [0, 8],
-                blur: 24,
-                spread: 0,
-                color: Color32::from_black_alpha(if tokens.dark { 140 } else { 36 }),
-            });
         let anchor_at = if self.at_pointer {
             PopupAnchor::PointerFixed
         } else {
@@ -321,52 +299,41 @@ impl PopupMenu {
             None
         };
         let slot = entries.iter().any(Entry::has_slot);
-        egui::Popup::new(id, ctx.clone(), anchor_at, anchor.layer_id)
-            .kind(egui::PopupKind::Popup)
-            .open_memory(open_memory)
-            .align(self.align)
-            .gap(GAP - SLIDE * (1. - t))
-            .width(self.width)
-            .layout(Layout::top_down_justified(Align::Min))
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .frame(frame)
-            .show(|ui| {
-                ui.set_opacity(t);
-                let inner = self.width - 2. * PAD;
-                ui.set_width(inner);
+        let width = self.width;
+        show_panel(id, anchor, anchor_at, open_memory, self.align, width, |ui| {
+            let inner = ui.available_width();
+            egui::ScrollArea::vertical().max_height(MAX_H).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.;
-                egui::ScrollArea::vertical().max_height(MAX_H).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.;
-                    let pointer_moved = ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO);
-                    let mut hovered = None;
-                    for (index, entry) in entries.iter().enumerate() {
-                        if entry.separated && index > 0 {
-                            separator(ui);
-                        }
-                        let height = row_height(ui);
-                        let (rect, response) = ui.allocate_exact_size(vec2(inner, height), Sense::CLICK);
-                        if response.hovered() {
-                            hovered = Some(index);
-                            if pointer_moved {
-                                state.highlight = Some(index);
-                                state.by_pointer = true;
-                            }
-                        }
-                        let highlighted = state.highlight == Some(index);
-                        if highlighted && moved {
-                            ui.scroll_to_rect(rect, None);
-                        }
-                        paint_row(ui, rect, entry, slot, highlighted);
-                        response.widget_info(|| row_info(entry, true));
-                        if response.clicked() {
-                            out.chosen = Some(index);
+                let pointer_moved = ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO);
+                let mut hovered = None;
+                for (index, entry) in entries.iter().enumerate() {
+                    if entry.separated && index > 0 {
+                        separator(ui);
+                    }
+                    let height = row_height(ui);
+                    let (rect, response) = ui.allocate_exact_size(vec2(inner, height), Sense::CLICK);
+                    if response.hovered() {
+                        hovered = Some(index);
+                        if pointer_moved {
+                            state.highlight = Some(index);
+                            state.by_pointer = true;
                         }
                     }
-                    if hovered.is_none() && pointer_moved && state.by_pointer {
-                        state.highlight = None;
+                    let highlighted = state.highlight == Some(index);
+                    if highlighted && moved {
+                        ui.scroll_to_rect(rect, None);
                     }
-                });
+                    paint_row(ui, rect, entry, slot, highlighted);
+                    response.widget_info(|| row_info(entry, true));
+                    if response.clicked() {
+                        out.chosen = Some(index);
+                    }
+                }
+                if hovered.is_none() && pointer_moved && state.by_pointer {
+                    state.highlight = None;
+                }
             });
+        });
 
         if out.chosen.is_some() {
             Self::close(&ctx, id);
@@ -376,6 +343,76 @@ impl PopupMenu {
     }
 }
 
+/// A menu's panel hung from `anchor` while popup `id` is open, with contents of the caller's own:
+/// for a popup that is more than a list of rows (the SyncPlay panel). It has the menu's frame,
+/// placement and opening motion, closes on Esc or a click outside, and `content` gets a `Ui`
+/// of the panel's inner width with no room between rows. Opening, closing and keys are the
+/// caller's (egui's `Popup::open_id` and friends). Returns what `content` returned, or `None`
+/// while it's closed.
+pub fn panel<R>(
+    id: Id,
+    anchor: &Response,
+    align: RectAlign,
+    width: f32,
+    content: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    if !egui::Popup::is_id_open(&anchor.ctx, id) {
+        return None;
+    }
+    show_panel(id, anchor, PopupAnchor::from(anchor), None, align, width, content)
+}
+
+fn show_panel<R>(
+    id: Id,
+    anchor: &Response,
+    anchor_at: PopupAnchor,
+    open_memory: Option<SetOpenCommand>,
+    align: RectAlign,
+    width: f32,
+    content: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    let ctx = anchor.ctx.clone();
+    // Opening, the panel fades in and moves out of what it hangs from.
+    let t = if theme::animations(&ctx) {
+        let now = ctx.input(|input| input.time);
+        let t = motion::progress(motion::appear(&ctx, id), now, 0., OPEN);
+        if t < 1. {
+            ctx.request_repaint();
+        }
+        t
+    } else {
+        1.
+    };
+    let tokens = theme::tokens(&ctx.global_style().visuals);
+    let frame = egui::Frame::new()
+        .fill(tokens.popover)
+        .stroke(Stroke::new(1., tokens.border))
+        .corner_radius(CornerRadius::same(tokens.radius_lg))
+        .inner_margin(Margin::same(PAD as i8))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 8],
+            blur: 24,
+            spread: 0,
+            color: Color32::from_black_alpha(if tokens.dark { 140 } else { 36 }),
+        });
+    egui::Popup::new(id, ctx, anchor_at, anchor.layer_id)
+        .kind(egui::PopupKind::Popup)
+        .open_memory(open_memory)
+        .align(align)
+        .gap(GAP - SLIDE * (1. - t))
+        .width(width)
+        .layout(Layout::top_down_justified(Align::Min))
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .frame(frame)
+        .show(|ui| {
+            ui.set_opacity(t);
+            // An `Area` shrinks to its contents; the panel keeps its width as they change.
+            ui.set_width(width - 2. * PAD);
+            ui.spacing_mut().item_spacing.y = 0.;
+            content(ui)
+        })
+        .map(|shown| shown.inner)
+}
 fn state_id(id: Id) -> Id {
     id.with("popup_menu_state")
 }
@@ -430,7 +467,7 @@ fn cancel_focus(ctx: &egui::Context) {
 }
 
 /// A line across the panel, edge to edge, with room above and below.
-fn separator(ui: &mut Ui) {
+pub fn separator(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 2. * PAD + 1.), Sense::hover());
     let y = rect.center().y;
     ui.painter().hline(
