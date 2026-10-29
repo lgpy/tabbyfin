@@ -91,3 +91,20 @@ fn the_oldest_go_when_too_many_pile_up() {
         assert!(ui.query_by_label(&i.to_string()).is_some(), "toast {i} went");
     }
 }
+
+/// Mockup: renders the toast stack to a PNG for looking at (`TABBYFIN_MOCKUP_DIR`).
+#[test]
+fn mockup_toasts() {
+    let Some(dir) = std::env::var_os("TABBYFIN_MOCKUP_DIR") else {
+        return;
+    };
+    let mut toasts = Toasts::default();
+    toasts.push(Toast::success("Playlist saved").title("Saved"));
+    toasts.push(
+        Toast::error("Couldn't reach the server.").action("Retry", ToastAction::OpenUrl("https://example.com".into())),
+    );
+    let mut ui = toast_harness(toasts);
+    ui.run();
+    let image = ui.render().expect("render");
+    image.save(std::path::Path::new(&dir).join("toasts.png")).unwrap();
+}
