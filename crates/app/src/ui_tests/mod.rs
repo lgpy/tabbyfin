@@ -38,10 +38,18 @@ pub mod item;
 pub mod library;
 pub mod login;
 pub mod menus;
+#[cfg(feature = "mockup")]
 pub mod mockups;
 pub mod settings;
 pub mod shelf;
 pub mod toasts;
+
+/// A disposable mockup, a file outside the tree that `.agents/skills/ui-mockup/render.py` points
+/// `TABBYFIN_MOCKUP_SRC` at; it's compiled here so it can use the app's own theme and widgets.
+#[cfg(feature = "mockup")]
+mod scratch {
+    include!(env!("TABBYFIN_MOCKUP_SRC"));
+}
 
 /// How long a test waits for a server answer or a page before it fails.
 pub const TIMEOUT: Duration = Duration::from_secs(10);
