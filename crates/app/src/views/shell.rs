@@ -26,10 +26,9 @@
 //! playback; the player closing leaves fullscreen.
 
 use egui::accesskit::Role;
-use egui::text::LayoutJob;
 use egui::{
     Align, Align2, Color32, CornerRadius, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText, Sense,
-    Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, WidgetInfo, vec2,
+    Stroke, StrokeKind, TextStyle, Ui, UiBuilder, WidgetInfo, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -52,6 +51,7 @@ use crate::theme::{self, over_video, text};
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::{self, Page, PageCx, player};
+use crate::widgets::button;
 use crate::widgets::popup::{Entry, Opened, PopupMenu};
 
 /// The bar's height, inside the panel's own margin.
@@ -1704,31 +1704,12 @@ fn toggle_button(ui: &mut Ui, icon: MaterialIcon, label: &str, on: bool) -> Resp
     } else {
         theme::tokens_of(ui).foreground
     };
-    let mut job = LayoutJob::default();
-    job.append(
-        icon.codepoint,
-        0.,
-        TextFormat {
-            font_id: text::icon(ui, icon.font_family()),
-            color,
-            ..Default::default()
-        },
-    );
-    job.append(
-        &format!("  {label}"),
-        0.,
-        TextFormat {
-            font_id: body,
-            color,
-            ..Default::default()
-        },
-    );
+    let icon_size = text::icon(ui, icon.font_family()).size;
+    let contents = button::icon_text(icon, icon_size, label, body, color);
     ui.add(theme::selected(
         ui,
         on,
-        egui::Button::new(egui::WidgetText::LayoutJob(job.into()))
-            .small()
-            .sense(Sense::CLICK),
+        egui::Button::new(contents).small().sense(Sense::CLICK),
     ))
 }
 
