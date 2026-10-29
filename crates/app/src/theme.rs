@@ -415,13 +415,6 @@ pub fn primary_button(ui: &mut egui::Ui, label: &str, width: f32, enabled: bool)
     .inner
 }
 
-/// A row in a picker's list, highlighted with `accent` when it's the chosen one: egui's own
-/// `selectable_label` paints the text selection's blue.
-pub fn selectable_label(ui: &mut egui::Ui, on: bool, text: impl Into<egui::WidgetText>) -> egui::Response {
-    let button = egui::Button::new(text).frame_when_inactive(on);
-    ui.add(selected(ui, on, button))
-}
-
 /// `main`'s fill for a selected control — a menu row, a toggle, a checked box — which egui would
 /// paint in the text selection's colour. The button keeps its `selected` state (AccessKit's
 /// selected/toggled flag) and is filled with `accent` when it's on.

@@ -42,7 +42,7 @@ use crate::views::value_filters::{Outcome, ValueFilters};
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::{CARD_GAP, POSTER_H, POSTER_W};
-use crate::widgets::{card, state};
+use crate::widgets::{card, select, state};
 
 /// Items per request: rows show placeholders until the page holding them arrives.
 const PAGE_SIZE: usize = 100;
@@ -825,23 +825,23 @@ impl LibraryPage {
         match tool {
             Tool::Sort => {
                 let labels = SORTS.iter().map(|(_, label, ..)| *label).collect();
-                let (response, index) = picker(ui, "library_sort", 160., labels, selected);
+                let (response, index) = picker(ui, "library_sort", "Sort", 160., labels, selected);
                 (response, index.map(ToolAction::Sort))
             }
             Tool::Show => {
                 let labels = FILTERS.iter().map(|(_, label, ..)| *label).collect();
-                let (response, index) = picker(ui, "library_show", 140., labels, selected);
+                let (response, index) = picker(ui, "library_show", "Show", 140., labels, selected);
                 (response, index.map(ToolAction::Show))
             }
             Tool::Year => {
                 let mut labels = vec!["Any year"];
                 labels.extend(years.iter().map(String::as_str));
-                let (response, index) = picker(ui, "library_year", 120., labels, selected);
+                let (response, index) = picker(ui, "library_year", "Year", 120., labels, selected);
                 (response, index.map(ToolAction::Year))
             }
             Tool::Resolution => {
                 let labels = RESOLUTIONS.iter().map(|(_, label, ..)| *label).collect();
-                let (response, index) = picker(ui, "library_resolution", 150., labels, selected);
+                let (response, index) = picker(ui, "library_resolution", "Resolution", 150., labels, selected);
                 (response, index.map(ToolAction::Resolution))
             }
             Tool::Order => {
@@ -1154,22 +1154,18 @@ impl Browse for LibraryPage {
     }
 }
 
-/// A menu of `labels`, with `selected` shown: its response and the line clicked.
-fn picker(ui: &mut Ui, id: &'static str, width: f32, labels: Vec<&str>, selected: usize) -> (Response, Option<usize>) {
-    let selected_text = labels.get(selected).copied().unwrap_or_default();
-    let chosen = egui::ComboBox::from_id_salt(id)
-        .width(width)
-        .selected_text(selected_text)
-        .show_ui(ui, |ui| {
-            let mut chosen = None;
-            for (index, label) in labels.iter().enumerate() {
-                if crate::theme::selectable_label(ui, index == selected, *label).clicked() {
-                    chosen = Some(index);
-                }
-            }
-            chosen
-        });
-    (chosen.response, chosen.inner.flatten())
+/// A select over `labels`, with `selected` shown: its response and the line picked. It takes no
+/// focus: the toolbar is on the page's cursor, and Enter there steps it instead.
+fn picker(
+    ui: &mut Ui,
+    id: &'static str,
+    name: &str,
+    width: f32,
+    labels: Vec<&str>,
+    selected: usize,
+) -> (Response, Option<usize>) {
+    let id = ui.make_persistent_id(id);
+    select::select(ui, id, width, name, &labels, selected, false)
 }
 
 /// What the values button says: what's chosen, or what it's for.

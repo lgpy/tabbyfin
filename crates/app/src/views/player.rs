@@ -33,8 +33,8 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_ARROW_DROP_DOWN, ICON_FAST_FORWARD, ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT,
-    ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT, ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST,
+    ICON_ARROW_BACK, ICON_FAST_FORWARD, ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE,
+    ICON_PLAY_ARROW, ICON_RESTART_ALT, ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST,
     ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
@@ -51,6 +51,7 @@ use crate::trickplay::Trickplay;
 use crate::views::PageCx;
 use crate::widgets::mascot;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
+use crate::widgets::select;
 use crate::widgets::text::{card_text, timestamp};
 use crate::widgets::video::Video;
 
@@ -1815,49 +1816,10 @@ fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
     response
 }
 
-/// The version picker's button: a small select with the playing version's name and a caret, as
-/// `main`'s was. Drawn by the page (not an egui widget) so it can't take the keyboard.
+/// The version picker's button: the app's select (`widgets::select`), small to fit the control
+/// bar. It takes no focus: the player's keys are `keys.rs`'s.
 fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(VERSION_W, VERSION_H), Sense::CLICK);
-    // A combo box to AccessKit, as egui's own is: the name is its value, "Version" its label.
-    response.widget_info(|| {
-        let mut info = WidgetInfo::new(Role::ComboBox);
-        info.enabled = ui.is_enabled();
-        info.label = Some("Version".to_owned());
-        info.current_text_value = Some(name.to_owned());
-        info
-    });
-    let tokens = theme::tokens_of(ui);
-    let painter = ui.painter().clone();
-    let fill = if response.hovered() {
-        tokens.muted
-    } else {
-        tokens.input_background()
-    };
-    painter.rect(
-        rect,
-        CornerRadius::same(tokens.radius),
-        fill,
-        Stroke::new(1., tokens.input),
-        StrokeKind::Inside,
-    );
-    let caret = 14.;
-    let text = rect.shrink2(vec2(8., 2.));
-    let text_w = (text.width() - caret).max(0.);
-    let mut child = ui.new_child(
-        UiBuilder::new()
-            .max_rect(Rect::from_min_size(text.min, vec2(text_w, text.height())))
-            .layout(Layout::left_to_right(Align::Center)),
-    );
-    child.add(egui::Label::new(RichText::new(name).small()).truncate());
-    painter.text(
-        pos2(rect.right() - 8. - caret / 2., rect.center().y),
-        Align2::CENTER_CENTER,
-        ICON_ARROW_DROP_DOWN.codepoint,
-        FontId::new(caret, ICON_ARROW_DROP_DOWN.font_family()),
-        over_video::MUTED_FOREGROUND,
-    );
-    response.on_hover_text("Version")
+    select::button(ui, vec2(VERSION_W, VERSION_H), name, "Version", false).on_hover_text("Version")
 }
 
 /// A small heading inside a settings tab.

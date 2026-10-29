@@ -377,6 +377,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 - ⬜ The **Cast & crew** shelf: this dev server's items have no people (the captured 12.2 fixture does), so the shelf didn't draw. Person cards were checked in W1.
 - ⬜ Right-clicking a season, *More like this* card or episode row, and clicking the version list or the More menu (the pointer paths). With a real mouse, the popup menus: the hover highlight following the pointer and giving way to the arrows (the arrows win while the pointer rests), the menu opening at the pointer and flipping to fit near the window's edges, its fade-in (none with animations off), and both themes.
+- ⬜ The shared selects (`widgets/select.rs`) on screen, in both themes: the library toolbar's, the Settings pickers (Tab to one, Enter opens its list, the focus ring on the box), the item page's version picker with the cursor's ring and the player's small one over video; and the lists drawn with `popup::row` (*Add to playlist*, genres, tags and ratings, the player's tracks) with the pointer taking the highlight.
 - ⬜ The **remote trailer** and a series' extras (unchanged from above).
 - ⬜ A **refusal with the server down** rather than a 500: the same `Services::refused_marks` path (the delayed proxy covered the off-screen case), but a real outage also fails the requests the page might otherwise make.
 
@@ -505,7 +506,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ A collections folder (`collection_type` none, browsed folder by folder) lists *Test Collection* with only Sort, order and Show (`u5-folder.png`), and `TABBYFIN_ROUTE=person:<id>` opens a `Source::Person` page (toolbar without the value/year/resolution pickers, "Nothing here yet.", `u5-person.png`). Enter on a card opened the U6 stub and Esc came back with the cursor still on that card (`u5-open-item.png`, `u5-back-library.png`).
 
-- ⬜ **With a mouse**: clicking a card, the toolbar's `ComboBox`es (choosing an entry), the letter bar's letters, and the dialog's checkboxes and *Done*. Right-click menus and *Add to playlist…* from a card (U8's dialog; its own checks are §27).
+- ⬜ **With a mouse**: clicking a card, the toolbar's selects (choosing an entry from the popup menu), the letter bar's letters, and the dialog's checkboxes and *Done*. Right-click menus and *Add to playlist…* from a card (U8's dialog; its own checks are §27).
 - ⬜ **Window resize** with the cursor in the grid (the column count changes), and zoom.
 - ⬜ A page request that fails mid-library and is retried after its rows scroll out and back, and the error state's *Retry*.
 - ⬜ Picking sort and filter on **10.11 with a bigger library**, and the resolution choices on 10.11 for HD and SD.
