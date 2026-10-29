@@ -6,9 +6,9 @@
 //! The bar has the app's icon, Back when there's a page to go back to, the page's title, and
 //! on the right the search box, SyncPlay, Settings and the account menu. The keyboard walks
 //! it: Up past a page's first row moves into the bar, Left and Right move along, Enter presses,
-//! Down or Esc goes back to the page with its cursor where it was. The account menu and the
-//! SyncPlay panel are drawn and driven here too: their keys are read before egui's focus pass
-//! can hand them to a button or card behind them.
+//! Down or Esc goes back to the page with its cursor where it was. The account menu is a
+//! [`PopupMenu`]; the SyncPlay panel is drawn and driven here: its keys are read before egui's
+//! focus pass can hand them to a button or card behind it.
 //!
 //! The SyncPlay panel (`render_syncplay` on `main`) lists the server's groups to join, or the
 //! group this session is in: its state, its members and the group's queue, which the keyboard
@@ -33,8 +33,8 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHECK, ICON_CLOSE, ICON_GROUPS, ICON_REPEAT,
-    ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
+    ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICON_REPEAT, ICON_REPEAT_ONE,
+    ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
 };
 use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 
@@ -52,6 +52,7 @@ use crate::theme::{self, over_video, text};
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::{self, Page, PageCx, player};
+use crate::widgets::popup::{Entry, Opened, PopupMenu};
 
 /// The bar's height, inside the panel's own margin.
 /// `main`'s bar: 72 points tall, 40-point buttons with 24-point icons.
@@ -66,9 +67,7 @@ const LOGO: f32 = 40.;
 const SEARCH_BOX_W: f32 = 400.;
 /// The search box's id: it gives its focus back when the keyboard leaves it.
 const SEARCH_ID: &str = "top_bar_search";
-/// The account menu's width, and the id it lives under in egui's popup memory: the app reads
-/// keys for it itself, but egui keeps those keys while a popup is open only if it is in that
-/// memory (`Popup::is_any_open`).
+/// The account menu's width, and its id.
 const ACCOUNT_MENU_W: f32 = 240.;
 const ACCOUNT_MENU: &str = "account_menu";
 /// The SyncPlay panel's width, as `main`'s popover had it.
@@ -193,19 +192,6 @@ fn bar_step(items: &[BarItem], current: Option<BarItem>, step: i32) -> Option<Ba
     items.get((index + step).clamp(0, last) as usize).copied()
 }
 
-/// Up and Down in the account menu wrap round, as a menu's highlight does.
-fn menu_step(current: Option<usize>, step: i32, len: usize) -> Option<usize> {
-    let len = len as i32;
-    if len == 0 {
-        return None;
-    }
-    Some(match current {
-        Some(index) => (index as i32 + step).rem_euclid(len) as usize,
-        None if step < 0 => (len - 1) as usize,
-        None => 0,
-    })
-}
-
 pub struct Shell {
     /// Never empty: Home is at the bottom.
     stack: Vec<StackEntry>,
@@ -241,10 +227,6 @@ pub struct Shell {
     /// (`keys::take` runs before egui changes the focus). The box's own keys are read on this
     /// rather than `Memory::has_focus`, which later events in the frame could have changed.
     search_focused: bool,
-    /// The entry the account menu's keyboard highlights (`None` when a click opened it, until
-    /// an arrow key picks one). Whether the menu is open is egui's popup memory's, so egui keeps
-    /// the keyboard while it is (`Popup::is_any_open`).
-    account_highlight: Option<usize>,
     /// The SyncPlay panel's keyboard highlight: `None` when a click opened the panel, until an
     /// arrow key picks an entry.
     syncplay_highlight: Option<Highlight>,
@@ -287,7 +269,6 @@ impl Shell {
             search_slot: None,
             search_motion: None,
             search_focused: false,
-            account_highlight: None,
             syncplay_highlight: None,
             syncplay_scroll: false,
             logo: load_logo(cx.ctx),
@@ -324,7 +305,6 @@ impl Shell {
         // A box on its way out or in stops with the bar gone: it would be stale when the bar
         // comes back.
         self.search_motion = None;
-        self.account_highlight = None;
         self.syncplay_highlight = None;
         self.syncplay_scroll = false;
         egui::Popup::close_id(ctx, account_menu_id());
@@ -666,57 +646,11 @@ impl Shell {
         }
     }
 
-    /// The account menu's keys, which egui keeps while its popup is open: Tab and the horizontal
-    /// arrows stay in the menu, Backspace and Alt+Left close it like Esc, Ctrl/Cmd+F closes it and
-    /// opens the box, Up and Down move its highlight, Enter picks. Read before anything in the bar
-    /// draws, so egui's focus pass can't hand the keyboard to a button or card behind the menu
-    /// (Enter would then press that as well); the popup itself only draws its rows.
-    fn account_menu_keys(&mut self, cx: &mut PageCx) {
-        if !egui::Popup::is_id_open(cx.ctx, account_menu_id()) {
-            return;
-        }
-        let ctx = cx.ctx;
-        if keys::take_exact(ctx, Modifiers::NONE, Key::Tab) | keys::take_exact(ctx, Modifiers::SHIFT, Key::Tab) {
-            cancel_focus(ctx);
-        }
-        take_horizontal_keys(ctx);
-        if keys::take_exact(ctx, Modifiers::NONE, Key::Backspace)
-            | keys::take_exact(ctx, Modifiers::ALT, Key::ArrowLeft)
-        {
-            egui::Popup::close_id(ctx, account_menu_id());
-            self.account_highlight = None;
-            return;
-        }
-        if keys::take_exact(ctx, Modifiers::COMMAND, Key::F) {
-            egui::Popup::close_id(ctx, account_menu_id());
-            self.account_highlight = None;
-            self.focus_search(cx);
-            return;
-        }
-        let count = self.accounts.len() + 2;
-        let down = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowDown);
-        let up = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowUp);
-        if down | up {
-            let step = if down { 1 } else { -1 };
-            self.account_highlight = menu_step(self.account_highlight, step, count);
-            cancel_focus(ctx);
-        }
-        if keys::take_exact(ctx, Modifiers::NONE, Key::Enter)
-            && let Some(index) = self.account_highlight
-        {
-            egui::Popup::close_id(ctx, account_menu_id());
-            self.account_highlight = None;
-            self.choose_account(index, cx);
-        }
-    }
-
-    /// Opens the account menu, loading the saved accounts as `main` did when its menu opened.
-    /// From the keyboard the first entry is highlighted; from a click the first arrow key
-    /// picks one.
+    /// Opens the account menu from the keyboard, its first entry highlighted, loading the saved
+    /// accounts as `main` did when its menu opened.
     fn open_account_menu(&mut self, ctx: &egui::Context) {
         self.accounts = Config::load().accounts;
-        self.account_highlight = Some(0);
-        egui::Popup::open_id(ctx, account_menu_id());
+        PopupMenu::open(ctx, account_menu_id(), Opened::Keyboard);
         ctx.request_repaint();
     }
 
@@ -907,7 +841,6 @@ impl Shell {
     fn top_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         self.step_search_motion(cx.ctx);
         self.search_box_keys(cx);
-        self.account_menu_keys(cx);
         self.syncplay_panel_keys(cx);
         let can_go_back = self.can_go_back();
         let keyboard = self.bar_key;
@@ -1099,56 +1032,39 @@ impl Shell {
         }
         let response = response.on_hover_text(tooltip);
         let id = account_menu_id();
-        let was_open = egui::Popup::is_id_open(ui.ctx(), id);
         if response.clicked() {
-            // A click leaves no keyboard in the bar (the menu's keys are `account_menu_keys`').
+            // A click leaves no keyboard in the bar; the menu takes it from here.
             self.bar_key = None;
-            if was_open {
-                egui::Popup::close_id(ui.ctx(), id);
-                self.account_highlight = None;
-            } else {
+            if !PopupMenu::is_open(ui.ctx(), id) {
                 self.accounts = Config::load().accounts;
-                self.account_highlight = None;
-                egui::Popup::open_id(ui.ctx(), id);
             }
+            PopupMenu::toggle(ui.ctx(), id, Opened::Pointer);
         }
 
-        // The rows only answer the pointer; the keyboard comes through `account_menu_keys`
-        // (egui's focus pass would otherwise hand it to a button or card behind the menu).
-        let mut chosen = None;
+        // The saved accounts, the current one checked and each with its server at the end, then
+        // adding one and signing out.
         let current = cx.services.session.account_key();
-        if egui::Popup::is_id_open(ui.ctx(), id) {
-            egui::Popup::menu(&response)
-                .id(id)
-                .open_memory(None::<egui::SetOpenCommand>)
-                .align(RectAlign::BOTTOM_END)
-                .width(ACCOUNT_MENU_W)
-                .show(|ui| {
-                    for (index, account) in self.accounts.iter().enumerate() {
-                        let checked = account.credential_account() == current;
-                        let entry = account_entry(ui, checked, &account.label(), self.account_highlight == Some(index));
-                        if entry.clicked() {
-                            chosen = Some(index);
-                        }
-                    }
-                    ui.separator();
-                    let actions = self.accounts.len();
-                    if account_entry(ui, false, "Add account…", self.account_highlight == Some(actions)).clicked() {
-                        chosen = Some(actions);
-                    }
-                    if account_entry(ui, false, "Sign out", self.account_highlight == Some(actions + 1)).clicked() {
-                        chosen = Some(actions + 1);
-                    }
-                });
+        let mut entries: Vec<Entry> = self
+            .accounts
+            .iter()
+            .map(|account| {
+                let server = account.server_name.as_deref().unwrap_or(&account.url);
+                Entry::new(account.username.as_str())
+                    .detail(server)
+                    .checked(account.credential_account() == current)
+            })
+            .collect();
+        entries.push(Entry::new("Add account…").checked(false).separated());
+        entries.push(Entry::new("Sign out").checked(false));
+        let shown = PopupMenu::new(id)
+            .align(RectAlign::BOTTOM_END)
+            .width(ACCOUNT_MENU_W)
+            .show(&response, &entries);
+        if shown.search {
+            self.focus_search(cx);
         }
-        if let Some(index) = chosen {
-            egui::Popup::close_id(ui.ctx(), id);
-            self.account_highlight = None;
+        if let Some(index) = shown.chosen {
             self.choose_account(index, cx);
-        } else if was_open && !egui::Popup::is_id_open(ui.ctx(), id) {
-            // Closed without a choice (Esc or a click outside): back where the keyboard came
-            // from. Opened from the bar, its item is still set, so its ring comes back.
-            self.account_highlight = None;
         }
     }
 
@@ -1156,7 +1072,6 @@ impl Shell {
     /// The app carries the event out after the frame.
     fn choose_account(&mut self, index: usize, cx: &mut PageCx) {
         let actions = self.accounts.len();
-        self.account_highlight = None;
         if index < actions {
             let account = self.accounts[index].clone();
             // Choosing the account already signed in just closes the menu, as on `main`:
@@ -1861,43 +1776,6 @@ fn ring(ui: &Ui, response: &Response) {
     );
 }
 
-/// A row in the account menu: a check in front when it's the current account, and the
-/// keyboard's highlight around it while the keyboard is on it.
-fn account_entry(ui: &mut Ui, checked: bool, label: &str, highlighted: bool) -> Response {
-    let body = TextStyle::Body.resolve(ui.style());
-    let color = theme::tokens_of(ui).foreground;
-    let mut job = LayoutJob::default();
-    // An unchecked row keeps the check's room, so the labels line up.
-    job.append(
-        ICON_CHECK.codepoint,
-        0.,
-        TextFormat {
-            font_id: text::icon(ui, ICON_CHECK.font_family()),
-            color: if checked { color } else { Color32::TRANSPARENT },
-            ..Default::default()
-        },
-    );
-    job.append(
-        &format!("  {label}"),
-        0.,
-        TextFormat {
-            font_id: body,
-            color,
-            ..Default::default()
-        },
-    );
-    let response = ui.add(egui::Button::new(egui::WidgetText::LayoutJob(job.into())).frame_when_inactive(false));
-    if highlighted {
-        ui.painter().rect_stroke(
-            response.rect,
-            CornerRadius::same(4),
-            Stroke::new(1.5, theme::tokens_of(ui).foreground),
-            StrokeKind::Inside,
-        );
-    }
-    response
-}
-
 /// The account menu's id in egui's popup memory, where `Popup::is_any_open` looks for it.
 fn account_menu_id() -> Id {
     Id::unique(ACCOUNT_MENU)
@@ -1931,8 +1809,8 @@ mod tests {
     use egui::{Event, Key, Modifiers, RawInput, Rect, pos2};
 
     use super::{
-        BarItem, Highlight, MenuEntry, SearchMotion, bar_items, bar_step, highlight_step, lerp_rect, menu_step,
-        move_target, resolve_highlight, syncplay_entries, take_horizontal_keys,
+        BarItem, Highlight, MenuEntry, SearchMotion, bar_items, bar_step, highlight_step, lerp_rect, move_target,
+        resolve_highlight, syncplay_entries, take_horizontal_keys,
     };
 
     #[test]
@@ -1996,17 +1874,6 @@ mod tests {
         let half = motion.progress(10. + crate::motion::ENTER / 2.);
         assert!(half > 0.95, "{half}");
         assert!(half < 1.);
-    }
-
-    #[test]
-    fn the_account_menu_wraps_round() {
-        assert_eq!(menu_step(Some(0), 1, 4), Some(1));
-        assert_eq!(menu_step(Some(3), 1, 4), Some(0));
-        assert_eq!(menu_step(Some(0), -1, 4), Some(3));
-        // A menu opened with a click shows the first entry going down, the last going up.
-        assert_eq!(menu_step(None, 1, 4), Some(0));
-        assert_eq!(menu_step(None, -1, 4), Some(3));
-        assert_eq!(menu_step(Some(0), 1, 0), None);
     }
 
     fn group(id: &str) -> GroupInfo {
