@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use jellyfin::models::{
-    AuthenticationResult, BaseItemDto, BaseItemKind, ItemFilterValues, MediaSegmentDto, PublicSystemInfo, QueryResult,
+    AuthenticationResult, BaseItemDto, BaseItemKind, Culture, ItemFilterValues, MediaSegmentDto, PublicSystemInfo,
+    QueryResult, SubtitleMode,
 };
 use jellyfin::{GroupInfo, PlaybackInfoResponse};
 use serde::de::DeserializeOwned;
@@ -32,7 +33,17 @@ fn every_fixture_parses() {
         let info: PublicSystemInfo = load(version, "public_info");
         let reported = info.server_version().expect("a server version");
         assert!(reported.is_supported(), "{version}: {reported}");
-        let _: AuthenticationResult = load(version, "authenticate");
+        let auth: AuthenticationResult = load(version, "authenticate");
+        let config = auth.user.configuration.expect("the user's configuration");
+        assert_eq!(config.subtitle_mode, SubtitleMode::Default, "{version}");
+        assert!(config.remember_audio_selections, "{version}");
+        let cultures: Vec<Culture> = load(version, "cultures");
+        assert!(
+            cultures
+                .iter()
+                .any(|culture| culture.three_letter_iso_language_name.as_deref() == Some("jpn")),
+            "{version}"
+        );
         for name in ["user_views", "items_movies", "seasons", "episodes", "resume", "next_up"] {
             let _: QueryResult<BaseItemDto> = load(version, name);
         }
