@@ -262,8 +262,9 @@ pub struct Watch {
 
 /// The mascot in `rect`, doing what `watch` says. Its eyes glide to a new target and shut over
 /// a moment, or jump there with animations off. Painted rather than allocated, so the form can
-/// lay itself out first and the mascot follows this frame's caret.
-pub fn watching(ui: &Ui, rect: Rect, watch: Watch) {
+/// lay itself out first and the mascot follows this frame's caret. `shadow` puts its shadow
+/// under it; without one it floats over whatever is below.
+pub fn watching(ui: &Ui, rect: Rect, watch: Watch, shadow: bool) {
     let face = if watch.puzzled { Face::Confused } else { Face::Cute };
     let still = ui.style().animation_time == 0.;
     let mut pose = if still {
@@ -281,7 +282,7 @@ pub fn watching(ui: &Ui, rect: Rect, watch: Watch) {
     ];
     let shut = ctx.animate_bool_with_time(id.with("shut"), watch.eyes_shut, glance);
     pose.eyes = shut_by(pose.eyes, shut);
-    paint(ui, Shapes::get(), &pose, face, rect);
+    paint(ui, Shapes::get(), &pose, face, rect, shadow);
     if !still {
         ctx.request_repaint_after(ANIMATION_STEP);
     }
@@ -333,7 +334,7 @@ fn show(ui: &mut Ui, size: f32, face: Face) {
     } else {
         Pose::rest()
     };
-    paint(ui, Shapes::get(), &pose, face, rect);
+    paint(ui, Shapes::get(), &pose, face, rect, true);
     if moving {
         ui.ctx().request_repaint_after(ANIMATION_STEP);
     }
@@ -599,8 +600,16 @@ impl Shapes {
                     .collect();
                 still(painted(polygon(&points), WHITE))
             }),
+            // One stroke per lid: a path only takes its first segment's start, so stroking both
+            // at once would draw a line from one eye to the other.
             lids: still(painted(
-                stroked(&CLOSED_EYES.map(cubic), false, CLOSED_EYE_WIDTH),
+                {
+                    let mut mesh = Mesh::default();
+                    for lid in CLOSED_EYES {
+                        mesh.append(stroked(&[cubic(lid)], false, CLOSED_EYE_WIDTH));
+                    }
+                    mesh
+                },
                 WHITE,
             )),
             mouth: still(painted(stroked(&MOUTH.map(cubic), false, MOUTH_WIDTH), WHITE)),
@@ -784,8 +793,9 @@ struct Drawn<'a> {
     tint: Option<Color32>,
 }
 
-/// Everything `face` shows in this pose, back to front, as `main` painted it.
-fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
+/// Everything `face` shows in this pose, back to front, as `main` painted it, with its shadow
+/// if `shadow`.
+fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face, shadow: bool) -> Vec<Drawn<'a>> {
     let body = pose.body();
     let bob = Affine::translate([0., pose.bob]);
     // The eyes move with the look and the rest of the face half as far.
@@ -796,12 +806,14 @@ fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
     let mut parts = Vec::with_capacity(17);
 
     let low = pose.low;
-    parts.push(Drawn {
-        part: &shapes.shadow,
-        pose: Affine::scale(SHADOW, [(SHADOW_WIDTH + SHADOW_GROWTH * low) / SHADOW_WIDTH, 1.]),
-        motion: 0.,
-        tint: Some(Color32::from_black_alpha(((0.08 + 0.1 * low) * 255.).round() as u8)),
-    });
+    if shadow {
+        parts.push(Drawn {
+            part: &shapes.shadow,
+            pose: Affine::scale(SHADOW, [(SHADOW_WIDTH + SHADOW_GROWTH * low) / SHADOW_WIDTH, 1.]),
+            motion: 0.,
+            tint: Some(Color32::from_black_alpha(((0.08 + 0.1 * low) * 255.).round() as u8)),
+        });
+    }
     for (i, tentacle) in shapes.tentacles.iter().enumerate() {
         if face == Face::Confused && i == TENTACLES.len() - 1 {
             continue;
@@ -899,10 +911,10 @@ fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face) -> Vec<Drawn<'a>> {
 }
 
 /// Paints the mascot into `rect`, its square face filling it.
-fn paint(ui: &Ui, shapes: &Shapes, pose: &Pose, face: Face, rect: Rect) {
+fn paint(ui: &Ui, shapes: &Shapes, pose: &Pose, face: Face, rect: Rect, shadow: bool) {
     let view = view(rect);
     let painter = ui.painter();
-    for drawn in frame(shapes, pose, face) {
+    for drawn in frame(shapes, pose, face, shadow) {
         let transform = drawn.pose.then(view);
         let mut mesh = drawn.part.mesh.clone();
         for (i, vertex) in mesh.vertices.iter_mut().enumerate() {
@@ -1123,9 +1135,9 @@ mod tests {
     use egui::{Context, RawInput, UiBuilder, pos2};
 
     use super::{
-        BROWS, EVIL_ODDS, EYES, Eyes, FLICK_EVERY, Face, HEAD, LOOK, Mesh, Pose, SCRATCHING, SCRATCHING_FRONT, Shapes,
-        TENTACLE_WIDTH, TENTACLES, Tentacle, Vertex, WHITE_UV, below_brow, blink, cubic, flick_shift, flicks, frame,
-        gaze, kept_face_with, noise, shut_by, smooth, wave_shift,
+        BROWS, CLOSED_EYE_WIDTH, CLOSED_EYES, EVIL_ODDS, EYES, Eyes, FLICK_EVERY, Face, HEAD, LOOK, Mesh, Pose,
+        SCRATCHING, SCRATCHING_FRONT, Shapes, TENTACLE_WIDTH, TENTACLES, Tentacle, Vertex, WHITE_UV, below_brow, blink,
+        cubic, flick_shift, flicks, frame, gaze, kept_face_with, noise, shut_by, smooth, wave_shift,
     };
 
     /// The eyes turn toward what's looked at, never past [`LOOK`], and ahead when nothing is.
@@ -1345,7 +1357,7 @@ mod tests {
             phase: None,
             look: [0., 0.],
         };
-        let parts = frame(shapes, &pose, Face::Cute);
+        let parts = frame(shapes, &pose, Face::Cute, true);
         let (center, r) = EYES[0];
         let eye = parts
             .iter()
@@ -1445,12 +1457,35 @@ mod tests {
         }
     }
 
+    /// The closed lids are two strokes, with nothing drawn across the gap between the eyes.
+    #[test]
+    fn the_closed_lids_are_not_joined() {
+        let gap = CLOSED_EYES[0][2][0] + CLOSED_EYE_WIDTH..CLOSED_EYES[1][0][0] - CLOSED_EYE_WIDTH;
+        let lids = &Shapes::get().lids.mesh;
+        assert!(!lids.vertices.is_empty());
+        assert!(lids.vertices.iter().all(|vertex| !gap.contains(&vertex.pos.x)));
+    }
+
+    /// The sign-in form's mascot floats with no shadow; the loaders keep theirs.
+    #[test]
+    fn the_shadow_is_drawn_only_when_asked_for() {
+        let shapes = Shapes::get();
+        let pose = Pose::at(0.3);
+        let has_shadow = |shadow| {
+            frame(shapes, &pose, Face::Cute, shadow)
+                .iter()
+                .any(|drawn| std::ptr::eq(drawn.part, &shapes.shadow))
+        };
+        assert!(has_shadow(true));
+        assert!(!has_shadow(false));
+    }
+
     #[test]
     fn every_face_tessellates() {
         let shapes = Shapes::get();
         let pose = super::Pose::at(0.3);
         for face in [Face::Cute, Face::Evil, Face::Confused] {
-            let parts = frame(shapes, &pose, face);
+            let parts = frame(shapes, &pose, face, true);
             assert!(parts.len() > 10, "{face:?} draws only {} parts", parts.len());
             for drawn in &parts {
                 let mesh = &drawn.part.mesh;
@@ -1462,7 +1497,7 @@ mod tests {
         }
         // Each face has its own pieces: the confused one scratches its head and asks, while the
         // others don't.
-        let confused = frame(shapes, &pose, Face::Confused);
+        let confused = frame(shapes, &pose, Face::Confused, true);
         assert!(confused.iter().any(|drawn| std::ptr::eq(drawn.part, &shapes.question)));
         assert!(
             confused
@@ -1470,7 +1505,7 @@ mod tests {
                 .any(|drawn| std::ptr::eq(drawn.part, &shapes.scratching_front))
         );
         for face in [Face::Cute, Face::Evil] {
-            let parts = frame(shapes, &pose, face);
+            let parts = frame(shapes, &pose, face, true);
             assert!(!parts.iter().any(|drawn| std::ptr::eq(drawn.part, &shapes.question)));
             assert!(!parts.iter().any(|drawn| std::ptr::eq(drawn.part, &shapes.scratching)));
         }

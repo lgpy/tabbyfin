@@ -3,7 +3,7 @@
 //! accounts the form opens with. The answers are the captured fixtures.
 
 use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use jellyfin::models::AuthenticationResult;
 
 use crate::config::SavedServer;
@@ -312,6 +312,37 @@ fn a_wrong_password_keeps_the_form_and_says_why() {
     assert!(ui.state().event.is_none(), "a failed sign-in reached the app");
 }
 
+/// The address field keeps its size as it takes and gives up the keyboard (egui takes a field's
+/// outline out of its whole-point margin, so a focus ring wider than the resting outline shrank
+/// it), and its hint shows only while it doesn't have the keyboard.
+#[test]
+fn the_address_field_keeps_its_size_and_hides_its_hint_while_typed_in() {
+    let mut ui = login_harness(|ctx| Login::new(ctx, "ui-test-device".into(), Vec::new(), false, None));
+    ui.step();
+    ui.step();
+    let field = ui.get_by_role(Role::TextInput);
+    assert!(field.is_focused(), "the address field takes the keyboard at launch");
+    let focused = field.rect();
+    // egui names a field without a hint with an empty one.
+    assert_eq!(
+        field.accesskit_node().placeholder().unwrap_or_default(),
+        "",
+        "no hint beside the caret"
+    );
+
+    // Escape gives up a text field's focus.
+    ui.key_press(egui::Key::Escape);
+    ui.step();
+    ui.step();
+    let field = ui.get_by_role(Role::TextInput);
+    assert!(!field.is_focused());
+    assert_eq!(field.rect(), focused, "the field changed size with the focus");
+    assert_eq!(
+        field.accesskit_node().placeholder(),
+        Some("jellyfin.example.com or 192.168.1.10:8096")
+    );
+}
+
 /// The form opens with the saved accounts to continue as, and choosing one asks the app to
 /// sign in with its stored token.
 #[test]
@@ -326,7 +357,7 @@ fn a_saved_account_is_offered_and_chosen() {
     let listed = account.clone();
     let mut ui = login_harness(move |ctx| Login::new(ctx, "ui-test-device".into(), vec![listed], false, None));
 
-    assert!(ui.query_by_label("Choose an account").is_some());
+    assert!(ui.query_by_label("Welcome back").is_some());
     ui.get_by_label(&account.label()).click();
     ui.step();
     match ui.state().event.as_ref() {

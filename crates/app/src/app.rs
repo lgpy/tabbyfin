@@ -23,6 +23,8 @@ use crate::{credentials, runtime, smooth_scroll, theme, window};
 
 /// The mascot's size while the saved session is restored, as on `main`.
 const RESTORING_MASCOT: f32 = 160.;
+/// How far the glow behind the restoring screen's mascot reaches, as the sign-in form's does.
+const RESTORING_GLOW: f32 = 360.;
 
 /// Restoring fails with the request's error, or none when there's no stored token.
 type Restored = Result<Session, Option<jellyfin::Error>>;
@@ -665,11 +667,18 @@ impl eframe::App for App {
                 shell.show(ui, keys, &mut cx);
             }
             Some(Screen::SignIn(login)) => {
-                egui::CentralPanel::default().show(ui, |ui| login.show(ui, &ctx));
+                // Frameless: the form paints the cozy backdrop over the whole window.
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| login.show(ui, &ctx));
             }
             Some(Screen::Restoring { .. }) | None => {
-                // The mascot, as `main`'s restoring screen had it.
-                egui::CentralPanel::default().show(ui, |ui| {
+                // The mascot, as `main`'s restoring screen had it, in the sign-in screen's
+                // backdrop and glow, so a launch that does need the form doesn't flash.
+                egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+                    let tokens = theme::tokens_of(ui);
+                    widgets::backdrop::fill(ui.painter(), ui.max_rect(), tokens);
+                    widgets::backdrop::glow(ui.painter(), ui.max_rect().center(), RESTORING_GLOW, tokens);
                     ui.scope_builder(
                         egui::UiBuilder::new().layout(egui::Layout::top_down(egui::Align::Center)),
                         |ui| {
