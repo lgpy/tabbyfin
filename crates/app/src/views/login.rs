@@ -322,15 +322,18 @@ impl Login {
         });
         ui.add_space(14.0);
         ui.vertical_centered(|ui| {
-            // An aside to the step: the way back to another server, or what this one needs.
-            if self.quick_connect_code.is_none() {
-                if self.server.is_some() {
-                    if button::subtle(ui, "Use another server").clicked() {
-                        self.change_server();
-                    }
-                } else {
-                    muted(ui, &format!("Works with Jellyfin {MIN_SUPPORTED_VERSION} or newer"));
+            // An aside to the step: the way out of a Quick Connect wait, the way back to another
+            // server, or what this one needs.
+            if self.quick_connect_code.is_some() {
+                if button::subtle(ui, "Cancel").clicked() {
+                    self.cancel();
                 }
+            } else if self.server.is_some() {
+                if button::subtle(ui, "Use another server").clicked() {
+                    self.change_server();
+                }
+            } else {
+                muted(ui, &format!("Works with Jellyfin {MIN_SUPPORTED_VERSION} or newer"));
             }
             if self.can_cancel {
                 ui.add_space(8.0);
@@ -347,7 +350,7 @@ impl Login {
         let (title, subtitle) = if self.quick_connect_code.is_some() {
             (
                 "Approve this sign-in".to_owned(),
-                "In another Jellyfin app where you're signed in, open Quick Connect and enter this code.".to_owned(),
+                "Enter this code in Quick Connect, in a Jellyfin app you're signed in to.".to_owned(),
             )
         } else if let Some((client, info)) = &self.server {
             let host = client.base_url().host_str().unwrap_or_default();
@@ -373,11 +376,8 @@ impl Login {
             ui.add_space(12.0);
         }
         if let Some(status) = self.status.clone() {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(status);
-            });
-            ui.add_space(8.0);
+            surface::waiting(ui, &status);
+            ui.add_space(12.0);
         }
         if let Some(code) = self.quick_connect_code.clone() {
             self.quick_connect_step(ui, &code);
@@ -694,22 +694,14 @@ impl Login {
         }
     }
 
+    /// The code to approve and the wait for it. Cancel is the aside under the panel (`form`):
+    /// with nothing to weigh it against, a full-width button outweighed the code.
     fn quick_connect_step(&mut self, ui: &mut egui::Ui, code: &str) {
-        let tokens = theme::tokens_of(ui);
-        ui.vertical_centered(|ui| {
-            // The code is what the user has to read off, so the mascot looks at it too.
-            let shown = ui.label(egui::RichText::new(code).size(40.0).color(tokens.ink).strong());
-            self.watch.look_at = Some(shown.rect.center());
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Waiting for approval");
-            });
-        });
-        ui.add_space(16.0);
-        if button::quiet(ui, "Cancel", ui.available_width(), button::State::Ready).clicked() {
-            self.cancel();
-        }
+        // The code is what the user has to read off, so the mascot looks at it too.
+        let shown = widgets::code::show(ui, code);
+        self.watch.look_at = Some(shown.rect.center());
+        ui.add_space(14.0);
+        surface::waiting(ui, "Waiting for approval…");
     }
 }
 

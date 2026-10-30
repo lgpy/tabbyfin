@@ -544,5 +544,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ The backdrop's gradient fills the window under a lavender glow; the mascot floats 16 points above the panel with no shadow (`widgets/mascot.rs` checks the shadow is left out only when asked). Titles: *Welcome to Tabbyfin*, *Welcome back* with saved accounts, *Sign in to {server}*. Saved accounts are avatar rows with their ✕ inside the row; the password's eye sits inside the field; *Use another server* and the minimum Jellyfin version sit under the panel.
 
+✅ The Quick Connect step (*Approve this sign-in*): the code in an inset, monospace and split in two halves, with the spinner and *Waiting for approval…* centred under it and *Cancel* under the panel. `ui_tests/login.rs` checks the step against the fixture server, and that *Cancel* goes back to the credentials.
+
 - ⬜ **In the real app**, dark and light, on the hidden display: the restoring screen's backdrop and glow running into the form without a flash; the glow's edge invisible on the light backdrop; the 150 % text tall form.
 - ⬜ **With a mouse and a real keyboard**: a row's hover and focus ring, Tab from a row to its ✕, Enter on a focused row continuing as that account; *Use another server*; the brand button's hover.

@@ -312,6 +312,52 @@ fn a_wrong_password_keeps_the_form_and_says_why() {
     assert!(ui.state().event.is_none(), "a failed sign-in reached the app");
 }
 
+/// Quick Connect swaps the credentials for the code to approve and a line saying it's waiting,
+/// with Cancel under the panel; Cancel goes back to the credentials.
+#[test]
+fn quick_connect_shows_the_code_until_cancelled() {
+    let server = FixtureServer::start();
+    server.json("GET", "/System/Info/Public", "public_info");
+    server.json_value("GET", "/QuickConnect/Enabled", &serde_json::json!(true));
+    let pending = serde_json::json!({"Authenticated": false, "Secret": "secret", "Code": "482913"});
+    server.json_value("POST", "/QuickConnect/Initiate", &pending);
+    server.json_value("GET", "/QuickConnect/Connect", &pending);
+    let url = server.uri();
+    let mut ui = login_harness(move |ctx| {
+        Login::new(
+            ctx,
+            "ui-test-device".into(),
+            Vec::new(),
+            false,
+            Some(Prefill {
+                url,
+                username: String::new(),
+                error: None,
+                resume_saved_session: false,
+            }),
+        )
+    });
+    step_until(&mut ui, "the credentials step", |harness| {
+        harness.query_by_label("Use Quick Connect").is_some()
+    });
+    ui.get_by_label("Use Quick Connect").click();
+    ui.step();
+    step_until(&mut ui, "the code", |harness| {
+        harness.query_by_label("482913").is_some()
+    });
+    assert!(ui.query_by_label("Waiting for approval…").is_some());
+    assert!(ui.query_by_label("Sign in").is_none());
+
+    // The shorter step recentres the form on the next frame; click Cancel where it settles.
+    ui.step();
+    ui.get_by_label("Cancel").click();
+    ui.step();
+    step_until(&mut ui, "the credentials again", |harness| {
+        harness.query_by_label("Sign in").is_some()
+    });
+    assert!(ui.query_by_label("482913").is_none());
+}
+
 /// The address field keeps its size as it takes and gives up the keyboard (egui takes a field's
 /// outline out of its whole-point margin, so a focus ring wider than the resting outline shrank
 /// it), and its hint shows only while it doesn't have the keyboard.
