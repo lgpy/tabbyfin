@@ -281,7 +281,46 @@ pub struct Tokens {
     pub radius: u8,
     /// The radius of cards, dialogs and popups (`main`'s override of 8).
     pub radius_lg: u8,
+
+    // The cozy look, which the app is moving to one screen at a time (the sign-in screen first,
+    // through [`cozy_style`]): the mascot's lavender in place of gpui-kit's greys.
+    /// The window's background, a gradient from the top colour to the bottom one.
+    pub backdrop_top: Color32,
+    pub backdrop_bottom: Color32,
+    /// The light pooled behind the mascot, at its brightest: lavender with its peak alpha.
+    pub glow: Color32,
+    /// A panel raised off the backdrop, its outline and the shadow under it.
+    pub surface: Color32,
+    pub surface_border: Color32,
+    pub surface_shadow: Color32,
+    /// Sunk into a surface: text fields and list rows.
+    pub inset: Color32,
+    pub inset_hover: Color32,
+    /// Text on the cozy surfaces, and the quieter lines under it.
+    pub ink: Color32,
+    pub ink_muted: Color32,
+    /// The mascot's lavender as the main action's colour, and the text on it.
+    pub brand: Color32,
+    pub brand_hover: Color32,
+    pub brand_foreground: Color32,
+    /// The pastel circles behind an account's initial, picked by its name, and the initial's
+    /// colour.
+    pub avatars: [Color32; 5],
+    pub avatar_foreground: Color32,
+    /// The radius of a cozy panel, and of the controls on it.
+    pub radius_surface: u8,
+    pub radius_control: u8,
 }
+
+/// Behind an account's initial: the mascot's lavender and periwinkle, the question mark's pink,
+/// a mint and a peach. Pastels read on both themes, so the two share them.
+const AVATARS: [Color32; 5] = [
+    Color32::from_rgb(0xc3, 0x96, 0xe7),
+    Color32::from_rgb(0x9a, 0x8e, 0xe9),
+    Color32::from_rgb(0xec, 0x9a, 0xb0),
+    Color32::from_rgb(0x8f, 0xd3, 0xb6),
+    Color32::from_rgb(0xf2, 0xb4, 0x8c),
+];
 
 impl Tokens {
     /// gpui-kit's *Default Light* with `main`'s overrides.
@@ -318,6 +357,25 @@ impl Tokens {
         overlay: Color32::from_rgba_premultiplied(0, 0, 0, 13),
         radius: 10,
         radius_lg: 12,
+        // A pale lilac morning.
+        backdrop_top: Color32::from_rgb(0xfc, 0xfa, 0xff),
+        backdrop_bottom: Color32::from_rgb(0xee, 0xe6, 0xfa),
+        glow: Color32::from_rgba_unmultiplied_const(0xc3, 0x96, 0xe7, 97),
+        surface: Color32::from_rgb(0xff, 0xff, 0xff),
+        surface_border: Color32::from_rgb(0xe8, 0xe0, 0xf4),
+        surface_shadow: Color32::from_rgba_premultiplied(0x10, 0x00, 0x30, 26),
+        inset: Color32::from_rgb(0xf8, 0xf5, 0xfc),
+        inset_hover: Color32::from_rgb(0xf0, 0xea, 0xf9),
+        ink: Color32::from_rgb(0x1f, 0x18, 0x2b),
+        ink_muted: Color32::from_rgb(0x60, 0x57, 0x70),
+        // Deeper than the mascot, so white text on it passes AA (5.9:1).
+        brand: Color32::from_rgb(0x7b, 0x4f, 0xb0),
+        brand_hover: Color32::from_rgb(0x6a, 0x42, 0x9e),
+        brand_foreground: Color32::WHITE,
+        avatars: AVATARS,
+        avatar_foreground: Color32::from_rgb(0x1d, 0x12, 0x30),
+        radius_surface: 22,
+        radius_control: 12,
     };
 
     /// gpui-kit's *Default Dark* with `main`'s overrides.
@@ -353,6 +411,24 @@ impl Tokens {
         overlay: Color32::from_rgba_premultiplied(0, 0, 0, 51),
         radius: 10,
         radius_lg: 12,
+        // A nightlight: deep plum, lit from behind the mascot.
+        backdrop_top: Color32::from_rgb(0x0e, 0x0b, 0x16),
+        backdrop_bottom: Color32::from_rgb(0x1d, 0x16, 0x33),
+        glow: Color32::from_rgba_unmultiplied_const(0xc3, 0x96, 0xe7, 77),
+        surface: Color32::from_rgb(0x1a, 0x15, 0x26),
+        surface_border: Color32::from_rgb(0x2c, 0x24, 0x40),
+        surface_shadow: Color32::from_rgba_premultiplied(0, 0, 0, 110),
+        inset: Color32::from_rgb(0x12, 0x0e, 0x1b),
+        inset_hover: Color32::from_rgb(0x22, 0x1b, 0x31),
+        ink: Color32::from_rgb(0xf4, 0xf0, 0xfa),
+        ink_muted: Color32::from_rgb(0xa8, 0x9f, 0xbb),
+        brand: Color32::from_rgb(0xc3, 0x96, 0xe7),
+        brand_hover: Color32::from_rgb(0xd2, 0xad, 0xf0),
+        brand_foreground: Color32::from_rgb(0x1d, 0x12, 0x30),
+        avatars: AVATARS,
+        avatar_foreground: Color32::from_rgb(0x1d, 0x12, 0x30),
+        radius_surface: 22,
+        radius_control: 12,
     };
 
     /// The fill of an input or a select, gpui-kit's `input_background`: in the dark theme the
@@ -398,21 +474,33 @@ pub fn primary_style(ui: &mut egui::Ui) {
     widgets.active.weak_bg_fill = tokens.primary_hover;
 }
 
-/// A primary button of `width` with its label centred, drawn with [`primary_style`] (so it takes
-/// `primary_hover` under the pointer and pressed) and disabled while `enabled` is false.
-pub fn primary_button(ui: &mut egui::Ui, label: &str, width: f32, enabled: bool) -> egui::Response {
-    let colour = tokens_of(ui).primary_foreground;
-    let button = egui::Button::new(egui::RichText::new(label).color(colour)).min_size(egui::vec2(width, 0.));
-    // A button centres its contents with the layout of the `Ui` drawing it.
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, ui.spacing().interact_size.y),
-        egui::Layout::top_down(egui::Align::Center),
-        |ui| {
-            primary_style(ui);
-            ui.add_enabled(enabled, button)
-        },
-    )
-    .inner
+/// Restyles `ui` in the cozy look: text in [`Tokens::ink`], fields and rows sunk in
+/// [`Tokens::inset`] with the larger [`Tokens::radius_control`], and the focus ring in the brand
+/// colour. The screens that have moved to the look call it at their top; the rest keep
+/// [`visuals`].
+pub fn cozy_style(ui: &mut egui::Ui) {
+    let tokens = tokens_of(ui);
+    let visuals = ui.visuals_mut();
+    visuals.weak_text_color = Some(tokens.ink_muted);
+    visuals.extreme_bg_color = tokens.inset;
+    visuals.text_edit_bg_color = Some(tokens.inset);
+    // As wide as the resting outline: a text field keeps its size by taking its outline out of
+    // its margin, which egui rounds to whole points, so a wider ring would shrink it on focus.
+    visuals.selection.stroke = Stroke::new(1., tokens.brand);
+    visuals.hyperlink_color = tokens.ink;
+    let widgets = &mut visuals.widgets;
+    for (state, fill) in [
+        (&mut widgets.noninteractive, tokens.surface),
+        (&mut widgets.inactive, tokens.surface),
+        (&mut widgets.hovered, tokens.inset_hover),
+        (&mut widgets.active, tokens.inset_hover),
+    ] {
+        state.weak_bg_fill = fill;
+        state.bg_stroke.color = tokens.surface_border;
+        state.fg_stroke.color = tokens.ink;
+        state.corner_radius = egui::CornerRadius::same(tokens.radius_control);
+    }
+    widgets.hovered.bg_stroke.color = tokens.ink_muted;
 }
 
 /// `main`'s fill for a selected control — a menu row, a toggle, a checked box — which egui would

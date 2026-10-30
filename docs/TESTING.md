@@ -537,3 +537,12 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 - ⬜ **With a mouse and a real keyboard**: *Show password* opening its eyes to read along, then shutting them again; the Quick Connect step looking at the code; the saved-accounts step; the tall form (150 % text, 800×500) with the bigger mascot above it.
 - ⬜ With the **animations setting off**: the eyes jump to their target and shut at once, and nothing repaints while idle.
+
+## 38. The cozy sign-in screen
+
+**egui**, rendered headless (`egui_kittest` on lavapipe) from the real `Login` in dark and light: the first step, two saved accounts, and the credentials step against the fixture server.
+
+✅ The backdrop's gradient fills the window under a lavender glow; the mascot floats 16 points above the panel with no shadow (`widgets/mascot.rs` checks the shadow is left out only when asked). Titles: *Welcome to Tabbyfin*, *Welcome back* with saved accounts, *Sign in to {server}*. Saved accounts are avatar rows with their ✕ inside the row; the password's eye sits inside the field; *Use another server* and the minimum Jellyfin version sit under the panel.
+
+- ⬜ **In the real app**, dark and light, on the hidden display: the restoring screen's backdrop and glow running into the form without a flash; the glow's edge invisible on the light backdrop; the 150 % text tall form.
+- ⬜ **With a mouse and a real keyboard**: a row's hover and focus ring, Tab from a row to its ✕, Enter on a focused row continuing as that account; *Use another server*; the brand button's hover.

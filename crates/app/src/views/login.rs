@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use egui_material_icons::icons::{ICON_ARROW_BACK, ICON_CLOSE, ICON_VISIBILITY, ICON_VISIBILITY_OFF};
+use egui_material_icons::icons::{ICON_ARROW_BACK, ICON_VISIBILITY, ICON_VISIBILITY_OFF};
 use jellyfin::models::PublicSystemInfo;
 use jellyfin::{Client, ClientInfo, Error, MIN_SUPPORTED_VERSION};
 
@@ -18,7 +18,9 @@ use crate::session::{self, Session, describe_error};
 use crate::task::{self, Deadline, Receiver, Sender, Task};
 use crate::theme;
 use crate::theme::text;
+use crate::widgets::avatar_row::AvatarRow;
 use crate::widgets::mascot::{self, Watch};
+use crate::widgets::{self, button, field, surface};
 
 /// How long to keep retrying while the server reports that it is starting up.
 const STARTUP_WAIT: Duration = Duration::from_secs(120);
@@ -28,9 +30,13 @@ const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 const FORM_WIDTH: f32 = 400.0;
 /// The mascot's square over the form.
 const MASCOT_SIZE: f32 = 160.0;
-/// How much of the mascot's square the panel comes up into: its shadow sits at the bottom of
-/// the square, so this puts the shadow on the panel's top edge, as though it floats over it.
-const MASCOT_OVERLAP: f32 = 6.0;
+/// The room between the mascot's square and the panel: its tentacles end a little above the
+/// square's bottom, so it hangs clear of the panel.
+const MASCOT_GAP: f32 = 16.0;
+/// The glow behind the mascot: how far it reaches, and how far below the mascot's middle it's
+/// centred, so the light pools around its body and onto the panel's top.
+const GLOW_RADIUS: f32 = 360.0;
+const GLOW_DROP: f32 = 30.0;
 
 pub enum LoginEvent {
     LoggedIn(Box<Session>),
@@ -97,6 +103,14 @@ impl Field {
     }
 }
 
+/// What the form is waiting on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Busy {
+    Connecting,
+    SigningIn,
+    QuickConnect,
+}
+
 pub struct Login {
     device_id: String,
     /// Saved accounts to continue as, most recently used first.
@@ -120,7 +134,8 @@ pub struct Login {
     /// Set once the server address has been verified.
     server: Option<(Client, PublicSystemInfo)>,
     quick_connect_code: Option<String>,
-    busy: bool,
+    /// The request in flight, so its button shows it loading while the rest of the form waits.
+    busy: Option<Busy>,
     status: Option<String>,
     error: Option<String>,
 
@@ -167,7 +182,7 @@ impl Login {
             watch: Watch::default(),
             server: None,
             quick_connect_code: None,
-            busy: false,
+            busy: None,
             status: None,
             error,
             task: None,
@@ -238,6 +253,10 @@ impl Login {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        // The sign-in screen is the first in the cozy look: the backdrop under everything, and
+        // the look's text, fields and buttons for what's drawn on it.
+        widgets::backdrop::fill(ui.painter(), ui.max_rect(), theme::tokens_of(ui));
+        theme::cozy_style(ui);
         // `main`'s form sat in the middle of the window (`items_center` and `justify_center`),
         // not at the top of a page. The form's height is only known after it has been laid
         // out, so the spacer above it comes from the last frame; a step that changes height
@@ -278,79 +297,77 @@ impl Login {
 
     fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         // The mascot's place comes first, but it's painted last: the fields tell it where to
-        // look, and its shadow lands on the panel.
+        // look. It floats over the panel, with a gap and no shadow, in the glow behind it.
         let top = ui
-            .allocate_space(egui::vec2(ui.available_width(), MASCOT_SIZE - MASCOT_OVERLAP))
+            .allocate_space(egui::vec2(ui.available_width(), MASCOT_SIZE + MASCOT_GAP))
             .1;
-        let mascot = egui::Rect::from_center_size(
-            egui::pos2(top.center().x, top.top() + MASCOT_SIZE / 2.),
+        let mascot = egui::Rect::from_min_size(
+            egui::pos2(top.center().x - MASCOT_SIZE / 2., top.top()),
             egui::Vec2::splat(MASCOT_SIZE),
+        );
+        let tokens = theme::tokens_of(ui);
+        widgets::backdrop::glow(
+            ui.painter(),
+            mascot.center() + egui::vec2(0., GLOW_DROP),
+            GLOW_RADIUS,
+            tokens,
         );
         self.watch = Watch {
             puzzled: self.error.is_some(),
             ..Watch::default()
         };
-        let tokens = theme::tokens_of(ui);
-        egui::Frame::new()
-            .fill(tokens.background)
-            .stroke(egui::Stroke::new(1.0, tokens.border))
-            .corner_radius(tokens.radius_lg)
-            .inner_margin(24.0)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                self.panel(ui, ctx);
-            });
-        if self.can_cancel {
-            ui.add_space(12.0);
-            ui.vertical_centered(|ui| {
+        surface::frame(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            self.panel(ui, ctx);
+        });
+        ui.add_space(14.0);
+        ui.vertical_centered(|ui| {
+            // An aside to the step: the way back to another server, or what this one needs.
+            if self.quick_connect_code.is_none() {
+                if self.server.is_some() {
+                    if button::subtle(ui, "Use another server").clicked() {
+                        self.change_server();
+                    }
+                } else {
+                    muted(ui, &format!("Works with Jellyfin {MIN_SUPPORTED_VERSION} or newer"));
+                }
+            }
+            if self.can_cancel {
+                ui.add_space(8.0);
                 if ui.button((ICON_ARROW_BACK, "Back to your account")).clicked() {
                     self.event = Some(LoginEvent::Cancel);
                 }
-            });
-        }
-        mascot::watching(ui, mascot, self.watch);
+            }
+        });
+        mascot::watching(ui, mascot, self.watch, false);
     }
 
     /// The panel under the mascot: the step's title, what went wrong, and the step's fields.
     fn panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let title = if self.quick_connect_code.is_some() {
-            "Approve this sign-in".to_owned()
-        } else if let Some((_, info)) = &self.server {
-            format!("Sign in to {}", info.server_name.as_deref().unwrap_or("Jellyfin"))
+        let (title, subtitle) = if self.quick_connect_code.is_some() {
+            (
+                "Approve this sign-in".to_owned(),
+                "In another Jellyfin app where you're signed in, open Quick Connect and enter this code.".to_owned(),
+            )
+        } else if let Some((client, info)) = &self.server {
+            let host = client.base_url().host_str().unwrap_or_default();
+            (
+                format!("Sign in to {}", info.server_name.as_deref().unwrap_or("Jellyfin")),
+                format!("Jellyfin {} at {host}", info.version.as_deref().unwrap_or("?")),
+            )
         } else if !self.accounts.is_empty() {
-            "Choose an account".to_owned()
+            (
+                "Welcome back".to_owned(),
+                "Pick an account to carry on watching.".to_owned(),
+            )
         } else {
-            "Connect to your server".to_owned()
+            (
+                "Welcome to Tabbyfin".to_owned(),
+                "Let's find your Jellyfin server.".to_owned(),
+            )
         };
-        ui.label(egui::RichText::new(title).font(text::font(ui, "2xl")).strong());
-        ui.add_space(2.0);
-        if self.quick_connect_code.is_some() {
-            muted(
-                ui,
-                "In another Jellyfin app where you're signed in, open Quick Connect and enter this code.",
-            );
-        } else if let Some((client, info)) = self.server.clone() {
-            ui.horizontal(|ui| {
-                let host = client.base_url().host_str().unwrap_or_default().to_owned();
-                muted(
-                    ui,
-                    &format!("Jellyfin {} at {host}", info.version.as_deref().unwrap_or("?")),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Change").clicked() {
-                        self.change_server();
-                    }
-                });
-            });
-        } else if !self.accounts.is_empty() {
-            muted(ui, "Continue as one of these, or connect to another server.");
-        } else {
-            muted(
-                ui,
-                &format!("Tabbyfin works with Jellyfin {MIN_SUPPORTED_VERSION} or newer."),
-            );
-        }
-        ui.add_space(16.0);
+        surface::heading(ui, &title, &subtitle);
+        ui.add_space(20.0);
         if let Some(error) = self.error.clone() {
             error_box(ui, &error);
             ui.add_space(12.0);
@@ -395,7 +412,7 @@ impl Login {
         }
         let candidates = candidates(&input);
         let info = session::client_info(&self.device_id);
-        self.busy = true;
+        self.busy = Some(Busy::Connecting);
         let progress = self.begin_request(ctx);
         self.task = Some(Task::spawn(ctx, async move {
             Outcome::Connected(Box::new(probe(candidates, info, progress).await))
@@ -406,7 +423,7 @@ impl Login {
         let Some((client, info)) = self.server.clone() else {
             return;
         };
-        if self.busy {
+        if self.busy.is_some() {
             return;
         }
         let username = self.username.trim().to_string();
@@ -416,7 +433,7 @@ impl Login {
             return;
         }
 
-        self.busy = true;
+        self.busy = Some(Busy::SigningIn);
         self.error = None;
         let _ = self.begin_request(ctx);
         self.task = Some(Task::spawn(ctx, async move {
@@ -436,10 +453,10 @@ impl Login {
         let Some((client, info)) = self.server.clone() else {
             return;
         };
-        if self.busy {
+        if self.busy.is_some() {
             return;
         }
-        self.busy = true;
+        self.busy = Some(Busy::QuickConnect);
         self.error = None;
         self.status = None;
         let progress = self.begin_request(ctx);
@@ -478,7 +495,7 @@ impl Login {
 
     /// What the finished operation means for the form.
     fn finish(&mut self, outcome: Outcome) {
-        self.busy = false;
+        self.busy = None;
         self.status = None;
         match outcome {
             Outcome::Connected(result) => match *result {
@@ -540,7 +557,7 @@ impl Login {
     fn cancel(&mut self) {
         self.task = None;
         self.progress = None;
-        self.busy = false;
+        self.busy = None;
         self.status = None;
         self.quick_connect_code = None;
     }
@@ -555,33 +572,44 @@ impl Login {
     }
 
     fn server_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        if !self.accounts.is_empty() {
-            for account in self.accounts.clone() {
-                ui.horizontal(|ui| {
-                    let width = ui.available_width() - 32.0;
-                    let use_it = egui::Button::new(account.label()).min_size(egui::vec2(width, 26.0));
-                    if ui.add_enabled(!self.busy, use_it).clicked() {
-                        self.event = Some(LoginEvent::UseAccount(account.clone()));
-                    }
-                    if ui
-                        .add_enabled(!self.busy, egui::Button::new(ICON_CLOSE))
-                        .on_hover_text("Remove this account")
-                        .clicked()
-                    {
-                        self.event = Some(LoginEvent::ForgetAccount(account.clone()));
-                    }
-                });
+        for account in self.accounts.clone() {
+            let label = account.label();
+            let row = AvatarRow {
+                name: &account.username,
+                title: &account.username,
+                subtitle: account.server_name.as_deref().unwrap_or(&account.url),
+                label: &label,
+                remove: Some("Remove this account"),
             }
-            ui.add_space(16.0);
+            .show(ui, self.busy.is_none());
+            if row.row.clicked() {
+                self.event = Some(LoginEvent::UseAccount(account.clone()));
+            }
+            if row.remove.is_some_and(|remove| remove.clicked()) {
+                self.event = Some(LoginEvent::ForgetAccount(account.clone()));
+            }
+            ui.add_space(6.0);
+        }
+        if !self.accounts.is_empty() {
+            ui.add_space(14.0);
         }
 
-        field_label(ui, "Server address");
-        let address = egui::TextEdit::singleline(&mut self.url)
-            .id(Field::Server.id())
-            .hint_text("jellyfin.example.com or 192.168.1.10:8096")
-            .desired_width(f32::INFINITY)
-            .interactive(!self.busy)
-            .show(ui);
+        field::label(
+            ui,
+            if self.accounts.is_empty() {
+                "Server address"
+            } else {
+                "Or connect to another server"
+            },
+        );
+        let address = field::single_line(
+            ui,
+            Field::Server.id(),
+            &mut self.url,
+            "jellyfin.example.com or 192.168.1.10:8096",
+        )
+        .interactive(self.busy.is_none())
+        .show(ui);
         self.watch_field(&address);
         let address = address.response.response;
         if self.focus == Some(Field::Server) {
@@ -589,23 +617,27 @@ impl Login {
             self.focus = None;
         }
         let entered = address.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        ui.add_space(8.0);
-        // `main`'s form: the step's button under the field, the width of the form.
-        let connect = theme::primary_button(ui, "Connect", ui.available_width(), !self.busy);
-        if self.busy {
-            ui.spinner();
-        }
+        ui.add_space(14.0);
+        let connect = button::brand(ui, "Connect", ui.available_width(), self.button(Busy::Connecting));
         if connect.clicked() || entered {
             self.on_connect(ctx);
         }
     }
 
+    /// The state of the button that starts `action`: loading while it runs, and disabled while
+    /// anything else does.
+    fn button(&self, action: Busy) -> button::State {
+        match self.busy {
+            None => button::State::Ready,
+            Some(busy) if busy == action => button::State::Loading,
+            Some(_) => button::State::Disabled,
+        }
+    }
+
     fn credentials_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        field_label(ui, "Username");
-        let username = egui::TextEdit::singleline(&mut self.username)
-            .id(Field::Username.id())
-            .desired_width(f32::INFINITY)
-            .interactive(!self.busy)
+        field::label(ui, "Username");
+        let username = field::single_line(ui, Field::Username.id(), &mut self.username, "")
+            .interactive(self.busy.is_none())
             .show(ui);
         self.watch_field(&username);
         let username = username.response.response;
@@ -614,101 +646,79 @@ impl Login {
             self.focus = None;
         }
         let username_entered = username.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        ui.add_space(4.0);
+        ui.add_space(10.0);
 
-        field_label(ui, "Password");
-        let mut password_entered = false;
-        ui.horizontal(|ui| {
-            let password = egui::TextEdit::singleline(&mut self.password)
-                .id(Field::Password.id())
-                .password(!self.show_password)
-                .desired_width(ui.available_width() - 40.0)
-                .interactive(!self.busy)
-                .show(ui);
-            // A hidden password is none of its business: it shuts its eyes, and opens them to
-            // read along once the password is shown.
-            if self.show_password {
-                self.watch_field(&password);
-            } else if has_keyboard(&password) {
-                self.watch.eyes_shut = true;
-            }
-            let password = password.response.response;
-            if self.focus == Some(Field::Password) {
-                password.request_focus();
-                self.focus = None;
-            }
-            password_entered = password.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-            let icon = if self.show_password {
-                ICON_VISIBILITY_OFF
-            } else {
-                ICON_VISIBILITY
-            };
-            let tooltip = if self.show_password {
-                "Hide password"
-            } else {
-                "Show password"
-            };
-            let toggle = ui
-                .add_enabled(!self.busy, egui::Button::selectable(self.show_password, icon))
-                .on_hover_text(tooltip);
-            if toggle.clicked() {
-                self.show_password = !self.show_password;
-            }
-        });
+        field::label(ui, "Password");
+        let password = field::with_trailing(ui, Field::Password.id(), &mut self.password, "")
+            .password(!self.show_password)
+            .interactive(self.busy.is_none())
+            .show(ui);
+        // A hidden password is none of its business: it shuts its eyes, and opens them to read
+        // along once the password is shown.
+        if self.show_password {
+            self.watch_field(&password);
+        } else if has_keyboard(&password) {
+            self.watch.eyes_shut = true;
+        }
+        let password = password.response.response;
+        if self.focus == Some(Field::Password) {
+            password.request_focus();
+            self.focus = None;
+        }
+        let password_entered = password.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        let (icon, tooltip) = if self.show_password {
+            (ICON_VISIBILITY_OFF, "Hide password")
+        } else {
+            (ICON_VISIBILITY, "Show password")
+        };
+        if field::trailing(ui, &password, icon, self.busy.is_none())
+            .on_hover_text(tooltip)
+            .clicked()
+        {
+            self.show_password = !self.show_password;
+        }
         if username_entered {
             self.focus = Some(Field::Password);
             ui.ctx().request_repaint();
         }
-        ui.add_space(8.0);
+        ui.add_space(16.0);
 
         let width = ui.available_width();
-        let sign_in = theme::primary_button(ui, "Sign in", width, !self.busy);
-        if self.busy {
-            ui.spinner();
-        }
+        let sign_in = button::brand(ui, "Sign in", width, self.button(Busy::SigningIn));
         if sign_in.clicked() || password_entered {
             self.sign_in(ctx);
         }
-        // Centred like the primary button above it.
-        let quick_connect = ui
-            .allocate_ui_with_layout(
-                egui::vec2(width, ui.spacing().interact_size.y),
-                egui::Layout::top_down(egui::Align::Center),
-                |ui| {
-                    ui.add_enabled(
-                        !self.busy,
-                        egui::Button::new("Use Quick Connect").min_size(egui::vec2(width, 0.)),
-                    )
-                },
-            )
-            .inner;
-        if quick_connect.clicked() {
+        ui.add_space(8.0);
+        if button::quiet(ui, "Use Quick Connect", width, self.button(Busy::QuickConnect)).clicked() {
             self.start_quick_connect(ctx);
         }
     }
 
     fn quick_connect_step(&mut self, ui: &mut egui::Ui, code: &str) {
-        // The code is what the user has to read off, so the mascot looks at it too.
-        let shown = ui.label(egui::RichText::new(code).size(32.0).strong());
-        self.watch.look_at = Some(shown.rect.center());
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label("Waiting for approval");
+        let tokens = theme::tokens_of(ui);
+        ui.vertical_centered(|ui| {
+            // The code is what the user has to read off, so the mascot looks at it too.
+            let shown = ui.label(egui::RichText::new(code).size(40.0).color(tokens.ink).strong());
+            self.watch.look_at = Some(shown.rect.center());
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Waiting for approval");
+            });
         });
-        ui.add_space(8.0);
-        if ui.button("Cancel").clicked() {
+        ui.add_space(16.0);
+        if button::quiet(ui, "Cancel", ui.available_width(), button::State::Ready).clicked() {
             self.cancel();
         }
     }
 }
 
-/// A line of secondary text: `text_sm` in the muted colour.
+/// A line of secondary text: `text_sm` in the muted ink.
 fn muted(ui: &mut egui::Ui, line: &str) {
     ui.label(
         egui::RichText::new(line)
             .font(text::font(ui, "sm"))
-            .color(theme::tokens_of(ui).muted_foreground),
+            .color(theme::tokens_of(ui).ink_muted),
     );
 }
 
@@ -728,24 +738,17 @@ fn caret(field: &egui::text_edit::TextEditOutput) -> Option<egui::Pos2> {
     Some(field.galley.pos_from_cursor(cursor).center() + field.galley_pos.to_vec2())
 }
 
-/// A field's name above it, as `main`'s `field_label` had it: `text_sm` in the muted colour.
-fn field_label(ui: &mut egui::Ui, label: &str) {
-    ui.label(
-        egui::RichText::new(label)
-            .font(text::font(ui, "sm"))
-            .color(theme::tokens_of(ui).muted_foreground),
-    );
-}
-
 /// A boxed line in the theme's error colour, so it reads as more than body text.
 fn error_box(ui: &mut egui::Ui, message: &str) {
     let tokens = theme::tokens_of(ui);
     let color = tokens.danger;
     egui::Frame::new()
+        .fill(color.gamma_multiply(0.1))
         .stroke(egui::Stroke::new(1.0, color))
-        .corner_radius(tokens.radius)
-        .inner_margin(8.0)
+        .corner_radius(tokens.radius_control)
+        .inner_margin(egui::Margin::symmetric(12, 9))
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.colored_label(color, message);
         });
 }
