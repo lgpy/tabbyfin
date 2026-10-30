@@ -9,7 +9,8 @@
 //!   value the library no longer has stays listed, so what's applied is still shown. Opened
 //!   from Home's *Latest* shelf title, the library starts sorted by date added, newest first.
 //! - Changing the sort or filter bumps a generation: pages fetched before it are dropped.
-//! - Excluded genres and tags have no server parameter. While any are set, the page first lists
+//! - Excluded genres and tags, and requiring several of either at once, have no server parameter.
+//!   While any are set, the page first lists
 //!   the ids of every item the other filters leave and drops those with an excluded value
 //!   ([`order`]); the grid's pages are then fetched by id from that list.
 //! - The keyboard: the toolbar row, then the grid. Enter on a picker steps it to its next
@@ -50,6 +51,8 @@ const PAGE_SIZE: usize = 100;
 const GRID_PADDING: f32 = 24.;
 /// Space around a toolbar control for the cursor's ring.
 const RING_GAP: f32 = 3.;
+/// The genres and tags button's width.
+const VALUES_BUTTON_W: f32 = 200.;
 /// The jump bar's letters; `#` is the top (names starting with digits or symbols).
 const LETTERS: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const LETTER_BAR_W: f32 = 28.;
@@ -554,8 +557,9 @@ impl LibraryPage {
         let Some(scope) = &self.filter_scope else {
             return;
         };
-        self.base_query.genres = self.view.genres.clone();
-        self.base_query.tags = self.view.tags.clone();
+        // The server matches any of the genres given; the rest are intersected in `order`.
+        self.base_query.genres = self.view.genres.iter().take(1).cloned().collect();
+        self.base_query.tags = self.view.tags.iter().take(1).cloned().collect();
         self.base_query.official_ratings = self.view.rating.iter().cloned().collect();
         self.base_query.years = self.view.year.as_deref().map(years_of).unwrap_or_default();
         let resolution = RESOLUTIONS
@@ -577,14 +581,18 @@ impl LibraryPage {
             || self.view.resolution.is_some()
     }
 
-    /// Whether genres or tags are excluded, so the grid goes by [`Self::order`].
-    fn excluding(&self) -> bool {
-        self.filter_scope.is_some() && !(self.view.exclude_genres.is_empty() && self.view.exclude_tags.is_empty())
+    /// Whether genres or tags are excluded, or several genres or tags required (the server matches any
+    /// of them, we need all), so the grid goes by [`Self::order`].
+    fn ordered(&self) -> bool {
+        self.filter_scope.is_some()
+            && (self.view.genres.len() > 1
+                || self.view.tags.len() > 1
+                || !(self.view.exclude_genres.is_empty() && self.view.exclude_tags.is_empty()))
     }
 
     /// Loads the grid from the top: its first page, or first the order it's fetched by.
     fn load(&mut self, cx: &mut PageCx) {
-        if self.excluding() {
+        if self.ordered() {
             self.request_order(cx);
         } else {
             self.request_page(0, cx);
@@ -603,9 +611,13 @@ impl LibraryPage {
             ..self.base_query.clone()
         };
         let (genres, tags) = (self.view.exclude_genres.clone(), self.view.exclude_tags.clone());
+        let required: Vec<(Vec<String>, Vec<String>)> = (self.view.genres.iter().skip(1))
+            .map(|genre| (vec![genre.clone()], Vec::new()))
+            .chain(self.view.tags.iter().skip(1).map(|tag| (Vec::new(), vec![tag.clone()])))
+            .collect();
         let generation = self.generation;
         self.order_task = Some(Task::spawn(cx.ctx, async move {
-            (generation, order(&client, query, genres, tags).await)
+            (generation, order(&client, query, required, genres, tags).await)
         }));
     }
 
@@ -809,6 +821,7 @@ impl LibraryPage {
                 self.value_filters.open(cx.ctx);
                 return;
             }
+            Tool::Clear if !self.filtered() => return,
             Tool::Clear => ToolAction::Clear,
         };
         self.apply_tool(action, cx);
@@ -842,7 +855,7 @@ impl LibraryPage {
     /// Re-fetches the pages already loaded (e.g. for new watched badges), keeping the current
     /// items on screen until the new ones arrive.
     fn refresh(&mut self, cx: &mut PageCx) {
-        // Excluding, the order may have changed too (a watched filter): it comes first, and
+        // Ordered, the order may have changed too (a watched filter): it comes first, and
         // brings the pages with it (`apply_order`).
         if self.order.is_some() {
             self.requests.clear();
@@ -890,8 +903,8 @@ impl LibraryPage {
                     ..self.base_query.clone()
                 }
             }
-            // Excluding, pages wait for the order.
-            None if self.excluding() => {
+            // Ordered, pages wait for the order.
+            None if self.ordered() => {
                 self.pages_requested.remove(&page);
                 return;
             }
@@ -924,9 +937,7 @@ impl LibraryPage {
                 tools.push(Tool::Resolution);
             }
         }
-        if self.filtered() {
-            tools.push(Tool::Clear);
-        }
+        tools.push(Tool::Clear);
         tools.extend([Tool::Sort, Tool::Order]);
         tools
     }
@@ -949,19 +960,18 @@ impl LibraryPage {
                     values_button = Some(response);
                 }
             }
-            let total = self.total;
+            if let Some(total) = self.total {
+                ui.add_space(12.);
+                ui.label(
+                    RichText::new(item_count(total))
+                        .font(crate::theme::text::font(ui, "sm"))
+                        .color(muted),
+                );
+            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                // `main`'s `px_6` on the right too: the count sits clear of the window's edge
+                // `main`'s `px_6` on the right too: the sort sits clear of the window's edge
                 // now that the page owns the whole width.
                 ui.add_space(GRID_PADDING - RING_GAP);
-                if let Some(total) = total {
-                    ui.label(
-                        RichText::new(item_count(total))
-                            .font(crate::theme::text::font(ui, "sm"))
-                            .color(muted),
-                    );
-                    ui.add_space(12.);
-                }
                 // Right to left: the order button, the sort picker, then its label.
                 for index in (split..tools.len()).rev() {
                     let (response, control) = self.tool(ui, tools[index]);
@@ -1049,12 +1059,14 @@ impl LibraryPage {
             }
             Tool::Values => {
                 let label = value_filters::summary(view);
-                let response = ui.add(button::with_icon(ui, ICON_FILTER_LIST, &label));
+                // A set width, so the controls after it don't shift as the choice changes.
+                let button = button::with_icon(ui, ICON_FILTER_LIST, &label).truncate();
+                let response = ui.add_sized(vec2(VALUES_BUTTON_W, ui.spacing().interact_size.y), button);
                 let action = response.clicked().then_some(ToolAction::OpenValues);
                 (response, action)
             }
             Tool::Clear => {
-                let response = ui.button("Clear filters");
+                let response = ui.add_enabled(self.filtered(), egui::Button::new("Clear filters"));
                 let action = response.clicked().then_some(ToolAction::Clear);
                 (response, action)
             }
@@ -1348,11 +1360,13 @@ fn ring(ui: &Ui, response: &Response) {
 }
 
 /// The ids of what `query` lists, in order, less the items with any of the excluded `genres` or
-/// `tags`. The server can't leave those out itself, so it lists them too, with the same
-/// filters bar the included values, and they're taken off.
+/// `tags`, and only those that also have every one of the `required` genres and tags, each given
+/// as the genres and tags to ask the server for (`query` already asks for one of each kind). The server can't do either itself, so it lists the items of each of those
+/// values too, with the same filters bar the included ones, and they're taken off or kept.
 async fn order(
     client: &Client,
     query: ItemsQuery,
+    required: Vec<(Vec<String>, Vec<String>)>,
     genres: Vec<String>,
     tags: Vec<String>,
 ) -> jellyfin::Result<Vec<String>> {
@@ -1386,8 +1400,14 @@ async fn order(
             }
         },
     )?;
+    let having =
+        futures_util::future::try_join_all(required.into_iter().map(|(genres, tags)| ids(apart(genres, tags)))).await?;
+    let having: Vec<HashSet<String>> = having.into_iter().map(|ids| ids.into_iter().collect()).collect();
     let excluded: HashSet<String> = with_genres.into_iter().chain(with_tags).collect();
-    Ok(all.into_iter().filter(|id| !excluded.contains(id)).collect())
+    Ok(all
+        .into_iter()
+        .filter(|id| !excluded.contains(id) && having.iter().all(|set| set.contains(id)))
+        .collect())
 }
 
 /// Cards per row that fit `width`, with the toolbar's padding on both sides.

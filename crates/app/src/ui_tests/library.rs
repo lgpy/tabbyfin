@@ -99,9 +99,10 @@ fn up_from_the_grid_reaches_the_toolbar_and_then_the_top_bar() {
         ui.state().handled.last().copied().unwrap_or_default(),
         "Up left the page"
     );
-    // The toolbar ends with the sort picker and the order button, five controls on from the
-    // rating picker the cursor came up to: Enter flips the order and the page remembers it.
-    for _ in 0..5 {
+    // The toolbar ends with the clear button, the sort picker and the order button, six controls
+    // on from the rating picker the cursor came up to: Enter flips the order and the page
+    // remembers it.
+    for _ in 0..6 {
         ui.press(Key::ArrowRight);
     }
     ui.press(Key::Enter);
