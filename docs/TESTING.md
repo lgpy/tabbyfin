@@ -535,7 +535,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ The form follows the focused widget's id, not `Response::has_focus`: egui's `has_focus` also asks for the window to have the OS's focus, which the hidden display never gives, so the mascot didn't react there at first.
 
-- ⬜ **With a mouse and a real keyboard**: *Show password* opening its eyes to read along, then shutting them again; the Quick Connect step looking at the code; the saved-accounts step; the tall form (150 % text, 800×500) with the bigger mascot above it.
+- ⬜ **With a mouse and a real keyboard**: *Show password* opening its eyes to read along, then shutting them again; the Quick Connect step looking at the code, and its copy button pasting into a browser; the saved-accounts step; the tall form (150 % text, 800×500) with the bigger mascot above it.
 - ⬜ With the **animations setting off**: the eyes jump to their target and shut at once, and nothing repaints while idle.
 
 ## 38. The cozy sign-in screen
@@ -544,7 +544,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 ✅ The backdrop's gradient fills the window under a lavender glow; the mascot floats 16 points above the panel with no shadow (`widgets/mascot.rs` checks the shadow is left out only when asked). Titles: *Welcome to Tabbyfin*, *Welcome back* with saved accounts, *Sign in to {server}*. Saved accounts are avatar rows with their ✕ inside the row; the password's eye sits inside the field; *Use another server* and the minimum Jellyfin version sit under the panel.
 
-✅ The Quick Connect step (*Approve this sign-in*): the code in an inset, monospace and split in two halves, with the spinner and *Waiting for approval…* centred under it and *Cancel* under the panel. `ui_tests/login.rs` checks the step against the fixture server, and that *Cancel* goes back to the credentials.
+✅ The Quick Connect step (*Approve this sign-in*): the code in an inset, monospace and split in two halves, with a copy button at its right end (a check mark for a moment after a click), the spinner and *Waiting for approval…* centred under it and *Cancel* under the panel. `ui_tests/login.rs` checks the step against the fixture server, that the copy button puts the code on the clipboard, and that *Cancel* goes back to the credentials.
 
 - ⬜ **In the real app**, dark and light, on the hidden display: the restoring screen's backdrop and glow running into the form without a flash; the glow's edge invisible on the light backdrop; the 150 % text tall form.
 - ⬜ **With a mouse and a real keyboard**: a row's hover and focus ring, Tab from a row to its ✕, Enter on a focused row continuing as that account; *Use another server*; the brand button's hover.

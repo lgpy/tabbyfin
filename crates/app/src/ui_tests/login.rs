@@ -348,6 +348,18 @@ fn quick_connect_shows_the_code_until_cancelled() {
     assert!(ui.query_by_label("Waiting for approval…").is_some());
     assert!(ui.query_by_label("Sign in").is_none());
 
+    // The copy button puts the code on the clipboard and says so, once the form has recentred.
+    ui.step();
+    ui.get_by_label("Copy code").click();
+    ui.step();
+    let commands = &ui.output().platform_output.commands;
+    assert!(
+        commands.contains(&egui::OutputCommand::CopyText("482913".into())),
+        "the code wasn't copied: {commands:?}"
+    );
+    ui.step();
+    assert!(ui.query_by_label("Copied").is_some());
+
     // The shorter step recentres the form on the next frame; click Cancel where it settles.
     ui.step();
     ui.get_by_label("Cancel").click();
