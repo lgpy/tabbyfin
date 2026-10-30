@@ -367,7 +367,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 - The AppImage builds in the Ubuntu 22.04 container (`mise run package:appimage`) and starts in a clean Ubuntu 24.04 container once the windowing libraries winit loads are installed; without `libxkbcommon-x11` it panics in `xkbcommon-dl`, which is expected for an AppImage that relies on the system's windowing stack.
 - The Flatpak builds and installs (`mise run package:flatpak`). Running it under this harness's Xvfb fails before the window: Xvfb listens on an abstract X11 socket, which Flatpak can't share with the sandbox. That isn't a packaging result; its real-desktop checks stay in §7.
 - `mise run flatpak:sources` regenerates `packaging/flatpak/cargo-sources.json` with no changes after the egui dependency changes.
-- `cargo build -p tabbyfin --target x86_64-pc-windows-gnu` (what `dev/win-run.sh` builds) succeeds; the release MSVC package itself is CI's.
+- `cargo build -p tabbyfin --target x86_64-pc-windows-gnu` (what `dev/win-run.sh --debug` builds) succeeds; the release MSVC package itself is CI's.
 
 - ⬜ The **GitHub Actions jobs**: this branch isn't pushed (X1 must not push), so `mise run ci:build` couldn't run; the same steps passed locally.
 - ⬜ **Playback** from those packaged builds; the checks above only opened the sign-in screen.
