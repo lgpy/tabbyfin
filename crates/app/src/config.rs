@@ -145,7 +145,7 @@ pub struct LibraryView {
     pub sort: String,
     pub descending: bool,
     pub filter: String,
-    /// Genre names: items with any of them show (and with any of the tags, when those are set
+    /// Genre names: items with all of them show (and with all of the tags, when those are set
     /// too). Empty shows everything.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub genres: Vec<String>,

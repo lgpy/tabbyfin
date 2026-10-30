@@ -1,7 +1,7 @@
 //! The library's genres and tags popover, hung from the toolbar's button: a search box, the
 //! filters chosen so far, and every genre and tag as a pill. A click on a pill includes its value,
-//! a second excludes it, a third lets it go. Items with any included genre show (and likewise for
-//! tags; the two kinds must both match), and items with any excluded value are left out, whatever
+//! a second excludes it, a third, or a right click, lets it go. Items with every included genre and tag show
+//! (the two kinds must both match), and items with any excluded value are left out, whatever
 //! else they have. Each click reloads the grid behind the popover.
 //!
 //! The search box takes the keyboard while the popover is open: typing narrows the pills, Up
@@ -85,7 +85,7 @@ impl ValueFilters {
     /// Draws the popover hung from `anchor` while it's open. `values` is what the library offers
     /// and `view` what's chosen; a click changes `view` and returns true.
     pub fn show(&mut self, anchor: &Response, values: &FilterValues, view: &mut LibraryView) -> bool {
-        let mut cycled: Option<(ValueKind, String)> = None;
+        let mut cycled: Option<(ValueKind, String, bool)> = None;
         popup::panel(Self::id(), anchor, RectAlign::BOTTOM_START, WIDTH, |ui| {
             // A frame, not a `horizontal`, which would cap the scroll area's room at one row.
             egui::Frame::new()
@@ -95,16 +95,25 @@ impl ValueFilters {
                     cycled = self.contents(ui, values, view);
                 });
         });
-        let Some((kind, value)) = cycled else {
+        let Some((kind, value, release)) = cycled else {
             return false;
         };
-        cycle(view, kind, &value);
+        if release {
+            set_off(view, kind, &value);
+        } else {
+            cycle(view, kind, &value);
+        }
         // The chosen pills above the list come and go: the panel sizes itself again next frame.
         anchor.ctx.request_repaint();
         true
     }
 
-    fn contents(&mut self, ui: &mut Ui, values: &FilterValues, view: &LibraryView) -> Option<(ValueKind, String)> {
+    fn contents(
+        &mut self,
+        ui: &mut Ui,
+        values: &FilterValues,
+        view: &LibraryView,
+    ) -> Option<(ValueKind, String, bool)> {
         let mut cycled = None;
         let shown = matching(values, &self.search);
 
@@ -121,7 +130,7 @@ impl ValueFilters {
             self.scroll_to_highlight = true;
         }
         if enter && let Some((kind, value)) = self.highlighted.and_then(|index| shown.get(index)) {
-            cycled = Some((*kind, value.clone()));
+            cycled = Some((*kind, value.clone(), false));
         }
 
         if self.search_box(ui) {
@@ -136,8 +145,9 @@ impl ValueFilters {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
                 for (kind, value, mark) in &chosen {
-                    if pill(ui, value, *mark, false).clicked() {
-                        cycled = Some((*kind, value.clone()));
+                    let response = pill(ui, value, *mark, false);
+                    if response.clicked() || response.secondary_clicked() {
+                        cycled = Some((*kind, value.clone(), response.secondary_clicked()));
                     }
                 }
             });
@@ -171,8 +181,8 @@ impl ValueFilters {
                     for value in group {
                         let highlighted = self.highlighted == Some(index);
                         let response = pill(ui, value, mark(view, kind, value), highlighted);
-                        if response.clicked() {
-                            cycled = Some((kind, value.clone()));
+                        if response.clicked() || response.secondary_clicked() {
+                            cycled = Some((kind, value.clone(), response.secondary_clicked()));
                             self.highlighted = Some(index);
                         }
                         if highlighted && self.scroll_to_highlight {
@@ -187,7 +197,7 @@ impl ValueFilters {
 
         ui.add_space(10.);
         ui.label(
-            RichText::new("Click once to include, twice to exclude.")
+            RichText::new("Click once to include, twice to exclude, right-click to clear.")
                 .font(text::font(ui, "xs"))
                 .color(muted(ui)),
         );
@@ -305,6 +315,13 @@ pub fn cycle(view: &mut LibraryView, kind: ValueKind, value: &str) {
         Mark::Included => excluded.push(value.to_owned()),
         Mark::Excluded => {}
     }
+}
+
+/// Lets a value go, whichever way it was chosen: a right click on its pill.
+fn set_off(view: &mut LibraryView, kind: ValueKind, value: &str) {
+    let (included, excluded) = lists_mut(view, kind);
+    included.retain(|v| v != value);
+    excluded.retain(|v| v != value);
 }
 
 fn muted(ui: &Ui) -> egui::Color32 {
