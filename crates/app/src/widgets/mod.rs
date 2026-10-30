@@ -5,6 +5,7 @@ pub mod avatar_row;
 pub mod backdrop;
 pub mod button;
 pub mod card;
+pub mod code;
 pub mod dialog;
 pub mod field;
 pub mod image;

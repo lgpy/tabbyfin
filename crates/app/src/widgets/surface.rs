@@ -2,7 +2,8 @@
 //! shadow, with the larger radius. The sign-in form sits in one; dialogs and settings groups can
 //! take it as they move to the look.
 
-use egui::{CornerRadius, Frame, Margin, Shadow, Stroke, Ui};
+use egui::accesskit::Role;
+use egui::{CornerRadius, Frame, Margin, Rect, Sense, Shadow, Spinner, Stroke, Ui, Vec2, WidgetInfo, pos2, vec2};
 
 use crate::theme;
 
@@ -41,4 +42,29 @@ pub fn heading(ui: &mut Ui, title: &str, subtitle: &str) {
                 .color(tokens.ink_muted),
         );
     });
+}
+
+/// A small spinner and a muted line beside it, centred together on the surface's width: what the
+/// surface is waiting for ("Waiting for approval…"). `ui.horizontal` would start the pair at the
+/// left edge, so it's laid out by hand.
+pub fn waiting(ui: &mut Ui, line: &str) {
+    let tokens = theme::tokens_of(ui);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(line.to_owned(), theme::text::font(ui, "sm"), tokens.ink_muted);
+    let (spinner, gap) = (14., 8.);
+    let width = spinner + gap + galley.size().x;
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), galley.size().y.max(spinner)), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, line));
+    let left = rect.center().x - width / 2.;
+    Spinner::new().size(spinner).color(tokens.ink_muted).paint_at(
+        ui,
+        Rect::from_center_size(pos2(left + spinner / 2., rect.center().y), Vec2::splat(spinner)),
+    );
+    ui.painter().galley(
+        pos2(left + spinner + gap, rect.center().y - galley.size().y / 2.),
+        galley,
+        tokens.ink_muted,
+    );
 }
