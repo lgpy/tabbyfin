@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Windows test loop from WSL: cross-builds a debug tabbyfin.exe with mingw, copies it to
+# Windows test loop from WSL: cross-builds a release tabbyfin.exe with mingw, copies it to
 # C:\Temp\jelly-dev, and runs it on the Windows host with logs on this terminal.
 #
-#   dev/win-run.sh [seconds]      # default: run until the window is closed
+#   dev/win-run.sh [--debug] [seconds]   # default: release, run until the window is closed
+#
+# --debug builds the debug profile instead, which the TABBYFIN_ROUTE/KEYS test knobs need.
 #
 # The host runs this copy on C: next to the player's runtime DLLs (libmpv, ANGLE), which are
 # fetched once into the same folder; the build folder stays on the Linux side.
@@ -12,9 +14,15 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 dest=/mnt/c/Temp/jelly-dev
 target=x86_64-pc-windows-gnu
 
-cargo build -p tabbyfin --target "$target"
+profile=release
+if [[ ${1-} == --debug ]]; then
+  profile=debug
+  shift
+fi
+
+cargo build $([[ $profile == release ]] && echo --release) -p tabbyfin --target "$target"
 mkdir -p "$dest"
-x86_64-w64-mingw32-strip -o "$dest/tabbyfin.exe" "$root/target/$target/debug/tabbyfin.exe"
+x86_64-w64-mingw32-strip -o "$dest/tabbyfin.exe" "$root/target/$target/$profile/tabbyfin.exe"
 
 # libmpv, pinned in packaging/mpv.lock. Extracted with Windows' own tar.exe (libarchive reads
 # .7z), since 7z usually isn't installed in WSL.

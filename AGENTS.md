@@ -21,7 +21,7 @@ mise run smoke        # cargo run -p jellyfin --example smoke against the dev se
 mise run ci:build     # build packages for every OS on GitHub Actions into dist/
 mise run flatpak:sources # after any Cargo.lock change: regenerate the Flatpak's offline crate list
 mise run deps:mirror  # after changing packaging/*.lock: copy the pinned files to the repo's deps release
-dev/win-run.sh [secs] # cross-build (mingw) and run on the Windows host from WSL
+dev/win-run.sh [--debug] [secs] # cross-build (mingw, release unless --debug) and run on the Windows host from WSL
 ```
 
 GitHub CI also runs an `integration` job: Jellyfin 12.2 and 10.11.11 in Docker, set up with `dev/setup-server.py`, then the `smoke` and `socket` examples. `crates/jellyfin/examples/` has those live checks: `smoke`, `socket` (websocket, clock, keep-alive), and `syncplay` (a scripted second SyncPlay member). `dev/capture-fixtures.py <url> <version>` refreshes the JSON fixtures in `crates/jellyfin/tests/fixtures/` from a dev server.

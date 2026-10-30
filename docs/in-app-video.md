@@ -128,6 +128,6 @@ The migration to egui kept all of that and changed only where the import lives: 
 
 ## Test loop for Windows
 
-- Build a debug cross-build from WSL with mingw (`dev/win-run.sh`). wgpu's DX12 backend compiles its shaders at runtime, so it doesn't need `fxc.exe`.
+- Build a cross-build from WSL with mingw (`dev/win-run.sh`, release; `--debug` for a debug build). wgpu's DX12 backend compiles its shaders at runtime, so it doesn't need `fxc.exe`.
 - Copy it to `C:\Temp`, launch it through WSL interop, and read its log file.
 - CI produces the MSVC release builds.
