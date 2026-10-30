@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Render a disposable UI mockup file and open the results as a page.
 
-    python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> [--only <group>[,<group>…]] [--no-open]
+    python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> [--only <group>[,<group>…]] [--open | --no-open]
     python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> --zoom <name>[.light]:x,y,w,h
 
 The file lives outside the repo (see `template.rs`); it is compiled into the app's UI tests under
 the `mockup` feature and its `mockup_*` tests run. Output goes to `target/mockups/<file stem>/`:
 a PNG and a JSON sidecar per mockup and theme (`ui_tests/mockups.rs` writes them), the previous
-run's PNGs as `*.prev.png` where they changed, and `index.html`.
+run's PNGs as `*.prev.png` where they changed, `index.html`, and `source.rs`, a copy of the mockup
+file, since the file itself lives in a scratch dir a later session won't have.
+
+The browser opens on a file's first run only (`--open` forces it, `--no-open` never): an open
+page notices a re-render and reloads itself.
 
 What it prints is meant for an agent and kept short: compile errors and the mockup file's own
 warnings (one line each), failed tests' panics, which renders are new, changed or unchanged since
@@ -22,8 +26,10 @@ The page is built from the mockup file itself:
   - a `// ## Title` comment block names and introduces the section of the next mockup's group;
   - a test's `///` doc comment captions its mockup (first line the title, the rest below it);
 Mockups are grouped by their name's part before the first dot (`welcome.now`, `welcome.cozy`);
-a group of two gets side-by-side, swipe and flip comparison. The page follows the artifact
-contract, so the folder can be published as it is.
+a group of two gets side-by-side, swipe and flip comparison. On the page the reader can pick a
+variant per group and comment on each mockup, then copy it all as one Markdown reply (starting
+`# Re:`) to paste back to the agent. The page follows the artifact contract, so the folder can be
+published as it is.
 """
 
 import html
@@ -56,6 +62,8 @@ def main():
 
     if zoom:
         return zoom_into(out, env, zoom)
+    first = not (out / "index.html").exists()
+    shutil.copyfile(src, out / "source.rs")
 
     filters = ["ui_tests::scratch"]
     groups = None
@@ -85,6 +93,9 @@ def main():
         sys.exit("mockup render failed")
 
     renders = [json.loads(p.read_text()) for p in sorted(out.glob("*.json"))]
+    # In the file's order, so its sections read as written.
+    order = [name for _, name in test_names(src.read_text()) if name]
+    renders.sort(key=lambda r: order.index(r["name"]) if r["name"] in order else len(order))
     if not renders:
         sys.exit("no mockups rendered: the file needs #[test] fns that call mockup() or Mockup::show")
     status = {}
@@ -120,7 +131,7 @@ def main():
         print("nothing changed since the last run")
     url = link(index)
     print(f"page: {url}")
-    if "--no-open" not in sys.argv:
+    if "--open" in sys.argv or (first and "--no-open" not in sys.argv):
         # WSL: the Windows browser, since the Linux side has none.
         if shutil.which("wslview"):
             subprocess.run(["wslview", url])
@@ -298,6 +309,8 @@ def parse(source):
                 if pending_section and group not in sections:
                     sections[group] = pending_section
             pending_section, doc = None, []
+        elif not s.startswith("#["):
+            doc = []  # a helper's doc comment, not a caption
         if block and block[0].startswith("## "):
             pending_section = block
         block = []
@@ -373,7 +386,8 @@ def build(title, renders, notes):
                 f'<input class="swipe" type="range" min="0" max="100" value="50" aria-label="Swipe position"></div>'
             )
         sections.append(
-            f'<section data-group="{html.escape(group)}" data-themes="{" ".join(themes)}" '
+            f'<section data-group="{html.escape(group)}" data-heading="{html.escape(heading)}" '
+            f'data-themes="{" ".join(themes)}" '
             f'data-theme="{themes[0]}" data-mode="side">'
             f"<h2>{html.escape(heading)}</h2>{body}"
             f'<div class="figures n{len(ordered)}">{figures}</div>{compare}</section>'
@@ -382,6 +396,8 @@ def build(title, renders, notes):
     intro = markdown(notes["intro"]) if notes["intro"] else ""
     pretty = title.replace("_", " ").replace("-", " ").capitalize()
     return PAGE.format(
+        style=STYLE,
+        script=SCRIPT,
         title=html.escape(pretty),
         intro=intro,
         sections="\n".join(sections),
@@ -431,8 +447,8 @@ def figure(variant, v, caption):
         rest = markdown(caption[1:])
     prev_button = '<button type="button" class="prev" aria-pressed="false">Previous render</button>' if prevs else ""
     return (
-        f'<figure data-name="{html.escape(v["name"])}" {data}>'
-        f'<img src="{html.escape(first)}" width="{w:g}" height="{h:g}" alt="{html.escape(v["name"])}">'
+        f'<figure data-name="{html.escape(v["name"])}" style="max-width:{w:g}px" {data}>'
+        f'<div class="shot"><img src="{html.escape(first)}" width="{w:g}" height="{h:g}" alt="{html.escape(v["name"])}"></div>'
         f'<figcaption><div class="row"><span class="{tag_class}">{html.escape(tag_text(variant))}</span>{prev_button}</div>'
         f"{title}{rest}</figcaption></figure>"
     )
@@ -451,105 +467,282 @@ PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
-<style>
-:root {{
-  --bg: #121117; --surface: #1c1a24; --edge: #2e2b3a; --text: #ece9f3; --muted: #a29db0;
-  --accent: #c396e7; --on-accent: #1d1230;
-  color-scheme: dark;
-}}
-@media (prefers-color-scheme: light) {{
-  :root:not([data-theme="dark"]) {{
-    --bg: #f7f5fb; --surface: #ffffff; --edge: #e2ddec; --text: #1f1b29; --muted: #625c70;
-    --accent: #7b4fb0; --on-accent: #ffffff;
-    color-scheme: light;
-  }}
-}}
-:root[data-theme="light"] {{
-  --bg: #f7f5fb; --surface: #ffffff; --edge: #e2ddec; --text: #1f1b29; --muted: #625c70;
-  --accent: #7b4fb0; --on-accent: #ffffff;
-  color-scheme: light;
-}}
-* {{ box-sizing: border-box; }}
-body {{ margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, sans-serif; }}
-main {{ max-width: 2100px; margin: 0 auto; padding: 40px 16px 80px; display: grid; gap: 56px; }}
-.intro {{ max-width: 70ch; display: grid; gap: 10px; }}
-h1 {{ font-size: 1.9rem; font-weight: 500; margin: 0; }}
-h2 {{ font-size: 1.3rem; font-weight: 500; margin: 0; }}
-p, ul, ol {{ margin: 0; }}
-section > p, section > ul {{ max-width: 70ch; color: var(--muted); }}
-section {{ display: grid; gap: 14px; }}
-code {{ font-size: .9em; background: var(--surface); border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px; }}
-.fab {{ position: fixed; right: 20px; bottom: 20px; z-index: 10; display: flex; flex-direction: column;
-  align-items: flex-end; gap: 10px; }}
-.fab-button {{ display: flex; align-items: center; gap: 8px; padding: 0 16px 0 14px; height: 48px; border-radius: 24px;
-  background: var(--accent); color: var(--on-accent); box-shadow: 0 6px 20px rgb(0 0 0 / .35); font-weight: 600; }}
-.fab-panel {{ display: grid; gap: 8px; padding: 12px; border-radius: 16px; background: var(--surface);
-  border: 1px solid var(--edge); box-shadow: 0 10px 32px rgb(0 0 0 / .3);
-  opacity: 0; transform: translateY(8px) scale(.97); transform-origin: bottom right; pointer-events: none;
-  transition: opacity .15s, transform .15s; }}
-.fab:hover .fab-panel, .fab:focus-within .fab-panel, .fab.open .fab-panel {{
-  opacity: 1; transform: none; pointer-events: auto; }}
-@media (prefers-reduced-motion: reduce) {{ .fab-panel {{ transition: none; }} }}
-.fab .keys {{ color: var(--muted); font-size: .75rem; padding: 2px 4px 0; }}
-@media (hover: none) {{ .fab .keys {{ display: none; }} }}
-kbd {{ font: inherit; font-size: .7rem; border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px; }}
-main {{ padding-bottom: 120px; }}
-.segmented {{ display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px;
-  background: var(--bg); border: 1px solid var(--edge); }}
-.segmented span {{ color: var(--muted); font-size: .8rem; padding: 0 8px; min-width: 66px; }}
-button {{ font: inherit; font-size: .85rem; color: var(--text); background: transparent; border: 0;
-  border-radius: 7px; padding: 4px 12px; cursor: pointer; }}
-button[aria-pressed="true"] {{ background: var(--accent); color: var(--on-accent); }}
-.figures {{ display: grid; gap: 20px; align-items: start; }}
-.figures.n2 {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-.figures.n3 {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
-@media (max-width: 900px) {{ .figures.n2, .figures.n3 {{ grid-template-columns: 1fr; }} }}
-section:not([data-mode="side"]) .figures {{ display: none; }}
-figure {{ margin: 0; display: grid; gap: 8px; min-width: 0; }}
-img {{ display: block; max-width: 100%; height: auto; }}
-figure img {{ border-radius: 10px; border: 1px solid var(--edge); }}
-figcaption {{ display: grid; gap: 4px; justify-items: start; }}
-figcaption p, figcaption ul {{ color: var(--muted); }}
-figcaption .row {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }}
-.tag {{ font-size: .75rem; font-weight: 600; padding: 1px 9px; border-radius: 999px;
-  background: var(--accent); color: var(--on-accent); }}
-.tag.was {{ background: transparent; color: var(--muted); border: 1px solid var(--edge); }}
-button.prev {{ border: 1px solid var(--edge); padding: 1px 9px; font-size: .75rem; }}
-.stage {{ position: relative; width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid var(--edge);
-  user-select: none; }}
-.stage img {{ position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; }}
-.stage .which {{ position: absolute; top: 10px; left: 10px; font-size: .8rem; font-weight: 600; padding: 2px 10px;
-  border-radius: 999px; background: rgb(0 0 0 / .65); color: #fff; pointer-events: none; }}
-.stage .swipe {{ position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }}
-.stage::after {{ content: ""; position: absolute; top: 0; bottom: 0; left: var(--at, 50%); width: 2px;
-  background: var(--accent); pointer-events: none; }}
-section[data-mode="flip"] .stage::after, section[data-mode="flip"] .swipe {{ display: none; }}
-section[data-mode="flip"] .stage {{ cursor: pointer; }}
-</style>
+<style>{style}</style>
 <main>
 <header class="intro"><h1>{title}</h1>{intro}</header>
 {sections}
 </main>
 {fab}
-<script>
+<aside class="reply" hidden aria-live="polite"><span class="count"></span>
+<button type="button" class="reload" hidden>Reload</button>
+<button type="button" class="copy">Copy reply</button><button type="button" class="clear">Clear</button>
+<textarea class="fallback" readonly hidden aria-label="Reply to paste back"></textarea></aside>
+<div class="note-pop" hidden role="dialog" aria-label="Comment">
+<b class="note-title"></b>
+<textarea rows="4" placeholder="What to change, keep or ask about" aria-label="Comment"></textarea>
+<div class="note-foot"><span class="hint">Ctrl+Enter to close</span>
+<button type="button" class="delete">Delete</button><button type="button" class="done">Done</button></div>
+</div>
+<script>{script}</script>
+"""
+
+STYLE = r"""
+:root {
+  --bg: #121117; --surface: #1c1a24; --edge: #2e2b3a; --text: #ece9f3; --muted: #a29db0;
+  --accent: #c396e7; --on-accent: #1d1230;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f7f5fb; --surface: #ffffff; --edge: #e2ddec; --text: #1f1b29; --muted: #625c70;
+    --accent: #7b4fb0; --on-accent: #ffffff;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f7f5fb; --surface: #ffffff; --edge: #e2ddec; --text: #1f1b29; --muted: #625c70;
+  --accent: #7b4fb0; --on-accent: #ffffff;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, sans-serif; }
+main { max-width: 2100px; margin: 0 auto; padding: 40px 16px 120px; display: grid; gap: 56px; }
+/* Centred over the mockups, which are; a list keeps its lines left-aligned. */
+.intro { max-width: 70ch; margin-inline: auto; display: grid; gap: 10px; text-align: center; }
+.intro ul, section > ul { width: fit-content; margin-inline: auto; text-align: left; }
+h1 { font-size: 1.9rem; font-weight: 500; margin: 0; }
+h2 { font-size: 1.3rem; font-weight: 500; margin: 0; }
+p, ul, ol { margin: 0; }
+section > h2, section > p { text-align: center; }
+section > p, section > ul { max-width: 70ch; margin-inline: auto; color: var(--muted); }
+section { display: grid; gap: 14px; }
+code { font-size: .9em; background: var(--surface); border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px; }
+.fab { position: fixed; right: 20px; bottom: 20px; z-index: 10; display: flex; flex-direction: column;
+  align-items: flex-end; gap: 10px; }
+.fab-button { display: flex; align-items: center; gap: 8px; padding: 0 16px 0 14px; height: 48px; border-radius: 24px;
+  background: var(--accent); color: var(--on-accent); box-shadow: 0 6px 20px rgb(0 0 0 / .35); font-weight: 600; }
+.fab-panel { display: grid; gap: 8px; padding: 12px; border-radius: 16px; background: var(--surface);
+  border: 1px solid var(--edge); box-shadow: 0 10px 32px rgb(0 0 0 / .3);
+  opacity: 0; transform: translateY(8px) scale(.97); transform-origin: bottom right; pointer-events: none;
+  transition: opacity .15s, transform .15s; }
+.fab:hover .fab-panel, .fab:focus-within .fab-panel, .fab.open .fab-panel {
+  opacity: 1; transform: none; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .fab-panel { transition: none; } }
+.fab .keys { color: var(--muted); font-size: .75rem; padding: 2px 4px 0; }
+@media (hover: none) { .fab .keys { display: none; } }
+kbd { font: inherit; font-size: .7rem; border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px; }
+.segmented { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--edge); }
+.segmented span { color: var(--muted); font-size: .8rem; padding: 0 8px; min-width: 66px; }
+button { font: inherit; font-size: .85rem; color: var(--text); background: transparent; border: 0;
+  border-radius: 7px; padding: 4px 12px; cursor: pointer; }
+button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.figures { display: grid; gap: 20px; align-items: start; }
+.figures.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.figures.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 900px) { .figures.n2, .figures.n3 { grid-template-columns: 1fr; } }
+section:not([data-mode="side"]) .figures { display: none; }
+figure { margin: 0; display: grid; gap: 8px; min-width: 0; width: 100%; justify-self: center; }
+img { display: block; max-width: 100%; height: auto; }
+.shot { position: relative; }
+.shot img { border-radius: 10px; border: 1px solid var(--edge); }
+figcaption { display: grid; gap: 4px; justify-items: start; }
+figcaption p, figcaption ul { color: var(--muted); }
+figcaption .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tag { font-size: .75rem; font-weight: 600; padding: 1px 9px; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent); }
+.tag.was { background: transparent; color: var(--muted); border: 1px solid var(--edge); }
+button.prev { border: 1px solid var(--edge); padding: 1px 9px; font-size: .75rem; }
+.stage { position: relative; width: 100%; margin-inline: auto; border-radius: 10px; overflow: hidden; border: 1px solid var(--edge);
+  user-select: none; }
+.stage > img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; }
+.stage .which { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: .8rem;
+  font-weight: 600; padding: 2px 10px; border-radius: 999px; background: rgb(0 0 0 / .65); color: #fff;
+  pointer-events: none; white-space: nowrap; }
+.stage .swipe { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+.stage::after { content: ""; position: absolute; top: 0; bottom: 0; left: var(--at, 50%); width: 2px;
+  background: var(--accent); pointer-events: none; }
+section[data-mode="flip"] .stage::after, section[data-mode="flip"] .swipe { display: none; }
+section[data-mode="flip"] .stage { cursor: pointer; }
+/* Pick and comment, over a mockup: shown on hover, and kept once they're on. */
+.marks { position: absolute; top: 10px; z-index: 2; display: flex; gap: 6px; }
+.marks[hidden] { display: none; }
+.marks.right { right: 10px; }
+.marks.left { left: 10px; flex-direction: row-reverse; }
+/* Out of the layout while hidden, so what's shown sits in the corner. */
+.marks button { display: none; align-items: center; gap: 6px; font-size: .8rem; font-weight: 600;
+  padding: 4px 12px; border-radius: 999px; background: rgb(20 18 26 / .8); color: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / .3); }
+.shot:hover .marks button, .stage:hover .marks button, .marks:has(:focus-visible) button,
+.marks button.on, .marks button[aria-expanded="true"] { display: inline-flex; }
+.marks button.on { background: var(--accent); color: var(--on-accent); }
+/* Away from the pointer, what's on shrinks to its icon, to cover as little of the mockup as it can. */
+.marks .text { display: none; }
+.marks button.on { padding: 6px 8px; }
+.shot:hover .marks .text, .stage:hover .marks .text, .marks:has(:focus-visible) .text,
+.marks button[aria-expanded="true"] .text { display: inline; }
+.shot:hover .marks button.on, .stage:hover .marks button.on, .marks:has(:focus-visible) button.on,
+.marks button[aria-expanded="true"] { padding: 4px 12px; }
+@media (hover: none) { .marks .text { display: inline; } .marks button.on { padding: 4px 12px; } }
+@media (hover: none) { .marks button { display: inline-flex; } }
+.note-pop { position: absolute; top: 48px; z-index: 3; width: min(340px, calc(100% - 20px)); display: grid; gap: 8px;
+  padding: 12px; border-radius: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--edge);
+  box-shadow: 0 10px 32px rgb(0 0 0 / .35); cursor: auto; user-select: text; }
+.note-pop[hidden] { display: none; }
+.note-pop.right { right: 10px; }
+.note-pop.left { left: 10px; }
+.note-pop b { font-size: .85rem; }
+.note-pop textarea { width: 100%; font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--edge); border-radius: 8px; padding: 6px 10px; resize: vertical; }
+.note-pop textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.note-foot { display: flex; align-items: center; gap: 6px; }
+.note-foot .hint { margin-right: auto; color: var(--muted); font-size: .75rem; }
+@media (hover: none) { .note-foot .hint { visibility: hidden; } }
+.note-foot button { border: 1px solid var(--edge); font-size: .8rem; padding: 3px 10px; }
+.note-foot .done { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+.reply { position: fixed; left: 20px; bottom: 20px; z-index: 10; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px; max-width: calc(100% - 40px); padding: 8px 8px 8px 16px; border-radius: 16px; background: var(--surface);
+  border: 1px solid var(--edge); box-shadow: 0 10px 32px rgb(0 0 0 / .3); }
+.reply[hidden] { display: none; }
+.reply .count { color: var(--muted); font-size: .85rem; }
+.reply button { border: 1px solid var(--edge); }
+.reply button.copy { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+.reply textarea { flex-basis: 100%; height: 8em; font: .8rem/1.4 ui-monospace, monospace; color: var(--text);
+  background: var(--bg); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 8px; }
+.reply.updated { border-color: var(--accent); }
+@media (max-width: 700px) { .reply { bottom: 84px; left: 16px; max-width: calc(100% - 32px); } }
+"""
+
+SCRIPT = r"""
+// Picks (one variant per group) and comments (one per mockup), kept in this browser so a reload
+// keeps them, and copied as one Markdown reply for the reader to paste back to the agent.
+const REPLY_KEY = "mockup-reply:" + location.pathname;
+const reply = { picks: {}, comments: {} };
+try { Object.assign(reply, JSON.parse(localStorage.getItem(REPLY_KEY)) || {}); } catch {}
+const groupOf = (name) => name.split(".")[0];
+
+// The pick and comment buttons over a mockup. `data-for` names the mockup they act on; the
+// comparison stage's retarget as it flips.
+const allMarks = [];
+const icon = (d) => `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="${d}"/></svg>`;
+const bubble = icon("M4 4h16v12H8l-4 4z");
+const check = icon("M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z");
+const text = (t) => `<span class="text">${t}</span>`;
+const makeMarks = (host, side, pickable) => {
+  const marks = document.createElement("div");
+  marks.className = "marks " + side;
+  marks.innerHTML = (pickable ? '<button type="button" class="pick"></button>' : "")
+    + '<button type="button" class="comment" aria-expanded="false"></button>';
+  host.append(marks);
+  marks.addEventListener("click", (e) => {
+    // The stage flips on a click; these clicks are the buttons'.
+    e.stopPropagation();
+    const button = e.target.closest("button");
+    if (!button) return;
+    const name = marks.dataset.for;
+    if (button.classList.contains("pick")) {
+      const group = groupOf(name);
+      if (reply.picks[group] === name) delete reply.picks[group];
+      else reply.picks[group] = name;
+      save();
+    } else if (pop.dataset.for === name && !pop.hidden && pop.parentElement === host) closeNote();
+    else openNote(marks);
+  });
+  allMarks.push(marks);
+  return marks;
+};
+const paintMarks = () => {
+  for (const marks of allMarks) {
+    const name = marks.dataset.for;
+    const pick = marks.querySelector(".pick");
+    if (pick) {
+      const on = reply.picks[groupOf(name)] === name;
+      pick.classList.toggle("on", on);
+      pick.setAttribute("aria-pressed", on);
+      pick.innerHTML = check + text(on ? "Picked" : "Pick");
+      pick.title = on ? "Picked" : "";
+    }
+    const comment = marks.querySelector(".comment");
+    const has = !!reply.comments[name];
+    comment.classList.toggle("on", has);
+    comment.innerHTML = bubble + text(has ? "Commented" : "Comment");
+    comment.title = has ? reply.comments[name] : "";
+  }
+};
+
+// One comment popover, moved to the mockup it's opened on.
+const pop = document.querySelector(".note-pop");
+const note = pop.querySelector("textarea");
+let opener = null;
+const openNote = (marks) => {
+  closeNote();
+  opener = marks;
+  pop.dataset.for = marks.dataset.for;
+  pop.className = "note-pop " + (marks.classList.contains("left") ? "left" : "right");
+  pop.querySelector(".note-title").textContent = "Comment on " + marks.dataset.for;
+  note.value = reply.comments[marks.dataset.for] || "";
+  marks.parentElement.append(pop);
+  pop.hidden = false;
+  marks.querySelector(".comment").setAttribute("aria-expanded", true);
+  note.focus();
+};
+const closeNote = () => {
+  if (pop.hidden) return;
+  pop.hidden = true;
+  opener?.querySelector(".comment").setAttribute("aria-expanded", false);
+  opener = null;
+};
+note.addEventListener("input", () => {
+  if (note.value.trim()) reply.comments[pop.dataset.for] = note.value;
+  else delete reply.comments[pop.dataset.for];
+  save();
+});
+note.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
+    e.preventDefault();
+    const back = opener?.querySelector(".comment");
+    closeNote();
+    back?.focus();
+  }
+});
+pop.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (e.target.closest(".done")) closeNote();
+  else if (e.target.closest(".delete")) {
+    delete reply.comments[pop.dataset.for];
+    closeNote();
+    save();
+  }
+});
+document.addEventListener("click", (e) => {
+  if (!pop.hidden && !pop.contains(e.target)) closeNote();
+});
+
 // One view for the whole page, set from the floating options: how pairs are compared, and
 // which theme every mockup shows (a section without it keeps its own).
-const view = {{ mode: "side", theme: null }};
-const sections = [...document.querySelectorAll("section[data-group]")].map((section) => {{
+const view = { mode: "side", theme: null };
+const sections = [...document.querySelectorAll("section[data-group]")].map((section) => {
   const stage = section.querySelector(".stage");
-  const src = (name) => {{
-    const fig = section.querySelector(`figure[data-name="${{CSS.escape(name)}}"]`);
+  const pickable = section.querySelectorAll("figure").length > 1;
+  for (const fig of section.querySelectorAll("figure")) {
+    makeMarks(fig.querySelector(".shot"), "right", pickable).dataset.for = fig.dataset.name;
+  }
+  // In a swipe each side has its own; in a flip, the one on the right follows what's shown.
+  const marksA = stage && makeMarks(stage, "left", true);
+  const marksB = stage && makeMarks(stage, "right", true);
+  const src = (name) => {
+    const fig = section.querySelector(`figure[data-name="${CSS.escape(name)}"]`);
     return fig.dataset[section.dataset.theme];
-  }};
-  const draw = () => {{
+  };
+  const draw = () => {
     const themes = section.dataset.themes.split(" ");
     if (view.theme && themes.includes(view.theme)) section.dataset.theme = view.theme;
-    for (const fig of section.querySelectorAll("figure")) {{
+    for (const fig of section.querySelectorAll("figure")) {
       const prev = fig.querySelector("button.prev")?.getAttribute("aria-pressed") === "true";
       const t = section.dataset.theme;
       const key = prev ? "prev" + t[0].toUpperCase() + t.slice(1) : t;
-      if (fig.dataset[key]) fig.querySelector("img").src = fig.dataset[key];
-    }}
+      if (fig.dataset[key]) fig.querySelector(".shot img").src = fig.dataset[key];
+    }
     if (!stage) return;
     section.dataset.mode = view.mode;
     stage.hidden = view.mode === "side";
@@ -559,78 +752,204 @@ const sections = [...document.querySelectorAll("section[data-group]")].map((sect
     const showB = stage.dataset.flipped === "1";
     const at = stage.querySelector(".swipe").value;
     stage.style.setProperty("--at", at + "%");
-    stage.querySelector(".b").style.clipPath = swipe ? `inset(0 0 0 ${{at}}%)` : "none";
+    stage.querySelector(".b").style.clipPath = swipe ? `inset(0 0 0 ${at}%)` : "none";
     stage.querySelector(".b").style.visibility = swipe || showB ? "visible" : "hidden";
     stage.querySelector(".which").textContent = swipe
-      ? `${{stage.dataset.aLabel}} ◂ ▸ ${{stage.dataset.bLabel}}`
-      : `${{showB ? stage.dataset.bLabel : stage.dataset.aLabel}} (click to flip)`;
-  }};
-  for (const button of section.querySelectorAll("button.prev")) {{
-    button.addEventListener("click", () => {{
+      ? `${stage.dataset.aLabel} ◂ ▸ ${stage.dataset.bLabel}`
+      : `${showB ? stage.dataset.bLabel : stage.dataset.aLabel} (click to flip)`;
+    marksA.hidden = !swipe;
+    marksA.dataset.for = stage.dataset.a;
+    marksB.dataset.for = swipe || showB ? stage.dataset.b : stage.dataset.a;
+    if (pop.parentElement === stage && pop.dataset.for !== marksB.dataset.for && pop.dataset.for !== marksA.dataset.for) {
+      closeNote();
+    }
+    paintMarks();
+  };
+  for (const button of section.querySelectorAll("button.prev")) {
+    button.addEventListener("click", () => {
       button.setAttribute("aria-pressed", button.getAttribute("aria-pressed") !== "true");
       button.textContent = button.getAttribute("aria-pressed") === "true" ? "Showing previous render" : "Previous render";
       draw();
-    }});
-  }}
-  if (stage) {{
+    });
+  }
+  if (stage) {
     stage.querySelector(".swipe").addEventListener("input", draw);
-    stage.addEventListener("click", () => {{
+    stage.addEventListener("click", () => {
       if (view.mode !== "flip") return;
       stage.dataset.flipped = stage.dataset.flipped === "1" ? "0" : "1";
       draw();
-    }});
-  }}
-  return {{ stage, draw }};
-}});
+    });
+  }
+  return { stage, draw };
+});
 
 const fab = document.querySelector(".fab");
-const set = (kind, value) => {{
+const set = (kind, value) => {
   view[kind] = value;
-  for (const b of document.querySelectorAll(`.fab button[data-${{kind}}]`)) {{
+  for (const b of document.querySelectorAll(`.fab button[data-${kind}]`)) {
     b.setAttribute("aria-pressed", b.dataset[kind] === value);
-  }}
+  }
   const state = document.querySelector(".fab-state");
-  if (state) {{
-    const label = (kind) => document.querySelector(`.fab button[data-${{kind}}][aria-pressed="true"]`)?.textContent;
+  if (state) {
+    const label = (kind) => document.querySelector(`.fab button[data-${kind}][aria-pressed="true"]`)?.textContent;
     state.textContent = [label("mode"), label("theme")].filter(Boolean).join(" · ");
-  }}
+  }
+  // The mockup a comment was open on may not be drawn in the new mode.
+  if (kind === "mode") closeNote();
   for (const s of sections) s.draw();
-}};
-if (fab) {{
-  fab.addEventListener("click", (e) => {{
+};
+if (fab) {
+  fab.addEventListener("click", (e) => {
     const button = e.target.closest("button");
     if (!button) return;
-    if (button.classList.contains("fab-button")) {{
+    if (button.classList.contains("fab-button")) {
       // Hover opens it; a tap (no hover on touch screens) toggles it.
       fab.classList.toggle("open");
       button.setAttribute("aria-expanded", fab.classList.contains("open"));
-    }} else if (button.dataset.mode) set("mode", button.dataset.mode);
+    } else if (button.dataset.mode) set("mode", button.dataset.mode);
     else if (button.dataset.theme) set("theme", button.dataset.theme);
-  }});
-  document.addEventListener("click", (e) => {{
+  });
+  document.addEventListener("click", (e) => {
     if (!fab.contains(e.target)) fab.classList.remove("open");
-  }});
-}}
-document.addEventListener("keydown", (e) => {{
+  });
+}
+document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, textarea")) return;
-  const modes = {{ s: "side", w: "swipe", f: "flip" }};
+  const modes = { s: "side", w: "swipe", f: "flip" };
   const key = e.key.toLowerCase();
   if (modes[key] && document.querySelector(".fab button[data-mode]")) set("mode", modes[key]);
-  else if (key === "t") {{
+  else if (key === "t") {
     const themes = [...document.querySelectorAll(".fab button[data-theme]")].map((b) => b.dataset.theme);
     if (themes.length) set("theme", themes[(themes.indexOf(view.theme) + 1) % themes.length]);
-  }} else if (e.key === " " && view.mode === "flip") {{
+  } else if (e.key === " " && view.mode === "flip" && !e.target.closest("button")) {
     const hovered = sections.find((s) => s.stage?.matches(":hover"));
-    if (hovered) {{
+    if (hovered) {
       e.preventDefault();
       hovered.stage.click();
-    }}
-  }}
-}});
+    }
+  }
+});
+
+// The reply bar: what's been picked and commented, and copying it as one Markdown message.
+const bar = document.querySelector(".reply");
+const groups = [...document.querySelectorAll("section[data-group]")].map((section) => ({
+  group: section.dataset.group,
+  heading: section.dataset.heading,
+  names: [...section.querySelectorAll("figure")].map((f) => f.dataset.name),
+}));
+// Only what's still on the page: a re-render may have renamed or dropped a mockup.
+const picked = (g) => (g.names.includes(reply.picks[g.group]) ? reply.picks[g.group] : null);
+const commented = (g) => g.names.filter((n) => reply.comments[n]);
+const replyText = () => {
+  const out = ["# Re: " + document.title];
+  for (const g of groups) {
+    const pick = picked(g);
+    const notes = commented(g);
+    if (!pick && !notes.length) continue;
+    out.push("", "## " + g.heading + " (`" + g.group + "`)");
+    if (pick) out.push("Picked: `" + pick + "`");
+    for (const n of notes) {
+      out.push("`" + n + "`:", ...reply.comments[n].trim().split("\n").map((l) => "> " + l));
+    }
+  }
+  return out.join("\n");
+};
+let updated = false;
+const drawReply = () => {
+  let picks = 0, notes = 0;
+  for (const g of groups) {
+    picks += picked(g) ? 1 : 0;
+    notes += commented(g).length;
+  }
+  paintMarks();
+  const parts = [];
+  if (updated) parts.push("Page updated");
+  if (picks) parts.push(picks + (picks === 1 ? " pick" : " picks"));
+  if (notes) parts.push(notes + (notes === 1 ? " comment" : " comments"));
+  bar.querySelector(".count").textContent = parts.join(" · ");
+  bar.querySelector(".reload").hidden = !updated;
+  bar.querySelector(".copy").hidden = bar.querySelector(".clear").hidden = !(picks || notes);
+  bar.classList.toggle("updated", updated);
+  bar.hidden = !(updated || picks || notes);
+  const fallback = bar.querySelector(".fallback");
+  if (!fallback.hidden) fallback.value = replyText();
+};
+const save = () => {
+  try { localStorage.setItem(REPLY_KEY, JSON.stringify(reply)); } catch {}
+  drawReply();
+};
+bar.querySelector(".copy").addEventListener("click", async (e) => {
+  const button = e.currentTarget;
+  try {
+    await navigator.clipboard.writeText(replyText());
+    button.textContent = "Copied: paste it in the chat";
+    setTimeout(() => (button.textContent = "Copy reply"), 2500);
+  } catch {
+    // No clipboard (a sandboxed frame, say): show the text to copy by hand.
+    const fallback = bar.querySelector(".fallback");
+    fallback.hidden = false;
+    fallback.value = replyText();
+    fallback.select();
+  }
+});
+bar.querySelector(".clear").addEventListener("click", (e) => {
+  const button = e.currentTarget;
+  if (button.dataset.armed !== "1") {
+    // Two clicks, since dialogs may be blocked where the page is embedded.
+    button.dataset.armed = "1";
+    button.textContent = "Clear all?";
+    setTimeout(() => {
+      button.dataset.armed = "";
+      button.textContent = "Clear";
+    }, 3000);
+    return;
+  }
+  reply.picks = {};
+  reply.comments = {};
+  closeNote();
+  bar.querySelector(".fallback").hidden = true;
+  save();
+});
+bar.querySelector(".reload").addEventListener("click", () => location.reload());
+
+// The view outlives a reload (a re-render reloads the page), in this browser only.
+const VIEW_KEY = "mockup-view:" + location.pathname;
+let saved = {};
+try { saved = JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {}; } catch {}
+const has = (kind, value) => value && document.querySelector(`.fab button[data-${kind}="${CSS.escape(value)}"]`);
 const first = document.querySelector(".fab button[data-theme]");
-set("theme", first ? first.dataset.theme : null);
-set("mode", "side");
-</script>
+set("theme", has("theme", saved.theme) ? saved.theme : first ? first.dataset.theme : null);
+set("mode", has("mode", saved.mode) ? saved.mode : "side");
+addEventListener("pagehide", () => {
+  try { sessionStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {}
+});
+drawReply();
+
+// From render.py's local server, notice a re-render and reload. Picks and comments survive a
+// reload, but a comment being typed would lose its focus mid-word, so then offer it instead.
+if (["localhost", "127.0.0.1"].includes(location.hostname)) {
+  const stamp = async () => {
+    const r = await fetch(location.href, { method: "HEAD", cache: "no-store" });
+    return r.ok ? r.headers.get("last-modified") + " " + r.headers.get("content-length") : null;
+  };
+  let seen = null;
+  const check = async () => {
+    if (document.hidden || updated) return;
+    let now = null;
+    try { now = await stamp(); } catch {}
+    if (!now) return;
+    if (seen === null) seen = now;
+    else if (now !== seen) {
+      if (!pop.hidden) {
+        updated = true;
+        drawReply();
+      } else location.reload();
+    }
+  };
+  check();
+  setInterval(check, 1500);
+  document.addEventListener("visibilitychange", check);
+}
 """
 
 main()
