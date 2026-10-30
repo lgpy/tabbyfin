@@ -47,6 +47,10 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[3]
 TODAY = {"now", "current", "before", "today"}
+# The page's layout, in CSS pixels, kept in step with STYLE: the gap between mockups in a row and
+# the "or" between them, the gap beside a lone mockup's words, the side padding, the narrowest and widest that column
+# of words gets, and the narrowest the page's column gets (for the intro's sake).
+GAP, OR, GAP_WIDE, PAD, SIDE_MIN, SIDE_MAX, PAGE_MIN = 24, 40, 56, 24, 320, "34rem", 760
 
 
 def main():
@@ -360,6 +364,7 @@ def build(title, renders, notes):
         variants.setdefault(variant or name, {"name": name, "themes": {}})["themes"][r["theme"]] = r
 
     sections, all_themes, pairs = [], set(), False
+    widths, solo_rules = [], []
     for group, variants in groups.items():
         # Today's app first, so a pair reads before → after.
         ordered = sorted(variants.items(), key=lambda kv: kv[0] not in TODAY)
@@ -371,7 +376,25 @@ def build(title, renders, notes):
         heading = section_notes[0][3:] if section_notes else group.replace("_", " ").capitalize()
         body = markdown(section_notes[1:]) if section_notes else ""
 
-        figures = "\n".join(figure(variant, v, notes["captions"].get(v["name"])) for variant, v in ordered)
+        figures = '<div class="or" aria-hidden="true"><span>or</span></div>'.join(
+            figure(variant, v, notes["captions"].get(v["name"])) for variant, v in ordered
+        )
+        # The row of mockups as drawn (up to three side by side), which sets the page's column.
+        w = max(s[0] for s in sizes)
+        n = len(ordered) if len(ordered) <= 3 else 1
+        widths.append(n * w + (n - 1) * (2 * GAP + OR))
+        solo = len(ordered) == 1
+        if solo:
+            # A lone mockup takes its words beside it once there's room for a column of text.
+            at = w + GAP_WIDE + SIDE_MIN + 2 * PAD
+            sel = f'section[data-group="{html.escape(group)}"]'
+            solo_rules.append(
+                f"@media (min-width: {at:g}px) {{ {sel} {{ grid-template-columns: minmax(0, {w:g}px) "
+                f"minmax(0, {SIDE_MAX}); grid-template-rows: auto auto 1fr; }} "
+                f"{sel} .shot {{ grid-column: 1; grid-row: 1 / span 3; }} "
+                f"{sel} .head, {sel} figcaption {{ grid-column: 2; }} "
+                f"{sel} figcaption {{ margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--edge); }} }}"
+            )
         all_themes.update(themes)
         compare = ""
         if len(ordered) == 2 and len(sizes) == 1:
@@ -388,15 +411,17 @@ def build(title, renders, notes):
         sections.append(
             f'<section data-group="{html.escape(group)}" data-heading="{html.escape(heading)}" '
             f'data-themes="{" ".join(themes)}" '
-            f'data-theme="{themes[0]}" data-mode="side">'
-            f"<h2>{html.escape(heading)}</h2>{body}"
+            f'data-theme="{themes[0]}" data-mode="side"{" class=\"solo\"" if solo else ""}>'
+            f'<header class="head"><h2>{html.escape(heading)}</h2>{body}</header>'
             f'<div class="figures n{len(ordered)}">{figures}</div>{compare}</section>'
         )
 
     intro = markdown(notes["intro"]) if notes["intro"] else ""
     pretty = title.replace("_", " ").replace("-", " ").capitalize()
+    page = max([*widths, PAGE_MIN])
     return PAGE.format(
-        style=STYLE,
+        style=STYLE + "\n".join(solo_rules),
+        page=f"{page:g}",
         script=SCRIPT,
         title=html.escape(pretty),
         intro=intro,
@@ -445,12 +470,16 @@ def figure(variant, v, caption):
     if caption:
         title = f"<b>{html.escape(caption[0])}</b>"
         rest = markdown(caption[1:])
+    # The variant's name, unless the caption's title already says it ("Stacked" over "Stacked").
+    same = caption and caption[0].strip().lower() == tag_text(variant).lower()
+    tag = "" if same and variant not in TODAY else f'<span class="{tag_class}">{html.escape(tag_text(variant))}</span>'
     prev_button = '<button type="button" class="prev" aria-pressed="false">Previous render</button>' if prevs else ""
+    # On the title's line, so a pair's captions line up whether or not each has a tag.
+    row = f'<div class="row">{title}{tag}{prev_button}</div>' if title or tag or prev_button else ""
     return (
         f'<figure data-name="{html.escape(v["name"])}" style="max-width:{w:g}px" {data}>'
         f'<div class="shot"><img src="{html.escape(first)}" width="{w:g}" height="{h:g}" alt="{html.escape(v["name"])}"></div>'
-        f'<figcaption><div class="row"><span class="{tag_class}">{html.escape(tag_text(variant))}</span>{prev_button}</div>'
-        f"{title}{rest}</figcaption></figure>"
+        f"<figcaption>{row}{rest}</figcaption></figure>"
     )
 
 
@@ -467,8 +496,10 @@ PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500&display=swap">
 <style>{style}</style>
-<main>
+<main style="--page: {page}px">
 <header class="intro"><h1>{title}</h1>{intro}</header>
 {sections}
 </main>
@@ -487,36 +518,48 @@ PAGE = """<!doctype html>
 """
 
 STYLE = r"""
+/* The app's cozy tokens (theme.rs): its plum backdrop, surfaces and lavender brand. */
 :root {
-  --bg: #121117; --surface: #1c1a24; --edge: #2e2b3a; --text: #ece9f3; --muted: #a29db0;
-  --accent: #c396e7; --on-accent: #1d1230;
+  --bg: #0e0b16; --surface: #1a1526; --edge: #2c2440; --text: #f4f0fa; --muted: #a89fbb;
+  --accent: #c396e7; --on-accent: #1d1230; --glow: rgb(195 150 231 / .3);
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #f7f5fb; --surface: #ffffff; --edge: #e2ddec; --text: #1f1b29; --muted: #625c70;
-    --accent: #7b4fb0; --on-accent: #ffffff;
+    --bg: #f8f5fc; --surface: #ffffff; --edge: #e8e0f4; --text: #1f182b; --muted: #605770;
+    --accent: #7b4fb0; --on-accent: #ffffff; --glow: rgb(123 79 176 / .25);
     color-scheme: light;
   }
 }
 :root[data-theme="light"] {
-  --bg: #f7f5fb; --surface: #ffffff; --edge: #e2ddec; --text: #1f1b29; --muted: #625c70;
-  --accent: #7b4fb0; --on-accent: #ffffff;
+  --bg: #f8f5fc; --surface: #ffffff; --edge: #e8e0f4; --text: #1f182b; --muted: #605770;
+  --accent: #7b4fb0; --on-accent: #ffffff; --glow: rgb(123 79 176 / .25);
   color-scheme: light;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, sans-serif; }
-main { max-width: 2100px; margin: 0 auto; padding: 40px 16px 120px; display: grid; gap: 56px; }
-/* Centred over the mockups, which are; a list keeps its lines left-aligned. */
-.intro { max-width: 70ch; margin-inline: auto; display: grid; gap: 10px; text-align: center; }
-.intro ul, section > ul { width: fit-content; margin-inline: auto; text-align: left; }
-h1 { font-size: 1.9rem; font-weight: 500; margin: 0; }
-h2 { font-size: 1.3rem; font-weight: 500; margin: 0; }
+/* Ubuntu is what egui draws the mockups in, so the page's words read like the app's. */
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.55 Ubuntu, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+/* One column, as wide as the widest row of mockups, that everything starts at. */
+main { max-width: calc(var(--page) + 48px); margin: 0 auto; padding: 56px 24px 140px;
+  display: grid; gap: 2.5rem; }
+@media (max-width: 700px) { main { padding: 32px 16px 140px; gap: 48px; } }
+/* Everything starts at the figures' left edge; prose keeps a readable measure. */
+.intro { display: grid; gap: 12px; max-width: 68ch; }
+h1 { font-size: 2.4rem; line-height: 1.1; font-weight: 500; letter-spacing: -.02em; margin: 0 0 4px; }
+.intro p, .intro ul { font-size: 1.06rem; }
+h2 { font-size: 1.45rem; line-height: 1.2; font-weight: 500; letter-spacing: -.01em; margin: 0; }
 p, ul, ol { margin: 0; }
-section > h2, section > p { text-align: center; }
-section > p, section > ul { max-width: 70ch; margin-inline: auto; color: var(--muted); }
-section { display: grid; gap: 14px; }
-code { font-size: .9em; background: var(--surface); border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px; }
+ul { padding-left: 1.2em; }
+li + li { margin-top: 2px; }
+b { font-weight: 500; }
+/* A hairline over each section, so where one group ends and the next begins reads at a glance. */
+section { display: grid; gap: 16px; padding-top: 2.5rem; border-top: 1px solid var(--edge); }
+.head { display: grid; gap: 6px; max-width: 68ch; }
+.head p, .head ul { color: var(--muted); }
+code { font: .88em ui-monospace, monospace; background: var(--surface); border: 1px solid var(--edge);
+  border-radius: 5px; padding: 1px 5px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .fab { position: fixed; right: 20px; bottom: 20px; z-index: 10; display: flex; flex-direction: column;
   align-items: flex-end; gap: 10px; }
 .fab-button { display: flex; align-items: center; gap: 8px; padding: 0 16px 0 14px; height: 48px; border-radius: 24px;
@@ -537,23 +580,48 @@ kbd { font: inherit; font-size: .7rem; border: 1px solid var(--edge); border-rad
 button { font: inherit; font-size: .85rem; color: var(--text); background: transparent; border: 0;
   border-radius: 7px; padding: 4px 12px; cursor: pointer; }
 button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
-.figures { display: grid; gap: 20px; align-items: start; }
-.figures.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.figures.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-@media (max-width: 900px) { .figures.n2, .figures.n3 { grid-template-columns: 1fr; } }
+.figures { display: grid; gap: 24px; align-items: start; justify-items: start; }
+.figures.n2 { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+.figures.n3 { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); }
+/* Between variants to pick from: a rule with "or" on it, upright beside them, level across
+   when they stack. */
+.or { align-self: stretch; display: grid; grid-template-rows: 1fr auto 1fr; justify-items: center; gap: 8px;
+  width: 40px; color: var(--muted); }
+.or::before, .or::after { content: ""; width: 1px; background: var(--edge); }
+.or span { font-size: .9rem; font-weight: 500; line-height: 1; padding: 6px 10px 7px; border-radius: 999px;
+  border: 1px solid var(--edge); background: var(--surface); }
+@media (max-width: 900px) {
+  .figures.n2, .figures.n3 { grid-template-columns: 1fr; }
+  .or { width: 100%; grid-template-rows: none; grid-template-columns: 1fr auto 1fr; align-items: center;
+    justify-items: stretch; }
+  .or::before, .or::after { width: auto; height: 1px; }
+}
 section:not([data-mode="side"]) .figures { display: none; }
-figure { margin: 0; display: grid; gap: 8px; min-width: 0; width: 100%; justify-self: center; }
+figure { margin: 0; display: grid; gap: 10px; min-width: 0; width: 100%; }
 img { display: block; max-width: 100%; height: auto; }
 .shot { position: relative; }
-.shot img { border-radius: 10px; border: 1px solid var(--edge); }
-figcaption { display: grid; gap: 4px; justify-items: start; }
+.shot img { border-radius: 12px; border: 1px solid var(--edge); transition: opacity .2s, filter .2s; }
+/* What's been decided shows while scrolling: the pick glows like the app's focus, and the
+   variants it beat step back until they're pointed at. */
+figure.picked .shot img { border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 16px 48px -8px var(--glow); }
+section.decided figure:not(.picked) .shot img { opacity: .45; filter: saturate(.5); }
+section.decided figure:not(.picked) .shot:hover img,
+section.decided figure:not(.picked):focus-within .shot img { opacity: 1; filter: none; }
+@media (prefers-reduced-motion: reduce) { .shot img { transition: none; } }
+/* A lone mockup: heading, mockup, caption stacked; where there's room its section's own rule
+   (from render.py) puts the heading, notes and caption in a column beside it. */
+section.solo { column-gap: 56px; align-content: start; }
+section.solo .figures, section.solo figure { display: contents; }
+figcaption { display: grid; gap: 4px; justify-items: start; max-width: 68ch; }
+figcaption .row > b { font-size: 1.05rem; }
 figcaption p, figcaption ul { color: var(--muted); }
-figcaption .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.tag { font-size: .75rem; font-weight: 600; padding: 1px 9px; border-radius: 999px;
+figcaption .row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.tag { font-size: .78rem; font-weight: 500; padding: 1px 10px; border-radius: 999px;
   background: var(--accent); color: var(--on-accent); }
 .tag.was { background: transparent; color: var(--muted); border: 1px solid var(--edge); }
 button.prev { border: 1px solid var(--edge); padding: 1px 9px; font-size: .75rem; }
-.stage { position: relative; width: 100%; margin-inline: auto; border-radius: 10px; overflow: hidden; border: 1px solid var(--edge);
+.stage { position: relative; width: 100%; border-radius: 12px; overflow: hidden; border: 1px solid var(--edge);
   user-select: none; }
 .stage > img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; }
 .stage .which { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: .8rem;
@@ -561,7 +629,7 @@ button.prev { border: 1px solid var(--edge); padding: 1px 9px; font-size: .75rem
   pointer-events: none; white-space: nowrap; }
 .stage .swipe { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
 .stage::after { content: ""; position: absolute; top: 0; bottom: 0; left: var(--at, 50%); width: 2px;
-  background: var(--accent); pointer-events: none; }
+  margin-left: -1px; background: var(--accent); box-shadow: 0 0 12px var(--glow); pointer-events: none; }
 section[data-mode="flip"] .stage::after, section[data-mode="flip"] .swipe { display: none; }
 section[data-mode="flip"] .stage { cursor: pointer; }
 /* Pick and comment, over a mockup: shown on hover, and kept once they're on. */
@@ -652,6 +720,16 @@ const makeMarks = (host, side, pickable) => {
   return marks;
 };
 const paintMarks = () => {
+  for (const section of document.querySelectorAll("section[data-group]")) {
+    const pick = reply.picks[section.dataset.group];
+    let decided = false;
+    for (const fig of section.querySelectorAll("figure")) {
+      const on = fig.dataset.name === pick;
+      fig.classList.toggle("picked", on);
+      decided ||= on;
+    }
+    section.classList.toggle("decided", decided);
+  }
   for (const marks of allMarks) {
     const name = marks.dataset.for;
     const pick = marks.querySelector(".pick");
@@ -786,13 +864,15 @@ const sections = [...document.querySelectorAll("section[data-group]")].map((sect
 const fab = document.querySelector(".fab");
 const set = (kind, value) => {
   view[kind] = value;
+  // The page around the mockups wears their theme, so a light render isn't judged on a dark page.
+  if (kind === "theme" && value) document.documentElement.dataset.theme = value;
   for (const b of document.querySelectorAll(`.fab button[data-${kind}]`)) {
     b.setAttribute("aria-pressed", b.dataset[kind] === value);
   }
   const state = document.querySelector(".fab-state");
   if (state) {
     const label = (kind) => document.querySelector(`.fab button[data-${kind}][aria-pressed="true"]`)?.textContent;
-    state.textContent = [label("mode"), label("theme")].filter(Boolean).join(" · ");
+    state.textContent = label("mode") || label("theme") || "";
   }
   // The mockup a comment was open on may not be drawn in the new mode.
   if (kind === "mode") closeNote();
@@ -918,7 +998,9 @@ let saved = {};
 try { saved = JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {}; } catch {}
 const has = (kind, value) => value && document.querySelector(`.fab button[data-${kind}="${CSS.escape(value)}"]`);
 const first = document.querySelector(".fab button[data-theme]");
-set("theme", has("theme", saved.theme) ? saved.theme : first ? first.dataset.theme : null);
+const scheme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+const start = has("theme", saved.theme) ? saved.theme : has("theme", scheme) ? scheme : first?.dataset.theme;
+set("theme", start || null);
 set("mode", has("mode", saved.mode) ? saved.mode : "side");
 addEventListener("pagehide", () => {
   try { sessionStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {}
