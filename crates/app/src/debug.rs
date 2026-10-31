@@ -9,7 +9,7 @@
 //!   A press is only injected in a pass that will draw: eframe runs logic-only passes for a window
 //!   the compositor won't show, and input given to one of those only reaches the next pass, where
 //!   presses bunch up out of time order. So the presses wait for drawing to resume, one per pass
-//!   (dev/README.md, `docs/egui-migration.md` §6).
+//!   (dev/README.md, *WSL's clocks*).
 //! - `TABBYFIN_ROUTE` opens a page on top of Home at startup ([`Start`]).
 
 use std::time::{Duration, Instant};

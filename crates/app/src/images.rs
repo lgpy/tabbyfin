@@ -159,6 +159,13 @@ impl ImageCache {
         None
     }
 
+    /// Whether an image is still queued or loading. A mockup waits for this before it takes its
+    /// picture, so it shows the images rather than their blurred previews.
+    #[cfg(feature = "mockup")]
+    pub fn busy(&self) -> bool {
+        self.running > 0 || self.pump_scheduled || !self.queue.is_empty()
+    }
+
     /// Uploads what finished loading, looks at the queue once the frame that asked is done, and
     /// drops aged images while over the budget. Called from `Services::tick`, before each frame.
     pub fn tick(&mut self) {
@@ -500,7 +507,7 @@ mod tests {
 
     #[test]
     fn images_decode_as_rgba() {
-        // A red and a blue pixel: the cache used to swap them for GPUI's BGRA.
+        // A red and a blue pixel, which must come out in RGBA order, not swapped to BGRA.
         let pixels = image::RgbaImage::from_raw(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).expect("2x1");
         let mut png = Vec::new();
         image::codecs::png::PngEncoder::new(&mut png)

@@ -127,7 +127,7 @@ pub fn import(device: &wgpu::Device, frame: &SharedFrame) -> Result<wgpu::Textur
         );
         drop(hal_device);
         // Uninitialized: wgpu's first barrier moves the image out of `UNDEFINED`, once per image,
-        // as GPUI's renderer did. That may discard contents in principle, which would lose the
+        // as renderers usually do. That may discard contents in principle, which would lose the
         // first showing of each image only (there's no barrier after it); linear images have no
         // layout-dependent state to discard on Mesa. Claiming another layout would be wrong for
         // an image Vulkan never transitioned.

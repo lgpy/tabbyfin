@@ -1,7 +1,7 @@
 //! Windows GPU interop probe for docs/in-app-video.md phase 2.
 //!
 //! Checks which way an OpenGL context (which libmpv renders through) can share a texture with a
-//! separate D3D11 device (standing in for GPUI's renderer), via WGL_NV_DX_interop2:
+//! separate D3D11 device (standing in for the app's renderer), via WGL_NV_DX_interop2:
 //!   A. GL renders into a shared D3D11 texture.
 //!   B. GL renders into a shared D3D9Ex texture, which D3D11 opens by its share handle.
 //! Each test clears the texture to a known color in GL and reads it back on the second device.
@@ -133,7 +133,7 @@ mod probe {
                 glCheckFramebufferStatus: proc("glCheckFramebufferStatus")?,
             };
 
-            // The "GPUI" device that reads the result.
+            // The app's device that reads the result.
             let reader = d3d11_device()?;
 
             match test_d3d11(&gl, &reader) {

@@ -4,7 +4,7 @@
 
 **Decision (2026-10-14):** **GPU texture sharing.** mpv renders on the GPU and the app imports its frames into wgpu's device, so egui draws them without a CPU copy. That keeps mpv's full quality (`gpu-next`) and 4K; HDR is tone-mapped to SDR, since frames are 8-bit RGBA. Software frames are the fallback everywhere.
 
-- **Order:** it was built Windows first, then Linux (see History).
+- **Order:** it was built Windows first, then Linux.
 - **macOS:** software frames for now. There's no Mac to test with, so no Metal import has been attempted.
 
 ## Pipeline
@@ -31,7 +31,7 @@ Files: `crates/player/src/libmpv/{video,opengl,angle,wgl,egl,d3d11}.rs`, `crates
 
 - **libmpv's render API only offers `opengl` and `sw`.** There's no Vulkan, D3D or Metal render API (checked in mpv v0.41.0 `render.h`). So mpv always draws through OpenGL, and every platform needs OpenGL-to-native-API texture sharing.
 - **The textures must be made on the same GPU** whose device the window draws with: opaque Vulkan fds only import on the device that made them, and D3D12 only opens textures made on its own adapter. Hence the handshake below, which tells the player which GPU to put everything on.
-- **wgpu's import goes through `wgpu-hal`.** `texture_from_raw` wraps a Vulkan image or a D3D12 resource as a `wgpu::Texture` (`create_texture_from_hal`); egui-wgpu registers that texture under an egui texture id. Both imports live in the app crate, not in the UI framework: egui-wgpu has `register_native_texture`, so no patched dependency is needed. (The GPUI app this replaced had to vendor patched crates under `third_party/gpui/`; they're gone.)
+- **wgpu's import goes through `wgpu-hal`.** `texture_from_raw` wraps a Vulkan image or a D3D12 resource as a `wgpu::Texture` (`create_texture_from_hal`); egui-wgpu registers that texture under an egui texture id. Both imports live in the app crate, not in the UI framework: egui-wgpu has `register_native_texture`, so no patched dependency is needed.
 
 ## The handshake: what the app can draw
 
@@ -93,7 +93,7 @@ The app tells the player, before libmpv starts, which frames it can show. **`pla
   | WGL, `d3d11va-copy` | 4–12% | ~23% | 27–34% | — |
   | Software (`TABBYFIN_VIDEO=software`) | 13–20% | 100–137% | — | — |
 
-  How the CPU splits between the app and the host varies from sample to sample, more than the sum does. For comparison, the GPUI app's ANGLE path in one process cost ~11% (see History) and its WGL host ~22%, so the egui app's ANGLE costs about one and a half times that. Release builds weren't measured.
+  How the CPU splits between the app and the host varies from sample to sample, more than the sum does. Release builds weren't measured.
 - **Packaging:** on Windows the zip carries ANGLE (MSYS2's ucrt64 build, about 12 MB with its runtime DLLs, `packaging/angle.lock`, `packaging/fetch-angle.sh`). Delete `libEGL.dll` next to the exe to try the WGL path.
 
 ## Software frames
@@ -104,27 +104,15 @@ Every path ends here when no import can be used; it's also what macOS shows for 
 - The video widget writes each frame with `queue.write_texture` into one texture per frame size, registered once with egui-wgpu (`register_native_texture`; a new size swaps the texture under the same id), and wakes the UI once per frame.
 - Measured with debug builds, 1080p H.264 in a 1280×800 window (rendered at 1280×720), 25 s into playback (the first seconds also pay for mpv reading the file ahead):
 
-  | | App | Player host | Embedded (`TABBYFIN_PLAYER=embedded`) | GPUI's software path |
-  |---|---|---|---|---|
-  | WSL (llvmpipe) | ~148% | ~65% | ~191% | ~280% |
-  | Windows (RX 6600, `TABBYFIN_VIDEO=software`) | ~7% | ~29% | ~45% | ~54% |
+  | | App | Player host | Embedded (`TABBYFIN_PLAYER=embedded`) |
+  |---|---|---|---|
+  | WSL (llvmpipe) | ~148% | ~65% | ~191% |
+  | Windows (RX 6600, `TABBYFIN_VIDEO=software`) | ~7% | ~29% | ~45% |
 
   Paused: 0%, since mpv renders nothing new and nothing repaints.
 - **Repaints:** `ctx.request_repaint()` gives two UI passes per call, so the widget wakes the UI with `request_repaint_after(1 ms)`, which gives one. With the zero delay the app took about twice the CPU (~300% on WSL), drawing every frame twice.
 - **Dropping the widget** unregisters its texture at the start of the next egui pass (a small egui plugin), not at once: the pass that dropped it (playback ending) has usually drawn it already, and egui-wgpu paints that pass afterwards.
 - **No HDR:** frames are 8-bit RGBA, so HDR is tone-mapped to SDR by mpv (correct, but not HDR). Real HDR output needs a 10-bit/FP16 shared texture and an HDR swapchain, which the app doesn't have (ROADMAP 2.3.6).
-
-## History
-
-The GPUI app that came before used the same pipeline with patched crates instead of egui-wgpu:
-
-1. **libmpv backend and the software path** (2026-10-14), verified on Linux (WSL) and on Windows (RX 6600).
-2. **Windows GPU sharing** (2026-10-14), verified on the RX 6600: ANGLE (`d3d11va`) and WGL (`WGL_NV_DX_interop2`), chosen in that order, with software as the fallback; `examples/dx_interop_probe.rs` had confirmed the interop on AMD driver 26.8.1. Measured (debug, 1080p H.264): GPU ~5% of a core against ~54% software; with ANGLE at 4K HEVC 10-bit, ~11% (`d3d11va`) against ~22% (`d3d11va-copy` through WGL).
-3. **Linux GPU sharing** (2026-10-14), verified on Mesa llvmpipe/lavapipe, i.e. without a real GPU; `examples/vk_interop_probe.rs` checks export/import both ways.
-4. **Packaging** `libmpv`: done for Windows and Linux; macOS still uses Homebrew's libmpv.
-5. **macOS GPU sharing** (IOSurface) is open, when a Mac is available.
-
-The migration to egui kept all of that and changed only where the import lives: `widgets/video/{vulkan,dx12}.rs` instead of the vendored GPUI renderers, and the `VideoImport` handshake instead of GPUI's patched surface API. The patches (`third_party/gpui/`, `[patch.crates-io]`) are gone.
 
 ## Test loop for Windows
 

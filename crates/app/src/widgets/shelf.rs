@@ -195,8 +195,8 @@ fn shelf_inner(
         // The arrows show where the row is, as on `main`; a bar under every shelf would not.
         .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
         // `main`'s rail dragging: a press on the row and a move scrolls it with the mouse. The
-        // wheel is the page's, as on `main`, where the row undid the sideways scroll GPUI gave
-        // it.
+        // wheel is the page's, as on `main`, where the row undid the sideways scroll the toolkit
+        // gave it.
         .scroll_source(ScrollSource {
             drag: DragScroll::Always,
             mouse_wheel: false,

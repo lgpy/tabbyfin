@@ -3,7 +3,7 @@
 //! Models the planned path: a Vulkan device (the player) allocates an exportable, linearly
 //! tiled image and exports its memory twice as opaque fds. OpenGL (which libmpv renders
 //! through, via EGL) imports one with GL_EXT_memory_object_fd and clears it to a known color.
-//! A second, independent Vulkan device (standing in for GPUI's wgpu renderer) imports the other
+//! A second, independent Vulkan device (standing in for the app's wgpu renderer) imports the other
 //! and reads the pixel back.
 //!
 //! ```sh
@@ -425,7 +425,7 @@ mod probe {
             (gl.glClear)(GL_COLOR_BUFFER_BIT);
             (gl.glFinish)();
 
-            // Reader ("GPUI"): import the other fd and read back.
+            // Reader (the app): import the other fd and read back.
             let imported = reader.import(reader_fd)?;
             let pixel = reader.read_pixel(imported)?;
             let verdict = if pixel == EXPECTED_RGBA { "OK" } else { "WRONG COLOR" };

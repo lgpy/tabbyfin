@@ -2,7 +2,7 @@
 //!
 //! egui eases a mouse wheel's whole step over a few frames itself (`WheelState`: an exponential
 //! approach, about 63 % of what's left every 43 ms) and leaves a trackpad's pixel deltas alone.
-//! That is what `main`'s `smooth_wheel` did — it took GPUI's jump back and glided to the same
+//! That is what `main`'s `smooth_wheel` did — it took the toolkit's jump back and glided to the same
 //! place, 63 % every 70 ms — so the pages' scroll areas keep egui's smoothing. The animations
 //! setting is where the two differ: egui smooths a wheel whatever the setting says, where
 //! `main`'s reduced motion scrolled the step at once. [`instant_wheel`] gives the step to the
@@ -24,7 +24,7 @@ const SMOOTH_STEP: f32 = 7.;
 
 /// A glide in progress: an exponential approach to `target`, as `main`'s `Glide` did.
 ///
-/// egui's offsets grow as the content scrolls down or right, where GPUI's went negative; the
+/// egui's offsets grow as the content scrolls down or right, where `main`'s went negative; the
 /// maths is the same otherwise.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Glide {

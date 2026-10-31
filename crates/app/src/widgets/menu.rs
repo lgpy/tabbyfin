@@ -5,7 +5,7 @@
 //! The menu returns what was chosen instead of carrying it out. [`Services::carry_out`] does
 //! everything only the services can — playing, playing a series' next episode, marking it
 //! watched or favorite — and hands back *Add to playlist…* for the page to open U8's dialog.
-//! `main`'s menu did all of it itself, through GPUI globals.
+//! `main`'s menu did all of it itself, through globals.
 //!
 //! Each action that takes a request first ([`Services::mark`], [`Services::play_up_next`],
 //! [`Services::play_shuffled`]) runs it on tokio and reports back in

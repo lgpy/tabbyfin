@@ -589,7 +589,7 @@ impl Shapes {
             eyes: EYES.map(|(center, r)| still(painted(ellipse(center, r, r), WHITE))),
             evil_eyes: std::array::from_fn(|eye| {
                 let (center, r) = EYES[eye];
-                // GPUI had no clip either, so the eye is sampled and its points pushed below the
+                // `main` had no clip either, so the eye is sampled and its points pushed below the
                 // brow; the blink then squashes what's left towards the eye's middle.
                 let points: Vec<P> = (0..EYE_SAMPLES)
                     .map(|i| {
@@ -1036,7 +1036,7 @@ fn filled(segments: &[[P; 4]], closed: bool) -> Mesh {
     mesh(buffers)
 }
 
-/// `segments` stroked `width` wide, with round ends and joins: GPUI's strokes had butt ends and
+/// `segments` stroked `width` wide, with round ends and joins: `main`'s strokes had butt ends and
 /// mitred joins, which `main` rounded by stroking each curve and its ends separately.
 fn stroked(segments: &[[P; 4]], closed: bool, width: f32) -> Mesh {
     let mut tessellator = StrokeTessellator::new();

@@ -1015,7 +1015,7 @@ impl Shell {
         // focused, which an Xvfb display without a window manager never is.
         let focused = ui.ctx().memory(|memory| memory.has_focus(Id::unique(SEARCH_ID)));
         // `main`'s field puts the search icon inside its left padding, a gap after it, and the
-        // text after that (`gpui-kit`'s input prefix): 10 points, the icon at the text size, and
+        // text after that (an input prefix): 10 points, the icon at the text size, and
         // 6 points between them.
         let icon = text::icon(ui, ICON_SEARCH.font_family());
         let icon_size = icon.size;
@@ -1070,7 +1070,7 @@ impl Shell {
                         let hit = Rect::from_center_size(center, vec2(icon_size + 8., icon_size + 8.));
                         let button = ui.interact(hit, Id::unique("top_bar_search_clear"), Sense::CLICK);
                         button.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), "Clear search"));
-                        // gpui-kit's text button: the foreground at 90 % at rest, and the
+                        // `main`'s text button: the foreground at 90 % at rest, and the
                         // foreground under the pointer.
                         let tokens = theme::tokens_of(ui);
                         let color = if button.hovered() {
