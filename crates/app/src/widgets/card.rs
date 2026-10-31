@@ -254,7 +254,7 @@ fn cursor_ring(ui: &Ui, image: Rect, selected: bool) {
         ui.painter().rect_stroke(
             image,
             CornerRadius::same(image::RADIUS),
-            Stroke::new(3., theme::tokens_of(ui).foreground),
+            Stroke::new(3., theme::tokens_of(ui).brand),
             StrokeKind::Inside,
         );
     }

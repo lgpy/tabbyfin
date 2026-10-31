@@ -761,10 +761,10 @@ impl PlayerPage {
         );
 
         if let Some(response) = &chapters_button {
-            self.chapters_menu(ui, response, view, cx);
+            self.chapters_menu(response, view, cx);
         }
         if let Some(response) = &settings_button {
-            self.settings_menu(ui, response, view, cx);
+            self.settings_menu(response, view, cx);
         }
         if let Some(response) = &versions_button {
             self.versions_menu(response, view, cx);
@@ -1008,7 +1008,7 @@ impl PlayerPage {
 
     /// The chapters list: each chapter's image (when the server extracted them), name and start,
     /// the current one highlighted. A click seeks there and closes the menu.
-    fn chapters_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
+    fn chapters_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
         let Some(menu) = &view.chapters else { return };
         let mut chosen = None;
         egui::Popup::menu(response)
@@ -1019,7 +1019,7 @@ impl PlayerPage {
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .width(CHAPTERS_W + 24.)
-            .frame(menu_frame(ui))
+            .frame(menu_frame())
             .show(|ui| {
                 ui.set_width(CHAPTERS_W);
                 egui::ScrollArea::vertical().max_height(CHAPTERS_MAX_H).show(ui, |ui| {
@@ -1032,7 +1032,7 @@ impl PlayerPage {
                         let (rect, row) =
                             ui.allocate_exact_size(vec2(ui.available_width(), CHAPTER_THUMB_H + 8.), Sense::CLICK);
                         let current = menu.current == Some(chapter.index);
-                        let tokens = theme::tokens_of(ui);
+                        let tokens = over_video::TOKENS;
                         let name = chapter
                             .name
                             .clone()
@@ -1079,7 +1079,7 @@ impl PlayerPage {
 
     /// The settings menu: audio, subtitle and general tabs, with the tracks, the delays, the
     /// subtitle size and the speeds.
-    fn settings_menu(&mut self, ui: &egui::Ui, response: &Response, view: &View, cx: &mut PageCx) {
+    fn settings_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
         let Some(menu) = &view.settings else { return };
         let mut tab = self.settings_tab;
         let mut chosen_audio = None;
@@ -1094,7 +1094,7 @@ impl PlayerPage {
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .width(SETTINGS_W + 24.)
-            .frame(menu_frame(ui))
+            .frame(menu_frame())
             .show(|ui| {
                 ui.set_width(SETTINGS_W);
                 if let Some(choice) = settings_tabs(ui, tab) {
@@ -1526,11 +1526,11 @@ fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::CLICK);
     let name = tooltip.split(" (").next().unwrap_or(tooltip);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), name));
-    let tokens = theme::tokens_of(ui);
+    let tokens = over_video::TOKENS;
     let fill = if active {
         tokens.accent
     } else if response.hovered() {
-        ghost_hover(ui)
+        ghost_hover()
     } else {
         Color32::TRANSPARENT
     };
@@ -1547,8 +1547,8 @@ fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str
 
 /// `main`'s ghost button under the pointer: gpui-kit's accent at half strength in the dark theme,
 /// which is what the player draws in either theme.
-fn ghost_hover(ui: &egui::Ui) -> Color32 {
-    let [r, g, b, _] = theme::tokens_of(ui).accent.to_srgba_unmultiplied();
+fn ghost_hover() -> Color32 {
+    let [r, g, b, _] = over_video::TOKENS.accent.to_srgba_unmultiplied();
     Color32::from_rgba_unmultiplied(r, g, b, 128)
 }
 
@@ -1576,7 +1576,7 @@ enum ButtonKind {
 /// radius and icon size (24 in the large one, 16 otherwise). Drawn by the page rather than as an
 /// `egui::Button` for those measurements, and so it can't take the keyboard.
 fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>, label: &str) -> Response {
-    let tokens = theme::tokens_of(ui);
+    let tokens = over_video::TOKENS;
     let (padding, gap, text, icon_size) = match kind {
         ButtonKind::Large => (12., 8., theme::text::font(ui, "base"), 24.),
         _ => (10., 8., theme::text::font(ui, "sm"), 16.),
@@ -1600,7 +1600,7 @@ fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>
             tokens.foreground,
             Color32::TRANSPARENT,
             Color32::TRANSPARENT,
-            ghost_hover(ui),
+            ghost_hover(),
             tokens.accent,
         ),
     };
@@ -1658,8 +1658,8 @@ fn label_badge(ui: &mut egui::Ui, text: impl Into<String>) {
 
 /// The frame a player menu draws in: `main`'s popover surface (gpui-kit's `popover_style`), with
 /// its 12-point inset and its soft shadow, rather than egui's thinner popup frame.
-fn menu_frame(ui: &egui::Ui) -> egui::Frame {
-    let tokens = theme::tokens_of(ui);
+fn menu_frame() -> egui::Frame {
+    let tokens = over_video::TOKENS;
     egui::Frame::new()
         .fill(tokens.popover)
         .stroke(Stroke::new(1., tokens.border))
@@ -1676,7 +1676,7 @@ fn menu_frame(ui: &egui::Ui) -> egui::Frame {
 /// The settings menu's tabs: `main`'s segmented tab bar, a track with the selected tab in the
 /// popover's own colour on it. Returns the tab clicked.
 fn settings_tabs(ui: &mut egui::Ui, current: SettingsTab) -> Option<SettingsTab> {
-    let tokens = theme::tokens_of(ui);
+    let tokens = over_video::TOKENS;
     let mut chosen = None;
     egui::Frame::new()
         .fill(tokens.tab_bar)
@@ -1701,7 +1701,7 @@ fn settings_tabs(ui: &mut egui::Ui, current: SettingsTab) -> Option<SettingsTab>
 /// to AccessKit, with its selected state, though not keyboard-focusable like the rest of the
 /// player's widgets.
 fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
-    let tokens = theme::tokens_of(ui);
+    let tokens = over_video::TOKENS;
     let color = if selected {
         tokens.foreground
     } else {
@@ -1725,7 +1725,7 @@ fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
 /// segment is a radio button to AccessKit with its selected state; the group's own rect only
 /// senses hover, so it can't take a click or focus meant for a segment.
 fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
-    let tokens = theme::tokens_of(ui);
+    let tokens = over_video::TOKENS;
     let font = theme::text::font(ui, "sm");
     let labels: Vec<String> = Adjustments::SPEEDS.iter().map(|speed| format!("{speed}×")).collect();
     let widths: Vec<f32> = labels
@@ -1749,7 +1749,7 @@ fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
         let fill = if selected {
             tokens.accent
         } else if response.hovered() {
-            ghost_hover(ui)
+            ghost_hover()
         } else {
             tokens.background
         };
@@ -1798,7 +1798,7 @@ fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
 /// A small ghost button, as `main`'s settings steppers used: 24 points high, 8 either side of
 /// its label, the accent under the pointer.
 fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
-    let tokens = theme::tokens_of(ui);
+    let tokens = over_video::TOKENS;
     let font = theme::text::font(ui, "sm");
     let galley = ui.painter().layout_no_wrap(text.to_owned(), font, tokens.foreground);
     let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 16., 24.), Sense::CLICK);
@@ -1806,7 +1806,7 @@ fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
     let fill = if response.is_pointer_button_down_on() {
         tokens.accent
     } else if response.hovered() {
-        ghost_hover(ui)
+        ghost_hover()
     } else {
         Color32::TRANSPARENT
     };
@@ -1993,7 +1993,7 @@ mod tests {
                         .open_memory(None::<egui::SetOpenCommand>)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .width(SETTINGS_W + 24.)
-                        .frame(menu_frame(ui))
+                        .frame(menu_frame())
                         .show(|ui| {
                             ui.set_width(SETTINGS_W);
                             if let Some(choice) = settings_tabs(ui, menu.tab) {

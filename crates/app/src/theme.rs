@@ -1,10 +1,9 @@
 //! The app's look: the theme tokens, dark, light or the system's theme, text size, zoom,
 //! animations, and the colours over video (`over_video`).
 //!
-//! The tokens ([`Tokens`]) are `main`'s: gpui-kit 0.7.3's default light and dark themes with the
-//! overrides `main`'s `theme.rs` made on top (radius 10 and 12, and the light theme's
-//! `muted_foreground` of `0x525252`). They're the one place colours, radii and spacing come
-//! from; [`apply`] builds egui's [`egui::Visuals`] and [`egui::Spacing`] out of them, and
+//! The tokens ([`Tokens`]) are the cozy look's palette (`docs/DESIGN.md`), one set per theme.
+//! gpui-kit's token names (`background`, `primary`, …), which `main` drew with, are kept as
+//! aliases of the cozy ones. They're the one place colours, radii and spacing come from; [`apply`] builds egui's [`egui::Visuals`] and [`egui::Spacing`] out of them, and
 //! widgets that paint themselves read [`tokens`] instead of literals. The player is the
 //! exception: it stays dark whatever the theme, and draws with [`over_video`].
 //!
@@ -282,8 +281,8 @@ pub struct Tokens {
     /// The radius of cards, dialogs and popups (`main`'s override of 8).
     pub radius_lg: u8,
 
-    // The cozy look, which the app is moving to one screen at a time (the sign-in screen first,
-    // through [`cozy_style`]): the mascot's lavender in place of gpui-kit's greys.
+    // The cozy look: the mascot's lavender in place of gpui-kit's greys. The fields above are
+    // aliases of these ([`Tokens::cozy_aliases`]).
     /// The window's background, a gradient from the top colour to the bottom one.
     pub backdrop_top: Color32,
     pub backdrop_bottom: Color32,
@@ -323,8 +322,16 @@ const AVATARS: [Color32; 5] = [
 ];
 
 impl Tokens {
-    /// gpui-kit's *Default Light* with `main`'s overrides.
-    pub const LIGHT: Self = Self {
+    /// The light theme ("a pale lilac morning"): the cozy palette, with gpui-kit's names
+    /// pointing into it ([`Self::cozy_aliases`]).
+    pub const LIGHT: Self = Self::GPUI_LIGHT.cozy_aliases();
+
+    /// The dark theme ("a nightlight"): the cozy palette, with gpui-kit's names pointing into it.
+    pub const DARK: Self = Self::GPUI_DARK.cozy_aliases();
+
+    /// gpui-kit's *Default Light* with `main`'s overrides, and the cozy look's own values. Its
+    /// gpui-kit values are overridden by [`Self::cozy_aliases`]; only its cozy fields reach the app.
+    const GPUI_LIGHT: Self = Self {
         dark: false,
         background: Color32::from_rgb(0xff, 0xff, 0xff),
         foreground: Color32::from_rgb(0x0a, 0x0a, 0x0a),
@@ -378,8 +385,9 @@ impl Tokens {
         radius_control: 12,
     };
 
-    /// gpui-kit's *Default Dark* with `main`'s overrides.
-    pub const DARK: Self = Self {
+    /// gpui-kit's *Default Dark* with `main`'s overrides, and the cozy look's own values. The
+    /// player still draws with its gpui-kit values over the video ([`over_video::TOKENS`]).
+    const GPUI_DARK: Self = Self {
         dark: true,
         background: Color32::from_rgb(0x0a, 0x0a, 0x0a),
         foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
@@ -431,6 +439,38 @@ impl Tokens {
         radius_control: 12,
     };
 
+    /// gpui-kit's names as aliases of the cozy tokens, so code that reads `background` or
+    /// `primary` draws in the cozy palette without changing. The scrim (`overlay`), the text
+    /// selection, the status colours, `radius_lg` (cards and popups) and the tab bar's
+    /// foreground keep their own values.
+    const fn cozy_aliases(self) -> Self {
+        Self {
+            // The gradient's top end, which the surfaces and insets were picked against: the
+            // bottom end is as dark as a dark surface, so a raised panel would look sunk.
+            background: self.backdrop_top,
+            foreground: self.ink,
+            muted: self.inset_hover,
+            muted_foreground: self.ink_muted,
+            border: self.surface_border,
+            input: self.surface_border,
+            button: self.surface,
+            button_hover: self.inset_hover,
+            button_active: self.inset_hover,
+            primary: self.brand,
+            primary_foreground: self.brand_foreground,
+            primary_hover: self.brand_hover,
+            secondary: self.inset,
+            secondary_active: self.inset_hover,
+            accent: self.inset_hover,
+            accent_foreground: self.ink,
+            popover: self.surface,
+            tab_bar: self.inset,
+            tab_foreground: self.ink_muted,
+            radius: self.radius_control,
+            ..self
+        }
+    }
+
     /// The fill of an input or a select, gpui-kit's `input_background`: in the dark theme the
     /// `input` colour at 70 %, so the surface behind it shows through; in the light theme the
     /// background itself. The player's version picker reads it, over the picture.
@@ -472,35 +512,6 @@ pub fn primary_style(ui: &mut egui::Ui) {
     }
     widgets.hovered.weak_bg_fill = tokens.primary_hover;
     widgets.active.weak_bg_fill = tokens.primary_hover;
-}
-
-/// Restyles `ui` in the cozy look: text in [`Tokens::ink`], fields and rows sunk in
-/// [`Tokens::inset`] with the larger [`Tokens::radius_control`], and the focus ring in the brand
-/// colour. The screens that have moved to the look call it at their top; the rest keep
-/// [`visuals`].
-pub fn cozy_style(ui: &mut egui::Ui) {
-    let tokens = tokens_of(ui);
-    let visuals = ui.visuals_mut();
-    visuals.weak_text_color = Some(tokens.ink_muted);
-    visuals.extreme_bg_color = tokens.inset;
-    visuals.text_edit_bg_color = Some(tokens.inset);
-    // As wide as the resting outline: a text field keeps its size by taking its outline out of
-    // its margin, which egui rounds to whole points, so a wider ring would shrink it on focus.
-    visuals.selection.stroke = Stroke::new(1., tokens.brand);
-    visuals.hyperlink_color = tokens.ink;
-    let widgets = &mut visuals.widgets;
-    for (state, fill) in [
-        (&mut widgets.noninteractive, tokens.surface),
-        (&mut widgets.inactive, tokens.surface),
-        (&mut widgets.hovered, tokens.inset_hover),
-        (&mut widgets.active, tokens.inset_hover),
-    ] {
-        state.weak_bg_fill = fill;
-        state.bg_stroke.color = tokens.surface_border;
-        state.fg_stroke.color = tokens.ink;
-        state.corner_radius = egui::CornerRadius::same(tokens.radius_control);
-    }
-    widgets.hovered.bg_stroke.color = tokens.ink_muted;
 }
 
 /// `main`'s fill for a selected control — a menu row, a toggle, a checked box — which egui would
@@ -562,18 +573,19 @@ fn visuals(tokens: &Tokens) -> egui::Visuals {
     visuals.window_corner_radius = egui::CornerRadius::same(tokens.radius_lg);
     // `main`'s popups were rounded like a dialog (`rounded_lg`).
     visuals.menu_corner_radius = egui::CornerRadius::same(tokens.radius_lg);
-    // A text field is the background with an `input` outline, as gpui-kit's inputs are.
-    visuals.extreme_bg_color = tokens.background;
-    visuals.text_edit_bg_color = Some(tokens.background);
+    // A text field is sunk in `inset`, with an `input` outline.
+    visuals.extreme_bg_color = tokens.inset;
+    visuals.text_edit_bg_color = Some(tokens.inset);
     visuals.faint_bg_color = tokens.muted;
     visuals.code_bg_color = tokens.muted;
     visuals.hyperlink_color = tokens.foreground;
     visuals.warn_fg_color = tokens.warning;
     visuals.error_fg_color = tokens.danger;
     visuals.selection.bg_fill = tokens.selection;
-    // Selected text keeps the text colour; the ring around a selected control is the
-    // foreground, as `main`'s selection ring was.
-    visuals.selection.stroke = Stroke::new(1., tokens.foreground);
+    // The focus ring, in `brand`. As wide as the resting outline: a text field keeps its size by
+    // taking its outline out of its margin, which egui rounds to whole points, so a wider ring
+    // would shrink it on focus.
+    visuals.selection.stroke = Stroke::new(1., tokens.brand);
     visuals.interact_cursor = None;
 
     visuals.widgets.noninteractive = egui::style::WidgetVisuals {
@@ -597,7 +609,8 @@ fn visuals(tokens: &Tokens) -> egui::Visuals {
     visuals.widgets.hovered = egui::style::WidgetVisuals {
         bg_fill: tokens.secondary,
         weak_bg_fill: tokens.button_hover,
-        bg_stroke: Stroke::new(1., tokens.input),
+        // A control under the pointer darkens its outline to the muted ink.
+        bg_stroke: Stroke::new(1., tokens.ink_muted),
         fg_stroke: Stroke::new(1., tokens.foreground),
         corner_radius,
         expansion: 0.,
@@ -1023,33 +1036,53 @@ mod tests {
     }
 
     #[test]
-    fn the_tokens_are_mains_overrides_on_gpui_kits_themes() {
-        // `main`'s `theme.rs`: radius 10, radius_lg 12, and a darker muted grey in light.
+    fn gpui_kits_names_are_aliases_of_the_cozy_tokens() {
         for tokens in [Tokens::LIGHT, Tokens::DARK] {
-            assert_eq!(tokens.radius, 10);
+            assert_eq!(tokens.background, tokens.backdrop_top);
+            assert_eq!(tokens.foreground, tokens.ink);
+            assert_eq!(tokens.muted_foreground, tokens.ink_muted);
+            assert_eq!(tokens.primary, tokens.brand);
+            assert_eq!(tokens.primary_foreground, tokens.brand_foreground);
+            assert_eq!(tokens.primary_hover, tokens.brand_hover);
+            assert_eq!(tokens.popover, tokens.surface);
+            assert_eq!(tokens.button, tokens.surface);
+            assert_eq!(tokens.border, tokens.surface_border);
+            assert_eq!(tokens.input, tokens.surface_border);
+            assert_eq!(tokens.accent, tokens.inset_hover);
+            assert_eq!(tokens.muted, tokens.inset_hover);
+            assert_eq!(tokens.radius, tokens.radius_control);
+            // Cards and popups keep gpui-kit's larger radius; a panel's 22 is too round for a
+            // poster.
             assert_eq!(tokens.radius_lg, 12);
         }
-        assert_eq!(
-            Tokens::LIGHT.muted_foreground,
-            egui::Color32::from_rgb(0x52, 0x52, 0x52)
-        );
-        assert_eq!(Tokens::DARK.muted_foreground, egui::Color32::from_rgb(0xa3, 0xa3, 0xa3));
-        // gpui-kit's defaults the pages lean on.
-        assert_eq!(Tokens::DARK.background, egui::Color32::from_rgb(0x0a, 0x0a, 0x0a));
-        assert_eq!(Tokens::LIGHT.background, egui::Color32::WHITE);
-        assert_eq!(Tokens::DARK.primary, egui::Color32::from_rgb(0xfa, 0xfa, 0xfa));
-        assert_eq!(Tokens::LIGHT.primary, egui::Color32::from_rgb(0x17, 0x17, 0x17));
-        // The player's menu reads these two: gpui-kit's segmented tab bar.
-        assert_eq!(Tokens::LIGHT.tab_bar, egui::Color32::from_rgb(0xf5, 0xf5, 0xf5));
-        assert_eq!(Tokens::DARK.tab_bar, egui::Color32::from_rgb(0x17, 0x17, 0x17));
-        assert_eq!(Tokens::DARK.tab_foreground, egui::Color32::from_rgb(0xd4, 0xd4, 0xd4));
-        // gpui-kit's `input_background`: the input colour at 70 % in dark, the background in
-        // light.
-        assert_eq!(Tokens::LIGHT.input_background(), Tokens::LIGHT.background);
-        let dark = Tokens::DARK.input_background();
-        assert_eq!(dark.to_srgba_unmultiplied(), [0x2f, 0x2f, 0x2f, 179]);
+        // The cozy palette itself (`docs/DESIGN.md`).
+        assert_eq!(Tokens::LIGHT.background, egui::Color32::from_rgb(0xfc, 0xfa, 0xff));
+        assert_eq!(Tokens::DARK.background, egui::Color32::from_rgb(0x0e, 0x0b, 0x16));
+        assert_eq!(Tokens::LIGHT.primary, egui::Color32::from_rgb(0x7b, 0x4f, 0xb0));
+        assert_eq!(Tokens::DARK.primary, egui::Color32::from_rgb(0xc3, 0x96, 0xe7));
         assert_eq!(tokens(&egui::Visuals::dark()), &Tokens::DARK);
         assert_eq!(tokens(&egui::Visuals::light()), &Tokens::LIGHT);
+    }
+
+    /// The player draws over the picture with gpui-kit's dark theme, as before the retint.
+    #[test]
+    fn the_player_keeps_gpui_kits_dark_tokens() {
+        let tokens = super::over_video::TOKENS;
+        assert!(tokens.dark);
+        assert_eq!(tokens.background, egui::Color32::from_rgb(0x0a, 0x0a, 0x0a));
+        assert_eq!(tokens.foreground, egui::Color32::from_rgb(0xfa, 0xfa, 0xfa));
+        assert_eq!(tokens.muted_foreground, egui::Color32::from_rgb(0xa3, 0xa3, 0xa3));
+        assert_eq!(tokens.primary, egui::Color32::from_rgb(0xfa, 0xfa, 0xfa));
+        assert_eq!(tokens.popover, egui::Color32::from_rgb(0x0a, 0x0a, 0x0a));
+        assert_eq!(tokens.radius, 10);
+        // The player's menu reads these: gpui-kit's segmented tab bar.
+        assert_eq!(tokens.tab_bar, egui::Color32::from_rgb(0x17, 0x17, 0x17));
+        assert_eq!(tokens.tab_foreground, egui::Color32::from_rgb(0xd4, 0xd4, 0xd4));
+        // gpui-kit's `input_background`: the input colour at 70 % in dark.
+        assert_eq!(
+            tokens.input_background().to_srgba_unmultiplied(),
+            [0x2f, 0x2f, 0x2f, 179]
+        );
     }
 
     #[test]
@@ -1063,7 +1096,11 @@ mod tests {
             assert_eq!(visuals.faint_bg_color, tokens.muted);
             assert_eq!(visuals.error_fg_color, tokens.danger);
             assert_eq!(visuals.selection.bg_fill, tokens.selection);
-            assert_eq!(visuals.selection.stroke.color, tokens.foreground);
+            // The focus ring is the brand colour, 1 point like the resting outline.
+            assert_eq!(visuals.selection.stroke, egui::Stroke::new(1., tokens.brand));
+            // Text fields are sunk in the inset, as on the sign-in panel.
+            assert_eq!(visuals.text_edit_bg_color, Some(tokens.inset));
+            assert_eq!(visuals.widgets.hovered.bg_stroke.color, tokens.ink_muted);
             assert_eq!(visuals.widgets.noninteractive.fg_stroke.color, tokens.foreground);
             assert_eq!(visuals.widgets.inactive.weak_bg_fill, tokens.button);
             assert_eq!(visuals.widgets.hovered.weak_bg_fill, tokens.button_hover);
@@ -1302,6 +1339,12 @@ mod tests {
 /// the picture; these are its tokens, so views don't scatter black and white literals.
 pub mod over_video {
     use egui::Color32;
+
+    use super::Tokens;
+
+    /// What the player paints its own controls with: gpui-kit's dark theme, as before the app
+    /// moved to the cozy palette, so its bars and menus stay neutral over the picture.
+    pub const TOKENS: &Tokens = &Tokens::GPUI_DARK;
 
     /// Behind the picture, and its letterbox bars.
     pub const BACKDROP: Color32 = Color32::BLACK;

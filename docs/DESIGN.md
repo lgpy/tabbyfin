@@ -2,7 +2,7 @@
 
 The design reference for Tabbyfin's new look. The sign-in and restoring screens are the first in it (2026-10-29/30, commits `e70588c`, `4d8c3d5`, `59fc96d`); this doc writes down what they settled so the next screens start from it, and lists what's still open. It's a draft to refine as more screens move over: when a screen settles something new, add it here.
 
-The rest of the app still draws with gpui-kit's tokens through `theme::visuals`. A screen moves to the look by calling `theme::cozy_style(ui)` at its top and building from the widgets below.
+Since C1 the whole app draws in the cozy palette: `theme::visuals` (egui's colours for every page) is built from the cozy tokens, and gpui-kit's token names are aliases of them (see *Colour tokens*). The other pages still have gpui-kit's layout and widgets, and they move to the look's structure one at a time.
 
 ## Principles
 
@@ -19,13 +19,13 @@ The rest of the app still draws with gpui-kit's tokens through `theme::visuals`.
 |---|---|---|
 | Backdrop | Vertical gradient `backdrop_top` → `backdrop_bottom` over the whole window, plus an optional soft `glow` pooled behind the mascot | `widgets::backdrop::fill`, `backdrop::glow` (meshes; egui has no gradients) |
 | Surface | A panel: `surface` fill, 1 pt `surface_border`, `radius_surface` (22), 28 pt padding, shadow offset 0/12, blur 40 in `surface_shadow` | `widgets::surface::frame(ui)` |
-| Inset | Sunk into a surface: `inset` fill, `inset_hover` under the pointer, `radius_control` (12) | text fields (via `cozy_style`), `AvatarRow`, `code::show` |
+| Inset | Sunk into a surface: `inset` fill, `inset_hover` under the pointer, `radius_control` (12) | text fields (`theme::visuals`), `AvatarRow`, `code::show` |
 
 The CentralPanel holding a cozy screen is frameless (`Frame::NONE`) so the backdrop covers the window.
 
 ## Colour tokens
 
-New fields on `theme::Tokens` (`crates/app/src/theme.rs`), alongside gpui-kit's.
+`theme::Tokens` (`crates/app/src/theme.rs`), one set per theme.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
@@ -47,6 +47,22 @@ New fields on `theme::Tokens` (`crates/app/src/theme.rs`), alongside gpui-kit's.
 | `danger` (existing) | `#ef4444` | `#f87171` | danger notice |
 | `info` (existing) | `#06b6d4` | `#22d3ee` | info notice |
 | `success` (existing) | `#22c55e` | `#4ade80` | success notice |
+
+gpui-kit's names, which `main` and the pages not yet restructured draw with, are aliases of these (`Tokens::cozy_aliases`), so a page that reads `primary` gets `brand`:
+
+| gpui-kit name | Is | Where it shows |
+|---|---|---|
+| `background` | `backdrop_top` | the page and top bar's flat fill, an item banner's fade |
+| `foreground`, `accent_foreground` | `ink` | text |
+| `muted_foreground`, `tab_foreground` | `ink_muted` | subtitles, hints, card subtitles |
+| `primary`, `primary_hover`, `primary_foreground` | `brand`, `brand_hover`, `brand_foreground` | primary buttons, the card progress bar and played badge |
+| `popover`, `button` | `surface` | menus, dialogs, buttons at rest |
+| `muted`, `accent`, `button_hover`, `button_active`, `secondary_active` | `inset_hover` | chips, image placeholders, highlighted rows, hovered buttons |
+| `secondary`, `tab_bar` | `inset` | checkbox boxes, slider rails, tab tracks |
+| `border`, `input` | `surface_border` | outlines |
+| `radius` | `radius_control` (12) | controls |
+
+`overlay`, `selection`, the status colours and `radius_lg` (12, for cards and popups) keep their own values. The page's flat fill is `backdrop_top`, the gradient's top end, not the lilac bottom: in dark the bottom end (`#1d1633`) is lighter than `surface` (`#1a1526`), so raised things would look sunk, and in light `inset_hover` rows and `surface_border` outlines disappear against it. The gradient itself goes under the shell with C2. The focus ring (egui's `selection.stroke`) and the cursor rings are `brand`. The player keeps gpui-kit's dark set over the video (`theme::over_video::TOKENS`).
 
 Light `brand` is deeper than the mascot's lavender so white text passes AA (5.9:1); dark uses the mascot's lavender itself with dark text. The status colours (`danger`, `info`, `success`) are too pale for text on a light surface (green and cyan about 2.3:1 on white), so they tint a notice's box, outline and icon, and its text stays `ink`.
 
@@ -135,7 +151,7 @@ The rollout plan is `docs/ROADMAP.md`'s [cozy look backlog](ROADMAP.md#cozy-look
 - **Mascot and glow.** Sign-in, restoring, loaders and empty states only. The glow always goes with the mascot.
 - **Selects, toggles, menus.** Inset boxes and `inset_hover` rows, with a cozy toggle/checkbox (C3, C4).
 - **The player.** Stays dark (`theme::over_video`) and only borrows `brand` for its accents.
-- **Retiring gpui-kit's tokens.** C1 turns them into aliases, and C13 removes them.
+- **Retiring gpui-kit's tokens.** They're aliases since C1; C13 removes them.
 
 ## Testing
 

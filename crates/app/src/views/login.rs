@@ -253,10 +253,9 @@ impl Login {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        // The sign-in screen is the first in the cozy look: the backdrop under everything, and
-        // the look's text, fields and buttons for what's drawn on it.
+        // The backdrop under everything; the theme's visuals give the panel's text, fields and
+        // buttons their colours.
         widgets::backdrop::fill(ui.painter(), ui.max_rect(), theme::tokens_of(ui));
-        theme::cozy_style(ui);
         // `main`'s form sat in the middle of the window (`items_center` and `justify_center`),
         // not at the top of a page. The form's height is only known after it has been laid
         // out, so the spacer above it comes from the last frame; a step that changes height

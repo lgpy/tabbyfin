@@ -1,5 +1,5 @@
 //! The cozy look's text fields: a muted label above a roomy single-line field, sunk into the
-//! surface (the fill and outline come from [`theme::cozy_style`]).
+//! surface (the fill and outline come from the theme's visuals, `theme::visuals`).
 
 use egui::{CursorIcon, FontId, Id, Margin, Rect, Response, RichText, Sense, TextBuffer, TextEdit, Ui, Vec2, pos2};
 use egui_material_icons::MaterialIcon;
