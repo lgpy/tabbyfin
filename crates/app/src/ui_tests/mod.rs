@@ -42,6 +42,7 @@ pub mod menus;
 pub mod mockups;
 pub mod settings;
 pub mod shelf;
+pub mod theme;
 pub mod toasts;
 pub mod widgets;
 
@@ -175,6 +176,18 @@ impl FixtureServer {
                 .mount(&mock)
                 .await;
         });
+    }
+
+    /// Answers `route` with the file at `path`, as `content_type`: an image for a mockup, where
+    /// the fixtures only carry blurhashes.
+    #[cfg(feature = "mockup")]
+    pub fn file(&self, http_method: &'static str, route: &'static str, path: &str, content_type: &str) {
+        let body = std::fs::read(path).unwrap_or_else(|err| panic!("{path}: {err}"));
+        self.respond(
+            http_method,
+            route,
+            ResponseTemplate::new(200).set_body_raw(body, content_type),
+        )
     }
 
     /// Answers `route` with a bare status, e.g. a 401 for a wrong password.

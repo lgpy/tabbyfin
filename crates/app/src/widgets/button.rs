@@ -125,8 +125,8 @@ pub fn subtle(ui: &mut Ui, label: &str) -> Response {
     ui.add(Button::new(label).frame(false))
 }
 
-/// The cozy look's rounder, taller button. Its own radius, so it keeps it on a screen that
-/// hasn't moved to [`theme::cozy_style`] yet.
+/// The cozy look's rounder, taller button, with its own radius so a `Ui` that changed the
+/// widgets' radius doesn't change it.
 fn cozy(label: RichText, width: f32, radius: u8, focus: Focus) -> Button<'static> {
     let button = Button::new(label)
         .corner_radius(radius)

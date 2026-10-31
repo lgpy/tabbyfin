@@ -1694,7 +1694,7 @@ fn ring(ui: &Ui, response: &Response) {
     ui.painter().rect_stroke(
         response.rect.expand(1.),
         CornerRadius::same(4),
-        Stroke::new(1.5, theme::tokens_of(ui).foreground),
+        Stroke::new(1.5, theme::tokens_of(ui).brand),
         StrokeKind::Outside,
     );
 }
