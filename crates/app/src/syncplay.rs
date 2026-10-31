@@ -19,7 +19,8 @@
 //! apart on a 60 Hz screen (far more on a software renderer), while tokio's timer wakes within
 //! a millisecond or two. The UI only hears back through `tick`. Drift correction, which
 //! compares positions rather than acting at an exact time, runs from `tick` once a second.
-//! `docs/egui-migration.md` §6 has the measurements.
+//! Measured with the scripted member: tokio sent commands 0.3–1.9 ms late, the UI loop up to
+//! 8 ms late while repainting continuously.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};

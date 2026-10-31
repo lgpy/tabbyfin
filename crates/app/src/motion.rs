@@ -26,7 +26,7 @@ pub const POP: f64 = 0.420;
 /// The delay between one shelf appearing and the next (`main`'s `SHELF_STAGGER`).
 pub const SHELF_STAGGER: f64 = 0.060;
 
-/// `main`'s easing: quick off the mark, settling gently (GPUI's `ease_out_quint`).
+/// `main`'s easing: quick off the mark, settling gently (`ease_out_quint`).
 fn ease_out_quint(t: f32) -> f32 {
     1. - (1. - t).powi(5)
 }

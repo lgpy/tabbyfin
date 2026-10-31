@@ -61,7 +61,7 @@ pub const SEEK_STEP: f64 = 10.;
 pub const VOLUME_STEP: f64 = 5.;
 /// Trackpad points per wheel notch, for platforms that send pixel deltas (macOS): `main`'s
 /// three lines of 30. egui's line deltas are notches already (X11, Windows and Wayland report
-/// one per notch, where GPUI gave three lines), so only the pixel deltas are divided.
+/// one per notch, where `main` got three lines), so only the pixel deltas are divided.
 pub const PIXELS_PER_NOTCH: f32 = 90.;
 /// The most volume steps one wheel event makes, so a fast flick on a free-spinning wheel or a
 /// trackpad's burst of pixels can't jump the volume from silent to full.
@@ -77,7 +77,7 @@ const TOP_BAR_H: f32 = 2. * PADDING + CONTROL;
 const PADDING: f32 = 16.;
 /// The gap between a bar's controls, `main`'s `gap_3`.
 const GAP: f32 = theme::SPACE.md;
-/// The seek bar's row: gpui-kit's slider track is 24 points high around its track.
+/// The seek bar's row: `main`'s slider track is 24 points high around its track.
 const SEEK_H: f32 = 24.;
 /// The slider track inside that row, and its thumb: a 16-point circle with a 1-point ring.
 const TRACK_H: f32 = 6.;
@@ -981,7 +981,7 @@ impl PlayerPage {
             .corner_radius(CornerRadius::same(12))
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
-                // `main`'s `w(320)` is the card's width with its padding, and gpui boxes that way.
+                // `main`'s `w(320)` is the card's width with its padding included.
                 ui.set_width(UP_NEXT_W - 2. * 12.);
                 ui.spacing_mut().item_spacing = vec2(8., 8.);
                 ui.label(RichText::new("Up next").small().color(over_video::MUTED_FOREGROUND));
@@ -1518,7 +1518,7 @@ fn toggle_fullscreen(ctx: &egui::Context) {
 }
 
 /// A control-bar button: an icon in a square, filled with the accent while its menu is open and
-/// half of it under the pointer, as gpui-kit's ghost button is. Not focusable: egui's focus would
+/// half of it under the pointer, as `main`'s ghost button is. Not focusable: egui's focus would
 /// take every key from the player (`keys.rs`), as U8's dialogs avoid for their buttons. Its
 /// AccessKit name is the tooltip's text without the key hint, so a screen reader reads "Back"
 /// rather than "Back (Esc)".
@@ -1545,14 +1545,14 @@ fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str
     response.on_hover_text(tooltip)
 }
 
-/// `main`'s ghost button under the pointer: gpui-kit's accent at half strength in the dark theme,
+/// `main`'s ghost button under the pointer: the classic accent at half strength in the dark theme,
 /// which is what the player draws in either theme.
 fn ghost_hover() -> Color32 {
     let [r, g, b, _] = over_video::TOKENS.accent.to_srgba_unmultiplied();
     Color32::from_rgba_unmultiplied(r, g, b, 128)
 }
 
-/// A slider's thumb, as gpui-kit draws one: a 16-point circle whose 1-point ring is the bar's
+/// A slider's thumb, as `main` drew one: a 16-point circle whose 1-point ring is the bar's
 /// colour at half strength around a dark middle.
 fn slider_thumb(painter: &egui::Painter, center: egui::Pos2) {
     painter.circle_filled(center, THUMB_R, over_video::THUMB_RING);
@@ -1563,7 +1563,7 @@ fn control_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str) -> Respo
     sized_control(ui, icon, CONTROL, tooltip, false)
 }
 
-/// How a prompt's button is painted, as gpui-kit's variants are: `main`'s large default button
+/// How a prompt's button is painted, as `main`'s variants were: `main`'s large default button
 /// (Skip intro), a primary one (Play now, Start over) and a ghost one (Cancel).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ButtonKind {
@@ -1572,7 +1572,7 @@ enum ButtonKind {
     Ghost,
 }
 
-/// A button of the player's prompt, as gpui-kit draws one: 32 points high with `main`'s padding,
+/// A button of the player's prompt, as `main` drew one: 32 points high with `main`'s padding,
 /// radius and icon size (24 in the large one, 16 otherwise). Drawn by the page rather than as an
 /// `egui::Button` for those measurements, and so it can't take the keyboard.
 fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>, label: &str) -> Response {
@@ -1656,7 +1656,7 @@ fn label_badge(ui: &mut egui::Ui, text: impl Into<String>) {
         });
 }
 
-/// The frame a player menu draws in: `main`'s popover surface (gpui-kit's `popover_style`), with
+/// The frame a player menu draws in: `main`'s popover surface (its `popover_style`), with
 /// its 12-point inset and its soft shadow, rather than egui's thinner popup frame.
 fn menu_frame() -> egui::Frame {
     let tokens = over_video::TOKENS;
@@ -1927,7 +1927,7 @@ fn time_at(rect: Rect, duration: Duration, x: f32) -> Duration {
 }
 
 /// egui's wheel delta in wheel notches, positive upwards. One `Line` is one notch: X11,
-/// Windows and Wayland all normalise a notch to it (where `main`'s GPUI gave three lines).
+/// Windows and Wayland all normalise a notch to it (where `main` got three lines).
 /// Pixel deltas are a trackpad's, at `PIXELS_PER_NOTCH` points per notch; a page counts as one.
 fn wheel_notches(unit: egui::MouseWheelUnit, delta: f32) -> f32 {
     match unit {

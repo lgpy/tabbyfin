@@ -2,12 +2,12 @@
 //! animations, and the colours over video (`over_video`).
 //!
 //! The tokens ([`Tokens`]) are the cozy look's palette (`docs/DESIGN.md`), one set per theme.
-//! gpui-kit's token names (`background`, `primary`, …), which `main` drew with, are kept as
+//! The classic token names (`background`, `primary`, …), which `main` drew with, are kept as
 //! aliases of the cozy ones. They're the one place colours, radii and spacing come from; [`apply`] builds egui's [`egui::Visuals`] and [`egui::Spacing`] out of them, and
 //! widgets that paint themselves read [`tokens`] instead of literals. The player is the
 //! exception: it stays dark whatever the theme, and draws with [`over_video`].
 //!
-//! The text-style table ([`text`]) is `main`'s gpui scale (`text_xs` … `text_2xl`) rather than
+//! The text-style table ([`text`]) is `main`'s scale (`text_xs` … `text_2xl`) rather than
 //! egui's: it's what [`apply_text_size`] scales, and what widgets name instead of adding steps to
 //! egui's body size.
 //!
@@ -122,7 +122,7 @@ pub fn text_scale(setting: Option<u16>) -> f32 {
     scale.clamp(0.75, 2.)
 }
 
-/// The app's text styles, `main`'s gpui scale in points at 100 %: `text_xs` (12), `text_sm`
+/// The app's text styles, `main`'s scale in points at 100 %: `text_xs` (12), `text_sm`
 /// (14), `text_base` (16), `text_lg` (18), `text_xl` (20) and `text_2xl` (24). They're installed
 /// into [`egui::Style::text_styles`] as the named styles [`NAMED`] (`"xs"` … `"2xl"`), alongside
 /// egui's own (`Small` is `xs`, `Body` and `Button` are `sm`, `Heading` is `lg`), so a widget
@@ -149,7 +149,7 @@ pub mod text {
     pub const XL: f32 = 20.;
     /// `text_2xl`: the sign-in title, a person card's initials.
     pub const XXL: f32 = 24.;
-    /// gpui-kit's monospace size.
+    /// The monospace size.
     pub const MONO: f32 = 13.;
 
     /// The named styles the table installs, with their 100 % sizes.
@@ -215,7 +215,7 @@ fn apply_text_size(ctx: &egui::Context, setting: Option<u16>) {
     });
 }
 
-/// The app's colours, radii and spacing: `main`'s gpui-kit theme. One set per theme; [`apply`]
+/// The app's colours, radii and spacing: the cozy palette, with `main`'s classic names. One set per theme; [`apply`]
 /// turns them into egui's [`egui::Visuals`], and widgets that paint themselves ask [`tokens`]
 /// for the rest (the success green of a watched tick, the accent of a highlighted row).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -263,25 +263,25 @@ pub struct Tokens {
     pub success: Color32,
     pub warning: Color32,
     pub info: Color32,
-    /// gpui-kit's base red, which is the favorite heart (`danger` is the error red).
+    /// The base red, which is the favorite heart (`danger` is the error red).
     pub red: Color32,
 
     /// Menus, popups and dialogs.
     pub popover: Color32,
-    /// A segmented tab bar's track (gpui-kit's `tab_bar.segmented.background`), with the selected
+    /// A segmented tab bar's track (the classic `tab_bar.segmented.background`), with the selected
     /// tab drawn in [`Self::background`] on top of it.
     pub tab_bar: Color32,
-    /// A tab's label while it isn't selected (gpui-kit's `tab.foreground`).
+    /// A tab's label while it isn't selected (the classic `tab.foreground`).
     pub tab_foreground: Color32,
     /// A dialog's scrim, which `main`'s dialogs and sheets drew the page under.
     pub overlay: Color32,
 
-    /// The radius of controls (`main`'s theme override of gpui-kit's 6).
+    /// The radius of controls (`main`'s override of the classic 6).
     pub radius: u8,
     /// The radius of cards, dialogs and popups (`main`'s override of 8).
     pub radius_lg: u8,
 
-    // The cozy look: the mascot's lavender in place of gpui-kit's greys. The fields above are
+    // The cozy look: the mascot's lavender in place of the classic greys. The fields above are
     // aliases of these ([`Tokens::cozy_aliases`]).
     /// The window's background, a gradient from the top colour to the bottom one.
     pub backdrop_top: Color32,
@@ -322,21 +322,21 @@ const AVATARS: [Color32; 5] = [
 ];
 
 impl Tokens {
-    /// The light theme ("a pale lilac morning"): the cozy palette, with gpui-kit's names
+    /// The light theme ("a pale lilac morning"): the cozy palette, with the classic names
     /// pointing into it ([`Self::cozy_aliases`]).
-    pub const LIGHT: Self = Self::GPUI_LIGHT.cozy_aliases();
+    pub const LIGHT: Self = Self::CLASSIC_LIGHT.cozy_aliases();
 
-    /// The dark theme ("a nightlight"): the cozy palette, with gpui-kit's names pointing into it.
-    pub const DARK: Self = Self::GPUI_DARK.cozy_aliases();
+    /// The dark theme ("a nightlight"): the cozy palette, with the classic names pointing into it.
+    pub const DARK: Self = Self::CLASSIC_DARK.cozy_aliases();
 
-    /// gpui-kit's *Default Light* with `main`'s overrides, and the cozy look's own values. Its
-    /// gpui-kit values are overridden by [`Self::cozy_aliases`]; only its cozy fields reach the app.
-    const GPUI_LIGHT: Self = Self {
+    /// The classic light theme with `main`'s overrides, and the cozy look's own values. Its
+    /// classic values are overridden by [`Self::cozy_aliases`]; only its cozy fields reach the app.
+    const CLASSIC_LIGHT: Self = Self {
         dark: false,
         background: Color32::from_rgb(0xff, 0xff, 0xff),
         foreground: Color32::from_rgb(0x0a, 0x0a, 0x0a),
         muted: Color32::from_rgb(0xf5, 0xf5, 0xf5),
-        // gpui-kit's neutral-500 is under the 4.5:1 WCAG AA asks of small text on its grey
+        // The classic neutral-500 is under the 4.5:1 WCAG AA asks of small text on its grey
         // fills; one step darker (neutral-600) passes, as `main` had it.
         muted_foreground: Color32::from_rgb(0x52, 0x52, 0x52),
         border: Color32::from_rgb(0xe5, 0xe5, 0xe5),
@@ -385,9 +385,9 @@ impl Tokens {
         radius_control: 12,
     };
 
-    /// gpui-kit's *Default Dark* with `main`'s overrides, and the cozy look's own values. The
-    /// player still draws with its gpui-kit values over the video ([`over_video::TOKENS`]).
-    const GPUI_DARK: Self = Self {
+    /// The classic dark theme with `main`'s overrides, and the cozy look's own values. The
+    /// player still draws with its classic values over the video ([`over_video::TOKENS`]).
+    const CLASSIC_DARK: Self = Self {
         dark: true,
         background: Color32::from_rgb(0x0a, 0x0a, 0x0a),
         foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
@@ -395,7 +395,7 @@ impl Tokens {
         muted_foreground: Color32::from_rgb(0xa3, 0xa3, 0xa3),
         border: Color32::from_rgb(0x26, 0x26, 0x26),
         input: Color32::from_rgb(0x2f, 0x2f, 0x2f),
-        // gpui-kit blends the input's colour (`#2f2f2f`) into the background at 30, 50 and
+        // The classic theme blends the input's colour (`#2f2f2f`) into the background at 30, 50 and
         // 70 %; these are the results over `background`.
         button: Color32::from_rgb(0x15, 0x15, 0x15),
         button_hover: Color32::from_rgb(0x1d, 0x1d, 0x1d),
@@ -439,7 +439,7 @@ impl Tokens {
         radius_control: 12,
     };
 
-    /// gpui-kit's names as aliases of the cozy tokens, so code that reads `background` or
+    /// The classic names as aliases of the cozy tokens, so code that reads `background` or
     /// `primary` draws in the cozy palette without changing. The scrim (`overlay`), the text
     /// selection, the status colours, `radius_lg` (cards and popups) and the tab bar's
     /// foreground keep their own values.
@@ -471,7 +471,7 @@ impl Tokens {
         }
     }
 
-    /// The fill of an input or a select, gpui-kit's `input_background`: in the dark theme the
+    /// The fill of an input or a select, the classic `input_background`: in the dark theme the
     /// `input` colour at 70 %, so the surface behind it shows through; in the light theme the
     /// background itself. The player's version picker reads it, over the picture.
     pub fn input_background(&self) -> Color32 {
@@ -526,7 +526,7 @@ pub fn selected<'a>(ui: &egui::Ui, selected: bool, button: egui::Button<'a>) -> 
     }
 }
 
-/// gpui-kit's spacing scale (`main`'s `gap_1`, `p_2`, `px_6`, …), in points. It's the same in
+/// The spacing scale (`main`'s `gap_1`, `p_2`, `px_6`, …), in points. It's the same in
 /// both themes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Space {
@@ -663,8 +663,8 @@ fn spacing() -> egui::Spacing {
     spacing
 }
 
-/// Off makes every widget change instant, scrolling included, as GPUI's reduce-motion flag did
-/// for `main`.
+/// Off makes every widget change instant, scrolling included, as `main`'s reduce-motion flag
+/// did.
 fn apply_animations(ctx: &egui::Context, on: bool) {
     let animation_time = if on { egui::Style::default().animation_time } else { 0. };
     let scroll = if on {
@@ -1036,7 +1036,7 @@ mod tests {
     }
 
     #[test]
-    fn gpui_kits_names_are_aliases_of_the_cozy_tokens() {
+    fn the_classic_names_are_aliases_of_the_cozy_tokens() {
         for tokens in [Tokens::LIGHT, Tokens::DARK] {
             assert_eq!(tokens.background, tokens.backdrop_top);
             assert_eq!(tokens.foreground, tokens.ink);
@@ -1051,7 +1051,7 @@ mod tests {
             assert_eq!(tokens.accent, tokens.inset_hover);
             assert_eq!(tokens.muted, tokens.inset_hover);
             assert_eq!(tokens.radius, tokens.radius_control);
-            // Cards and popups keep gpui-kit's larger radius; a panel's 22 is too round for a
+            // Cards and popups keep the classic larger radius; a panel's 22 is too round for a
             // poster.
             assert_eq!(tokens.radius_lg, 12);
         }
@@ -1064,9 +1064,9 @@ mod tests {
         assert_eq!(tokens(&egui::Visuals::light()), &Tokens::LIGHT);
     }
 
-    /// The player draws over the picture with gpui-kit's dark theme, as before the retint.
+    /// The player draws over the picture with the classic dark theme, as before the retint.
     #[test]
-    fn the_player_keeps_gpui_kits_dark_tokens() {
+    fn the_player_keeps_the_classic_dark_tokens() {
         let tokens = super::over_video::TOKENS;
         assert!(tokens.dark);
         assert_eq!(tokens.background, egui::Color32::from_rgb(0x0a, 0x0a, 0x0a));
@@ -1075,10 +1075,10 @@ mod tests {
         assert_eq!(tokens.primary, egui::Color32::from_rgb(0xfa, 0xfa, 0xfa));
         assert_eq!(tokens.popover, egui::Color32::from_rgb(0x0a, 0x0a, 0x0a));
         assert_eq!(tokens.radius, 10);
-        // The player's menu reads these: gpui-kit's segmented tab bar.
+        // The player's menu reads these: the segmented tab bar.
         assert_eq!(tokens.tab_bar, egui::Color32::from_rgb(0x17, 0x17, 0x17));
         assert_eq!(tokens.tab_foreground, egui::Color32::from_rgb(0xd4, 0xd4, 0xd4));
-        // gpui-kit's `input_background`: the input colour at 70 % in dark.
+        // `input_background`: the input colour at 70 % in dark.
         assert_eq!(
             tokens.input_background().to_srgba_unmultiplied(),
             [0x2f, 0x2f, 0x2f, 179]
@@ -1114,7 +1114,7 @@ mod tests {
     }
 
     #[test]
-    fn the_spacing_is_gpui_kits_scale() {
+    fn the_spacing_is_mains_scale() {
         let spacing = super::spacing();
         assert_eq!(spacing.item_spacing, egui::vec2(SPACE.sm, SPACE.xs));
         assert_eq!(spacing.button_padding, egui::vec2(10., SPACE.xs));
@@ -1342,9 +1342,9 @@ pub mod over_video {
 
     use super::Tokens;
 
-    /// What the player paints its own controls with: gpui-kit's dark theme, as before the app
+    /// What the player paints its own controls with: the classic dark theme, as before the app
     /// moved to the cozy palette, so its bars and menus stay neutral over the picture.
-    pub const TOKENS: &Tokens = &Tokens::GPUI_DARK;
+    pub const TOKENS: &Tokens = &Tokens::CLASSIC_DARK;
 
     /// Behind the picture, and its letterbox bars.
     pub const BACKDROP: Color32 = Color32::BLACK;
@@ -1371,14 +1371,14 @@ pub mod over_video {
     /// Chapter marks on the seek bar and the preview's outline: white at 60 %.
     pub const MARK: Color32 = Color32::from_rgba_premultiplied(153, 153, 153, 153);
 
-    /// The unfilled part of the seek and volume sliders: white at 20 %, gpui-kit's slider bar
+    /// The unfilled part of the seek and volume sliders: white at 20 %, the slider bar
     /// behind its fill.
     pub const SEEK_TRACK: Color32 = Color32::from_rgba_premultiplied(51, 51, 51, 51);
 
     /// The ring around a slider's thumb: white at 50 %.
     pub const THUMB_RING: Color32 = Color32::from_rgba_premultiplied(128, 128, 128, 128);
 
-    /// A slider's thumb, inside its ring: gpui-kit's `slider.thumb.background` in the dark theme,
+    /// A slider's thumb, inside its ring: the classic `slider.thumb.background` in the dark theme,
     /// which is what `main`'s player drew whichever theme was chosen.
     pub const THUMB: Color32 = Color32::from_rgb(0x0a, 0x0a, 0x0a);
 
