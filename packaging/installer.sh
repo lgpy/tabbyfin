@@ -30,5 +30,8 @@ fi
 winpath() {
   if command -v cygpath >/dev/null; then cygpath -w "$1"; else wslpath -w "$1"; fi
 }
-"$iscc" /Q "/DAppVersion=$version" "/DSourceDir=$(winpath "$source_dir")" "/DOutputDir=$(winpath "$out")" \
-  "$(winpath "$here/tabbyfin.iss")"
+# Git Bash rewrites arguments that look like paths, which turns /Q into Q:/ and
+# /DAppVersion=0.1.0 into C:/Program Files/Git/DAppVersion=0.1.0, and ISCC then reads the
+# first as a second script filename. The arguments below are already what ISCC wants.
+MSYS2_ARG_CONV_EXCL='*' "$iscc" /Q "/DAppVersion=$version" "/DSourceDir=$(winpath "$source_dir")" \
+  "/DOutputDir=$(winpath "$out")" "$(winpath "$here/tabbyfin.iss")"
