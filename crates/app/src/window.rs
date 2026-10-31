@@ -124,13 +124,21 @@ pub struct Launch {
 /// The placement from the config, when it's sane (and, on Windows, still on a monitor), or
 /// nothing: the window opens at its default size, centred.
 pub fn launch(config: &Config) -> Option<Launch> {
+    #[cfg(windows)]
+    let on_monitor = on_a_monitor;
+    #[cfg(not(windows))]
+    let on_monitor = |_| true;
+    place(config, on_monitor)
+}
+
+/// [`launch`], with the monitor check passed in so tests don't depend on the host's screens.
+fn place(config: &Config, on_monitor: impl Fn(WindowGeometry) -> bool) -> Option<Launch> {
     let saved = config.window_bounds.filter(sane)?;
     let scale = saved.scale.unwrap_or(1.);
     if !(scale.is_finite() && scale > 0.) {
         return None;
     }
-    #[cfg(windows)]
-    if !on_a_monitor(saved) {
+    if !on_monitor(saved) {
         return None;
     }
     Some(Launch {
@@ -398,8 +406,14 @@ fn finish_launch(ctx: &egui::Context, launch: Launch, state: WindowState) -> boo
 mod tests {
     use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
-    use super::{Launch, MIN_SIZE, Placed, Placement, WindowState, launch, misplaced, placed_bounds, remember};
+    use super::{Launch, MIN_SIZE, Placed, Placement, WindowState, misplaced, place, placed_bounds, remember};
     use crate::config::{Config, WindowGeometry};
+
+    /// [`super::launch`] as if every saved placement were on a monitor: on Windows the real
+    /// check asks the OS, and a CI runner's screen is small.
+    fn launch(config: &Config) -> Option<Launch> {
+        place(config, |_| true)
+    }
 
     /// A rectangle to stand in for a display or a window.
     fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {

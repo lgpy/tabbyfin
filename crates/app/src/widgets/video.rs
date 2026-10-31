@@ -43,12 +43,14 @@ pub struct Video {
     /// A GPU frame couldn't be imported; see [`Video::import_failed`].
     import_failed: bool,
     /// GPU frames in a row whose image was already gone ([`ImportError::Gone`]).
+    #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
     gone: u32,
     /// Repaints for each new frame. Dropping the widget stops it.
     _wake: Task<()>,
 }
 
 /// An imported image of the player's ring, registered with egui-wgpu.
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 struct Imported {
     /// The player's id for the image (`SharedFrame::id`).
     image: u64,
@@ -61,10 +63,12 @@ struct Imported {
 
 /// The player renders into a ring of three images (`player::libmpv::opengl`), so that many
 /// imports are kept: each image is imported once and drawn whenever it comes round again.
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 const RING: usize = 3;
 
 /// Why a GPU frame wasn't imported.
 #[derive(Debug)]
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 enum ImportError {
     /// The frame's image is gone: the player let go of it (an old ring, after a resize) before
     /// the UI got to it. Only Windows, where frames name their textures rather than hold them.
@@ -76,6 +80,7 @@ enum ImportError {
 
 /// Frames in a row whose image was gone, before the import counts as failed: far more than a
 /// resize can cause, since the player's current ring stays alive.
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 const MAX_GONE: u32 = 10;
 
 /// A texture for software frames of one size, registered with egui-wgpu.
