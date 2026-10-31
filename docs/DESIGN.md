@@ -123,17 +123,18 @@ The restoring screen is the same backdrop and glow with only the mascot, so a la
 
 ## Applying it to other pages
 
-The rollout plan is `docs/ROADMAP.md`'s [cozy look backlog](ROADMAP.md#cozy-look-backlog) (C0–C12). It starts with one pass that retints the whole app through egui's `Visuals`, then restructures one screen at a time. Below is where it currently stands on the open questions. These are proposals until each item's mockup confirms them, and when one is settled, move it into the sections above.
+The rollout plan is `docs/ROADMAP.md`'s [cozy look backlog](ROADMAP.md#cozy-look-backlog) (C0–C13). It starts with one pass that retints the whole app through egui's `Visuals`, pulls the widgets pages draw for themselves into shared components, then restructures one screen at a time. Below is where it currently stands on the open questions. These are proposals until each item's mockup confirms them, and when one is settled, move it into the sections above.
 
-- **Order.** Shared pieces (popups, selects, toasts, dialogs) first, then Settings as the first full page, then the top bar, then the browsing pages. The player goes last and changes least.
+- **Components.** Views compose and widgets draw: anything another page could use lives in `widgets/` and in the component gallery (C3).
+- **Order.** The component library, then shared pieces (popups, selects, toasts, dialogs), then Settings as the first full page, then the top bar, then the browsing pages. The player goes last and changes least.
 - **Backdrop on browsing pages.** Yes, the gradient goes under the whole shell, without the glow. The top bar sits on the backdrop with no fill.
 - **Cards and shelves.** Cards stay image-first: no surface around them, image radius `radius_lg` (22 is too round for posters). The cursor ring, progress and played badge use `brand`.
 - **Mascot and glow.** Sign-in, restoring, loaders and empty states only. The glow always goes with the mascot.
 - **Spacing constants.** Snap to `theme::SPACE` in C0.
 - **Notices.** The error box becomes `surface::notice` with danger, info and success kinds.
-- **Selects, toggles, menus.** Inset boxes and `inset_hover` rows, with a cozy toggle/checkbox (C0, C3).
+- **Selects, toggles, menus.** Inset boxes and `inset_hover` rows, with a cozy toggle/checkbox (C3, C4).
 - **The player.** Stays dark (`theme::over_video`) and only borrows `brand` for its accents.
-- **Retiring gpui-kit's tokens.** C1 turns them into aliases, and C12 removes them.
+- **Retiring gpui-kit's tokens.** C1 turns them into aliases, and C13 removes them.
 
 ## Testing
 
