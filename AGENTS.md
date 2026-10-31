@@ -2,7 +2,7 @@
 
 Guidance for coding agents working in this repository.
 
-A native desktop Jellyfin client: egui (through eframe) for the UI, libmpv for in-window video. Linux, Windows and macOS; Jellyfin 10.11 minimum, developed against 12.2. `docs/PLAN.md` is the architecture reference, `docs/ROADMAP.md` tracks what's done and open, `docs/TESTING.md` lists what still needs testing on real hardware, and `docs/in-app-video.md` explains the video paths per OS.
+A native desktop Jellyfin client: egui (through eframe) for the UI, libmpv for in-window video. Linux, Windows and macOS; Jellyfin 10.11 minimum, developed against 12.2. `docs/PLAN.md` is the architecture reference, `docs/ROADMAP.md` tracks what's done and open, `docs/TESTING.md` lists what still needs testing on real hardware, `docs/in-app-video.md` explains the video paths per OS, and `docs/DESIGN.md` is the reference for the cozy look new screens move to.
 
 ## Commands
 
