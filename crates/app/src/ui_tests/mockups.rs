@@ -169,7 +169,15 @@ fn render<S: 'static>(
     let size = *size;
     let dir = std::env::var_os("TABBYFIN_MOCKUP_DIR").map_or_else(|| PathBuf::from("target/mockups"), PathBuf::from);
     std::fs::create_dir_all(&dir).unwrap();
-    let image = snapshot(size, SCALE * SUPERSAMPLE, theme, mockup.until.as_deref(), state, frame, ready);
+    let image = snapshot(
+        size,
+        SCALE * SUPERSAMPLE,
+        theme,
+        mockup.until.as_deref(),
+        state,
+        frame,
+        ready,
+    );
     let (width, height) = ((size.x * SCALE).round() as u32, (size.y * SCALE).round() as u32);
     let image = imageops::resize(&image, width, height, FilterType::Triangle);
     let theme = match theme {
