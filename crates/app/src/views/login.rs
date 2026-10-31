@@ -320,7 +320,7 @@ impl Login {
             ui.set_width(ui.available_width());
             self.panel(ui, ctx);
         });
-        ui.add_space(14.0);
+        ui.add_space(surface::GAP_GROUP);
         ui.vertical_centered(|ui| {
             // An aside to the step: the way out of a Quick Connect wait, the way back to another
             // server, or what this one needs.
@@ -336,7 +336,7 @@ impl Login {
                 muted(ui, &format!("Works with Jellyfin {MIN_SUPPORTED_VERSION} or newer"));
             }
             if self.can_cancel {
-                ui.add_space(8.0);
+                ui.add_space(surface::GAP_ITEM);
                 if ui.button((ICON_ARROW_BACK, "Back to your account")).clicked() {
                     self.event = Some(LoginEvent::Cancel);
                 }
@@ -370,14 +370,14 @@ impl Login {
             )
         };
         surface::heading(ui, &title, &subtitle);
-        ui.add_space(20.0);
+        ui.add_space(surface::GAP_HEADING);
         if let Some(error) = self.error.clone() {
-            error_box(ui, &error);
-            ui.add_space(12.0);
+            surface::notice(ui, surface::Kind::Danger, &error);
+            ui.add_space(surface::GAP_FIELD);
         }
         if let Some(status) = self.status.clone() {
             surface::waiting(ui, &status);
-            ui.add_space(12.0);
+            ui.add_space(surface::GAP_FIELD);
         }
         if let Some(code) = self.quick_connect_code.clone() {
             self.quick_connect_step(ui, &code);
@@ -588,10 +588,10 @@ impl Login {
             if row.remove.is_some_and(|remove| remove.clicked()) {
                 self.event = Some(LoginEvent::ForgetAccount(account.clone()));
             }
-            ui.add_space(6.0);
+            ui.add_space(surface::GAP_ITEM);
         }
         if !self.accounts.is_empty() {
-            ui.add_space(14.0);
+            ui.add_space(surface::GAP_GROUP);
         }
 
         field::label(
@@ -617,8 +617,14 @@ impl Login {
             self.focus = None;
         }
         let entered = address.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        ui.add_space(14.0);
-        let connect = button::brand(ui, "Connect", ui.available_width(), self.button(Busy::Connecting));
+        ui.add_space(surface::GAP_GROUP);
+        let connect = button::brand(
+            ui,
+            "Connect",
+            ui.available_width(),
+            self.button(Busy::Connecting),
+            button::Focus::Tab,
+        );
         if connect.clicked() || entered {
             self.on_connect(ctx);
         }
@@ -646,7 +652,7 @@ impl Login {
             self.focus = None;
         }
         let username_entered = username.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        ui.add_space(10.0);
+        ui.add_space(surface::GAP_FIELD);
 
         field::label(ui, "Password");
         let password = field::with_trailing(ui, Field::Password.id(), &mut self.password, "")
@@ -681,15 +687,16 @@ impl Login {
             self.focus = Some(Field::Password);
             ui.ctx().request_repaint();
         }
-        ui.add_space(16.0);
+        ui.add_space(surface::GAP_GROUP);
 
         let width = ui.available_width();
-        let sign_in = button::brand(ui, "Sign in", width, self.button(Busy::SigningIn));
+        let sign_in = button::brand(ui, "Sign in", width, self.button(Busy::SigningIn), button::Focus::Tab);
         if sign_in.clicked() || password_entered {
             self.sign_in(ctx);
         }
-        ui.add_space(8.0);
-        if button::quiet(ui, "Use Quick Connect", width, self.button(Busy::QuickConnect)).clicked() {
+        ui.add_space(surface::GAP_ITEM);
+        let quick_connect = self.button(Busy::QuickConnect);
+        if button::quiet(ui, "Use Quick Connect", width, quick_connect, button::Focus::Tab).clicked() {
             self.start_quick_connect(ctx);
         }
     }
@@ -700,7 +707,7 @@ impl Login {
         // The code is what the user has to read off, so the mascot looks at it too.
         let shown = widgets::code::show(ui, code);
         self.watch.look_at = Some(shown.rect.center());
-        ui.add_space(14.0);
+        ui.add_space(surface::GAP_GROUP);
         surface::waiting(ui, "Waiting for approval…");
     }
 }
@@ -728,21 +735,6 @@ fn caret(field: &egui::text_edit::TextEditOutput) -> Option<egui::Pos2> {
     }
     let cursor = field.cursor_range?.primary;
     Some(field.galley.pos_from_cursor(cursor).center() + field.galley_pos.to_vec2())
-}
-
-/// A boxed line in the theme's error colour, so it reads as more than body text.
-fn error_box(ui: &mut egui::Ui, message: &str) {
-    let tokens = theme::tokens_of(ui);
-    let color = tokens.danger;
-    egui::Frame::new()
-        .fill(color.gamma_multiply(0.1))
-        .stroke(egui::Stroke::new(1.0, color))
-        .corner_radius(tokens.radius_control)
-        .inner_margin(egui::Margin::symmetric(12, 9))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.colored_label(color, message);
-        });
 }
 
 /// The URLs to try for an address: one with a scheme; without one, HTTPS first and plain HTTP

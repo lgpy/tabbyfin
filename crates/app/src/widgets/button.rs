@@ -52,9 +52,21 @@ pub enum State {
     Loading,
 }
 
+/// Whether a cozy button is a stop for Tab.
+// No screen skips focus yet; the dialogs will (C5 in `docs/ROADMAP.md`).
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Focus {
+    /// Tab reaches it and Space or Enter presses it, as on the sign-in form.
+    Tab,
+    /// Clicks only (`Sense::CLICK`): for a dialog, whose keys are its own (`widgets/dialog.rs`),
+    /// and for any screen where egui's focus would take Space or Enter from it.
+    Skip,
+}
+
 /// The cozy look's main action: a [`theme::Tokens::brand`] button `width` wide, its label
 /// centred.
-pub fn brand(ui: &mut Ui, label: &str, width: f32, state: State) -> Response {
+pub fn brand(ui: &mut Ui, label: &str, width: f32, state: State, focus: Focus) -> Response {
     let tokens = theme::tokens_of(ui);
     let label = RichText::new(label)
         .font(text::font(ui, "base"))
@@ -69,7 +81,7 @@ pub fn brand(ui: &mut Ui, label: &str, width: f32, state: State) -> Response {
         widgets.active.weak_bg_fill = tokens.brand_hover;
         add(
             ui,
-            cozy(label, width, tokens.radius_control),
+            cozy(label, width, tokens.radius_control, focus),
             state,
             tokens.brand_foreground,
         )
@@ -77,11 +89,11 @@ pub fn brand(ui: &mut Ui, label: &str, width: f32, state: State) -> Response {
 }
 
 /// A cozy action that isn't the main one: outlined, on the surface, the same size as [`brand`].
-pub fn quiet(ui: &mut Ui, label: &str, width: f32, state: State) -> Response {
+pub fn quiet(ui: &mut Ui, label: &str, width: f32, state: State, focus: Focus) -> Response {
     let radius = theme::tokens_of(ui).radius_control;
     let label = RichText::new(label).font(text::font(ui, "base"));
     let color = ui.visuals().widgets.inactive.fg_stroke.color;
-    centred(ui, width, |ui| add(ui, cozy(label, width, radius), state, color))
+    centred(ui, width, |ui| add(ui, cozy(label, width, radius, focus), state, color))
 }
 
 /// Adds a cozy button in `state`; a loading one's spinner is in `color`, dimmed with the rest
@@ -115,10 +127,14 @@ pub fn subtle(ui: &mut Ui, label: &str) -> Response {
 
 /// The cozy look's rounder, taller button. Its own radius, so it keeps it on a screen that
 /// hasn't moved to [`theme::cozy_style`] yet.
-fn cozy(label: RichText, width: f32, radius: u8) -> Button<'static> {
-    Button::new(label)
+fn cozy(label: RichText, width: f32, radius: u8, focus: Focus) -> Button<'static> {
+    let button = Button::new(label)
         .corner_radius(radius)
-        .min_size(vec2(width, COZY_HEIGHT))
+        .min_size(vec2(width, COZY_HEIGHT));
+    match focus {
+        Focus::Tab => button,
+        Focus::Skip => button.sense(egui::Sense::CLICK),
+    }
 }
 
 /// A button centres its contents with the layout of the `Ui` drawing it.

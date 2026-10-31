@@ -309,6 +309,11 @@ fn a_wrong_password_keeps_the_form_and_says_why() {
     step_until(&mut ui, "the error", |harness| {
         harness.query_by_label("Wrong username or password.").is_some()
     });
+    // The message is a danger notice (`surface::notice`), whose icon says what kind it is.
+    assert!(
+        ui.query_by_role_and_label(Role::Image, "Error").is_some(),
+        "the error isn't shown as a danger notice"
+    );
     assert!(ui.state().event.is_none(), "a failed sign-in reached the app");
 }
 
