@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render a disposable UI mockup file and open the results as a page.
 
-    python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> [--only <group>[,<group>…]] [--open | --no-open]
+    python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> [--only <group>[,<group>…]] [--baseline] [--open | --no-open]
     python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> --zoom <name>[.light]:x,y,w,h
 
 The file lives outside the repo (see `template.rs`); it is compiled into the app's UI tests under
@@ -17,7 +17,10 @@ What it prints is meant for an agent and kept short: compile errors and the mock
 warnings (one line each), failed tests' panics, which renders are new, changed or unchanged since
 the last run, and `preview.png`: the new and changed ones on one sheet, sized to cost one image
 read. `--only` renders just those groups (`welcome` for `welcome.now` and `welcome.cozy`) and
-keeps the others' last renders on the page. `--zoom` re-renders nothing: it draws a region of an existing render, given in the
+keeps the others' last renders on the page. `--baseline` first renders the same file against the
+last commit (in a git worktree under `target/`, with its own build), so each figure's
+"Previous render" is today's committed app and the working tree is never touched. `--zoom`
+re-renders nothing: it draws a region of an existing render, given in the
 mockup's points, at full resolution into `zoom.png`.
 
 The page is built from the mockup file itself:
@@ -28,8 +31,7 @@ The page is built from the mockup file itself:
 Mockups are grouped by their name's part before the first dot (`welcome.now`, `welcome.cozy`);
 a group of two gets side-by-side, swipe and flip comparison. On the page the reader can pick a
 variant per group and comment on each mockup, then copy it all as one Markdown reply (starting
-`# Re:`) to paste back to the agent. The page follows the artifact contract, so the folder can be
-published as it is.
+`# Re:`) to paste back to the agent.
 """
 
 import html
@@ -68,6 +70,7 @@ def main():
         return zoom_into(out, env, zoom)
     first = not (out / "index.html").exists()
     shutil.copyfile(src, out / "source.rs")
+    baseline = "--baseline" in argv
 
     filters = ["ui_tests::scratch"]
     groups = None
@@ -81,6 +84,9 @@ def main():
 
     def rendering(stem):
         return groups is None or group_of(stem) in groups
+
+    if baseline and not render_baseline(filters, env, src, out, rendering):
+        sys.exit("baseline render failed: the mockup file has to compile against the last commit too")
 
     # Keep the last run's PNGs to flip against; the sidecars say what this run made.
     before = set()
@@ -135,6 +141,7 @@ def main():
         print("nothing changed since the last run")
     url = link(index)
     print(f"page: {url}")
+    print(f"tell the user: [{src.stem} mockups]({url}), in your reply, before any question about it")
     if "--open" in sys.argv or (first and "--no-open" not in sys.argv):
         # WSL: the Windows browser, since the Linux side has none.
         if shutil.which("wslview"):
@@ -240,21 +247,47 @@ def group_of(name):
 
 
 def test_names(source):
-    """Each test's fn name and the mockup it renders: the first string literal in its body
-    (`mockup("…"`, `Mockup::new("…")` or a helper's argument)."""
+    """Each test's fn name and the mockup it renders: the argument of `Mockup::new("…")` or
+    `mockup("…"`, or else the first string literal in its body (a helper's argument)."""
     tests = []
     for body in re.split(r"(?m)^\s*#\[test\]", source)[1:]:
+        # Just the test: up to its closing brace, so the helpers after it don't count.
+        body = body.split("\n}", 1)[0]
         fn = re.search(r"fn\s+(\w+)", body)
-        name = re.search(r'"([^"\\]+)"', body)
+        name = re.search(r'\b(?:Mockup::new|mockup)\(\s*"([^"\\]+)"', body) or re.search(r'"([^"\\]+)"', body)
         if fn:
             tests.append((fn.group(1), name.group(1) if name else None))
     return tests
 
 
-def cargo(filters, env, src):
+def render_baseline(filters, env, src, out, rendering):
+    """Renders the file against HEAD into `out`, in a detached worktree reused across runs, so
+    the run after it flips each figure against the committed app. True if it rendered."""
+    tree = root / "target" / "mockup-baseline"
+    if (tree / ".git").exists():
+        # A worktree shares the repo's commits: it only has to move to the current HEAD.
+        head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        git = ["git", "-C", str(tree), "checkout", "--detach", "--force", "-q", head]
+    else:
+        git = ["git", "-C", str(root), "worktree", "add", "--detach", "-q", str(tree), "HEAD"]
+    made = subprocess.run(git, capture_output=True, text=True)
+    if made.returncode != 0:
+        print(made.stderr.strip())
+        return False
+    for stale in out.glob("*.png"):
+        if not stale.name.endswith(".prev.png") and stale.name not in ("preview.png", "zoom.png") and rendering(stale.name):
+            stale.unlink()
+    print("baseline (HEAD):")
+    # Its own target dir (the worktree's): cargo hashes a workspace crate the same wherever it
+    # sits, so sharing the main one would swap the two builds' artifacts and leave a stale binary.
+    env = {k: v for k, v in env.items() if k != "CARGO_TARGET_DIR"}
+    return cargo(filters, env, src, cwd=tree)
+
+
+def cargo(filters, env, src, cwd=None):
     """Runs the matching tests, printing only what needs acting on. True if they passed."""
     cmd = ["cargo", "test", "-p", "tabbyfin", "--features", "mockup", "--message-format", "short", *filters]
-    run = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True)
+    run = subprocess.run(cmd, cwd=cwd or root, env=env, capture_output=True, text=True)
     lines = (run.stderr + "\n" + run.stdout).splitlines()
     shown = []
     for line in lines:
@@ -275,6 +308,8 @@ def cargo(filters, env, src):
             block.append(line)
     if run.returncode != 0 and not shown:
         shown = lines[-30:]
+    # Each warning comes once per build of the file (the tests, then the preview's): say it once.
+    shown = list(dict.fromkeys(shown))
     if shown:
         print("\n".join(shown))
     return run.returncode == 0

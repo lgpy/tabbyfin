@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use image::RgbaImage;
 use image::imageops::{self, FilterType};
@@ -34,6 +35,9 @@ const SUPERSAMPLE: f32 = 2.;
 /// larger on every side and the margin cropped off, so a mockup gets all of its size and no
 /// transparent edge.
 const HARNESS_MARGIN: f32 = 8.;
+
+/// How long a page's images have to stay idle before its picture is taken.
+const QUIET: Duration = Duration::from_millis(300);
 
 /// Which of the app's themes a mockup is drawn in.
 #[derive(Clone, Copy)]
@@ -80,7 +84,8 @@ impl Mockup {
 
     /// Steps frames until something labelled `label` is drawn before rendering: for what
     /// arrives from the fixture server (a sign-in form after the server answers, a page's
-    /// items), which settling the frames alone doesn't wait for.
+    /// items), which settling the frames alone doesn't wait for. The label needn't be unique
+    /// on the page: any match will do.
     pub fn until(self, label: &str) -> Self {
         Self {
             until: Some(label.to_owned()),
@@ -91,13 +96,23 @@ impl Mockup {
     /// Renders `frame` once per theme, each with a fresh `state`: what a page keeps (its
     /// textures, say) belongs to the harness it was made in.
     pub fn show<S: 'static>(self, state: impl Fn() -> S, frame: impl FnMut(&mut egui::Ui, &mut S) + Clone + 'static) {
+        self.show_when(state, frame, None);
+    }
+
+    /// [`Self::show`], stepping frames until `ready` has held for [`QUIET`].
+    fn show_when<S: 'static>(
+        self,
+        state: impl Fn() -> S,
+        frame: impl FnMut(&mut egui::Ui, &mut S) + Clone + 'static,
+        ready: Option<&dyn Fn(&S) -> bool>,
+    ) {
         let themes: &[egui::Theme] = match self.themes {
             Themes::Dark => &[egui::Theme::Dark],
             Themes::Light => &[egui::Theme::Light],
             Themes::Both => &[egui::Theme::Dark, egui::Theme::Light],
         };
         for &theme in themes {
-            render(&self, theme, state(), frame.clone());
+            render(&self, theme, state(), frame.clone(), ready);
         }
     }
 
@@ -113,10 +128,11 @@ impl Mockup {
     /// A signed-in page, opened as the shell opens it (without its top bar), with services over
     /// `server`:
     /// `.page(&server, |cx| crate::views::open(Route::Home, cx))`. The server answers with the
-    /// fixtures it was given (`FixtureServer::json`).
+    /// fixtures it was given (`FixtureServer::json`, or `FixtureServer::file` for a real image).
+    /// The picture waits until the page's images are loaded, or have failed to.
     pub fn page(self, server: &FixtureServer, open: impl FnOnce(&mut PageCx) -> Box<dyn Page> + Clone + 'static) {
         let behind = self.behind.clone();
-        self.show(
+        self.show_when(
             || PageRun::new(session(server), open.clone()),
             move |ui, run| {
                 // The shell's frame for a page: the pages keep their own margins.
@@ -129,13 +145,15 @@ impl Mockup {
                 };
                 egui::CentralPanel::default().frame(frame).show(ui, |ui| run.show(ui));
             },
+            // The services exist from the first frame on; until then nothing has been asked for.
+            Some(&|run: &PageRun| run.services.as_ref().is_some_and(|services| !services.images.busy())),
         );
     }
 }
 
 /// Renders `frame` at `size` in the dark theme: [`Mockup`] for one that needs nothing else.
 pub fn mockup<S: 'static>(name: &str, size: egui::Vec2, state: S, frame: impl FnMut(&mut egui::Ui, &mut S) + 'static) {
-    render(&Mockup::new(name).size(size), egui::Theme::Dark, state, frame);
+    render(&Mockup::new(name).size(size), egui::Theme::Dark, state, frame, None);
 }
 
 /// Writes `<name>.<theme>.png` and its `.json` sidecar to `<TABBYFIN_MOCKUP_DIR>`, the directory
@@ -145,12 +163,13 @@ fn render<S: 'static>(
     theme: egui::Theme,
     state: S,
     frame: impl FnMut(&mut egui::Ui, &mut S) + 'static,
+    ready: Option<&dyn Fn(&S) -> bool>,
 ) {
     let Mockup { name, size, .. } = mockup;
     let size = *size;
     let dir = std::env::var_os("TABBYFIN_MOCKUP_DIR").map_or_else(|| PathBuf::from("target/mockups"), PathBuf::from);
     std::fs::create_dir_all(&dir).unwrap();
-    let image = snapshot(size, SCALE * SUPERSAMPLE, theme, mockup.until.as_deref(), state, frame);
+    let image = snapshot(size, SCALE * SUPERSAMPLE, theme, mockup.until.as_deref(), state, frame, ready);
     let (width, height) = ((size.x * SCALE).round() as u32, (size.y * SCALE).round() as u32);
     let image = imageops::resize(&image, width, height, FilterType::Triangle);
     let theme = match theme {
@@ -163,7 +182,7 @@ fn render<S: 'static>(
 }
 
 /// `frame` drawn at `size` points and `pixels_per_point`, settled (once `until` is drawn, if
-/// given) and rendered.
+/// given, and `ready` has held for [`QUIET`]) and rendered.
 ///
 /// It holds a [`ConfigDir`], as the other UI tests do, so what a page saves goes to a temporary
 /// config and never the user's; that also renders one mockup at a time.
@@ -174,6 +193,7 @@ fn snapshot<S: 'static>(
     until: Option<&str>,
     state: S,
     frame: impl FnMut(&mut egui::Ui, &mut S) + 'static,
+    ready: Option<&dyn Fn(&S) -> bool>,
 ) -> RgbaImage {
     let _config = ConfigDir::new("mockup");
     let mut ui = harness_builder(size + egui::Vec2::splat(2. * HARNESS_MARGIN))
@@ -181,7 +201,19 @@ fn snapshot<S: 'static>(
         .with_theme(theme)
         .build_ui_state(frame, state);
     if let Some(label) = until {
-        step_until(&mut ui, label, |ui| ui.query_by_label(label).is_some());
+        step_until(&mut ui, label, |ui| ui.query_all_by_label(label).next().is_some());
+    }
+    if let Some(ready) = ready {
+        // Ready for a while, not just once: a page asks for its images only after its item
+        // arrives, which can be after `until`'s label (a route's name) is already drawn.
+        let mut since: Option<Instant> = None;
+        step_until(&mut ui, "the page's images", |ui| {
+            if !ready(ui.state()) {
+                since = None;
+                return false;
+            }
+            since.get_or_insert_with(Instant::now).elapsed() >= QUIET
+        });
     }
     // A spinner repaints forever and never settles: what's drawn by then is the picture.
     let _ = ui.try_run();
@@ -304,6 +336,7 @@ fn preview() {
                 painter.image(texture.id(), rect, uv, egui::Color32::WHITE);
             }
         },
+        None,
     );
     sheet.save(&preview.out).unwrap();
 }

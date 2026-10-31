@@ -161,7 +161,7 @@ impl ImageCache {
 
     /// Whether an image is still queued or loading. A mockup waits for this before it takes its
     /// picture, so it shows the images rather than their blurred previews.
-    #[cfg(feature = "mockup")]
+    #[cfg(all(test, feature = "mockup"))]
     pub fn busy(&self) -> bool {
         self.running > 0 || self.pump_scheduled || !self.queue.is_empty()
     }
