@@ -13,7 +13,7 @@ pub fn label(ui: &mut Ui, label: &str) {
             .font(text::font(ui, "sm"))
             .color(theme::tokens_of(ui).ink_muted),
     );
-    ui.add_space(2.);
+    ui.add_space(theme::SPACE.xxs);
 }
 
 /// A single-line field over the width it's given, in the body's larger size with room around

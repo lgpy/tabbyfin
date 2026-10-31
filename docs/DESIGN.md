@@ -19,7 +19,7 @@ The rest of the app still draws with gpui-kit's tokens through `theme::visuals`.
 |---|---|---|
 | Backdrop | Vertical gradient `backdrop_top` → `backdrop_bottom` over the whole window, plus an optional soft `glow` pooled behind the mascot | `widgets::backdrop::fill`, `backdrop::glow` (meshes; egui has no gradients) |
 | Surface | A panel: `surface` fill, 1 pt `surface_border`, `radius_surface` (22), 28 pt padding, shadow offset 0/12, blur 40 in `surface_shadow` | `widgets::surface::frame(ui)` |
-| Inset | Sunk into a surface: `inset` fill, `inset_hover` under the pointer, `radius_control` (12) | text fields (via `cozy_style`), `AvatarRow`, `code::show`, error box |
+| Inset | Sunk into a surface: `inset` fill, `inset_hover` under the pointer, `radius_control` (12) | text fields (via `cozy_style`), `AvatarRow`, `code::show` |
 
 The CentralPanel holding a cozy screen is frameless (`Frame::NONE`) so the backdrop covers the window.
 
@@ -44,9 +44,11 @@ New fields on `theme::Tokens` (`crates/app/src/theme.rs`), alongside gpui-kit's.
 | `brand_foreground` | white | `#1d1230` | text on `brand` |
 | `avatars[5]` | lavender, periwinkle, pink, mint, peach | same | initial circles, picked by a hash of the name |
 | `avatar_foreground` | `#1d1230` | `#1d1230` | initial on the pastel |
-| `danger` (existing) | `#ef4444` | `#f87171` | error box |
+| `danger` (existing) | `#ef4444` | `#f87171` | danger notice |
+| `info` (existing) | `#06b6d4` | `#22d3ee` | info notice |
+| `success` (existing) | `#22c55e` | `#4ade80` | success notice |
 
-Light `brand` is deeper than the mascot's lavender so white text passes AA (5.9:1); dark uses the mascot's lavender itself with dark text.
+Light `brand` is deeper than the mascot's lavender so white text passes AA (5.9:1); dark uses the mascot's lavender itself with dark text. The status colours (`danger`, `info`, `success`) are too pale for text on a light surface (green and cyan about 2.3:1 on white), so they tint a notice's box, outline and icon, and its text stays `ink`.
 
 ## Type
 
@@ -65,18 +67,19 @@ Titles are `ink`; everything secondary is `ink_muted`. Get fonts with `text::fon
 
 ## Shape and spacing
 
-- Radii: `radius_surface` 22 for panels, `radius_control` 12 for everything on them (fields, buttons, rows, insets, error box).
+- Radii: `radius_surface` 22 for panels, `radius_control` 12 for everything on them (fields, buttons, rows, insets, notices).
 - Heights: buttons 42 (`button::COZY_HEIGHT`), avatar rows 56, code inset 76. Field margin 12 × 9.
 - Panel padding 28. The sign-in column is 400 wide, centred horizontally and vertically (measured last frame, so a step change asks for one repaint to recentre; taller than the window, it scrolls and Tab scrolls the focused field into view).
-- Vertical rhythm inside a panel (current values, worth turning into named constants as more screens use them):
-  - heading → content: 20
-  - error / status → next: 12
-  - label → field: 2
-  - field → field: 10
-  - last field → main button: 14–16
-  - button → button: 8
-  - row → row: 6; row list → next group: +14
-  - panel → aside under it: 14
+- Vertical rhythm on a surface: named gaps in `widgets/surface.rs`, each a step of `theme::SPACE`. Use the name, not a number:
+
+  | Gap | Value | Between |
+  |---|---|---|
+  | `GAP_HEADING` | `SPACE.xl` 24 | the heading and the step's content |
+  | `GAP_GROUP` | `SPACE.lg` 16 | groups: a row list and what follows it, the last field and the main button, a code and its waiting line, the panel and the aside under it |
+  | `GAP_FIELD` | `SPACE.md` 12 | field and field; a notice or waiting line and what follows it |
+  | `GAP_ITEM` | `SPACE.sm` 8 | items of a list: row and row, stacked buttons |
+
+  Inside a heading, the title sits `SPACE.xs` (4) above its subtitle; a field's label sits `SPACE.xxs` (2) above its field.
 
 ## Components
 
@@ -85,11 +88,11 @@ All in `crates/app/src/widgets/`.
 - **`surface::frame(ui)`** — the panel. **`surface::heading(ui, title, subtitle)`** — centred `2xl` title over a `base` muted line; every panel starts with one. The title names the step ("Sign in to *server*", "Approve this sign-in", "Welcome back"); the subtitle says what to do or where you are.
 - **`surface::waiting(ui, line)`** — small spinner and a muted `sm` line, centred together. For a wait the user can't act on ("Waiting for approval…", "server is starting").
 - **`field::label` + `field::single_line`** — muted `sm` label above a full-width `base` field. Hint text only while empty *and* unfocused (egui's hint next to the caret reads as typed text). **`field::with_trailing` + `field::trailing`** — an icon button inside the field's right end (show/hide password): painted, muted at rest, `ink` over an `inset_hover` circle on hover.
-- **`button::brand`** — the main action, full width, `brand` fill. **`button::quiet`** — same size, outlined on the surface. **`button::subtle`** — muted, underlined `sm` link with no frame, for asides under the panel ("Use another server", "Cancel"). Buttons take a `State`: `Ready`, `Disabled`, or `Loading` (disabled, spinner at the right end, label doesn't move). A view with several actions runs them through one helper so the running one loads and the others disable.
+- **`button::brand`** — the main action, full width, `brand` fill. **`button::quiet`** — same size, outlined on the surface. **`button::subtle`** — muted, underlined `sm` link with no frame, for asides under the panel ("Use another server", "Cancel"). Buttons take a `State`: `Ready`, `Disabled`, or `Loading` (disabled, spinner at the right end, label doesn't move). A view with several actions runs them through one helper so the running one loads and the others disable. `brand` and `quiet` also take a `Focus`: `Tab` (a Tab stop, pressed by Space or Enter, as on sign-in) or `Skip` (clicks only, `Sense::CLICK`), which dialogs use because their keys are their own (`widgets/dialog.rs`).
 - **`avatar::paint`** — a pastel circle with the name's initial; the colour is stable per name across launches.
 - **`AvatarRow`** — avatar, title, muted subtitle and an optional ✕, as one focusable button (the ✕ is a second focus stop). Inset fill, `inset_hover` on hover/focus, 1.5 pt `brand` ring on focus.
 - **`code::show`** — a code to read off: inset, 36 pt monospace split in two halves, copy button at the right end that turns into a check mark for 1.5 s.
-- **Error box** (private to `views/login.rs` today) — `danger` line in a `danger`-tinted box with a 1 pt `danger` outline, `radius_control`. Shown under the heading. Should move into `surface.rs` or its own widget when the second screen needs it.
+- **`surface::notice(ui, Kind, text)`** — a message under the heading: a box tinted with the kind's colour at 10 %, a 1 pt outline in it, `radius_control`, 12 × 9 margin, then the kind's icon (the toasts' icons, `lg`) and the message in `ink` at `base`, wrapping under itself rather than under the icon. Kinds: `Danger` (something failed), `Info` (something to know), `Success` (something worked). The icon names the kind to AccessKit ("Error", "Information", "Success"), so the kind isn't told by colour alone.
 - **`mascot::watching(ui, rect, Watch, shadow)`** — the mascot reacting to the view: `look_at` (a caret or the thing being read), `eyes_shut`, `puzzled`. Its place is allocated first but it's painted last, so it follows this frame's caret. `mascot::loader` and `mascot::confused` remain for pages.
 
 ## Anatomy of a cozy screen
@@ -102,7 +105,7 @@ backdrop (gradient over the window)
   mascot (160, 16 gap above the panel, no shadow — it floats)
   surface
     heading: title / subtitle
-    [error box]           — while something failed
+    [notice]              — while something failed
     [waiting line]        — while the server is starting
     step content          — rows, fields, code
     brand button          — the one main action
@@ -117,7 +120,7 @@ The restoring screen is the same backdrop and glow with only the mascot, so a la
 - **Focus.** Check focus by the focused widget's id (`ctx.memory(|m| m.focused())`), not `Response::has_focus`, which is false while the window lacks the OS's focus. The focus ring is `brand`, 1 pt on fields (as wide as the resting outline, so the field doesn't shrink on focus) and 1.5 pt on rows.
 - **Keyboard.** Enter in a field advances to the next field or runs the main action. A step that needs a field focuses it.
 - **Busy.** Nothing awaits; while a request runs its button loads, the others and the fields are disabled, and the error clears.
-- **Errors.** One message at a time, in the error box under the heading; the mascot looks confused while it shows.
+- **Errors.** One message at a time, in a danger notice under the heading; the mascot looks confused while it shows.
 - **Animations off.** The mascot holds its rest pose and jumps to its targets; nothing asks for repaints.
 - **Accessibility.** Painted widgets give AccessKit a role and label (`widget_info`): rows are buttons named by the account, the code is a label with the code itself, the copy button says "Copy code"/"Copied".
 
@@ -130,8 +133,6 @@ The rollout plan is `docs/ROADMAP.md`'s [cozy look backlog](ROADMAP.md#cozy-look
 - **Backdrop on browsing pages.** Yes, the gradient goes under the whole shell, without the glow. The top bar sits on the backdrop with no fill.
 - **Cards and shelves.** Cards stay image-first: no surface around them, image radius `radius_lg` (22 is too round for posters). The cursor ring, progress and played badge use `brand`.
 - **Mascot and glow.** Sign-in, restoring, loaders and empty states only. The glow always goes with the mascot.
-- **Spacing constants.** Snap to `theme::SPACE` in C0.
-- **Notices.** The error box becomes `surface::notice` with danger, info and success kinds.
 - **Selects, toggles, menus.** Inset boxes and `inset_hover` rows, with a cozy toggle/checkbox (C3, C4).
 - **The player.** Stays dark (`theme::over_video`) and only borrows `brand` for its accents.
 - **Retiring gpui-kit's tokens.** C1 turns them into aliases, and C13 removes them.

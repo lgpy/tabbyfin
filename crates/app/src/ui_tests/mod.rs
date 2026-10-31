@@ -43,6 +43,7 @@ pub mod mockups;
 pub mod settings;
 pub mod shelf;
 pub mod toasts;
+pub mod widgets;
 
 /// A disposable mockup, a file outside the tree that `.agents/skills/ui-mockup/render.py` points
 /// `TABBYFIN_MOCKUP_SRC` at; it's compiled here so it can use the app's own theme and widgets.
