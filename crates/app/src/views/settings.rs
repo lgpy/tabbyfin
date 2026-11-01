@@ -40,12 +40,15 @@ use crate::config::{self, Config, SubtitleColor, SubtitleStyle, ThemePreference}
 use crate::services::AppEvent;
 use crate::task::Task;
 use crate::theme;
+use crate::theme::SPACE;
 use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::{Page, PageCx};
+use crate::widgets::avatar_row::AvatarRow;
+use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
 use crate::widgets::label;
-use crate::widgets::{backdrop, select};
+use crate::widgets::{backdrop, field, select, surface, toggle};
 
 /// The theme choices, in the order the picker lists them.
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -84,6 +87,8 @@ const CONTENT_W: f32 = 760.;
 /// The menu's width: a quarter of the page, within these.
 const MENU_MIN_W: f32 = 190.;
 const MENU_MAX_W: f32 = 250.;
+/// The `brand` bar at the open section's menu entry.
+const MENU_BAR_W: f32 = 3.;
 /// The pickers' width beside their label (`main`'s 220 px).
 const PICKER_W: f32 = 220.;
 /// The gaps between a group's heading and its box, between the rows in it, and between groups.
@@ -91,7 +96,12 @@ const HEADING_GAP: f32 = 4.;
 const ROW_GAP: f32 = 10.;
 const SECTION_GAP: f32 = 24.;
 /// The size of the icons beside the group headings, and of the banners' icons.
-const HEADING_ICON: f32 = 20.;
+const HEADING_ICON: f32 = 22.;
+/// The room inside a section's surface: less than a lone panel's [`surface::PADDING`], since a
+/// page stacks eight of them.
+const SECTION_PADDING: i8 = 24;
+/// The storage rows' buttons.
+const ROW_BUTTON_W: f32 = 132.;
 const BANNER_ICON: f32 = 28.;
 
 /// How long the menu keeps marking the section an entry scrolled to before following the
@@ -670,15 +680,14 @@ impl Page for SettingsPage {
         self.report_job(cx);
         self.server.tick(cx);
 
-        // The menu, a line, and the section, side by side. Drawn in that order, so Tab goes
-        // through the search box and the menu before the section's controls.
+        // The menu and the sections side by side on the backdrop, with no line between them:
+        // the sections' surfaces set the column apart. Drawn in that order, so Tab goes through
+        // the search box and the menu before the section's controls.
         let rect = ui.available_rect_before_wrap();
         let menu_w = (rect.width() * 0.25).clamp(MENU_MIN_W, MENU_MAX_W);
         let menu = Rect::from_min_max(rect.min, pos2(rect.left() + menu_w, rect.bottom()));
-        let content = Rect::from_min_max(pos2(menu.right() + 1., rect.top()), rect.max);
+        let content = Rect::from_min_max(pos2(menu.right(), rect.top()), rect.max);
         ui.scope_builder(UiBuilder::new().max_rect(menu), |ui| self.menu(ui));
-        let line = egui::Stroke::new(1., theme::tokens_of(ui).border);
-        ui.painter().vline(menu.right() + 0.5, rect.y_range(), line);
         ui.scope_builder(UiBuilder::new().max_rect(content), |ui| self.content(ui, cx));
         ui.advance_cursor_after_rect(rect);
     }
@@ -717,42 +726,39 @@ impl SettingsPage {
     /// it has text, a clear button at its right end. Esc in the field clears it as it lets go.
     fn search_box(&mut self, ui: &mut Ui) {
         let icon = text::icon(ui, ICON_SEARCH.font_family());
-        let inset = (10. + icon.size + 6.).round() as i8;
+        let inset = (12. + icon.size + 6.).round() as i8;
         let clear = !self.search.text.is_empty();
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut self.search.text)
-                .id(Id::unique(SEARCH_ID))
-                .hint_text("Search settings")
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin {
-                    left: inset,
-                    right: if clear { inset } else { 10 },
-                    top: 9,
-                    bottom: 9,
-                }),
-        );
+        let edit = field::single_line(ui, Id::unique(SEARCH_ID), &mut self.search.text, "Search settings");
+        let response = ui.add(edit.margin(egui::Margin {
+            left: inset,
+            right: if clear { inset } else { 12 },
+            top: 9,
+            bottom: 9,
+        }));
         let tokens = theme::tokens_of(ui);
         let rect = response.rect;
         ui.painter().text(
-            pos2(rect.left() + 10. + icon.size / 2., rect.center().y),
+            pos2(rect.left() + 12. + icon.size / 2., rect.center().y),
             Align2::CENTER_CENTER,
             ICON_SEARCH.codepoint,
             icon.clone(),
-            tokens.muted_foreground,
+            tokens.ink_muted,
         );
         if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.search.text.clear();
         }
         if clear {
-            // Not focusable, as the top bar's isn't: Esc clears from the keyboard.
-            let center = pos2(rect.right() - 10. - icon.size / 2., rect.center().y);
+            // Not focusable, as the top bar's isn't: Esc clears from the keyboard. Drawn like
+            // `field::trailing` (which is focusable): muted, `ink` over a soft circle on hover.
+            let center = pos2(rect.right() - 12. - icon.size / 2., rect.center().y);
             let hit = Rect::from_center_size(center, vec2(icon.size + 8., icon.size + 8.));
             let button = ui.interact(hit, Id::unique("settings_search_clear"), Sense::CLICK);
             button.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), "Clear search"));
             let color = if button.hovered() {
-                tokens.foreground
+                ui.painter().circle_filled(center, hit.width() / 2., tokens.inset_hover);
+                tokens.ink
             } else {
-                tokens.muted_foreground
+                tokens.ink_muted
             };
             ui.painter()
                 .text(center, Align2::CENTER_CENTER, ICON_CLOSE.codepoint, icon, color);
@@ -819,7 +825,7 @@ impl SettingsPage {
         let mut starts = Vec::with_capacity(found.len());
         if found.is_empty() {
             let message = format!("No settings match “{}”.", self.search.text.trim());
-            ui.label(RichText::new(message).color(theme::tokens_of(ui).muted_foreground));
+            ui.label(label::muted(ui, message));
             return starts;
         }
         for store in Store::ALL {
@@ -865,37 +871,30 @@ impl SettingsPage {
                 )
             }
         };
-        egui::Frame::NONE
-            .fill(tokens.muted)
-            .corner_radius(egui::CornerRadius::same(tokens.radius_lg))
-            .inner_margin(12)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal_top(|ui| {
-                    ui.label(store.icon().rich_text().size(BANNER_ICON).color(tokens.foreground));
-                    ui.add_space(4.);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(store.title()).font(text::font(ui, "lg")).strong());
-                        ui.label(
-                            RichText::new(description)
-                                .font(text::font(ui, "sm"))
-                                .color(tokens.muted_foreground),
-                        );
-                        if store == Store::Server
-                            && let Some(status) = self.server.status()
-                        {
-                            ui.label(
-                                RichText::new(status)
-                                    .font(text::font(ui, "sm"))
-                                    .color(tokens.muted_foreground),
-                            );
-                        }
-                    });
-                });
+        // On the backdrop rather than boxed: the sections under it are the surfaces, and a third
+        // kind of box between them would read as another section.
+        ui.horizontal_top(|ui| {
+            ui.add_space(SPACE.xs);
+            ui.label(store.icon().rich_text().size(BANNER_ICON).color(tokens.ink_muted));
+            ui.add_space(SPACE.xs);
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(store.title())
+                        .font(text::font(ui, "lg"))
+                        .color(tokens.ink)
+                        .strong(),
+                );
+                ui.label(label::muted(ui, description));
+                if store == Store::Server
+                    && let Some(status) = self.server.status()
+                {
+                    ui.label(label::muted(ui, status));
+                }
             });
+        });
     }
 
-    /// A section's heading and its box of rows.
+    /// A section: a surface with its heading and its rows.
     fn section(&mut self, ui: &mut Ui, cx: &mut PageCx, section: Section) {
         group(ui, section.icon(), section.title(), |ui| match section {
             Section::Appearance => self.appearance(ui, cx),
@@ -1043,7 +1042,7 @@ impl SettingsPage {
                     ..IMAGE_CACHE
                 },
                 |ui| {
-                    clear = ui.add_enabled(!busy, egui::Button::new("Clear")).clicked();
+                    clear = button::quiet(ui, "Clear", ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
                 },
             );
             if clear {
@@ -1055,7 +1054,7 @@ impl SettingsPage {
             let logs = config::log_dir().display().to_string();
             let mut open = false;
             row(ui, Row { key: &logs, ..LOGS }, |ui| {
-                open = ui.add_enabled(!busy, egui::Button::new("Open folder")).clicked();
+                open = button::quiet(ui, "Open folder", ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
             });
             if open {
                 self.open_logs(cx);
@@ -1074,10 +1073,17 @@ impl SettingsPage {
 
     fn account(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let session = &cx.services.session;
-        info(ui, &self.search, USER, &session.user.name);
-        let server = session.server.server_name.clone().unwrap_or_else(|| "Jellyfin".into());
-        info(ui, &self.search, SERVER, &server);
-        info(ui, &self.search, ADDRESS, session.client.base_url().as_str());
+        // Who's signed in, as the sign-in screen lists accounts: one row for the user, the
+        // server and its address, found by a search for any of the three.
+        if [USER, SERVER, ADDRESS].iter().any(|row| self.search.shows(row)) {
+            let server = session.server.server_name.clone().unwrap_or_else(|| "Jellyfin".into());
+            let address = session.client.base_url().as_str().trim_end_matches('/').to_owned();
+            let subtitle = format!("{server} · {address}");
+            let label = format!("Signed in as {} on {subtitle}", session.user.name);
+            let names = [session.user.name.as_str()];
+            AvatarRow::new(&names, &session.user.name, &subtitle, &label).show(ui, false);
+            ui.add_space(surface::GAP_GROUP);
+        }
         let version = session.server.version.clone().unwrap_or_else(|| "?".into());
         info(ui, &self.search, SERVER_VERSION, &version);
     }
@@ -1294,21 +1300,22 @@ impl ServerSettings {
         if let Some(config) = &self.config {
             return Some(config.clone());
         }
-        let muted = theme::tokens_of(ui).muted_foreground;
         if self.failed {
-            let mut retry = false;
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Couldn't load your settings from the server.").color(muted));
-                retry = ui.button("Retry").clicked();
-            });
+            surface::notice(
+                ui,
+                surface::Kind::Danger,
+                "Couldn't load your settings from the server.",
+            );
+            ui.add_space(surface::GAP_FIELD);
+            let retry = button::quiet(ui, "Retry", ROW_BUTTON_W, State::Ready, Focus::Tab).clicked();
             if retry {
                 self.failed = false;
                 self.cultures_asked = !self.languages.is_empty();
             }
         } else {
             ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(RichText::new("Loading your settings from the server…").color(muted));
+                ui.add(egui::Spinner::new().size(14.).color(theme::tokens_of(ui).ink_muted));
+                ui.label(label::muted(ui, "Loading your settings from the server…"));
             });
         }
         ui.add_space(ROW_GAP);
@@ -1370,37 +1377,43 @@ fn menu_heading(ui: &mut Ui, store: Store) {
     ui.add_space(HEADING_GAP);
 }
 
-/// A section in the menu: its icon and title across the menu's width, filled while it's open
-/// and under the pointer or the keyboard. While searching, `matches` is how many of its rows
+/// A section in the menu: its icon and title across the menu's width, on an `inset_hover` pill
+/// while it's open (with a `brand` bar at its left end and its icon in `brand`) or under the
+/// pointer or the keyboard. While searching, `matches` is how many of its rows
 /// the search finds, shown at the right end; one with none is greyed.
 fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usize>) -> egui::Response {
     let tokens = theme::tokens_of(ui);
-    let height = (ui.spacing().interact_size.y + 10.).max(32.);
+    let height = (ui.spacing().interact_size.y + 8.).max(40.);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, section.title()));
     let focused = ui.memory(|memory| memory.has_focus(response.id));
-    let radius = egui::CornerRadius::same(tokens.radius);
+    let radius = egui::CornerRadius::same(tokens.radius_control);
+    if selected || response.hovered() || focused {
+        ui.painter().rect_filled(rect, radius, tokens.inset_hover);
+    }
     if selected {
-        ui.painter().rect_filled(rect, radius, tokens.accent);
-    } else if response.hovered() || focused {
-        ui.painter().rect_filled(rect, radius, tokens.muted);
+        let bar = Rect::from_center_size(
+            pos2(rect.left() + MENU_BAR_W / 2. + 2., rect.center().y),
+            vec2(MENU_BAR_W, rect.height() - 16.),
+        );
+        ui.painter().rect_filled(bar, MENU_BAR_W / 2., tokens.brand);
     }
     if focused {
-        focus::ring(ui, rect, tokens.radius as f32, Place::Inside);
+        focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
     }
     let color = match matches {
-        Some(0) => tokens.muted_foreground,
-        _ if selected => tokens.accent_foreground,
-        _ => tokens.foreground,
+        Some(0) => tokens.ink_muted,
+        _ => tokens.ink,
     };
+    let icon_color = if selected { tokens.brand } else { color };
     let icon = text::icon(ui, section.icon().font_family());
-    let icon_x = rect.left() + 8. + icon.size / 2.;
+    let icon_x = rect.left() + 14. + icon.size / 2.;
     ui.painter().text(
         pos2(icon_x, rect.center().y),
         Align2::CENTER_CENTER,
         section.icon().codepoint,
         icon.clone(),
-        color,
+        icon_color,
     );
     let font = text::font(ui, "base");
     let label_x = icon_x + icon.size / 2. + 10.;
@@ -1417,47 +1430,40 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
             Align2::RIGHT_CENTER,
             count.to_string(),
             text::font(ui, "xs"),
-            tokens.muted_foreground,
+            tokens.ink_muted,
         );
     }
     response
 }
 
-/// A group on the page: its heading, and a box around its rows.
+/// A group on the page: a surface with the section's icon and title at its top, left-aligned
+/// as a dialog's is (the column isn't a centred form), over its rows.
 fn group(ui: &mut Ui, icon: MaterialIcon, title: &str, contents: impl FnOnce(&mut Ui)) {
     ui.add_space(SECTION_GAP);
     let tokens = theme::tokens_of(ui);
-    ui.horizontal(|ui| {
-        ui.label(icon.rich_text().size(HEADING_ICON).color(tokens.muted_foreground));
-        ui.label(RichText::new(title).heading());
-    });
-    ui.add_space(HEADING_GAP);
-    // `main`'s `GroupBox::outline`: the border and the controls' radius over the page, with no
-    // fill of its own (an unchecked checkbox would read poorly on a grey box in light).
-    egui::Frame::NONE
-        .stroke(egui::Stroke::new(1., tokens.border))
-        .corner_radius(egui::CornerRadius::same(tokens.radius))
-        .inner_margin(12)
-        .show(ui, |ui| {
-            // The box spans the form's width, not just its widest row.
-            ui.set_width(ui.available_width());
-            contents(ui);
+    surface::frame(ui).inner_margin(SECTION_PADDING).show(ui, |ui| {
+        // The surface spans the column, not just its widest row.
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = SPACE.sm;
+            ui.label(icon.rich_text().size(HEADING_ICON).color(tokens.ink_muted));
+            ui.label(RichText::new(title).font(text::font(ui, "xl")).color(tokens.ink));
         });
+        ui.add_space(surface::GAP_GROUP);
+        contents(ui);
+    });
 }
 
 /// One setting: its label on the left and its control on the right, then what it does and the
 /// key it saves.
 fn row(ui: &mut Ui, row: Row, control: impl FnOnce(&mut Ui)) {
+    let tokens = theme::tokens_of(ui);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(row.label).strong());
+        ui.label(RichText::new(row.label).font(text::font(ui, "base")).color(tokens.ink));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
     });
     // `main`'s setting descriptions were `text_sm` in the muted colour.
-    ui.label(
-        RichText::new(row.description)
-            .font(text::font(ui, "sm"))
-            .color(theme::tokens_of(ui).muted_foreground),
-    );
+    ui.label(label::muted(ui, row.description));
     if !row.key.is_empty() {
         let metadata = if row.unset.is_empty() {
             row.key.to_string()
@@ -1468,11 +1474,7 @@ fn row(ui: &mut Ui, row: Row, control: impl FnOnce(&mut Ui)) {
         // after the table's font, so the font id is built directly.
         let mut font = text::font(ui, "xs");
         font.family = egui::FontFamily::Monospace;
-        ui.label(
-            RichText::new(metadata)
-                .font(font)
-                .color(theme::tokens_of(ui).muted_foreground),
-        );
+        ui.label(RichText::new(metadata).font(font).color(tokens.ink_muted));
     }
     ui.add_space(ROW_GAP);
 }
@@ -1485,9 +1487,9 @@ fn toggle(ui: &mut Ui, search: &Search, row: Row, value: bool) -> Option<bool> {
     }
     let mut flipped = None;
     self::row(ui, row, |ui| {
-        let mut checked = value;
-        if ui.add(egui::Checkbox::without_text(&mut checked)).changed() {
-            flipped = Some(checked);
+        let mut on = value;
+        if toggle::switch(ui, &mut on, row.label).changed() {
+            flipped = Some(on);
         }
     });
     flipped
@@ -1606,10 +1608,11 @@ fn info(ui: &mut Ui, search: &Search, row: Row, value: &str) {
     if !search.shows(&row) {
         return;
     }
+    let tokens = theme::tokens_of(ui);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(row.label).strong());
+        ui.label(RichText::new(row.label).font(text::font(ui, "base")).color(tokens.ink));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(value);
+            ui.label(RichText::new(value).color(tokens.ink_muted));
         });
     });
     ui.add_space(ROW_GAP);
@@ -1622,9 +1625,7 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
         return false;
     }
     let font = text::font(ui, "sm");
-    let description = RichText::new(row.description)
-        .font(font.clone())
-        .color(theme::tokens_of(ui).muted_foreground);
+    let description = label::muted(ui, row.description);
     let mut clicked = false;
     match link {
         // Wrapped with the link at the end of its last line. A wrapped row's lines are a
@@ -1632,7 +1633,10 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
         Some(link) => {
             ui.horizontal_wrapped(|ui| {
                 ui.label(description);
-                clicked = ui.link(RichText::new(format!("{link} ›")).font(font)).clicked();
+                let link = RichText::new(format!("{link} ›"))
+                    .font(font)
+                    .color(theme::tokens_of(ui).brand);
+                clicked = ui.link(link).clicked();
             });
         }
         None => {
@@ -1641,6 +1645,11 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
     }
     ui.add_space(ROW_GAP);
     clicked
+}
+
+/// A row button's state: disabled while a storage job runs.
+fn ready(busy: bool) -> State {
+    if busy { State::Disabled } else { State::Ready }
 }
 
 /// The bitrate picker's current choice, from the config: [`AUTOMATIC`] when it measures the

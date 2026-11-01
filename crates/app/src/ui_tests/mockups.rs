@@ -36,6 +36,10 @@ const SUPERSAMPLE: f32 = 2.;
 /// transparent edge.
 const HARNESS_MARGIN: f32 = 8.;
 
+/// The widest or tallest a mockup can be, in points: wgpu's textures stop at 8192 pixels a side,
+/// and a mockup is drawn at `SCALE * SUPERSAMPLE` with the harness's margin round it.
+pub const MAX_SIDE: f32 = 8192. / (SCALE * SUPERSAMPLE) - 2. * HARNESS_MARGIN;
+
 /// How long a page's images have to stay idle before its picture is taken.
 const QUIET: Duration = Duration::from_millis(300);
 
@@ -74,7 +78,15 @@ impl Mockup {
         }
     }
 
+    /// Panics past [`MAX_SIDE`], which the renderer can't draw: show a long page in parts.
     pub fn size(self, size: egui::Vec2) -> Self {
+        assert!(
+            size.x <= MAX_SIDE && size.y <= MAX_SIDE,
+            "mockup {} is {}×{} points; the renderer draws at most {MAX_SIDE} a side, so split it",
+            self.name,
+            size.x,
+            size.y,
+        );
         Self { size, ..self }
     }
 

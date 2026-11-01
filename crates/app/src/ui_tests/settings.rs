@@ -157,6 +157,31 @@ fn the_menu_scrolls_to_a_section() {
     });
 }
 
+/// A flag is a switch that saves what it's flipped to, and the account is one row naming the
+/// user and where they're signed in.
+#[test]
+fn a_switch_saves_and_the_account_is_one_row() {
+    let _config = ConfigDir::new("settings-switch");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Animations");
+    assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::True), "on by default");
+    switch.click();
+    ui.step();
+    assert_eq!(Config::load().animations, Some(false));
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Animations");
+    assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::False));
+
+    let account = ui.harness().query_all_by_role(Role::Button).find(|node| {
+        node.accesskit_node()
+            .label()
+            .is_some_and(|label| label.starts_with("Signed in as dev on "))
+    });
+    assert!(account.is_some(), "the account row");
+}
+
 /// A search shows the rows it finds from both sides, and the server's subtitle mode, stepped
 /// with the keyboard, goes to the server with the rest of the user's configuration as it was.
 #[test]

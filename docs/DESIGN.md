@@ -44,6 +44,10 @@ The CentralPanel holding a cozy screen is frameless (`Frame::NONE`) so the backd
 | `brand` | `#7b4fb0` | `#c396e7` | main action, focus ring |
 | `brand_hover` | `#6a429e` | `#d2adf0` | main action hovered/pressed |
 | `brand_foreground` | white | `#1d1230` | text on `brand` |
+| `danger_action` | `#dc2626` | `#f87171` | a main action that deletes (`button::danger`) |
+| `danger_action_hover` | `#b91c1c` | `#fca5a5` | the same hovered/pressed |
+| `danger_action_foreground` | white | `#1d1230` | text on `danger_action` (4.8:1, 6.4:1) |
+| `scrim` | `ink` @ 30 % | `backdrop_top` @ 60 % | the page under a dialog |
 | `avatars[5]` | lavender, periwinkle, pink, mint, peach | same | initial circles, picked by a hash of the name |
 | `avatar_foreground` | `#1d1230` | `#1d1230` | initial on the pastel |
 | `danger` (existing) | `#ef4444` | `#f87171` | danger notice |
@@ -63,8 +67,9 @@ The classic names, which `main` and the pages not yet restructured draw with, ar
 | `secondary`, `tab_bar` | `inset` | checkbox boxes, slider rails, tab tracks |
 | `border`, `input` | `surface_border` | outlines |
 | `radius` | `radius_control` (12) | controls |
+| `overlay` | `scrim` | the page under a dialog |
 
-`overlay`, `selection`, the status colours and `radius_lg` (12, for cards and popups) keep their own values. The page's flat fill is `backdrop_top`, the gradient's top end, not the lilac bottom: in dark the bottom end (`#1d1633`) is lighter than `surface` (`#1a1526`), so raised things would look sunk, and in light `inset_hover` rows and `surface_border` outlines disappear against it. Since C2 the shell is on the gradient itself, so `background` no longer fills a page; it stays `backdrop_top` for what still reads it. The gradient's lilac end passes for text: `ink_muted` (card subtitles, shelf titles) is 5.6:1 on light `backdrop_bottom` and 6.9:1 on dark, `ink` 14:1 and 15:1. The focus ring (egui's `selection.stroke`) and the cursor rings are `brand`. The player keeps the classic dark set over the video (`theme::over_video::TOKENS`).
+`selection`, the status colours and `radius_lg` (12, for cards and popups) keep their own values. The page's flat fill is `backdrop_top`, the gradient's top end, not the lilac bottom: in dark the bottom end (`#1d1633`) is lighter than `surface` (`#1a1526`), so raised things would look sunk, and in light `inset_hover` rows and `surface_border` outlines disappear against it. Since C2 the shell is on the gradient itself, so `background` no longer fills a page; it stays `backdrop_top` for what still reads it. The gradient's lilac end passes for text: `ink_muted` (card subtitles, shelf titles) is 5.6:1 on light `backdrop_bottom` and 6.9:1 on dark, `ink` 14:1 and 15:1. The focus ring (egui's `selection.stroke`) and the cursor rings are `brand`. The player keeps the classic dark set over the video (`theme::over_video::TOKENS`).
 
 Light `brand` is deeper than the mascot's lavender so white text passes AA (5.9:1); dark uses the mascot's lavender itself with dark text. The status colours (`danger`, `info`, `success`) are too pale for text on a light surface (green and cyan about 2.3:1 on white), so they tint a notice's box, outline and icon, and its text stays `ink`.
 
@@ -103,10 +108,11 @@ Titles are `ink`; everything secondary is `ink_muted`. Get fonts with `text::fon
 
 All in `crates/app/src/widgets/`.
 
-- **`surface::frame(ui)`** — the panel. **`surface::heading(ui, title, subtitle)`** — centred `2xl` title over a `base` muted line; every panel starts with one. The title names the step ("Sign in to *server*", "Approve this sign-in", "Welcome back"); the subtitle says what to do or where you are.
+- **`surface::frame(ui)`** — the panel (`frame_of(tokens)` where there's no `Ui` yet). **`surface::heading(ui, title, subtitle)`** — centred `2xl` title over a `base` muted line; every panel starts with one. The title names the step ("Sign in to *server*", "Approve this sign-in", "Welcome back"); the subtitle says what to do or where you are. **`surface::heading_left(ui, title, Option<subtitle>)`** — the same against the left edge, for a surface that isn't a centred form (a dialog), the subtitle only when there's something to explain.
 - **`surface::waiting(ui, line)`** — small spinner and a muted `sm` line, centred together. For a wait the user can't act on ("Waiting for approval…", "server is starting").
 - **`field::label` + `field::single_line`** — muted `sm` label above a full-width `base` field. Hint text only while empty *and* unfocused (egui's hint next to the caret reads as typed text). **`field::with_trailing` + `field::trailing`** — an icon button inside the field's right end (show/hide password), named and tooltipped by its label: a `RoundButton` 28 across with the icon at `lg`. `field::trailing_button` and `trailing_center` give the same button for a caller that sets its focus (the search box's clear button skips it).
-- **`button::brand`** — the main action, full width, `brand` fill. **`button::quiet`** — same size, outlined on the surface; **`button::quiet_danger`** is the same with its label in `danger`, for leaving or losing something that isn't the view's main action (*Leave group*). **`button::subtle`** — muted, underlined `sm` link with no frame, for asides under the panel ("Use another server", "Cancel"). Buttons take a `State`: `Ready`, `Disabled`, or `Loading` (disabled, spinner at the right end, label doesn't move). A view with several actions runs them through one helper so the running one loads and the others disable. `brand` and `quiet` also take a `Focus`: `Tab` (a Tab stop, pressed by Space or Enter, as on sign-in) or `Skip` (clicks only, `Sense::CLICK`), which dialogs use because their keys are their own (`widgets/dialog.rs`).
+- **`button::brand`** — the main action, full width, `brand` fill. **`button::quiet`** — same size, outlined on the surface; **`button::quiet_danger`** is the same with its label in `danger`, for leaving or losing something that isn't the view's main action (*Leave group*). **`button::subtle`** — muted, underlined `sm` link with no frame, for asides under the panel ("Use another server", "Cancel"). Buttons take a `State`: `Ready`, `Disabled`, or `Loading` (disabled, spinner at the right end, label doesn't move). A view with several actions runs them through one helper so the running one loads and the others disable. `brand` and `quiet` also take a `Focus`: `Tab` (a Tab stop, pressed by Space or Enter, as on sign-in) or `Skip` (clicks only, `Sense::CLICK`), which dialogs use because their keys are their own (`widgets/dialog.rs`). **`button::danger`** — `brand`'s shape in `danger_action`, for a main action that deletes something.
+- **`dialog::show`** — a dialog: an `egui::Modal` in a surface frame over the page dimmed with `scrim`, `heading_left`, `GAP_GROUP` under it. **`dialog::buttons`** puts its buttons at the bottom right, `GAP_ITEM` apart: `dialog::main` (`brand`) or `dialog::danger`, then `dialog::cancel` (`quiet`), all `Focus::Skip` and as wide as their label plus room for the loading spinner (96 at least). A list in a dialog (*Add to playlist*) is inset rows: `inset` at rest, `inset_hover` on the row Enter would pick, with the focus ring inside it while the keyboard put it there.
 - **`avatar::paint`** — a pastel circle with the name's initial; the colour is stable per name across launches.
 - **`AvatarRow::new(names, title, subtitle, label)`** — avatar, title, muted subtitle, as one button named by `label`. Inset fill, `inset_hover` on hover/focus, the focus ring (inside) on focus or `.highlighted(true)` (a list that keeps its own keyboard). Several names overlap as 14-point avatars (up to three, each parted from the one under it by a ring of the row's fill) for a group. `.status(colour)` puts a dot before the subtitle. At the right end, `.remove(tooltip)` adds a ✕ (a second focus stop), or `.action(label)` a compact `brand` button (30 tall, radius 10, `brand_hover` with the row) that is part of the row: a click anywhere on it presses it. `.focus(Focus::Skip)` for clicks only. **`avatar_row::person(ui, name, aside)`** — a person in a list that isn't a list of buttons: a 14-point avatar, the name in `ink` at `base` and an optional `xs` muted aside ("you"), 36 tall, a `ListItem` to AccessKit.
 - **`RoundButton`** (`round_button.rs`) — a round button holding an icon (`RoundButton::icon`) or a person's avatar (`RoundButton::avatar`, 4 points inside the circle): no frame at rest and the icon in `ink_muted`; under the pointer an `inset_hover` circle and `ink`. `.on(bool)` makes it a toggle (selected to AccessKit): on keeps the circle with the icon in `brand`. Disabled is dimmed `ink_muted` at 45 %. `.ringed(true)` (or egui's focus) puts `focus::ring` round it, a circle round the circle (round the avatar for an avatar). Named and tooltipped by its label. Sizes: 40 with a 24-point icon (the top bar), 30/18 (the SyncPlay panel's toggles), 28/`lg` (a field's trailing button), 26/16 (a queue row's buttons). `round_button::glyph` centres an icon on its own bounds, which the icon font needs. Picked by a mockup, 2026-11-01.
@@ -115,6 +121,7 @@ All in `crates/app/src/widgets/`.
 - **`focus::ring(ui, rect, radius, Place)`** — the keyboard's ring, wherever the keyboard (egui focus or a page's cursor) sits on something: 2 pt `brand`, the same on every widget and page. `Place::Outside` for free-standing controls (bar buttons, selects, pills, the item page's actions): 2 pt clear of the control, with the control's radius plus the gap, so a circle gets a circle and a pill a pill. `Place::Inside` for rows and cards, on their own edge, since the lists and scroll areas they sit in would clip a ring outside them. **`focus::ring_widget(ui, &response)`** rings an egui `Button` or `TextEdit` on the theme's widget radius. Picked over the old per-page rings (1–3 pt, `brand` or `ink`, square rings round round buttons) by a mockup, 2026-11-01.
 - **`label::muted`, `note`, `title`, `overline`** — the text styles beyond body text, as `RichText`: `muted` is `sm` `ink_muted` (a waiting or empty line, a field's label, an aside), `note` `xs` `ink_muted` (a panel's status or hint), `title` `base` strong `ink` (a panel's or group's title), `overline` `xs` strong capitals in `ink_muted` (a heading over a menu's or a panel's section). Off the cozy inks (the player), recolour with `.color(…)`.
 - **Popups** (`popup::PopupMenu`, `popup::panel`, tooltips, toasts) — a `surface` with its `surface_border` outline and `theme::popup_shadow`, the surface's shadow colour at 0 × 6 offset and 20 blur (a surface's is 12 and 40). **`popup::frame(tokens)`** is that frame without radius or margin. Menus: radius 16, 6 pt round the rows, the highlighted row an `inset_hover` pill concentric with the panel (radius 10), a danger row's highlight `danger` at 14 %, separators in `surface_border`. Tooltips are egui's `Frame::popup`, which `theme::visuals` gives the same frame at radius 10 with a 10 × 6 margin; dialogs set their own frame on the `Modal` so they don't take the tooltip's. Picked by a mockup, 2026-11-01. **`popup::panel`** is a popup laid out like a small surface rather than a list of rows (the SyncPlay panel): the menus' frame and placement with `popup::PANEL_PAD` (16) inside.
+- **`toggle::switch(ui, &mut on, name)`** — an on/off switch, 40 × 22: a pill track sunk like an inset while off (`inset`, `surface_border` outline, `ink_muted` outline and `inset_hover` under the pointer) and filled with `brand` while on (`brand_hover` under the pointer), with a round knob 3 pt inside it, `ink_muted` off and `brand_foreground` on, so the state reads without colour too. The knob slides over egui's animation time (none with the animations setting off). Focusable: Space or Enter flips it, and `focus::ring` sits outside it. A `Switch` to AccessKit, named by the setting, with its state. Settings' flags are switches (C6).
 - **`select::select` / `select::button`** — sunk like a field: `inset` fill, `surface_border` outline that darkens to `ink_muted` under the pointer, `radius_control`, the value in `ink` at `sm` and a muted caret; the keyboard gets `focus::ring` outside it. Its height is the caller's (32 by default, the toolbar's).
 - **Toasts** (`toasts.rs`) — 340 wide in the bottom-right corner, 8 apart, each a popup surface with 14 pt padding: the kind's icon (20 pt, named to AccessKit like a notice's) on the first line, the title in `ink` at `base` over the text in `ink_muted` at `sm` (the text alone is in `ink`), and at the right end, centred on the toast, the action as a compact `brand` button (30 tall, radius 10) and a round close button that fills `inset_hover` on hover. Both buttons are `Sense::CLICK` only, so a toast never takes the keyboard from the player.
 - **`mascot::watching(ui, rect, Watch, shadow)`** — the mascot reacting to the view: `look_at` (a caret or the thing being read), `eyes_shut`, `puzzled`. Its place is allocated first but it's painted last, so it follows this frame's caret. `mascot::loader` and `mascot::confused` remain for pages.
@@ -138,6 +145,24 @@ backdrop (gradient over the window)
 ```
 
 The restoring screen is the same backdrop and glow with only the mascot, so a launch that does need the form doesn't flash.
+
+Settings is the full-page template (C6): the panels are the page's sections rather than one form, so the column is left-aligned and the surfaces stack.
+
+```
+backdrop (no glow)
+  menu column (no line beside it)
+    search field (icon inside, clear button at the right while it has text)
+    overline per store, then its sections: inset_hover pill on hover, focus and the open one,
+      which also gets a 3 pt brand bar and a brand icon
+  section column (760 wide at most, centred in what's left)
+    store banner on the backdrop: icon, lg title, muted line (and the server's saving status)
+    surface per section, 24 apart, 24 padding (a lone panel's 28 is too roomy stacked)
+      icon in ink_muted + xl title in ink, left-aligned
+      rows: base label in ink with its control at the right (select, switch, quiet button),
+        sm muted description, xs monospace key
+```
+
+The account section shows the user, server and address as one `AvatarRow` that isn't a button target, with the server's version under it.
 
 The top bar and the SyncPlay panel (C7, picked by a mockup on 2026-11-01):
 
@@ -180,7 +205,7 @@ The rollout plan is `docs/ROADMAP.md`'s [cozy look backlog](ROADMAP.md#cozy-look
 - **Order.** The component library, then shared pieces (popups, selects, toasts, dialogs), then Settings as the first full page, then the top bar, then the browsing pages. The player goes last and changes least.
 - **Cards and shelves.** Cards stay image-first: no surface around them, image radius `radius_lg` (22 is too round for posters). The cursor ring, progress and played badge use `brand`.
 - **Mascot and glow.** Sign-in, restoring, loaders and empty states only. The glow always goes with the mascot.
-- **Toggles.** A cozy toggle/checkbox (C3). Selects and menus settled in C4 (see *Components*).
+- **Toggles.** The switch landed with Settings (C6, see *Components*); a checkbox row for lists that tick several things (the dialogs) is still open. Selects and menus settled in C4.
 - **The player.** Stays dark (`theme::over_video`) and only borrows `brand` for its accents.
 - **Retiring the classic tokens.** They're aliases since C1; C13 removes them.
 

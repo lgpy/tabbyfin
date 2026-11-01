@@ -20,4 +20,5 @@ pub mod shelf;
 pub mod state;
 pub mod surface;
 pub mod text;
+pub mod toggle;
 pub mod video;
