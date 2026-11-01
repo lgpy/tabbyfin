@@ -11,14 +11,16 @@
 
 use egui::accesskit::Role;
 use egui::{
-    Align, Align2, CornerRadius, Id, Key, Modifiers, RectAlign, Response, RichText, ScrollArea, Sense, Stroke,
-    StrokeKind, TextEdit, Ui, WidgetInfo, pos2, vec2,
+    Align, Align2, CornerRadius, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Sense, Stroke, StrokeKind,
+    TextEdit, Ui, WidgetInfo, pos2, vec2,
 };
 use egui_material_icons::icons::{ICON_CHECK, ICON_REMOVE, ICON_SEARCH};
 
 use crate::config::LibraryView;
 use crate::theme::{self, text};
 use crate::views::library::{FilterValues, ValueKind};
+use crate::widgets::focus::{self, Place};
+use crate::widgets::label;
 use crate::widgets::popup;
 
 /// The popover's width.
@@ -158,7 +160,7 @@ impl ValueFilters {
             ui.spacing_mut().item_spacing.y = 0.;
             if shown.is_empty() {
                 let message = format!("No genres or tags match \u{201c}{}\u{201d}.", self.search.trim());
-                ui.label(RichText::new(message).font(text::font(ui, "sm")).color(muted(ui)));
+                ui.label(label::muted(ui, message));
                 return;
             }
             let mut index = 0;
@@ -174,7 +176,7 @@ impl ValueFilters {
                 if index > 0 {
                     ui.add_space(12.);
                 }
-                ui.label(RichText::new(title).font(text::font(ui, "sm")).color(muted(ui)));
+                ui.label(label::muted(ui, title));
                 ui.add_space(6.);
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
@@ -196,11 +198,10 @@ impl ValueFilters {
         });
 
         ui.add_space(10.);
-        ui.label(
-            RichText::new("Click once to include, twice to exclude, right-click to clear.")
-                .font(text::font(ui, "xs"))
-                .color(muted(ui)),
-        );
+        ui.label(label::note(
+            ui,
+            "Click once to include, twice to exclude, right-click to clear.",
+        ));
         cycled
     }
 
@@ -230,7 +231,7 @@ impl ValueFilters {
             Align2::CENTER_CENTER,
             ICON_SEARCH.codepoint,
             icon,
-            muted(ui),
+            theme::tokens_of(ui).ink_muted,
         );
         response.changed()
     }
@@ -324,10 +325,6 @@ fn set_off(view: &mut LibraryView, kind: ValueKind, value: &str) {
     excluded.retain(|v| v != value);
 }
 
-fn muted(ui: &Ui) -> egui::Color32 {
-    theme::tokens_of(ui).muted_foreground
-}
-
 /// A value as a pill: outlined while off, filled in the primary colour with a tick while
 /// included, and in the danger colour with a minus while excluded. `highlighted` rings it for
 /// the keyboard.
@@ -381,12 +378,7 @@ fn pill(ui: &mut Ui, label: &str, mark: Mark, highlighted: bool) -> Response {
     let radius = CornerRadius::same((height / 2.) as u8);
     painter.rect(rect, radius, fill, stroke, StrokeKind::Inside);
     if highlighted {
-        painter.rect_stroke(
-            rect.expand(2.),
-            CornerRadius::same((height / 2. + 2.) as u8),
-            Stroke::new(1.5, tokens.foreground),
-            StrokeKind::Outside,
-        );
+        focus::ring(ui, rect, height / 2., Place::Outside);
     }
 
     let mut x = rect.left() + PILL_INSET;

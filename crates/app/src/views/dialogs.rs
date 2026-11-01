@@ -13,8 +13,8 @@
 //! `views/add_to_playlist.rs`, `views/edit_playlist.rs` and `confirm_delete` in `views/item.rs`.
 
 use egui::{
-    Align2, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, TextEdit,
-    TextStyle, Ui, Vec2, pos2, vec2,
+    Align2, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, TextStyle,
+    Ui, Vec2, pos2, vec2,
 };
 use egui_material_icons::icons::{ICON_ADD, ICON_CHECK, ICON_PLAYLIST_PLAY};
 use jellyfin::ItemsQuery;
@@ -26,6 +26,8 @@ use crate::theme;
 use crate::toasts::Toast;
 use crate::views::PageCx;
 use crate::widgets::dialog;
+use crate::widgets::focus::{self, Place};
+use crate::widgets::label;
 use crate::widgets::popup::{self, Entry};
 use crate::widgets::text::Load;
 
@@ -227,18 +229,20 @@ impl AddToPlaylist {
     /// The list's contents, in the space [`Self::list`] gives it.
     fn lines(&mut self, ui: &mut Ui, rows: &[Row], chosen: &mut Option<usize>, measured: &mut f32) {
         match &self.playlists {
-            Load::Loading => muted(ui, "Loading playlists…"),
-            Load::Failed(error) => muted(ui, error.clone()),
+            Load::Loading => {
+                ui.label(label::muted(ui, "Loading playlists…"));
+            }
+            Load::Failed(error) => {
+                ui.label(label::muted(ui, error.clone()));
+            }
             Load::Loaded(_) if rows.is_empty() => {
                 let typed = !self.typed.trim().is_empty();
-                muted(
-                    ui,
-                    if typed {
-                        "No playlist has that name."
-                    } else {
-                        "No playlists yet. Type a name to make one."
-                    },
-                );
+                let line = if typed {
+                    "No playlist has that name."
+                } else {
+                    "No playlists yet. Type a name to make one."
+                };
+                ui.label(label::muted(ui, line));
             }
             Load::Loaded(_) => {
                 let pointer_moved = ui.input(|input| input.pointer.delta() != Vec2::ZERO);
@@ -387,7 +391,7 @@ impl EditPlaylist {
                 self.keys(ui);
             }
 
-            muted(ui, "Name");
+            ui.label(label::muted(ui, "Name"));
             let field = ui.add(
                 TextEdit::singleline(&mut self.typed)
                     .interactive(!self.busy)
@@ -402,8 +406,12 @@ impl EditPlaylist {
             }
             ui.add_space(8.);
             match &self.public {
-                Load::Loading => muted(ui, "Checking who can see it…"),
-                Load::Failed(message) => muted(ui, message.clone()),
+                Load::Loading => {
+                    ui.label(label::muted(ui, "Checking who can see it…"));
+                }
+                Load::Failed(message) => {
+                    ui.label(label::muted(ui, message.clone()));
+                }
                 Load::Loaded(public) => {
                     let on = *public;
                     if switch_row(ui, on, self.field == Field::Sharing).clicked() && !self.busy {
@@ -626,12 +634,7 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), line + 2. * padding), Sense::CLICK);
     let tokens = theme::tokens_of(ui);
     if selected {
-        ui.painter().rect_stroke(
-            rect,
-            CornerRadius::same(8),
-            Stroke::new(3., tokens.foreground),
-            StrokeKind::Inside,
-        );
+        focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
     }
     let tick_box = Rect::from_min_size(
         pos2(rect.left() + padding, rect.center().y - line * 0.5),
@@ -664,11 +667,6 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
         tokens.foreground,
     );
     response
-}
-
-/// A line of muted text: what the dialog is waiting for, or why there's nothing to pick.
-fn muted(ui: &mut Ui, text: impl Into<String>) {
-    ui.label(RichText::new(text).color(theme::tokens_of(ui).muted_foreground));
 }
 
 /// The sharing switch takes no widget focus, so the name must let go of the keyboard on the way

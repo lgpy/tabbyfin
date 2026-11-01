@@ -49,6 +49,7 @@ use crate::theme::{self, over_video};
 use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
+use crate::widgets::label;
 use crate::widgets::mascot;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
 use crate::widgets::select;
@@ -1104,7 +1105,7 @@ impl PlayerPage {
                 ui.spacing_mut().item_spacing.y = 8.;
                 match tab {
                     SettingsTab::Audio => {
-                        section_label(ui, "Track");
+                        ui.label(label::overline(ui, "Track").color(over_video::MUTED_FOREGROUND));
                         chosen_audio = track_list(
                             ui,
                             "player-audio",
@@ -1124,7 +1125,7 @@ impl PlayerPage {
                         }
                     }
                     SettingsTab::Subtitles => {
-                        section_label(ui, "Track");
+                        ui.label(label::overline(ui, "Track").color(over_video::MUTED_FOREGROUND));
                         let selected = match menu.subtitle {
                             SubtitleChoice::Stream(index) => index,
                             SubtitleChoice::Off => SUBTITLES_OFF,
@@ -1820,15 +1821,6 @@ fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
 /// bar. It takes no focus: the player's keys are `keys.rs`'s.
 fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
     select::button(ui, vec2(VERSION_W, VERSION_H), name, "Version", false).on_hover_text("Version")
-}
-
-/// A small heading inside a settings tab.
-fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(
-        RichText::new(text)
-            .font(theme::text::font(ui, "xs"))
-            .color(over_video::MUTED_FOREGROUND),
-    );
 }
 
 /// A settings value with its step buttons; `None` unless one was pressed.

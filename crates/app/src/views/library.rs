@@ -26,7 +26,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use egui::{Align, Align2, CornerRadius, FontId, Layout, Response, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
+use egui::{Align, Align2, CornerRadius, FontId, Layout, Response, RichText, Sense, Ui, vec2};
 use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_FILTER_LIST};
 use jellyfin::models::{
     BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemFilterValues, ItemSortBy, QueryResult,
@@ -41,6 +41,7 @@ use crate::task::Task;
 use crate::views::dialogs::AddToPlaylist;
 use crate::views::value_filters::{self, ValueFilters};
 use crate::views::{Page, PageCx};
+use crate::widgets::focus;
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::{CARD_GAP, POSTER_H, POSTER_W};
 use crate::widgets::{backdrop, button, card, select, state};
@@ -49,7 +50,7 @@ use crate::widgets::{backdrop, button, card, select, state};
 const PAGE_SIZE: usize = 100;
 /// `main`'s `px_6` around the toolbar and the grid.
 const GRID_PADDING: f32 = 24.;
-/// Space around a toolbar control for the cursor's ring.
+/// Room at the toolbar's ends for the cursor's ring.
 const RING_GAP: f32 = 3.;
 /// The genres and tags button's width.
 const VALUES_BUTTON_W: f32 = 200.;
@@ -954,7 +955,7 @@ impl LibraryPage {
                 let (response, control) = self.tool(ui, tool);
                 action = action.or(control);
                 if self.cursor.is_selected(TOOLBAR, index) {
-                    ring(ui, &response);
+                    focus::ring_widget(ui, &response);
                 }
                 if tool == Tool::Values {
                     values_button = Some(response);
@@ -977,7 +978,7 @@ impl LibraryPage {
                     let (response, control) = self.tool(ui, tools[index]);
                     action = action.or(control);
                     if self.cursor.is_selected(TOOLBAR, index) {
-                        ring(ui, &response);
+                        focus::ring_widget(ui, &response);
                     }
                 }
                 ui.label(
@@ -1348,16 +1349,6 @@ fn picker(
 ) -> (Response, Option<usize>) {
     let id = ui.make_persistent_id(id);
     select::select(ui, id, width, name, &labels, selected, false)
-}
-
-/// The keyboard's ring around a toolbar control (`main`'s selection ring).
-fn ring(ui: &Ui, response: &Response) {
-    ui.painter().rect_stroke(
-        response.rect.expand(RING_GAP),
-        CornerRadius::same(4),
-        Stroke::new(1.5, crate::theme::tokens_of(ui).brand),
-        StrokeKind::Outside,
-    );
 }
 
 /// The ids of what `query` lists, in order, less the items with any of the excluded `genres` or

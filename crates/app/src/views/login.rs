@@ -17,8 +17,8 @@ use crate::config::SavedServer;
 use crate::session::{self, Session, describe_error};
 use crate::task::{self, Deadline, Receiver, Sender, Task};
 use crate::theme;
-use crate::theme::text;
 use crate::widgets::avatar_row::AvatarRow;
+use crate::widgets::label;
 use crate::widgets::mascot::{self, Watch};
 use crate::widgets::{self, button, field, surface};
 
@@ -332,7 +332,10 @@ impl Login {
                     self.change_server();
                 }
             } else {
-                muted(ui, &format!("Works with Jellyfin {MIN_SUPPORTED_VERSION} or newer"));
+                ui.label(label::muted(
+                    ui,
+                    format!("Works with Jellyfin {MIN_SUPPORTED_VERSION} or newer"),
+                ));
             }
             if self.can_cancel {
                 ui.add_space(surface::GAP_ITEM);
@@ -709,15 +712,6 @@ impl Login {
         ui.add_space(surface::GAP_GROUP);
         surface::waiting(ui, "Waiting for approval…");
     }
-}
-
-/// A line of secondary text: `text_sm` in the muted ink.
-fn muted(ui: &mut egui::Ui, line: &str) {
-    ui.label(
-        egui::RichText::new(line)
-            .font(text::font(ui, "sm"))
-            .color(theme::tokens_of(ui).ink_muted),
-    );
 }
 
 /// Whether `field` is the widget the keyboard goes to. `Response::has_focus` also asks for the

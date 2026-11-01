@@ -23,6 +23,7 @@ use crate::images::ImageCache;
 use crate::item_menu::is_played;
 use crate::theme;
 use crate::theme::text;
+use crate::widgets::focus::{self, Place};
 use crate::widgets::image;
 use crate::widgets::text::{
     CARD_TEXT_H, LANDSCAPE_H, LANDSCAPE_W, PERSON_H, PERSON_W, POSTER_H, POSTER_W, card_text,
@@ -251,12 +252,7 @@ pub fn play_button(ui: &Ui, card: &Response) -> bool {
 /// The keyboard cursor's ring, inside the card's edge so scrolling containers don't clip it.
 fn cursor_ring(ui: &Ui, image: Rect, selected: bool) {
     if selected {
-        ui.painter().rect_stroke(
-            image,
-            CornerRadius::same(image::RADIUS),
-            Stroke::new(3., theme::tokens_of(ui).brand),
-            StrokeKind::Inside,
-        );
+        focus::ring(ui, image, image::RADIUS as f32, Place::Inside);
     }
 }
 
