@@ -114,6 +114,7 @@ All in `crates/app/src/widgets/`.
 - **`focus::ring(ui, rect, radius, Place)`** — the keyboard's ring, wherever the keyboard (egui focus or a page's cursor) sits on something: 2 pt `brand`, the same on every widget and page. `Place::Outside` for free-standing controls (bar buttons, selects, pills, the item page's actions): 2 pt clear of the control, with the control's radius plus the gap, so a circle gets a circle and a pill a pill. `Place::Inside` for rows and cards, on their own edge, since the lists and scroll areas they sit in would clip a ring outside them. **`focus::ring_widget(ui, &response)`** rings an egui `Button` or `TextEdit` on the theme's widget radius. Picked over the old per-page rings (1–3 pt, `brand` or `ink`, square rings round round buttons) by a mockup, 2026-11-01.
 - **`label::muted`, `note`, `title`, `overline`** — the text styles beyond body text, as `RichText`: `muted` is `sm` `ink_muted` (a waiting or empty line, a field's label, an aside), `note` `xs` `ink_muted` (a panel's status or hint), `title` `base` strong `ink` (a panel's or group's title), `overline` `xs` strong capitals in `ink_muted` (a heading over a menu's or a panel's section). Off the cozy inks (the player), recolour with `.color(…)`.
 - **Popups** (`popup::PopupMenu`, `popup::panel`, tooltips, toasts) — a `surface` with its `surface_border` outline and `theme::popup_shadow`, the surface's shadow colour at 0 × 6 offset and 20 blur (a surface's is 12 and 40). **`popup::frame(tokens)`** is that frame without radius or margin. Menus: radius 16, 6 pt round the rows, the highlighted row an `inset_hover` pill concentric with the panel (radius 10), a danger row's highlight `danger` at 14 %, separators in `surface_border`. Tooltips are egui's `Frame::popup`, which `theme::visuals` gives the same frame at radius 10 with a 10 × 6 margin; dialogs set their own frame on the `Modal` so they don't take the tooltip's. Picked by a mockup, 2026-11-01.
+- **`toggle::switch(ui, &mut on, name)`** — an on/off switch, 40 × 22: a pill track sunk like an inset while off (`inset`, `surface_border` outline, `ink_muted` outline and `inset_hover` under the pointer) and filled with `brand` while on (`brand_hover` under the pointer), with a round knob 3 pt inside it, `ink_muted` off and `brand_foreground` on, so the state reads without colour too. The knob slides over egui's animation time (none with the animations setting off). Focusable: Space or Enter flips it, and `focus::ring` sits outside it. A `Switch` to AccessKit, named by the setting, with its state. Settings' flags are switches (C6).
 - **`select::select` / `select::button`** — sunk like a field: `inset` fill, `surface_border` outline that darkens to `ink_muted` under the pointer, `radius_control`, the value in `ink` at `sm` and a muted caret; the keyboard gets `focus::ring` outside it. Its height is the caller's (32 by default, the toolbar's).
 - **Toasts** (`toasts.rs`) — 340 wide in the bottom-right corner, 8 apart, each a popup surface with 14 pt padding: the kind's icon (20 pt, named to AccessKit like a notice's) on the first line, the title in `ink` at `base` over the text in `ink_muted` at `sm` (the text alone is in `ink`), and at the right end, centred on the toast, the action as a compact `brand` button (30 tall, radius 10) and a round close button that fills `inset_hover` on hover. Both buttons are `Sense::CLICK` only, so a toast never takes the keyboard from the player.
 - **`mascot::watching(ui, rect, Watch, shadow)`** — the mascot reacting to the view: `look_at` (a caret or the thing being read), `eyes_shut`, `puzzled`. Its place is allocated first but it's painted last, so it follows this frame's caret. `mascot::loader` and `mascot::confused` remain for pages.
@@ -138,6 +139,24 @@ backdrop (gradient over the window)
 
 The restoring screen is the same backdrop and glow with only the mascot, so a launch that does need the form doesn't flash.
 
+Settings is the full-page template (C6): the panels are the page's sections rather than one form, so the column is left-aligned and the surfaces stack.
+
+```
+backdrop (no glow)
+  menu column (no line beside it)
+    search field (icon inside, clear button at the right while it has text)
+    overline per store, then its sections: inset_hover pill on hover, focus and the open one,
+      which also gets a 3 pt brand bar and a brand icon
+  section column (760 wide at most, centred in what's left)
+    store banner on the backdrop: icon, lg title, muted line (and the server's saving status)
+    surface per section, 24 apart, 24 padding (a lone panel's 28 is too roomy stacked)
+      icon in ink_muted + xl title in ink, left-aligned
+      rows: base label in ink with its control at the right (select, switch, quiet button),
+        sm muted description, xs monospace key
+```
+
+The account section shows the user, server and address as one `AvatarRow` that isn't a button target, with the server's version under it.
+
 ## Behaviour
 
 - **Focus.** Check focus by the focused widget's id (`ctx.memory(|m| m.focused())`), not `Response::has_focus`, which is false while the window lacks the OS's focus. Fields show focus as a 1 pt `brand` outline (as wide as the resting outline, so the field doesn't shrink on focus); everything else takes `focus::ring`.
@@ -155,7 +174,7 @@ The rollout plan is `docs/ROADMAP.md`'s [cozy look backlog](ROADMAP.md#cozy-look
 - **Order.** The component library, then shared pieces (popups, selects, toasts, dialogs), then Settings as the first full page, then the top bar, then the browsing pages. The player goes last and changes least.
 - **Cards and shelves.** Cards stay image-first: no surface around them, image radius `radius_lg` (22 is too round for posters). The cursor ring, progress and played badge use `brand`.
 - **Mascot and glow.** Sign-in, restoring, loaders and empty states only. The glow always goes with the mascot.
-- **Toggles.** A cozy toggle/checkbox (C3). Selects and menus settled in C4 (see *Components*).
+- **Toggles.** The switch landed with Settings (C6, see *Components*); a checkbox row for lists that tick several things (the dialogs) is still open. Selects and menus settled in C4.
 - **The player.** Stays dark (`theme::over_video`) and only borrows `brand` for its accents.
 - **Retiring the classic tokens.** They're aliases since C1; C13 removes them.
 
