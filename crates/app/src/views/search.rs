@@ -24,7 +24,7 @@ use crate::views::dialogs::AddToPlaylist;
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::{CARD_GAP, LANDSCAPE_W, Load, POSTER_W};
-use crate::widgets::{card, state};
+use crate::widgets::{backdrop, card, state};
 
 /// How long the box has to be still before the search goes out (`main`'s debounce).
 const DEBOUNCE: Duration = Duration::from_millis(300);
@@ -279,7 +279,7 @@ fn show_results(
     let mut asked = Asked::default();
     // The page takes the whole width, so the scroll bar sits at its right edge rather than at
     // the end of the widest row of cards.
-    egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+    let area = egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
         ui.add_space(PADDING);
         for (section, group) in rows.iter().enumerate() {
             if section > 0 {
@@ -317,6 +317,7 @@ fn show_results(
         }
         ui.add_space(PADDING);
     });
+    backdrop::scroll_edge(ui, &area);
     if let Some(route) = asked.open {
         cx.nav.push(NavRequest::Push(route));
     }

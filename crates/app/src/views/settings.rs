@@ -43,7 +43,7 @@ use crate::theme;
 use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::{Page, PageCx};
-use crate::widgets::select;
+use crate::widgets::{backdrop, select};
 
 /// The theme choices, in the order the picker lists them.
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -685,7 +685,7 @@ impl Page for SettingsPage {
 impl SettingsPage {
     /// The search box over the two groups of sections.
     fn menu(&mut self, ui: &mut Ui) {
-        egui::ScrollArea::vertical()
+        let area = egui::ScrollArea::vertical()
             .id_salt("settings_menu")
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -708,6 +708,7 @@ impl SettingsPage {
                         }
                     });
             });
+        backdrop::scroll_edge(ui, &area);
     }
 
     /// `main`'s settings search: the search icon inside the field's left padding and, while
@@ -763,7 +764,7 @@ impl SettingsPage {
     /// position of their own, so leaving the search puts the column back where it was.
     fn content(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let searching = self.search.active();
-        egui::ScrollArea::vertical()
+        let area = egui::ScrollArea::vertical()
             .id_salt(("settings_content", searching))
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -801,6 +802,7 @@ impl SettingsPage {
                     });
                 });
             });
+        backdrop::scroll_edge(ui, &area);
     }
 
     /// Every section with a row the search finds (all of them without a search), each store's

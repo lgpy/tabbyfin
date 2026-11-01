@@ -49,6 +49,7 @@ use crate::theme::{self, over_video, text};
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::{self, Page, PageCx, player};
+use crate::widgets::backdrop;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
 
 /// The bar's height, inside the panel's own margin.
@@ -301,25 +302,27 @@ impl Shell {
                 .frame(egui::Frame::NONE.fill(over_video::BACKDROP))
                 .show(ui, |ui| player.show(ui, cx));
         } else {
+            // One backdrop under the bar and the page, as on sign-in: neither panel has a fill,
+            // and a page that scrolls under the bar draws its own edge (`backdrop::scroll_edge`).
+            backdrop::fill(ui.painter(), ui.max_rect(), theme::tokens_of(ui));
             // `main`'s bar keeps its contents 24 points from the window's edges; the pages own
             // their own 24 (or less, for a grid's own padding), so the panel adds none.
             egui::Panel::top("top_bar")
-                .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(24, 0)))
+                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(24, 0)))
+                .show_separator_line(false)
                 .show(ui, |ui| self.top_bar(ui, cx));
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
-                .show(ui, |ui| {
-                    // Each page's widgets and scroll areas live under its own id scope, so stacked
-                    // pages can use the same names for theirs (two `"cast"` shelves, two
-                    // `ScrollArea`s).
-                    let entry = self.stack.last_mut().expect("the page stack is never empty");
-                    let serial = entry.serial;
-                    ui.push_id(serial, |ui| {
-                        // A page rises in as it opens, as `main`'s did (the player takes the
-                        // window on its own, without the entry).
-                        motion::enter(ui, ("page", serial), 0.0, |ui| entry.page.show(ui, cx));
-                    });
+            egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+                // Each page's widgets and scroll areas live under its own id scope, so stacked
+                // pages can use the same names for theirs (two `"cast"` shelves, two
+                // `ScrollArea`s).
+                let entry = self.stack.last_mut().expect("the page stack is never empty");
+                let serial = entry.serial;
+                ui.push_id(serial, |ui| {
+                    // A page rises in as it opens, as `main`'s did (the player takes the
+                    // window on its own, without the entry).
+                    motion::enter(ui, ("page", serial), 0.0, |ui| entry.page.show(ui, cx));
                 });
+            });
         }
         self.navigate(cx);
     }
