@@ -43,6 +43,8 @@ use crate::theme;
 use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::{Page, PageCx};
+use crate::widgets::focus::{self, Place};
+use crate::widgets::label;
 use crate::widgets::{backdrop, select};
 
 /// The theme choices, in the order the picker lists them.
@@ -1363,12 +1365,7 @@ fn menu_heading(ui: &mut Ui, store: Store) {
                 .size(text::font(ui, "sm").size)
                 .color(tokens.muted_foreground),
         );
-        ui.label(
-            RichText::new(store.title().to_uppercase())
-                .font(text::font(ui, "xs"))
-                .strong()
-                .color(tokens.muted_foreground),
-        );
+        ui.label(label::overline(ui, store.title()));
     });
     ui.add_space(HEADING_GAP);
 }
@@ -1389,8 +1386,7 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
         ui.painter().rect_filled(rect, radius, tokens.muted);
     }
     if focused {
-        ui.painter()
-            .rect_stroke(rect, radius, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
+        focus::ring(ui, rect, tokens.radius as f32, Place::Inside);
     }
     let color = match matches {
         Some(0) => tokens.muted_foreground,

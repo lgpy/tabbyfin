@@ -5,11 +5,12 @@
 //! second one after it, so Tab reaches the row and then its removal.
 
 use egui::accesskit::Role;
-use egui::{Align2, Response, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align2, Response, Sense, Ui, WidgetInfo, pos2, vec2};
 use egui_material_icons::icons::ICON_CLOSE;
 
 use crate::theme::{self, text};
 use crate::widgets::avatar;
+use crate::widgets::focus::{self, Place};
 
 const HEIGHT: f32 = 56.;
 const AVATAR_RADIUS: f32 = 18.;
@@ -51,12 +52,7 @@ impl AvatarRow<'_> {
         };
         painter.rect_filled(rect, tokens.radius_control, fill);
         if row.has_focus() {
-            painter.rect_stroke(
-                rect,
-                tokens.radius_control,
-                Stroke::new(1.5, tokens.brand),
-                StrokeKind::Inside,
-            );
+            focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
         }
         let center = pos2(rect.left() + INSET + AVATAR_RADIUS, rect.center().y);
         avatar::paint(ui, center, AVATAR_RADIUS, self.name);

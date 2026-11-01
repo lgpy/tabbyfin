@@ -25,7 +25,7 @@
 use egui::text::LayoutJob;
 use egui::{
     Align, Align2, Color32, CornerRadius, Direction, FontId, Id, Label, Layout, Margin, Rect, RectAlign, Response,
-    RichText, Sense, Stroke, StrokeKind, TextFormat, TextStyle, Ui, UiBuilder, pos2, vec2,
+    RichText, Sense, Stroke, TextFormat, TextStyle, Ui, UiBuilder, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -51,6 +51,7 @@ use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::dialogs::{AddToPlaylist, DeletePlaylist, EditPlaylist};
 use crate::views::{Page, PageCx};
+use crate::widgets::focus::{self, Place};
 use crate::widgets::menu::{self, MenuAction, RefusedMarks};
 use crate::widgets::popup::{Entry, Opened, PopupMenu};
 use crate::widgets::text::{
@@ -238,7 +239,7 @@ const ACTION_ICON: f32 = 24.;
 const ACTION_PADDING: f32 = 16.;
 /// The item's title, `main`'s fixed 40-point `text_size` (it didn't follow the text size).
 const TITLE_SIZE: f32 = 40.;
-/// Between the action buttons, whose cursor rings take 3 px on each side.
+/// Between the action buttons, less the room each side keeps for the cursor's ring.
 const ACTION_GAP: f32 = 16.;
 const ACTION_RING_GAP: f32 = 3.;
 /// The More menu's width.
@@ -1083,12 +1084,7 @@ fn entry_rows(
         let response = entry_row(ui, entry, index, len, playlist, selected, images, asked);
         if selected {
             selected_rect = Some(response.rect);
-            ui.painter().rect_stroke(
-                response.rect,
-                CornerRadius::same(8),
-                Stroke::new(3., theme::tokens_of(ui).foreground),
-                StrokeKind::Inside,
-            );
+            focus::ring(ui, response.rect, 8., Place::Inside);
         }
         if response.clicked() {
             asked.open = Some(Route::for_item(entry));
@@ -1755,12 +1751,7 @@ fn actions_row(
                 }
             };
             if ringed {
-                ui.painter().rect_stroke(
-                    response.rect.expand(ACTION_RING_GAP),
-                    CornerRadius::same(8),
-                    Stroke::new(2., theme::tokens_of(ui).foreground),
-                    StrokeKind::Outside,
-                );
+                focus::ring_widget(ui, &response);
             }
             if response.clicked() {
                 asked.action = Some(action);
@@ -1841,12 +1832,7 @@ fn pickers_row(ui: &mut Ui, data: &ItemData, selected: Option<Position>, version
 fn picker(ui: &mut Ui, name: &str, ringed: bool) -> Response {
     let response = select::button(ui, vec2(PICKER_W, PICKER_H), name, "Version", false);
     if ringed {
-        ui.painter().rect_stroke(
-            response.rect.expand(ACTION_RING_GAP),
-            CornerRadius::same(8),
-            Stroke::new(2., theme::tokens_of(ui).foreground),
-            StrokeKind::Outside,
-        );
+        focus::ring_widget(ui, &response);
     }
     response
 }

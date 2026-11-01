@@ -25,8 +25,8 @@
 
 use egui::accesskit::Role;
 use egui::{
-    Align, Align2, Color32, CornerRadius, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText, Sense,
-    Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, vec2,
+    Align, Align2, Color32, CornerRadius, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText, Sense, Ui,
+    UiBuilder, Vec2, WidgetInfo, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -50,6 +50,8 @@ use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::{self, Page, PageCx, player};
 use crate::widgets::backdrop;
+use crate::widgets::focus::{self, Place};
+use crate::widgets::label;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
 
 /// The bar's height, inside the panel's own margin.
@@ -870,7 +872,12 @@ impl Shell {
             tokens.foreground,
         );
         if highlighted {
-            ring(ui, &response);
+            focus::ring(
+                ui,
+                Rect::from_center_size(center, Vec2::splat(32.)),
+                16.,
+                Place::Outside,
+            );
         }
         let response = response.on_hover_text(tooltip);
         let id = account_menu_id();
@@ -973,8 +980,8 @@ impl Shell {
             }
             None => {
                 header_text(ui, |ui| {
-                    ui.add(egui::Label::new(panel_title(ui, "Watch together")).truncate());
-                    ui.add(egui::Label::new(panel_note(
+                    ui.add(egui::Label::new(label::title(ui, "Watch together")).truncate());
+                    ui.add(egui::Label::new(label::note(
                         ui,
                         "Play in sync with others on this server.",
                     )));
@@ -982,7 +989,7 @@ impl Shell {
                 popup::separator(ui);
                 if state.groups.is_empty() {
                     header_text(ui, |ui| {
-                        ui.add(egui::Label::new(panel_note(
+                        ui.add(egui::Label::new(label::note(
                             ui,
                             "No one is watching together right now.",
                         )));
@@ -1109,7 +1116,7 @@ impl Shell {
             self.search_changed(cx);
         }
         if highlighted && !focused {
-            ring(ui, &response);
+            focus::ring_widget(ui, &response);
         }
     }
 
@@ -1279,7 +1286,7 @@ fn bar_button(ui: &mut Ui, icon: MaterialIcon, tooltip: &str, highlighted: bool,
     let button = theme::selected(ui, selected, button);
     let response = ui.add(button).on_hover_text(tooltip);
     if highlighted {
-        ring(ui, &response);
+        focus::ring_widget(ui, &response);
     }
     response
 }
@@ -1392,19 +1399,6 @@ fn header_text(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
         });
 }
 
-fn panel_title(ui: &Ui, title: &str) -> RichText {
-    RichText::new(title)
-        .font(text::font(ui, "base"))
-        .color(theme::tokens_of(ui).foreground)
-        .strong()
-}
-
-fn panel_note(ui: &Ui, note: &str) -> RichText {
-    RichText::new(note)
-        .font(text::font(ui, "xs"))
-        .color(theme::tokens_of(ui).muted_foreground)
-}
-
 /// Who's in a group, as a sentence: "dev", "dev and ana", "dev, ana and bo".
 fn people(names: &[String]) -> String {
     match names {
@@ -1430,18 +1424,18 @@ fn group_header(ui: &mut Ui, group: &GroupInfo) {
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.;
-                ui.label(panel_note(ui, status));
+                ui.label(label::note(ui, status));
                 let (rect, _) = ui.allocate_exact_size(vec2(8., 8.), Sense::hover());
                 ui.painter().circle_filled(rect.center(), 3.5, dot);
                 // The name takes what's left, so a long one truncates rather than pushing the
                 // state out of the panel.
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    ui.add(egui::Label::new(panel_title(ui, &group.group_name)).truncate());
+                    ui.add(egui::Label::new(label::title(ui, group.group_name.as_str())).truncate());
                 });
             });
         });
-        ui.add(egui::Label::new(panel_note(ui, &format!("With {}", people(&group.participants)))).truncate());
-        ui.add(egui::Label::new(panel_note(
+        ui.add(egui::Label::new(label::note(ui, format!("With {}", people(&group.participants)))).truncate());
+        ui.add(egui::Label::new(label::note(
             ui,
             "Anything you play now plays for everyone in the group.",
         )));
@@ -1457,7 +1451,7 @@ fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scr
     ui.horizontal(|ui| {
         ui.set_height(QUEUE_TOGGLE);
         ui.add_space(popup::INSET);
-        ui.label(panel_note(ui, "Queue"));
+        ui.label(label::note(ui, "Queue"));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 2.;
             // Room for the keyboard's ring inside the panel's edge.
@@ -1667,7 +1661,7 @@ fn icon_toggle(ui: &mut Ui, icon: MaterialIcon, tooltip: &str, on: bool, ringed:
         color,
     );
     if ringed {
-        ring(ui, &response);
+        focus::ring(ui, rect, (tokens.radius_lg - 6) as f32, Place::Outside);
     }
     response.on_hover_text(tooltip)
 }
@@ -1690,16 +1684,6 @@ fn take_horizontal_keys(ctx: &egui::Context) -> bool {
         cancel_focus(ctx);
     }
     left | right
-}
-
-/// The keyboard's ring around a bar item (`main`'s selection ring).
-fn ring(ui: &Ui, response: &Response) {
-    ui.painter().rect_stroke(
-        response.rect.expand(1.),
-        CornerRadius::same(4),
-        Stroke::new(1.5, theme::tokens_of(ui).brand),
-        StrokeKind::Outside,
-    );
 }
 
 /// The account menu's id in egui's popup memory, where `Popup::is_any_open` looks for it.
