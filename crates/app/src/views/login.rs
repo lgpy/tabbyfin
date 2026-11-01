@@ -576,14 +576,11 @@ impl Login {
     fn server_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         for account in self.accounts.clone() {
             let label = account.label();
-            let row = AvatarRow {
-                name: &account.username,
-                title: &account.username,
-                subtitle: account.server_name.as_deref().unwrap_or(&account.url),
-                label: &label,
-                remove: Some("Remove this account"),
-            }
-            .show(ui, self.busy.is_none());
+            let names = [account.username.as_str()];
+            let subtitle = account.server_name.as_deref().unwrap_or(&account.url);
+            let row = AvatarRow::new(&names, &account.username, subtitle, &label)
+                .remove("Remove this account")
+                .show(ui, self.busy.is_none());
             if row.row.clicked() {
                 self.event = Some(LoginEvent::UseAccount(account.clone()));
             }
@@ -679,10 +676,7 @@ impl Login {
         } else {
             (ICON_VISIBILITY, "Show password")
         };
-        if field::trailing(ui, &password, icon, self.busy.is_none())
-            .on_hover_text(tooltip)
-            .clicked()
-        {
+        if field::trailing(ui, &password, icon, tooltip, self.busy.is_none()).clicked() {
             self.show_password = !self.show_password;
         }
         if username_entered {

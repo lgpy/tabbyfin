@@ -279,7 +279,7 @@ const HEVC: Row = Row {
     section: Section::Playback,
     label: "Ask for HEVC when the server transcodes",
     description: "HEVC needs half the bandwidth of H.264 for the same picture, but is much harder for the \
-                  server to encode. Used only if the server allows it (Dashboard → Playback → Transcoding). \
+                  server to encode. Used only if the server allows it (Dashboard › Playback › Transcoding). \
                   Read when the next item starts.",
     key: "prefer_hevc",
     unset: "off",
@@ -420,7 +420,7 @@ const HOME_SECTIONS_NOTE: Row = Row {
     section: Section::Home,
     label: "",
     description: "Which sections Home shows, and the libraries in them, follow your Jellyfin profile \
-                  (Settings → Home in the web client).",
+                  (Settings › Home in the web client).",
     key: "",
     unset: "",
 };
@@ -1080,14 +1080,8 @@ impl SettingsPage {
             let address = session.client.base_url().as_str().trim_end_matches('/').to_owned();
             let subtitle = format!("{server} · {address}");
             let label = format!("Signed in as {} on {subtitle}", session.user.name);
-            AvatarRow {
-                name: &session.user.name,
-                title: &session.user.name,
-                subtitle: &subtitle,
-                label: &label,
-                remove: None,
-            }
-            .show(ui, false);
+            let names = [session.user.name.as_str()];
+            AvatarRow::new(&names, &session.user.name, &subtitle, &label).show(ui, false);
             ui.add_space(surface::GAP_GROUP);
         }
         let version = session.server.version.clone().unwrap_or_else(|| "?".into());

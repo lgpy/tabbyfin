@@ -26,12 +26,12 @@
 use egui::accesskit::Role;
 use egui::{
     Align, Align2, Color32, CornerRadius, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText, Sense, Ui,
-    UiBuilder, Vec2, WidgetInfo, vec2,
+    UiBuilder, WidgetInfo, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICON_LOGOUT,
-    ICON_PLAY_ARROW, ICON_REPEAT, ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
+    ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICON_PLAY_ARROW, ICON_REPEAT,
+    ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
 };
 use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 
@@ -49,10 +49,12 @@ use crate::theme::{self, over_video, text};
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::{self, Page, PageCx, player};
-use crate::widgets::backdrop;
+use crate::widgets::avatar_row::{self, AvatarRow};
+use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
-use crate::widgets::label;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
+use crate::widgets::round_button::{self, RoundButton};
+use crate::widgets::{backdrop, field, label, surface};
 
 /// The bar's height, inside the panel's own margin.
 /// `main`'s bar: 72 points tall, 40-point buttons with 24-point icons.
@@ -70,17 +72,25 @@ const SEARCH_ID: &str = "top_bar_search";
 /// The account menu's width, and its id.
 const ACCOUNT_MENU_W: f32 = 240.;
 const ACCOUNT_MENU: &str = "account_menu";
-/// The SyncPlay panel's width, as `main`'s popover had it.
-const SYNCPLAY_PANEL_W: f32 = 300.;
+/// Where the search icon starts inside the box: the field's own text margin.
+const SEARCH_ICON_INSET: f32 = 12.;
+/// The SyncPlay panel's width: roomier than `main`'s 300 for its avatar rows and padding.
+const SYNCPLAY_PANEL_W: f32 = 340.;
 /// The SyncPlay panel's id in egui's popup memory (egui keeps the keyboard while it's open
 /// only if it is in that memory, as for the account menu), and the id it lives under.
 const SYNCPLAY_PANEL: &str = "syncplay_panel";
 /// How tall the group's queue may grow before it scrolls: the panel hangs from the bar, so a
 /// long queue would otherwise run off the bottom of the window.
 const SYNCPLAY_QUEUE_H: f32 = 320.;
-/// The queue's shuffle and repeat toggles, and the buttons on a queue row.
-const QUEUE_TOGGLE: f32 = 28.;
+/// The queue's shuffle and repeat toggles, the buttons on a queue row, and their icons.
+const QUEUE_TOGGLE: f32 = 30.;
 const QUEUE_BUTTON: f32 = 26.;
+const QUEUE_ICON: f32 = 16.;
+/// A queue row's height at the default text size, the room its place number or play mark takes
+/// at its left end, and the room between the rows and the inset block round them.
+const QUEUE_ROW_H: f32 = 36.;
+const QUEUE_SLOT: f32 = 36.;
+const QUEUE_INSET: f32 = 4.;
 
 /// A choice in the SyncPlay panel, in the order it lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -781,7 +791,7 @@ impl Shell {
                     );
                 }
                 if can_go_back {
-                    let back = bar_button(ui, ICON_ARROW_BACK, "Back", keyboard == Some(BarItem::Back), false);
+                    let back = bar_button(ICON_ARROW_BACK, "Back", keyboard == Some(BarItem::Back)).show(ui);
                     if back.clicked() {
                         // A mouse click leaves no keyboard in the bar, as on `main` going back
                         // focused the page.
@@ -805,24 +815,18 @@ impl Shell {
             |ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 self.account_button(ui, cx, keyboard == Some(BarItem::Account));
-                let settings = bar_button(
-                    ui,
-                    ICON_SETTINGS,
-                    "Settings",
-                    keyboard == Some(BarItem::Settings),
-                    false,
-                );
+                let settings = bar_button(ICON_SETTINGS, "Settings", keyboard == Some(BarItem::Settings)).show(ui);
                 if settings.clicked() {
                     self.toggle_settings(cx);
                 }
-                // Pressed while in a group, as on `main`.
+                // On while in a group, as `main` pressed it.
                 let syncplay = bar_button(
-                    ui,
                     ICON_GROUPS,
                     "Watch together (SyncPlay)",
                     keyboard == Some(BarItem::SyncPlay),
-                    in_group,
-                );
+                )
+                .on(in_group)
+                .show(ui);
                 if syncplay.clicked() {
                     // A click leaves no keyboard in the bar (the panel's keys are
                     // `syncplay_panel_keys`').
@@ -854,32 +858,11 @@ impl Shell {
             Some(server) => format!("{name} on {server}"),
             None => name.clone(),
         };
-        let (rect, response) = ui.allocate_exact_size(vec2(BAR_BUTTON, BAR_BUTTON), Sense::click());
-        // `main`'s avatar: `muted` behind the initial in the foreground colour.
-        let tokens = theme::tokens_of(ui);
-        let fill = if response.hovered() {
-            tokens.accent
-        } else {
-            tokens.muted
-        };
-        let center = rect.center();
-        ui.painter().circle_filled(center, 16., fill);
-        ui.painter().text(
-            center,
-            Align2::CENTER_CENTER,
-            initial(&name),
-            text::font(ui, "base"),
-            tokens.foreground,
-        );
-        if highlighted {
-            focus::ring(
-                ui,
-                Rect::from_center_size(center, Vec2::splat(32.)),
-                16.,
-                Place::Outside,
-            );
-        }
-        let response = response.on_hover_text(tooltip);
+        // The user's avatar, in the colour the sign-in screen gives the same name.
+        let response = RoundButton::avatar(&name, &tooltip)
+            .size(BAR_BUTTON, BAR_ICON)
+            .ringed(highlighted)
+            .show(ui);
         let id = account_menu_id();
         if response.clicked() {
             // A click leaves no keyboard in the bar; the menu takes it from here.
@@ -964,52 +947,62 @@ impl Shell {
     fn syncplay_content(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) -> Option<MenuEntry> {
         let state = &cx.services.syncplay;
         let highlight = self.syncplay_highlight.as_ref().map(|highlight| &highlight.entry);
+        let user = cx.services.session.user.name.as_str();
+        let width = ui.available_width();
+        let radius = theme::tokens_of(ui).radius_control as f32;
         let mut chosen = None;
         match &state.group {
             Some(group) => {
-                group_header(ui, group);
-                popup::separator(ui);
+                let (status, dot) = group_status(ui, group.state);
+                panel_header(
+                    ui,
+                    &group.group_name,
+                    Some((status, dot)),
+                    "Anything you play now plays for everyone here.",
+                );
+                ui.add_space(surface::GAP_GROUP);
+                group_members(ui, group, user);
                 let scroll = std::mem::take(&mut self.syncplay_scroll);
                 if let Some(entry) = group_queue(ui, state, highlight, scroll) {
                     chosen = Some(entry);
                 }
-                let leave = Entry::new("Leave group").icon(ICON_LOGOUT).danger();
-                if popup::row(ui, &leave, true, matches!(highlight, Some(MenuEntry::LeaveGroup))).clicked() {
+                ui.add_space(surface::GAP_GROUP);
+                let leave = button::quiet_danger(ui, "Leave group", width, State::Ready, Focus::Skip);
+                if matches!(highlight, Some(MenuEntry::LeaveGroup)) {
+                    focus::ring(ui, leave.rect, radius, Place::Outside);
+                }
+                if leave.clicked() {
                     chosen = Some(MenuEntry::LeaveGroup);
                 }
             }
             None => {
-                header_text(ui, |ui| {
-                    ui.add(egui::Label::new(label::title(ui, "Watch together")).truncate());
-                    ui.add(egui::Label::new(label::note(
-                        ui,
-                        "Play in sync with others on this server.",
-                    )));
-                });
-                popup::separator(ui);
+                panel_header(ui, "Watch together", None, "Play in sync with others on this server.");
+                ui.add_space(surface::GAP_GROUP);
                 if state.groups.is_empty() {
-                    header_text(ui, |ui| {
-                        ui.add(egui::Label::new(label::note(
-                            ui,
-                            "No one is watching together right now.",
-                        )));
-                    });
+                    nobody_watching(ui);
+                } else {
+                    panel_section(ui, "Join a group", |_| {});
                 }
-                for group in &state.groups {
-                    let watching = format!("{} watching", group.participants.len());
-                    let row = Entry::new(group.group_name.as_str()).icon(ICON_GROUPS).detail(watching);
-                    let highlighted = matches!(highlight, Some(MenuEntry::JoinGroup(id)) if id == &group.group_id);
-                    let response = popup::row(ui, &row, true, highlighted)
-                        .on_hover_text(format!("Join: {}", people(&group.participants)));
-                    if response.clicked() {
+                for (index, group) in state.groups.iter().enumerate() {
+                    if index > 0 {
+                        ui.add_space(surface::GAP_ITEM);
+                    }
+                    if join_row(ui, group, highlight).clicked() {
                         chosen = Some(MenuEntry::JoinGroup(group.group_id.clone()));
                     }
                 }
-                if !state.groups.is_empty() {
-                    popup::separator(ui);
+                ui.add_space(surface::GAP_GROUP);
+                // Joining is the main action while there are groups to join (each row's own
+                // `brand` Join); with none, starting one is.
+                let new_group = if state.groups.is_empty() {
+                    button::brand(ui, "New group", width, State::Ready, Focus::Skip)
+                } else {
+                    button::quiet(ui, "New group", width, State::Ready, Focus::Skip)
+                };
+                if matches!(highlight, Some(MenuEntry::NewGroup)) {
+                    focus::ring(ui, new_group.rect, radius, Place::Outside);
                 }
-                let new_group = Entry::new("New group").icon(ICON_ADD);
-                if popup::row(ui, &new_group, true, matches!(highlight, Some(MenuEntry::NewGroup))).clicked() {
+                if new_group.clicked() {
                     chosen = Some(MenuEntry::NewGroup);
                 }
             }
@@ -1017,20 +1010,13 @@ impl Shell {
         chosen
     }
 
-    /// The search box, centred in the bar while it's open; `rect` is where it is while it opens
-    /// or closes, `opacity` its fade with the button, and `clip` holds the field to that
-    /// rectangle while it moves (the field can't get as narrow as the button).
+    /// The search box at `rect`, in the middle of the bar: sign-in's field (`field::single_line`'s
+    /// font, colours and margin) with the search icon inside its left end and, while it has text,
+    /// a clear button inside its right end.
     fn search_box(&mut self, ui: &mut egui::Ui, rect: Rect, highlighted: bool, cx: &mut PageCx) {
         // `Memory::has_focus`, not `Response::has_focus`: the latter also wants the window to be
         // focused, which an Xvfb display without a window manager never is.
         let focused = ui.ctx().memory(|memory| memory.has_focus(Id::unique(SEARCH_ID)));
-        // `main`'s field puts the search icon inside its left padding, a gap after it, and the
-        // text after that (an input prefix): 10 points, the icon at the text size, and
-        // 6 points between them.
-        let icon = text::icon(ui, ICON_SEARCH.font_family());
-        let icon_size = icon.size;
-        let text_inset = (10. + icon_size + 6.).round() as i8;
-        let clear_inset = (10. + icon_size + 6.).round() as i8;
         let mut clear_clicked = false;
         let response = ui
             .scope_builder(
@@ -1038,59 +1024,59 @@ impl Shell {
                     .max_rect(rect)
                     .layout(Layout::left_to_right(Align::Center)),
                 |ui| {
-                    // The box locks the focus keys: egui must neither move the keyboard on
-                    // Tab nor drop it on Esc before the box reads Esc (`search_box_keys`), or
-                    // the app would stop getting keys until something was clicked.
-                    // `main`'s field was `cleanable`: a clear button at its right end while
-                    // it had text, which leaves the text room as the prefix icon does.
+                    let tokens = theme::tokens_of(ui);
                     let clear = !self.search_text.is_empty();
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.search_text)
-                            .id(Id::unique(SEARCH_ID))
-                            .hint_text("Search")
-                            .desired_width(rect.width())
-                            // `main`'s 40-point field: a `text_sm` line with 10 points above
-                            // and below it, and the icon's room on the left.
-                            .margin(egui::Margin {
-                                left: text_inset,
-                                right: if clear { clear_inset } else { 10 },
-                                top: 9,
-                                bottom: 9,
-                            })
-                            .event_filter(egui::EventFilter {
-                                tab: true,
-                                horizontal_arrows: true,
-                                vertical_arrows: true,
-                                escape: true,
-                            }),
-                    );
+                    // The icon sits in the field's left margin, as `main`'s input prefix did.
+                    let icon_size = text::font(ui, "lg").size + 2.;
+                    let icon_room = SEARCH_ICON_INSET + icon_size + 8.;
+                    let mut field = egui::TextEdit::singleline(&mut self.search_text)
+                        .id(Id::unique(SEARCH_ID))
+                        .font(text::font(ui, "base"))
+                        .text_color(tokens.ink)
+                        .desired_width(rect.width())
+                        .margin(egui::Margin {
+                            left: icon_room.round() as i8,
+                            right: if clear { field::TRAILING as i8 } else { 12 },
+                            top: 9,
+                            bottom: 9,
+                        })
+                        // The box locks the focus keys: egui must neither move the keyboard on
+                        // Tab nor drop it on Esc before the box reads Esc (`search_box_keys`),
+                        // or the app would stop getting keys until something was clicked.
+                        .event_filter(egui::EventFilter {
+                            tab: true,
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
+                            escape: true,
+                        });
+                    // The hint only while the box doesn't have the keyboard, as on sign-in:
+                    // egui keeps it beside the caret, where it reads as typed text.
+                    if !focused {
+                        field = field.hint_text(egui::RichText::new("Search").color(tokens.ink_muted));
+                    }
+                    let response = ui.add(field);
                     // Drawn over the field, or the field's own background would cover it.
-                    ui.painter().text(
-                        egui::pos2(rect.left() + 10. + icon_size / 2., rect.center().y),
-                        Align2::CENTER_CENTER,
-                        ICON_SEARCH.codepoint,
-                        icon.clone(),
-                        theme::tokens_of(ui).muted_foreground,
+                    round_button::glyph(
+                        ui,
+                        egui::pos2(
+                            rect.left() + SEARCH_ICON_INSET + icon_size / 2.,
+                            response.rect.center().y,
+                        ),
+                        ICON_SEARCH,
+                        icon_size,
+                        tokens.ink_muted,
                     );
                     if clear {
-                        let center = egui::pos2(rect.right() - 10. - icon_size / 2., rect.center().y);
                         // Not focusable (R6's rule for painted controls): a Tab that gave egui
-                        // the keyboard would take the box's keys. Its AccessKit name says what
-                        // it does.
-                        let hit = Rect::from_center_size(center, vec2(icon_size + 8., icon_size + 8.));
-                        let button = ui.interact(hit, Id::unique("top_bar_search_clear"), Sense::CLICK);
-                        button.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), "Clear search"));
-                        // `main`'s text button: the foreground at 90 % at rest, and the
-                        // foreground under the pointer.
-                        let tokens = theme::tokens_of(ui);
-                        let color = if button.hovered() {
-                            tokens.foreground
-                        } else {
-                            tokens.foreground.gamma_multiply(0.9)
-                        };
-                        ui.painter()
-                            .text(center, Align2::CENTER_CENTER, ICON_CLOSE.codepoint, icon, color);
-                        clear_clicked = button.clicked();
+                        // the keyboard would take the box's keys.
+                        clear_clicked = field::trailing_button(ui, ICON_CLOSE, "Clear search")
+                            .focus(Focus::Skip)
+                            .show_at(
+                                ui,
+                                field::trailing_center(&response),
+                                Id::unique("top_bar_search_clear"),
+                            )
+                            .clicked();
                     }
                     response
                 },
@@ -1275,20 +1261,12 @@ struct StackEntry {
     page: Box<dyn Page>,
 }
 
-/// A top-bar icon button: every item takes the same slot, with the keyboard's ring around it
+/// A top-bar button: every item takes the same round slot, with the keyboard's ring around it
 /// while the bar's keyboard is on it.
-fn bar_button(ui: &mut Ui, icon: MaterialIcon, tooltip: &str, highlighted: bool, selected: bool) -> Response {
-    // No frame at rest, as `main`'s ghost buttons had; the pointer and the keyboard's ring show
-    // where the button is.
-    let button = egui::Button::new(icon.rich_text().size(BAR_ICON))
-        .min_size(vec2(BAR_BUTTON, BAR_BUTTON))
-        .frame_when_inactive(false);
-    let button = theme::selected(ui, selected, button);
-    let response = ui.add(button).on_hover_text(tooltip);
-    if highlighted {
-        focus::ring_widget(ui, &response);
-    }
-    response
+fn bar_button(icon: MaterialIcon, label: &str, highlighted: bool) -> RoundButton<'_> {
+    RoundButton::icon(icon, label)
+        .size(BAR_BUTTON, BAR_ICON)
+        .ringed(highlighted)
 }
 
 /// The SyncPlay panel's id in egui's popup memory, where `Popup::is_any_open` looks for it.
@@ -1386,19 +1364,6 @@ fn move_target(entries: &[MenuEntry], from: usize, by: isize) -> Option<usize> {
     matches!(entries.get(target), Some(MenuEntry::QueueEntry(_))).then_some(target)
 }
 
-/// The panel's text above its rows, inset to line up with the rows' labels' left edge. Left
-/// aligned: in the panel's justified layout a wrapped line would be stretched to both edges.
-fn header_text(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
-    egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(popup::INSET as i8, 8))
-        .show(ui, |ui| {
-            ui.with_layout(Layout::top_down(Align::Min), |ui| {
-                ui.spacing_mut().item_spacing.y = 2.;
-                content(ui);
-            });
-        });
-}
-
 /// Who's in a group, as a sentence: "dev", "dev and ana", "dev, ana and bo".
 fn people(names: &[String]) -> String {
     match names {
@@ -1408,104 +1373,181 @@ fn people(names: &[String]) -> String {
     }
 }
 
-/// The group's name with its state beside it as a coloured dot, who's in it, and what being in
-/// it means.
-fn group_header(ui: &mut Ui, group: &GroupInfo) {
+/// A group's state as a note and the colour of the dot beside it.
+fn group_status(ui: &Ui, state: GroupState) -> (&'static str, Color32) {
     let tokens = theme::tokens_of(ui);
-    let (status, dot) = match group.state {
+    match state {
         GroupState::Playing => ("Playing", tokens.success),
         GroupState::Waiting => ("Waiting for everyone", tokens.warning),
-        GroupState::Paused => ("Paused", tokens.muted_foreground),
-        GroupState::Idle => ("Nothing playing", tokens.muted_foreground),
-    };
-    header_text(ui, |ui| {
-        // A row is wrapped in `ui.horizontal` so that it measures only itself: a `with_layout`
-        // directly in a vertical `Ui` would take the height left in the panel.
-        ui.horizontal(|ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 6.;
-                ui.label(label::note(ui, status));
+        GroupState::Paused => ("Paused", tokens.ink_muted),
+        GroupState::Idle => ("Nothing playing", tokens.ink_muted),
+    }
+}
+
+/// The panel's top: its title, with `status` at the right end as a dot and a note, over a
+/// muted line saying what the panel is for.
+fn panel_header(ui: &mut Ui, title: &str, status: Option<(&str, Color32)>, line: &str) {
+    // A row is wrapped in `ui.horizontal` so that it measures only itself: a `with_layout`
+    // directly in a vertical `Ui` would take the height left in the panel.
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 6.;
+            if let Some((note, dot)) = status {
+                ui.label(label::note(ui, note));
                 let (rect, _) = ui.allocate_exact_size(vec2(8., 8.), Sense::hover());
-                ui.painter().circle_filled(rect.center(), 3.5, dot);
-                // The name takes what's left, so a long one truncates rather than pushing the
-                // state out of the panel.
-                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    ui.add(egui::Label::new(label::title(ui, group.group_name.as_str())).truncate());
-                });
+                ui.painter().circle_filled(rect.center(), 4., dot);
+            }
+            // The title takes what's left, so a long one truncates rather than pushing the
+            // state out of the panel.
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                let title = label::title(ui, title).font(text::font(ui, "lg"));
+                ui.add(egui::Label::new(title).truncate());
             });
         });
-        ui.add(egui::Label::new(label::note(ui, format!("With {}", people(&group.participants)))).truncate());
-        ui.add(egui::Label::new(label::note(
-            ui,
-            "Anything you play now plays for everyone in the group.",
-        )));
+    });
+    ui.add_space(theme::SPACE.xs);
+    // Left aligned: in the panel's justified layout a wrapped line would be stretched to both
+    // edges.
+    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+        ui.label(label::muted(ui, line));
     });
 }
 
-/// The group's queue: its label with shuffle and repeat beside it, then the entries, the
-/// playing one marked, and a line under them. `highlight` is the entry the keyboard is on, so a
+/// A section's overline, with `right` (its controls) at the other end.
+fn panel_section(ui: &mut Ui, title: &str, right: impl FnOnce(&mut Ui)) {
+    ui.horizontal(|ui| {
+        ui.set_height(QUEUE_TOGGLE);
+        ui.label(label::overline(ui, title));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.;
+            // Room for the keyboard's ring inside the panel's edge.
+            ui.add_space(focus::GAP + focus::WIDTH);
+            right(ui);
+        });
+    });
+    ui.add_space(theme::SPACE.xs);
+}
+
+/// A group to join: its members' avatars, its name, who's in it and what it's doing, and a
+/// `brand` Join at the right end. The whole row joins; clicks only, as the panel reads its own
+/// keys.
+fn join_row(ui: &mut Ui, group: &GroupInfo, highlight: Option<&MenuEntry>) -> Response {
+    let mut names: Vec<&str> = group.participants.iter().map(String::as_str).collect();
+    if names.is_empty() {
+        names.push(&group.group_name);
+    }
+    let (status, dot) = group_status(ui, group.state);
+    let subtitle = format!("{} · {status}", people(&group.participants));
+    let label = format!("Join {}, with {}", group.group_name, people(&group.participants));
+    let highlighted = matches!(highlight, Some(MenuEntry::JoinGroup(id)) if id == &group.group_id);
+    AvatarRow::new(&names, &group.group_name, &subtitle, &label)
+        .status(dot)
+        .action("Join")
+        .highlighted(highlighted)
+        .focus(Focus::Skip)
+        .show(ui, true)
+        .row
+}
+
+/// No groups on the server: the groups icon in a soft circle over a muted line.
+fn nobody_watching(ui: &mut Ui) {
+    let tokens = theme::tokens_of(ui);
+    ui.vertical_centered(|ui| {
+        ui.add_space(theme::SPACE.sm);
+        let (rect, _) = ui.allocate_exact_size(vec2(48., 48.), Sense::hover());
+        ui.painter().circle_filled(rect.center(), 24., tokens.inset_hover);
+        round_button::glyph(ui, rect.center(), ICON_GROUPS, 26., tokens.ink_muted);
+        ui.add_space(theme::SPACE.sm);
+        ui.label(label::muted(ui, "No one is watching together right now."));
+        ui.add_space(theme::SPACE.sm);
+    });
+}
+
+/// Who's in the group, a row each, the user marked "you".
+fn group_members(ui: &mut Ui, group: &GroupInfo, user: &str) {
+    panel_section(ui, &format!("Watching · {}", group.participants.len()), |_| {});
+    for name in &group.participants {
+        avatar_row::person(ui, name, (name == user).then_some("you"));
+    }
+}
+
+/// The group's queue: its overline with shuffle and repeat beside it, then the entries in one
+/// inset block, the playing one marked. `highlight` is the entry the keyboard is on, so a
 /// reordered queue keeps it on the same row.
 fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scroll: bool) -> Option<MenuEntry> {
     let queue = state.queue.as_ref().filter(|queue| !queue.playlist.is_empty())?;
     let mut chosen = None;
-    ui.horizontal(|ui| {
-        ui.set_height(QUEUE_TOGGLE);
-        ui.add_space(popup::INSET);
-        ui.label(label::note(ui, "Queue"));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 2.;
-            // Room for the keyboard's ring inside the panel's edge.
-            ui.add_space(popup::INSET - 4.);
-            // Off, all, one: each press moves to the next, as on `main`.
-            let (icon, tooltip, on) = match queue.repeat_mode {
-                RepeatMode::RepeatNone => (ICON_REPEAT, "Repeat is off", false),
-                RepeatMode::RepeatAll => (ICON_REPEAT, "Repeating the queue", true),
-                RepeatMode::RepeatOne => (ICON_REPEAT_ONE, "Repeating one", true),
-            };
-            let repeat_ringed = matches!(highlight, Some(MenuEntry::CycleRepeat));
-            if icon_toggle(ui, icon, tooltip, on, repeat_ringed).clicked() {
-                chosen = Some(MenuEntry::CycleRepeat);
-            }
-            let shuffled = queue.shuffle_mode == ShuffleMode::Shuffle;
-            let tooltip = if shuffled { "Shuffle is on" } else { "Shuffle is off" };
-            let shuffle_ringed = matches!(highlight, Some(MenuEntry::ToggleShuffle));
-            if icon_toggle(ui, ICON_SHUFFLE, tooltip, shuffled, shuffle_ringed).clicked() {
-                chosen = Some(MenuEntry::ToggleShuffle);
-            }
-        });
+    ui.add_space(surface::GAP_GROUP);
+    panel_section(ui, "Queue", |ui| {
+        // Off, all, one: each press moves to the next, as on `main`.
+        let (icon, tooltip, on) = match queue.repeat_mode {
+            RepeatMode::RepeatNone => (ICON_REPEAT, "Repeat is off", false),
+            RepeatMode::RepeatAll => (ICON_REPEAT, "Repeating the queue", true),
+            RepeatMode::RepeatOne => (ICON_REPEAT_ONE, "Repeating one", true),
+        };
+        let repeat_ringed = matches!(highlight, Some(MenuEntry::CycleRepeat));
+        if queue_toggle(icon, tooltip, on, repeat_ringed).show(ui).clicked() {
+            chosen = Some(MenuEntry::CycleRepeat);
+        }
+        let shuffled = queue.shuffle_mode == ShuffleMode::Shuffle;
+        let tooltip = if shuffled { "Shuffle is on" } else { "Shuffle is off" };
+        let shuffle_ringed = matches!(highlight, Some(MenuEntry::ToggleShuffle));
+        if queue_toggle(ICON_SHUFFLE, tooltip, shuffled, shuffle_ringed)
+            .show(ui)
+            .clicked()
+        {
+            chosen = Some(MenuEntry::ToggleShuffle);
+        }
     });
+    let tokens = theme::tokens_of(ui);
     let last = queue.playlist.len() - 1;
-    egui::ScrollArea::vertical()
-        .max_height(SYNCPLAY_QUEUE_H)
-        .auto_shrink([false, true])
+    egui::Frame::new()
+        .fill(tokens.inset)
+        .stroke(egui::Stroke::new(1., tokens.surface_border))
+        .corner_radius(CornerRadius::same(tokens.radius_control))
+        .inner_margin(egui::Margin::same(QUEUE_INSET as i8))
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.;
-            for (index, entry) in queue.playlist.iter().enumerate() {
-                let name = state.names.get(&entry.item_id).map_or("…", String::as_str);
-                let id = &entry.playlist_item_id;
-                let row = QueueRow {
-                    name,
-                    index,
-                    playing: queue.playing_item_index == index as i32,
-                    first: index == 0,
-                    last: index == last,
-                    highlighted: matches!(highlight, Some(MenuEntry::QueueEntry(on)) if on == id),
-                };
-                let (response, pressed) = queue_row(ui, &row);
-                match pressed {
-                    Some(QueueButton::Up) => state.move_entry(id.clone(), -1),
-                    Some(QueueButton::Down) => state.move_entry(id.clone(), 1),
-                    Some(QueueButton::Remove) => state.remove_entry(id.clone()),
-                    None if response.clicked() => chosen = Some(MenuEntry::QueueEntry(id.clone())),
-                    None => {}
-                }
-                if row.highlighted && scroll {
-                    response.scroll_to_me(Some(Align::Center));
-                }
-            }
+            egui::ScrollArea::vertical()
+                .max_height(SYNCPLAY_QUEUE_H)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.;
+                    for (index, entry) in queue.playlist.iter().enumerate() {
+                        let name = state.names.get(&entry.item_id).map_or("…", String::as_str);
+                        let id = &entry.playlist_item_id;
+                        let row = QueueRow {
+                            name,
+                            index,
+                            playing: queue.playing_item_index == index as i32,
+                            first: index == 0,
+                            last: index == last,
+                            highlighted: matches!(highlight, Some(MenuEntry::QueueEntry(on)) if on == id),
+                        };
+                        let (response, pressed) = queue_row(ui, &row);
+                        match pressed {
+                            Some(QueueButton::Up) => state.move_entry(id.clone(), -1),
+                            Some(QueueButton::Down) => state.move_entry(id.clone(), 1),
+                            Some(QueueButton::Remove) => state.remove_entry(id.clone()),
+                            None if response.clicked() => chosen = Some(MenuEntry::QueueEntry(id.clone())),
+                            None => {}
+                        }
+                        if row.highlighted && scroll {
+                            response.scroll_to_me(Some(Align::Center));
+                        }
+                    }
+                });
         });
-    popup::separator(ui);
     chosen
+}
+
+/// Shuffle or repeat: a small round toggle, ringed while the keyboard is on it, as the bar's
+/// buttons are. Clicks only: the panel reads its own keys.
+fn queue_toggle(icon: MaterialIcon, tooltip: &str, on: bool, ringed: bool) -> RoundButton<'_> {
+    RoundButton::icon(icon, tooltip)
+        .size(QUEUE_TOGGLE, QUEUE_ICON + 2.)
+        .on(on)
+        .ringed(ringed)
+        .focus(Focus::Skip)
 }
 
 /// A queue entry as [`queue_row`] draws it.
@@ -1525,12 +1567,12 @@ enum QueueButton {
     Remove,
 }
 
-/// One queue entry: a play mark on the playing one and the others' place in the queue, the
-/// name, and (on the row the keyboard or the pointer is on) buttons to move and remove it.
-/// Clicking the row plays it for the group. Returns the row and the button pressed.
+/// One queue entry: a `brand` play mark on the playing one and the others' place in the queue,
+/// the name, and (on the row the keyboard or the pointer is on) round buttons to move and remove
+/// it. Clicking the row plays it for the group. Returns the row and the button pressed.
 fn queue_row(ui: &mut Ui, row: &QueueRow) -> (Response, Option<QueueButton>) {
     let tokens = theme::tokens_of(ui);
-    let height = popup::row_height(ui);
+    let height = (text::font(ui, "sm").size + 22.).max(QUEUE_ROW_H);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::CLICK);
     let label = if row.playing {
         format!("{}, playing", row.name)
@@ -1542,26 +1584,22 @@ fn queue_row(ui: &mut Ui, row: &QueueRow) -> (Response, Option<QueueButton>) {
     // rather than its response's hover (which the button takes).
     let active = row.highlighted || ui.rect_contains_pointer(rect);
     if active {
+        // Concentric with the inset block round the rows.
+        let radius = tokens.radius_control - QUEUE_INSET as u8;
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(tokens.radius_lg - 4), tokens.accent);
+            .rect_filled(rect, CornerRadius::same(radius), tokens.inset_hover);
     }
 
-    let slot = Rect::from_min_size(rect.min + vec2(popup::INSET, 0.), vec2(popup::SLOT_W, rect.height()));
+    let slot = egui::pos2(rect.left() + QUEUE_SLOT / 2., rect.center().y);
     if row.playing {
-        ui.painter().text(
-            slot.center(),
-            Align2::CENTER_CENTER,
-            ICON_PLAY_ARROW.codepoint,
-            text::icon(ui, ICON_PLAY_ARROW.font_family()),
-            tokens.foreground,
-        );
+        round_button::glyph(ui, slot, ICON_PLAY_ARROW, QUEUE_ICON + 2., tokens.brand);
     } else {
         ui.painter().text(
-            slot.center(),
+            slot,
             Align2::CENTER_CENTER,
             (row.index + 1).to_string(),
             text::font(ui, "xs"),
-            tokens.muted_foreground,
+            tokens.ink_muted,
         );
     }
 
@@ -1574,27 +1612,30 @@ fn queue_row(ui: &mut Ui, row: &QueueRow) -> (Response, Option<QueueButton>) {
             (QueueButton::Up, ICON_ARROW_UPWARD, "Move up (Alt+Up)", row.first),
         ];
         for (which, icon, tooltip, disabled) in buttons {
-            let button = Rect::from_center_size(
-                egui::pos2(right - QUEUE_BUTTON / 2., rect.center().y),
-                vec2(QUEUE_BUTTON, QUEUE_BUTTON),
-            );
-            right -= QUEUE_BUTTON;
-            if icon_button(ui, button, icon, tooltip, disabled).clicked() {
+            let center = egui::pos2(right - QUEUE_BUTTON / 2., rect.center().y);
+            right -= QUEUE_BUTTON + 2.;
+            let id = ui.scope_id().with(("queue_button", row.index, tooltip));
+            let button = RoundButton::icon(icon, tooltip)
+                .size(QUEUE_BUTTON, QUEUE_ICON)
+                .enabled(!disabled)
+                .focus(Focus::Skip)
+                .show_at(ui, center, id);
+            if button.clicked() {
                 pressed = Some(which);
             }
         }
         right -= 4.;
     } else {
-        right -= popup::INSET - 4.;
+        right -= 8.;
     }
 
-    let left = slot.right() + popup::INSET;
+    let left = rect.left() + QUEUE_SLOT;
     let font = text::font(ui, "sm");
     let mut job = egui::text::LayoutJob::single_section(
         row.name.to_owned(),
         egui::TextFormat {
             font_id: font,
-            color: tokens.foreground,
+            color: tokens.ink,
             ..Default::default()
         },
     );
@@ -1603,67 +1644,9 @@ fn queue_row(ui: &mut Ui, row: &QueueRow) -> (Response, Option<QueueButton>) {
     ui.painter().galley(
         egui::pos2(left, rect.center().y - galley.size().y / 2.),
         galley,
-        tokens.foreground,
+        tokens.ink,
     );
     (response, pressed)
-}
-
-/// A queue row's small icon button at `rect`, dimmed and inert at the queue's ends.
-fn icon_button(ui: &mut Ui, rect: Rect, icon: MaterialIcon, tooltip: &str, disabled: bool) -> Response {
-    let tokens = theme::tokens_of(ui);
-    let sense = if disabled { Sense::hover() } else { Sense::CLICK };
-    let response = ui.interact(rect, ui.scope_id().with((tooltip, rect.min.y as i32)), sense);
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, !disabled, tooltip));
-    if response.hovered() && !disabled {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(tokens.radius_lg - 6), tokens.button_hover);
-    }
-    let color = if disabled {
-        tokens.muted_foreground.gamma_multiply(0.45)
-    } else if response.hovered() {
-        tokens.foreground
-    } else {
-        tokens.muted_foreground
-    };
-    let mut font = text::font(ui, "sm");
-    font.family = icon.font_family();
-    ui.painter()
-        .text(rect.center(), Align2::CENTER_CENTER, icon.codepoint, font, color);
-    if disabled {
-        response
-    } else {
-        response.on_hover_text(tooltip)
-    }
-}
-
-/// Shuffle or repeat: an icon filled with the row highlight's colour while it's on, ringed while
-/// the keyboard is on it, as the bar's buttons are.
-fn icon_toggle(ui: &mut Ui, icon: MaterialIcon, tooltip: &str, on: bool, ringed: bool) -> Response {
-    let tokens = theme::tokens_of(ui);
-    let (rect, response) = ui.allocate_exact_size(vec2(QUEUE_TOGGLE, QUEUE_TOGGLE), Sense::CLICK);
-    response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, tooltip));
-    let radius = CornerRadius::same(tokens.radius_lg - 6);
-    if on {
-        ui.painter().rect_filled(rect, radius, tokens.accent);
-    } else if response.hovered() {
-        ui.painter().rect_filled(rect, radius, tokens.button_hover);
-    }
-    let color = if on || response.hovered() {
-        tokens.foreground
-    } else {
-        tokens.muted_foreground
-    };
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        icon.codepoint,
-        text::icon(ui, icon.font_family()),
-        color,
-    );
-    if ringed {
-        focus::ring(ui, rect, (tokens.radius_lg - 6) as f32, Place::Outside);
-    }
-    response.on_hover_text(tooltip)
 }
 
 /// Cancels the focus move egui queued for a key a menu reads itself, before a widget behind the
@@ -1689,14 +1672,6 @@ fn take_horizontal_keys(ctx: &egui::Context) -> bool {
 /// The account menu's id in egui's popup memory, where `Popup::is_any_open` looks for it.
 fn account_menu_id() -> Id {
     Id::unique(ACCOUNT_MENU)
-}
-
-/// A round badge with the first letter of `name`, standing in for the user's picture.
-fn initial(name: &str) -> String {
-    name.chars()
-        .find(|c| c.is_alphanumeric())
-        .map(|c| c.to_uppercase().collect())
-        .unwrap_or_else(|| "?".into())
 }
 
 /// The app icon at the start of the bar: the 128 px copy rather than the 512 px one the
