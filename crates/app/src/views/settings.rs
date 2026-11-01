@@ -279,7 +279,7 @@ const HEVC: Row = Row {
     section: Section::Playback,
     label: "Ask for HEVC when the server transcodes",
     description: "HEVC needs half the bandwidth of H.264 for the same picture, but is much harder for the \
-                  server to encode. Used only if the server allows it (Dashboard → Playback → Transcoding). \
+                  server to encode. Used only if the server allows it (Dashboard › Playback › Transcoding). \
                   Read when the next item starts.",
     key: "prefer_hevc",
     unset: "off",
@@ -420,7 +420,7 @@ const HOME_SECTIONS_NOTE: Row = Row {
     section: Section::Home,
     label: "",
     description: "Which sections Home shows, and the libraries in them, follow your Jellyfin profile \
-                  (Settings → Home in the web client).",
+                  (Settings › Home in the web client).",
     key: "",
     unset: "",
 };
