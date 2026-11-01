@@ -3,9 +3,12 @@
 
 use egui::accesskit::{Role, Toggled};
 use egui_kittest::kittest::{NodeT as _, Queryable};
+use egui_material_icons::icons::{ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICON_SETTINGS, ICON_SHUFFLE};
 
 use crate::ui_tests::build_harness;
+use crate::widgets::avatar_row::{self, AvatarRow};
 use crate::widgets::button::{self, Focus, State};
+use crate::widgets::round_button::RoundButton;
 use crate::widgets::surface::{self, Kind};
 use crate::widgets::toggle;
 
@@ -81,6 +84,99 @@ fn a_cozy_button_that_skips_focus_still_clicks() {
     ui.get_by_label("Skipped").click();
     ui.run();
     assert!(clicked.get(), "the click didn't register");
+}
+
+/// A round button names itself to AccessKit by its label, a toggle says whether it's on, and
+/// the avatar button is named like the icon ones.
+#[test]
+fn round_buttons_name_themselves_and_toggles_say_whether_they_are_on() {
+    let ui = build_harness(egui::vec2(400., 200.), (), |ui, _| {
+        ui.horizontal(|ui| {
+            RoundButton::icon(ICON_SETTINGS, "Settings").show(ui);
+            RoundButton::icon(ICON_GROUPS, "Watch together").on(true).show(ui);
+            RoundButton::icon(ICON_SHUFFLE, "Shuffle is off").on(false).show(ui);
+            RoundButton::avatar("dev", "dev on Tabbyfin").show(ui);
+        });
+    });
+    for name in ["Settings", "dev on Tabbyfin"] {
+        let button = ui.get_by_role_and_label(Role::Button, name);
+        assert_eq!(button.accesskit_node().toggled(), None, "{name:?} reads as a toggle");
+    }
+    let on = ui.get_by_role_and_label(Role::Button, "Watch together");
+    assert_eq!(on.accesskit_node().toggled(), Some(Toggled::True));
+    let off = ui.get_by_role_and_label(Role::Button, "Shuffle is off");
+    assert_eq!(off.accesskit_node().toggled(), Some(Toggled::False));
+}
+
+/// A round button that skips focus (the search box's clear button, the SyncPlay panel's) is
+/// passed over by Tab but still clicks; a disabled one takes no click.
+#[test]
+fn round_buttons_skip_focus_and_disabled_ones_ignore_clicks() {
+    let clicks = std::rc::Rc::new(std::cell::Cell::new(0));
+    let seen = clicks.clone();
+    let mut ui = build_harness(egui::vec2(400., 200.), String::new(), move |ui, text| {
+        let field = ui.text_edit_singleline(text);
+        if ui.memory(|memory| memory.focused()).is_none() {
+            field.request_focus();
+        }
+        ui.horizontal(|ui| {
+            let skipped = RoundButton::icon(ICON_CLOSE, "Clear").focus(Focus::Skip).show(ui);
+            let disabled = RoundButton::icon(ICON_ARROW_UPWARD, "Move up").enabled(false).show(ui);
+            RoundButton::icon(ICON_SETTINGS, "Reached").show(ui);
+            if skipped.clicked() || disabled.clicked() {
+                seen.set(seen.get() + 1);
+            }
+        });
+    });
+    ui.run();
+    ui.key_press(egui::Key::Tab);
+    ui.run();
+    assert!(
+        !ui.get_by_label("Clear").is_focused(),
+        "Tab stopped on the skipped button"
+    );
+    assert!(
+        ui.get_by_label("Reached").is_focused(),
+        "Tab didn't reach the next button"
+    );
+
+    ui.get_by_label("Clear").click();
+    ui.run();
+    ui.get_by_label("Move up").click();
+    ui.run();
+    assert_eq!(
+        clicks.get(),
+        1,
+        "the skipped button should click and the disabled one not"
+    );
+}
+
+/// A row with an action (a SyncPlay group to join) is one button named by its label: the
+/// `brand` Join is part of it, not a second stop. People listed under a group are list items,
+/// the user's own marked "you".
+#[test]
+fn an_action_row_is_one_button_and_people_are_list_items() {
+    let joined = std::rc::Rc::new(std::cell::Cell::new(false));
+    let seen = joined.clone();
+    let mut ui = build_harness(egui::vec2(400., 300.), (), move |ui, _| {
+        let names = ["ana", "bo"];
+        let row = AvatarRow::new(&names, "Movie night", "ana and bo · Playing", "Join Movie night")
+            .action("Join")
+            .focus(Focus::Skip)
+            .show(ui, true);
+        if row.row.clicked() {
+            seen.set(true);
+        }
+        avatar_row::person(ui, "dev", Some("you"));
+        avatar_row::person(ui, "ana", None);
+    });
+    ui.run();
+    assert!(ui.query_by_label("Join").is_none(), "the action is a second widget");
+    ui.get_by_role_and_label(Role::Button, "Join Movie night").click();
+    ui.run();
+    assert!(joined.get(), "a click on the row didn't join");
+    assert!(ui.query_by_role_and_label(Role::ListItem, "dev, you").is_some());
+    assert!(ui.query_by_role_and_label(Role::ListItem, "ana").is_some());
 }
 
 /// A switch tells AccessKit it's a switch, by its name, with its state; a click and Space (once
