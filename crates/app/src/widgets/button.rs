@@ -53,8 +53,6 @@ pub enum State {
 }
 
 /// Whether a cozy button is a stop for Tab.
-// No screen skips focus yet; the dialogs will (C5 in `docs/ROADMAP.md`).
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
     /// Tab reaches it and Space or Enter presses it, as on the sign-in form.
@@ -90,10 +88,34 @@ pub fn brand(ui: &mut Ui, label: &str, width: f32, state: State, focus: Focus) -
 
 /// A cozy action that isn't the main one: outlined, on the surface, the same size as [`brand`].
 pub fn quiet(ui: &mut Ui, label: &str, width: f32, state: State, focus: Focus) -> Response {
-    let radius = theme::tokens_of(ui).radius_control;
-    let label = RichText::new(label).font(text::font(ui, "base"));
     let color = ui.visuals().widgets.inactive.fg_stroke.color;
-    centred(ui, width, |ui| add(ui, cozy(label, width, radius, focus), state, color))
+    quiet_in(ui, label, None, width, state, focus, color)
+}
+
+/// A [`quiet`] button whose label is in [`theme::Tokens::danger`], for an action that leaves or
+/// loses something but isn't the view's main one (*Leave group*).
+pub fn quiet_danger(ui: &mut Ui, label: &str, width: f32, state: State, focus: Focus) -> Response {
+    let danger = theme::tokens_of(ui).danger;
+    quiet_in(ui, label, Some(danger), width, state, focus, danger)
+}
+
+fn quiet_in(
+    ui: &mut Ui,
+    label: &str,
+    label_color: Option<Color32>,
+    width: f32,
+    state: State,
+    focus: Focus,
+    spinner: Color32,
+) -> Response {
+    let radius = theme::tokens_of(ui).radius_control;
+    let mut label = RichText::new(label).font(text::font(ui, "base"));
+    if let Some(color) = label_color {
+        label = label.color(color);
+    }
+    centred(ui, width, |ui| {
+        add(ui, cozy(label, width, radius, focus), state, spinner)
+    })
 }
 
 /// Adds a cozy button in `state`; a loading one's spinner is in `color`, dimmed with the rest

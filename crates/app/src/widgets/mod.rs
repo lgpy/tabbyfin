@@ -14,6 +14,7 @@ pub mod label;
 pub mod mascot;
 pub mod menu;
 pub mod popup;
+pub mod round_button;
 pub mod select;
 pub mod shelf;
 pub mod state;
