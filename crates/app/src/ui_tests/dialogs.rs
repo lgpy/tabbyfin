@@ -1,12 +1,12 @@
 //! The playlist dialogs (`views/dialogs.rs`) over a page: *Add to playlist*'s rows, and the
 //! buttons every dialog shares (`widgets/dialog.rs`), which leave the keyboard to the dialog.
 
-use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui::accesskit::{Role, Toggled};
+use egui_kittest::kittest::{NodeT as _, Queryable};
 use jellyfin::models::BaseItemDto;
 
 use crate::ui_tests::{ConfigDir, FixtureServer, PageHarness, session};
-use crate::views::dialogs::{AddToPlaylist, DeletePlaylist};
+use crate::views::dialogs::{AddToPlaylist, DeletePlaylist, EditPlaylist};
 use crate::views::{Page, PageCx};
 
 /// A page that only holds a dialog, opened with the page, until the dialog is done.
@@ -17,6 +17,7 @@ struct Host {
 enum Dialog {
     Add(AddToPlaylist),
     Delete(DeletePlaylist),
+    Edit(EditPlaylist),
 }
 
 impl Page for Host {
@@ -28,6 +29,7 @@ impl Page for Host {
         let open = match &mut self.dialog {
             Some(Dialog::Add(dialog)) => dialog.show(cx),
             Some(Dialog::Delete(dialog)) => dialog.show(cx),
+            Some(Dialog::Edit(dialog)) => dialog.show(cx),
             None => return,
         };
         if !open {
@@ -151,5 +153,44 @@ fn delete_confirmation_buttons_take_clicks_not_focus() {
     assert!(
         ui.harness().query_by_label("Delete “Road trip”?").is_none(),
         "Cancel didn't close the confirmation"
+    );
+}
+
+/// The edit dialog's sharing is a switch showing what the server says, flipped by a click and
+/// passed over by Tab, since the dialog moves its own highlight onto it (Down from the name).
+#[test]
+fn edit_dialog_sharing_is_a_switch_that_stays_out_of_tab() {
+    let _config = ConfigDir::new("dialogs-sharing");
+    let server = FixtureServer::start();
+    server.json_value("GET", "/Playlists/p1", &serde_json::json!({ "OpenAccess": false }));
+    let playlist = item("p1", "Road trip", "Playlist", Some(3));
+    let mut ui = PageHarness::new(session(&server), move |cx| {
+        Box::new(Host {
+            dialog: Some(Dialog::Edit(EditPlaylist::new(cx, &playlist))),
+        })
+    });
+    let sharing = "Everyone on this server can see it";
+    ui.step_until("the sharing switch", |harness| {
+        harness.query_by_role_and_label(Role::Switch, sharing).is_some()
+    });
+    let toggled = |ui: &PageHarness| {
+        ui.harness()
+            .get_by_role_and_label(Role::Switch, sharing)
+            .accesskit_node()
+            .toggled()
+    };
+    assert_eq!(toggled(&ui), Some(Toggled::False), "the server's not shared");
+
+    ui.harness().get_by_label(sharing).click();
+    // The click flips it in the frame that reads it; the next frame draws it on.
+    ui.step();
+    ui.step();
+    assert_eq!(toggled(&ui), Some(Toggled::True), "a click shares it");
+
+    ui.harness_mut().key_press(egui::Key::Tab);
+    ui.step();
+    assert!(
+        !ui.harness().get_by_label(sharing).is_focused(),
+        "Tab focused the switch"
     );
 }
