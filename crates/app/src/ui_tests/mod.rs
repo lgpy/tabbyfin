@@ -34,6 +34,7 @@ use crate::services::Services;
 use crate::session::{self, Session};
 use crate::views::{Page, PageCx};
 
+pub mod dialogs;
 pub mod item;
 pub mod library;
 pub mod login;

@@ -273,7 +273,8 @@ pub struct Tokens {
     pub tab_bar: Color32,
     /// A tab's label while it isn't selected (the classic `tab.foreground`).
     pub tab_foreground: Color32,
-    /// A dialog's scrim, which `main`'s dialogs and sheets drew the page under.
+    /// A dialog's scrim, which `main`'s dialogs and sheets drew the page under (the cozy
+    /// [`Self::scrim`] since C5).
     pub overlay: Color32,
 
     /// The radius of controls (`main`'s override of the classic 6).
@@ -302,6 +303,14 @@ pub struct Tokens {
     pub brand: Color32,
     pub brand_hover: Color32,
     pub brand_foreground: Color32,
+    /// A main action that deletes something (a confirmation's *Delete*), and the text on it:
+    /// deeper than `danger` in light so white text on it passes AA, lighter in dark with dark
+    /// text, as `brand` is.
+    pub danger_action: Color32,
+    pub danger_action_hover: Color32,
+    pub danger_action_foreground: Color32,
+    /// The page under a dialog: the theme's darkest plum, see-through.
+    pub scrim: Color32,
     /// The pastel circles behind an account's initial, picked by its name, and the initial's
     /// colour.
     pub avatars: [Color32; 5],
@@ -379,6 +388,12 @@ impl Tokens {
         brand: Color32::from_rgb(0x7b, 0x4f, 0xb0),
         brand_hover: Color32::from_rgb(0x6a, 0x42, 0x9e),
         brand_foreground: Color32::WHITE,
+        // White on it is 4.8:1.
+        danger_action: Color32::from_rgb(0xdc, 0x26, 0x26),
+        danger_action_hover: Color32::from_rgb(0xb9, 0x1c, 0x1c),
+        danger_action_foreground: Color32::WHITE,
+        // The ink at 30 %.
+        scrim: Color32::from_rgba_unmultiplied_const(0x1f, 0x18, 0x2b, 77),
         avatars: AVATARS,
         avatar_foreground: Color32::from_rgb(0x1d, 0x12, 0x30),
         radius_surface: 22,
@@ -433,6 +448,12 @@ impl Tokens {
         brand: Color32::from_rgb(0xc3, 0x96, 0xe7),
         brand_hover: Color32::from_rgb(0xd2, 0xad, 0xf0),
         brand_foreground: Color32::from_rgb(0x1d, 0x12, 0x30),
+        // The ink on it is 6.3:1.
+        danger_action: Color32::from_rgb(0xf8, 0x71, 0x71),
+        danger_action_hover: Color32::from_rgb(0xfc, 0xa5, 0xa5),
+        danger_action_foreground: Color32::from_rgb(0x1d, 0x12, 0x30),
+        // The backdrop's top end at 60 %.
+        scrim: Color32::from_rgba_unmultiplied_const(0x0e, 0x0b, 0x16, 153),
         avatars: AVATARS,
         avatar_foreground: Color32::from_rgb(0x1d, 0x12, 0x30),
         radius_surface: 22,
@@ -440,8 +461,7 @@ impl Tokens {
     };
 
     /// The classic names as aliases of the cozy tokens, so code that reads `background` or
-    /// `primary` draws in the cozy palette without changing. The scrim (`overlay`), the text
-    /// selection, the status colours, `radius_lg` (cards and popups) and the tab bar's
+    /// `primary` draws in the cozy palette without changing. The text selection, the status colours, `radius_lg` (cards and popups) and the tab bar's
     /// foreground keep their own values.
     const fn cozy_aliases(self) -> Self {
         Self {
@@ -466,6 +486,7 @@ impl Tokens {
             popover: self.surface,
             tab_bar: self.inset,
             tab_foreground: self.ink_muted,
+            overlay: self.scrim,
             radius: self.radius_control,
             ..self
         }
@@ -1050,6 +1071,7 @@ mod tests {
             assert_eq!(tokens.primary, tokens.brand);
             assert_eq!(tokens.primary_foreground, tokens.brand_foreground);
             assert_eq!(tokens.primary_hover, tokens.brand_hover);
+            assert_eq!(tokens.overlay, tokens.scrim, "a dialog dims the page in plum");
             assert_eq!(tokens.popover, tokens.surface);
             assert_eq!(tokens.button, tokens.surface);
             assert_eq!(tokens.border, tokens.surface_border);

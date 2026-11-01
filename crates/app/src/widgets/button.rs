@@ -1,6 +1,7 @@
 //! A button's contents with a material icon before the label, as `main`'s buttons had them: the
 //! library toolbar's, the item page's actions, the SyncPlay panel's toggles. And the cozy look's
-//! buttons: [`brand`] for a screen's main action, [`quiet`] for the ones beside it.
+//! buttons: [`brand`] for a screen's main action (or [`danger`] when it deletes something),
+//! [`quiet`] for the ones beside it.
 
 use egui::text::LayoutJob;
 use egui::{
@@ -53,8 +54,6 @@ pub enum State {
 }
 
 /// Whether a cozy button is a stop for Tab.
-// No screen skips focus yet; the dialogs will (C5 in `docs/ROADMAP.md`).
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
     /// Tab reaches it and Space or Enter presses it, as on the sign-in form.
@@ -68,23 +67,42 @@ pub enum Focus {
 /// centred.
 pub fn brand(ui: &mut Ui, label: &str, width: f32, state: State, focus: Focus) -> Response {
     let tokens = theme::tokens_of(ui);
-    let label = RichText::new(label)
-        .font(text::font(ui, "base"))
-        .color(tokens.brand_foreground);
+    let colors = [tokens.brand, tokens.brand_hover, tokens.brand_foreground];
+    filled(ui, label, width, state, focus, colors)
+}
+
+/// [`brand`] for a main action that deletes something, in
+/// [`theme::Tokens::danger_action`].
+pub fn danger(ui: &mut Ui, label: &str, width: f32, state: State, focus: Focus) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let colors = [
+        tokens.danger_action,
+        tokens.danger_action_hover,
+        tokens.danger_action_foreground,
+    ];
+    filled(ui, label, width, state, focus, colors)
+}
+
+/// A cozy button filled with `fill`, `hover` under the pointer, its label in `ink`.
+fn filled(
+    ui: &mut Ui,
+    label: &str,
+    width: f32,
+    state: State,
+    focus: Focus,
+    [fill, hover, ink]: [Color32; 3],
+) -> Response {
+    let radius = theme::tokens_of(ui).radius_control;
+    let label = RichText::new(label).font(text::font(ui, "base")).color(ink);
     centred(ui, width, |ui| {
         let widgets = &mut ui.visuals_mut().widgets;
         for visuals in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.active] {
-            visuals.weak_bg_fill = tokens.brand;
+            visuals.weak_bg_fill = fill;
             visuals.bg_stroke = Stroke::NONE;
         }
-        widgets.hovered.weak_bg_fill = tokens.brand_hover;
-        widgets.active.weak_bg_fill = tokens.brand_hover;
-        add(
-            ui,
-            cozy(label, width, tokens.radius_control, focus),
-            state,
-            tokens.brand_foreground,
-        )
+        widgets.hovered.weak_bg_fill = hover;
+        widgets.active.weak_bg_fill = hover;
+        add(ui, cozy(label, width, radius, focus), state, ink)
     })
 }
 
