@@ -1,4 +1,5 @@
-//! A select: a bordered box with the chosen value's name and a caret, which opens a
+//! A select: a box sunk into the page like a cozy text field, with the chosen value's name and
+//! a caret, which opens a
 //! [`PopupMenu`] of the choices with the chosen one checked. Every select in the app is one (the
 //! library's toolbar, the Settings pickers, the item page's and the player's version pickers),
 //! so they look alike and their lists walk with the keyboard like any menu.
@@ -18,11 +19,12 @@ use egui_material_icons::icons::ICON_ARROW_DROP_DOWN;
 
 use crate::keys;
 use crate::theme::{self, text};
+use crate::widgets::focus;
 use crate::widgets::popup::{Entry, Opened, PopupMenu};
 
 /// The caret's size, and the room left and right of the name and caret.
 const CARET: f32 = 16.;
-const INSET: f32 = 10.;
+const INSET: f32 = 12.;
 
 /// A select under `id` over `labels` with `selected` chosen, `width` points wide and as tall as
 /// the theme's inputs. A click opens its menu; when `focusable`, egui's focus can rest on it and
@@ -82,19 +84,25 @@ pub fn button(ui: &mut Ui, size: Vec2, value: &str, name: &str, focusable: bool)
         info.current_text_value = Some(value.to_owned());
         info
     });
+    // Sunk like a text field: `inset` with the field's outline, which darkens under the pointer
+    // as a field's does. The keyboard gets the shared ring.
     let tokens = theme::tokens_of(ui);
-    let fill = if response.hovered() {
-        tokens.accent
+    let outline = if response.hovered() {
+        tokens.ink_muted
     } else {
-        tokens.input_background()
+        tokens.surface_border
     };
-    let stroke = if response.has_focus() {
-        Stroke::new(2., tokens.foreground)
-    } else {
-        Stroke::new(1., tokens.input)
-    };
-    let radius = CornerRadius::same(tokens.radius);
-    ui.painter().rect(rect, radius, fill, stroke, StrokeKind::Inside);
+    let radius = tokens.radius_control;
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(radius),
+        tokens.inset,
+        Stroke::new(1., outline),
+        StrokeKind::Inside,
+    );
+    if response.has_focus() {
+        focus::ring(ui, rect, radius as f32, focus::Place::Outside);
+    }
 
     // Painted rather than a `Label`, which would be a second AccessKit node with the value. A
     // value too long for the box ends in an ellipsis.
@@ -102,7 +110,7 @@ pub fn button(ui: &mut Ui, size: Vec2, value: &str, name: &str, focusable: bool)
         value.to_owned(),
         TextFormat {
             font_id: text::font(ui, "sm"),
-            color: tokens.foreground,
+            color: tokens.ink,
             ..Default::default()
         },
     );
@@ -111,14 +119,14 @@ pub fn button(ui: &mut Ui, size: Vec2, value: &str, name: &str, focusable: bool)
     ui.painter().galley(
         pos2(rect.left() + INSET, rect.center().y - galley.size().y / 2.),
         galley,
-        tokens.foreground,
+        tokens.ink,
     );
     ui.painter().text(
         pos2(rect.right() - INSET - CARET / 2. + 4., rect.center().y),
         Align2::CENTER_CENTER,
         ICON_ARROW_DROP_DOWN.codepoint,
         text::icon(ui, ICON_ARROW_DROP_DOWN.font_family()),
-        tokens.muted_foreground,
+        tokens.ink_muted,
     );
     response
 }

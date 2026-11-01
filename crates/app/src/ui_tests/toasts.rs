@@ -91,3 +91,27 @@ fn the_oldest_go_when_too_many_pile_up() {
         assert!(ui.query_by_label(&i.to_string()).is_some(), "toast {i} went");
     }
 }
+
+/// The action is a button at the toast's right end, after the text and before the close
+/// button, and the kind's icon tells a screen reader what kind of toast it is.
+#[test]
+fn the_action_sits_at_the_right_end() {
+    let mut toasts = Toasts::default();
+    toasts.push(
+        Toast::info("Tabbyfin 0.9.0 is out.")
+            .title("Update available")
+            .action("Download", ToastAction::OpenUrl("https://example.com".into())),
+    );
+    let ui = toast_harness(toasts);
+
+    let text = ui.get_by_label("Tabbyfin 0.9.0 is out.").rect();
+    let action = ui.get_by_label("Download").rect();
+    let close = ui.get_by_label("Close").rect();
+    assert!(text.max.x < action.min.x, "the action isn't after the text");
+    assert!(action.max.x <= close.min.x, "the action isn't before the close button");
+    assert!(
+        (action.center().y - close.center().y).abs() < 1.,
+        "the buttons aren't on one line"
+    );
+    assert!(ui.query_by_role_and_label(Role::Image, "Information").is_some());
+}
