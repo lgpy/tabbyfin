@@ -1,10 +1,11 @@
 //! The cozy look's text fields: a muted label above a roomy single-line field, sunk into the
 //! surface (the fill and outline come from the theme's visuals, `theme::visuals`).
 
-use egui::{CursorIcon, FontId, Id, Margin, Rect, Response, RichText, Sense, TextBuffer, TextEdit, Ui, Vec2, pos2};
+use egui::{Id, Margin, Pos2, Response, RichText, TextBuffer, TextEdit, Ui, pos2};
 use egui_material_icons::MaterialIcon;
 
 use crate::theme::{self, text};
+use crate::widgets::round_button::RoundButton;
 
 /// A field's name above it, in the muted ink.
 pub fn label(ui: &mut Ui, label: &str) {
@@ -50,34 +51,22 @@ pub fn with_trailing<'t>(ui: &Ui, id: Id, text: &'t mut dyn TextBuffer, hint: &s
 }
 
 /// An icon inside `field`'s right end that acts as a button, such as a password's show/hide
-/// toggle. Painted rather than an `egui::Button`, whose hover frame drew a box inside the field;
-/// it rests in the muted ink and darkens over a soft circle while hovered. Not allocated, so
-/// it sits over the field rather than after it.
-pub fn trailing(ui: &mut Ui, field: &Response, icon: MaterialIcon, enabled: bool) -> Response {
-    let size = TRAILING - 8.;
-    let rect = Rect::from_center_size(
-        pos2(field.rect.right() - TRAILING / 2., field.rect.center().y),
-        Vec2::splat(size),
-    );
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
-    let response = ui.interact(rect, field.id.with("trailing"), sense);
-    let tokens = theme::tokens_of(ui);
-    let hovered = enabled && response.hovered();
-    if hovered {
-        ui.painter().circle_filled(rect.center(), size / 2., tokens.inset_hover);
-    }
-    let color = if hovered { tokens.ink } else { tokens.ink_muted };
-    let color = if enabled { color } else { color.gamma_multiply(0.5) };
-    // The icon font's glyphs sit low in their line, so they're centred by their own bounds
-    // rather than the line's.
-    let font = FontId::new(text::font(ui, "lg").size, icon.font_family());
-    let galley = ui.painter().layout_no_wrap(icon.codepoint.to_owned(), font, color);
-    let glyph = galley.rows.first().map_or(galley.rect, |row| row.rect());
-    ui.painter()
-        .galley(rect.center() - glyph.center().to_vec2(), galley, color);
-    if enabled {
-        response.on_hover_cursor(CursorIcon::PointingHand)
-    } else {
-        response
-    }
+/// toggle, named and tooltipped by `label`. A [`RoundButton`] rather than an `egui::Button`,
+/// whose hover frame drew a box inside the field. Not allocated, so it sits over the field
+/// rather than after it.
+pub fn trailing(ui: &mut Ui, field: &Response, icon: MaterialIcon, label: &str, enabled: bool) -> Response {
+    trailing_button(ui, icon, label)
+        .enabled(enabled)
+        .show_at(ui, trailing_center(field), field.id.with("trailing"))
+}
+
+/// A [`trailing`] button sized for `ui`'s text, for a caller that sets more of it (its focus)
+/// before showing it at [`trailing_center`].
+pub fn trailing_button<'a>(ui: &Ui, icon: MaterialIcon, label: &'a str) -> RoundButton<'a> {
+    RoundButton::icon(icon, label).size(TRAILING - 8., text::font(ui, "lg").size)
+}
+
+/// Where a [`trailing`] button's centre is in `field`.
+pub fn trailing_center(field: &Response) -> Pos2 {
+    pos2(field.rect.right() - TRAILING / 2., field.rect.center().y)
 }
