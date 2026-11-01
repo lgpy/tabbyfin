@@ -38,9 +38,11 @@ use crate::theme::{self, text};
 
 /// A menu's width unless the caller sets one.
 pub const WIDTH: f32 = 220.;
+/// The panel's corner radius: between a control's (`radius_control`, 12) and a surface's (22).
+pub const RADIUS: u8 = 16;
 /// The room between the panel's edge and its rows. A row's corners are the panel's radius less
 /// this, so they sit concentric inside the panel's.
-const PAD: f32 = 4.;
+const PAD: f32 = 6.;
 /// A row's height at the default text size; larger text makes the rows taller.
 const ROW_H: f32 = 34.;
 /// The room left and right of a row's contents, and between its icon and label.
@@ -376,17 +378,9 @@ fn show_panel<R>(
         1.
     };
     let tokens = theme::tokens(&ctx.global_style().visuals);
-    let frame = egui::Frame::new()
-        .fill(tokens.popover)
-        .stroke(Stroke::new(1., tokens.border))
-        .corner_radius(CornerRadius::same(tokens.radius_lg))
-        .inner_margin(Margin::same(PAD as i8))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 8],
-            blur: 24,
-            spread: 0,
-            color: Color32::from_black_alpha(if tokens.dark { 140 } else { 36 }),
-        });
+    let frame = frame(tokens)
+        .corner_radius(CornerRadius::same(RADIUS))
+        .inner_margin(Margin::same(PAD as i8));
     egui::Popup::new(id, ctx, anchor_at, anchor.layer_id)
         .kind(egui::PopupKind::Popup)
         .open_memory(open_memory)
@@ -405,6 +399,16 @@ fn show_panel<R>(
         })
         .map(|shown| shown.inner)
 }
+/// A popup's frame, without its radius and margin: a surface with its outline and a smaller
+/// version of its shadow ([`theme::popup_shadow`]). Menus and toasts draw in it, and tooltips in
+/// egui's `Frame::popup`, which `theme::visuals` gives the same fill, outline and shadow.
+pub fn frame(tokens: &theme::Tokens) -> egui::Frame {
+    egui::Frame::new()
+        .fill(tokens.surface)
+        .stroke(Stroke::new(1., tokens.surface_border))
+        .shadow(theme::popup_shadow(tokens))
+}
+
 fn state_id(id: Id) -> Id {
     id.with("popup_menu_state")
 }
@@ -465,21 +469,21 @@ pub fn separator(ui: &mut Ui) {
     ui.painter().hline(
         (rect.left() - PAD)..=(rect.right() + PAD),
         y,
-        Stroke::new(1., theme::tokens_of(ui).border),
+        Stroke::new(1., theme::tokens_of(ui).surface_border),
     );
 }
 
 fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlighted: bool) {
     let tokens = theme::tokens_of(ui);
     let painter = ui.painter();
-    let color = if entry.danger { tokens.danger } else { tokens.foreground };
+    let color = if entry.danger { tokens.danger } else { tokens.ink };
     if highlighted {
         let fill = if entry.danger {
             tokens.danger.gamma_multiply(0.14)
         } else {
-            tokens.accent
+            tokens.inset_hover
         };
-        painter.rect_filled(rect, CornerRadius::same(tokens.radius_lg - PAD as u8), fill);
+        painter.rect_filled(rect, CornerRadius::same(RADIUS - PAD as u8), fill);
     }
 
     let mut x = rect.left() + ROW_INSET;
@@ -503,12 +507,12 @@ fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlighted: bool) 
 
     let mut right = rect.right() - ROW_INSET;
     if let Some(detail) = &entry.detail {
-        let galley = painter.layout_no_wrap(detail.to_string(), text::font(ui, "xs"), tokens.muted_foreground);
+        let galley = painter.layout_no_wrap(detail.to_string(), text::font(ui, "xs"), tokens.ink_muted);
         right -= galley.size().x;
         painter.galley(
             pos2(right, rect.center().y - galley.size().y / 2.),
             galley,
-            tokens.muted_foreground,
+            tokens.ink_muted,
         );
         right -= ROW_INSET;
     }

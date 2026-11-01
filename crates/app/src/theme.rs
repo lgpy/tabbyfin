@@ -470,18 +470,6 @@ impl Tokens {
             ..self
         }
     }
-
-    /// The fill of an input or a select, the classic `input_background`: in the dark theme the
-    /// `input` colour at 70 %, so the surface behind it shows through; in the light theme the
-    /// background itself. The player's version picker reads it, over the picture.
-    pub fn input_background(&self) -> Color32 {
-        if self.dark {
-            let [r, g, b, _] = self.input.to_srgba_unmultiplied();
-            Color32::from_rgba_unmultiplied(r, g, b, 179)
-        } else {
-            self.background
-        }
-    }
 }
 
 /// The tokens the theme `visuals` draws in: the light or dark set, by its `dark_mode`. The player
@@ -550,6 +538,20 @@ pub const SPACE: Space = Space {
     xxl: 32.,
 };
 
+/// A tooltip's corner radius.
+const TOOLTIP_RADIUS: u8 = 10;
+
+/// A popup's shadow (menus, tooltips, toasts): the surface's colour, closer and tighter than a
+/// surface's own.
+pub fn popup_shadow(tokens: &Tokens) -> egui::epaint::Shadow {
+    egui::epaint::Shadow {
+        offset: [0, 6],
+        blur: 20,
+        spread: 0,
+        color: tokens.surface_shadow,
+    }
+}
+
 /// egui's [`egui::Visuals`] from `tokens`: what egui's own widgets (buttons, checkboxes, text
 /// fields, menus, scroll areas, separators) draw with.
 fn visuals(tokens: &Tokens) -> egui::Visuals {
@@ -571,8 +573,11 @@ fn visuals(tokens: &Tokens) -> egui::Visuals {
     visuals.window_fill = tokens.popover;
     visuals.window_stroke = Stroke::new(1., tokens.border);
     visuals.window_corner_radius = egui::CornerRadius::same(tokens.radius_lg);
-    // `main`'s popups were rounded like a dialog (`rounded_lg`).
-    visuals.menu_corner_radius = egui::CornerRadius::same(tokens.radius_lg);
+    // egui's `Frame::popup`, which is what a tooltip draws in: the popup menu's surface and
+    // shadow (`widgets::popup`), at a smaller radius. Dialogs keep their own frame
+    // (`widgets::dialog`).
+    visuals.menu_corner_radius = egui::CornerRadius::same(TOOLTIP_RADIUS);
+    visuals.popup_shadow = popup_shadow(tokens);
     // A text field is sunk in `inset`, with an `input` outline.
     visuals.extreme_bg_color = tokens.inset;
     visuals.text_edit_bg_color = Some(tokens.inset);
@@ -643,7 +648,8 @@ fn spacing() -> egui::Spacing {
     let mut spacing = egui::Spacing {
         item_spacing: egui::vec2(SPACE.sm, SPACE.xs),
         button_padding: egui::vec2(10., SPACE.xs),
-        menu_margin: egui::Margin::same(SPACE.xs as i8),
+        // A tooltip's room round its text.
+        menu_margin: egui::Margin::symmetric(10, 6),
         window_margin: egui::Margin::same(SPACE.sm as i8),
         // `main`'s buttons and text fields are 32 points tall.
         interact_size: egui::vec2(40., 32.),
@@ -1078,11 +1084,6 @@ mod tests {
         // The player's menu reads these: the segmented tab bar.
         assert_eq!(tokens.tab_bar, egui::Color32::from_rgb(0x17, 0x17, 0x17));
         assert_eq!(tokens.tab_foreground, egui::Color32::from_rgb(0xd4, 0xd4, 0xd4));
-        // `input_background`: the input colour at 70 % in dark.
-        assert_eq!(
-            tokens.input_background().to_srgba_unmultiplied(),
-            [0x2f, 0x2f, 0x2f, 179]
-        );
     }
 
     #[test]
@@ -1109,7 +1110,9 @@ mod tests {
             // painted with before the tokens were read directly.
             assert_eq!(visuals.strong_text_color(), tokens.foreground);
             assert_eq!(visuals.widgets.inactive.corner_radius.nw, tokens.radius);
-            assert_eq!(visuals.menu_corner_radius.nw, tokens.radius_lg);
+            // Tooltips: the popups' shadow at a smaller radius.
+            assert_eq!(visuals.menu_corner_radius.nw, super::TOOLTIP_RADIUS);
+            assert_eq!(visuals.popup_shadow.color, tokens.surface_shadow);
         }
     }
 

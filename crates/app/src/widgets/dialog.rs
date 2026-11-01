@@ -20,13 +20,22 @@ pub fn show<R>(
     title: &str,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> ModalResponse<R> {
-    let backdrop = theme::tokens(&ctx.style_of(ctx.theme()).visuals).overlay;
-    egui::Modal::new(id).backdrop_color(backdrop).show(ctx, |ui| {
-        ui.set_width(width);
-        ui.heading(title);
-        ui.add_space(TITLE_GAP);
-        contents(ui)
-    })
+    let style = ctx.style_of(ctx.theme());
+    let tokens = theme::tokens(&style.visuals);
+    // egui's default is `Frame::popup`, which is a tooltip's now: the dialog keeps the radius
+    // and margin it had until C5 restyles it.
+    let frame = egui::Frame::popup(&style)
+        .corner_radius(tokens.radius_lg)
+        .inner_margin(theme::SPACE.xs);
+    egui::Modal::new(id)
+        .backdrop_color(tokens.overlay)
+        .frame(frame)
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            ui.heading(title);
+            ui.add_space(TITLE_GAP);
+            contents(ui)
+        })
 }
 
 /// The dialog's buttons, right-aligned on a row of their own: `add` adds them right to left, so
