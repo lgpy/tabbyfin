@@ -672,11 +672,11 @@ impl PlayerPage {
                     cx.services.control(UiCommand::TogglePause);
                     self.show_controls();
                 }
-                if control_button(ui, ICON_FAST_REWIND, "Back 10 s (←)").clicked() {
+                if control_button(ui, ICON_FAST_REWIND, "Back 10 s (Left)").clicked() {
                     cx.services.control(UiCommand::SeekBy(-SEEK_STEP));
                     self.show_controls();
                 }
-                if control_button(ui, ICON_FAST_FORWARD, "Forward 10 s (→)").clicked() {
+                if control_button(ui, ICON_FAST_FORWARD, "Forward 10 s (Right)").clicked() {
                     cx.services.control(UiCommand::SeekBy(SEEK_STEP));
                     self.show_controls();
                 }

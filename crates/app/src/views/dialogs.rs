@@ -14,11 +14,8 @@
 
 use egui::accesskit::Role;
 use egui::text::{LayoutJob, TextWrapping};
-use egui::{
-    Align2, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke, StrokeKind, TextStyle, Ui, Vec2,
-    WidgetInfo, pos2, vec2,
-};
-use egui_material_icons::icons::{ICON_ADD, ICON_CHECK, ICON_PLAYLIST_PLAY};
+use egui::{FontId, Key, Modifiers, Response, Sense, Ui, Vec2, WidgetInfo, pos2, vec2};
+use egui_material_icons::icons::{ICON_ADD, ICON_PLAYLIST_PLAY};
 use jellyfin::ItemsQuery;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 
@@ -27,11 +24,11 @@ use crate::task::Task;
 use crate::theme::{self, text};
 use crate::toasts::Toast;
 use crate::views::PageCx;
-use crate::widgets::button::State;
+use crate::widgets::button::{Focus, State};
 use crate::widgets::focus::{self, Place};
 use crate::widgets::popup;
 use crate::widgets::text::Load;
-use crate::widgets::{dialog, field, label, surface};
+use crate::widgets::{dialog, field, label, surface, toggle};
 
 /// How wide the dialogs are outside: `main`'s 420 points inside, give or take, with the
 /// surface's padding round it.
@@ -44,6 +41,8 @@ const ROW_PAD: f32 = 12.;
 const ROW_INSET: f32 = 12.;
 /// The gap between playlist rows.
 const ROW_GAP: f32 = 6.;
+/// The edit dialog's sharing switch.
+const SHARING: &str = "Everyone on this server can see it";
 /// What deleting a playlist does, said plainly before it happens.
 const DELETE_PLAYLIST_NOTE: &str =
     "The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.";
@@ -416,7 +415,9 @@ impl EditPlaylist {
                 }
                 Load::Loaded(public) => {
                     let on = *public;
-                    if switch_row(ui, on, self.field == Field::Sharing).clicked() && !self.busy {
+                    let ringed = self.field == Field::Sharing;
+                    let row = toggle::row(ui, on, SHARING, Focus::Skip, ringed);
+                    if row.clicked() && !self.busy {
                         self.field = Field::Sharing;
                         let_keyboard_go(ui);
                         self.public = Load::Loaded(!on);
@@ -681,52 +682,6 @@ fn playlist_row(ui: &mut Ui, row: &Row, highlighted: bool, ring: bool) -> Respon
     job.wrap = TextWrapping::truncate_at_width((right - left).max(0.));
     let galley = painter.layout_job(job);
     painter.galley(pos2(left, rect.center().y - galley.size().y / 2.), galley, tokens.ink);
-    response
-}
-
-/// The sharing switch: a tick box and its label, with the keyboard's ring on it while the
-/// dialog's keys are there. Drawn rather than an egui widget so that it takes no focus, which
-/// would take Space from the dialog.
-fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
-    let padding = 6.;
-    let line = ui.text_style_height(&TextStyle::Body);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), line + 2. * padding), Sense::CLICK);
-    let tokens = theme::tokens_of(ui);
-    if selected {
-        focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
-    }
-    let tick_box = Rect::from_min_size(
-        pos2(rect.left() + padding, rect.center().y - line * 0.5),
-        Vec2::splat(line),
-    );
-    if on {
-        // A checked box: `brand` with its tick in the text on it.
-        ui.painter().rect_filled(tick_box, CornerRadius::same(4), tokens.brand);
-        ui.painter().text(
-            tick_box.center(),
-            Align2::CENTER_CENTER,
-            ICON_CHECK.codepoint,
-            FontId::new(line * 0.8, ICON_CHECK.font_family()),
-            tokens.brand_foreground,
-        );
-    } else {
-        // Sunk into the surface, outlined in the muted ink: a panel's outline colour vanishes
-        // on the surface it outlines.
-        ui.painter().rect(
-            tick_box,
-            CornerRadius::same(4),
-            tokens.inset,
-            Stroke::new(1.5, tokens.ink_muted),
-            StrokeKind::Inside,
-        );
-    }
-    ui.painter().text(
-        Pos2::new(tick_box.right() + 8., rect.center().y),
-        Align2::LEFT_CENTER,
-        "Everyone on this server can see it",
-        TextStyle::Body.resolve(ui.style()),
-        tokens.ink,
-    );
     response
 }
 
