@@ -1080,14 +1080,8 @@ impl SettingsPage {
             let address = session.client.base_url().as_str().trim_end_matches('/').to_owned();
             let subtitle = format!("{server} · {address}");
             let label = format!("Signed in as {} on {subtitle}", session.user.name);
-            AvatarRow {
-                name: &session.user.name,
-                title: &session.user.name,
-                subtitle: &subtitle,
-                label: &label,
-                remove: None,
-            }
-            .show(ui, false);
+            let names = [session.user.name.as_str()];
+            AvatarRow::new(&names, &session.user.name, &subtitle, &label).show(ui, false);
             ui.add_space(surface::GAP_GROUP);
         }
         let version = session.server.version.clone().unwrap_or_else(|| "?".into());

@@ -47,8 +47,6 @@ const PAD: f32 = 6.;
 const ROW_H: f32 = 34.;
 /// The room left and right of a row's contents, and between its icon and label.
 const ROW_INSET: f32 = 10.;
-/// [`ROW_INSET`], for a panel's own text to line up with its rows.
-pub const INSET: f32 = ROW_INSET;
 /// The icon or check slot before the labels: kept on every row once one row has an icon, so the
 /// labels line up.
 pub const SLOT_W: f32 = 18.;
@@ -294,7 +292,7 @@ impl PopupMenu {
         };
         let slot = entries.iter().any(Entry::has_slot);
         let width = self.width;
-        show_panel(id, anchor, anchor_at, open_memory, self.align, width, |ui| {
+        show_panel(id, anchor, anchor_at, open_memory, self.align, width, PAD, |ui| {
             let inner = ui.available_width();
             egui::ScrollArea::vertical().max_height(MAX_H).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.;
@@ -337,12 +335,13 @@ impl PopupMenu {
     }
 }
 
-/// A menu's panel hung from `anchor` while popup `id` is open, with contents of the caller's own:
-/// for a popup that is more than a list of rows (the SyncPlay panel). It has the menu's frame,
-/// placement and opening motion, closes on Esc or a click outside, and `content` gets a `Ui`
-/// of the panel's inner width with no room between rows. Opening, closing and keys are the
-/// caller's (egui's `Popup::open_id` and friends). Returns what `content` returned, or `None`
-/// while it's closed.
+/// A menu's panel hung from `anchor` while popup `id` is open, with contents of the caller's own
+/// laid out like a small surface (headings, inset rows, cozy buttons): for a popup that is more
+/// than a list of rows (the SyncPlay panel). It has the menu's frame, placement and opening
+/// motion, with [`PANEL_PAD`] of room inside, closes on Esc or a click outside, and `content`
+/// gets a `Ui` of the panel's inner width with no room between rows. Opening, closing and keys
+/// are the caller's (egui's `Popup::open_id` and friends). Returns what `content` returned, or
+/// `None` while it's closed.
 pub fn panel<R>(
     id: Id,
     anchor: &Response,
@@ -353,9 +352,22 @@ pub fn panel<R>(
     if !egui::Popup::is_id_open(&anchor.ctx, id) {
         return None;
     }
-    show_panel(id, anchor, PopupAnchor::from(anchor), None, align, width, content)
+    show_panel(
+        id,
+        anchor,
+        PopupAnchor::from(anchor),
+        None,
+        align,
+        width,
+        PANEL_PAD,
+        content,
+    )
 }
 
+/// The room inside a [`panel`]: a surface's padding scaled down to a popup.
+pub const PANEL_PAD: f32 = 16.;
+
+#[expect(clippy::too_many_arguments, reason = "one caller each for menus and panels")]
 fn show_panel<R>(
     id: Id,
     anchor: &Response,
@@ -363,6 +375,7 @@ fn show_panel<R>(
     open_memory: Option<SetOpenCommand>,
     align: RectAlign,
     width: f32,
+    pad: f32,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
     let ctx = anchor.ctx.clone();
@@ -380,7 +393,7 @@ fn show_panel<R>(
     let tokens = theme::tokens(&ctx.global_style().visuals);
     let frame = frame(tokens)
         .corner_radius(CornerRadius::same(RADIUS))
-        .inner_margin(Margin::same(PAD as i8));
+        .inner_margin(Margin::same(pad as i8));
     egui::Popup::new(id, ctx, anchor_at, anchor.layer_id)
         .kind(egui::PopupKind::Popup)
         .open_memory(open_memory)
@@ -393,7 +406,7 @@ fn show_panel<R>(
         .show(|ui| {
             ui.set_opacity(t);
             // An `Area` shrinks to its contents; the panel keeps its width as they change.
-            ui.set_width(width - 2. * PAD);
+            ui.set_width(width - 2. * pad);
             ui.spacing_mut().item_spacing.y = 0.;
             content(ui)
         })
