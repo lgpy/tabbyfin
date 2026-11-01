@@ -12,9 +12,11 @@
 //! `services.user_data`, so the pages showing playlists load again. `main` had
 //! `views/add_to_playlist.rs`, `views/edit_playlist.rs` and `confirm_delete` in `views/item.rs`.
 
+use egui::accesskit::Role;
+use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align2, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, TextStyle,
-    Ui, Vec2, pos2, vec2,
+    Align2, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke, StrokeKind, TextStyle, Ui, Vec2,
+    WidgetInfo, pos2, vec2,
 };
 use egui_material_icons::icons::{ICON_ADD, ICON_CHECK, ICON_PLAYLIST_PLAY};
 use jellyfin::ItemsQuery;
@@ -22,19 +24,26 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 
 use crate::nav::NavRequest;
 use crate::task::Task;
-use crate::theme;
+use crate::theme::{self, text};
 use crate::toasts::Toast;
 use crate::views::PageCx;
-use crate::widgets::dialog;
+use crate::widgets::button::State;
 use crate::widgets::focus::{self, Place};
-use crate::widgets::label;
-use crate::widgets::popup::{self, Entry};
+use crate::widgets::popup;
 use crate::widgets::text::Load;
+use crate::widgets::{dialog, field, label, surface};
 
-/// How wide the dialogs are, as `main`'s were (420 points).
-const WIDTH: f32 = 420.;
+/// How wide the dialogs are outside: `main`'s 420 points inside, give or take, with the
+/// surface's padding round it.
+const WIDTH: f32 = 460.;
 /// The playlist list scrolls once it's this tall, as on `main`.
 const LIST_MAX_H: f32 = 320.;
+/// The room above and below a playlist row's text; the text size sets the rest of its height.
+const ROW_PAD: f32 = 12.;
+/// The room left of a row's icon, between it and the name, and right of the entry count.
+const ROW_INSET: f32 = 12.;
+/// The gap between playlist rows.
+const ROW_GAP: f32 = 6.;
 /// What deleting a playlist does, said plainly before it happens.
 const DELETE_PLAYLIST_NOTE: &str =
     "The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.";
@@ -60,9 +69,9 @@ pub struct AddToPlaylist {
     focus: bool,
     /// The highlight moved: bring it back on screen.
     scroll_to_highlight: bool,
-    /// A row's height, measured as the rows are drawn: the list's height is worked out from it,
-    /// since a `ScrollArea` given the modal's leftover height would keep it at the first frame's.
-    row_height: f32,
+    /// The keyboard moved the highlight last, rather than the pointer: the highlighted row
+    /// gets the focus ring, so it's clear which one Enter picks.
+    keyboard: bool,
 }
 
 /// How adding to a playlist went.
@@ -111,7 +120,7 @@ impl AddToPlaylist {
             working: None,
             focus: true,
             scroll_to_highlight: false,
-            row_height: 26.,
+            keyboard: true,
         }
     }
 
@@ -153,55 +162,50 @@ impl AddToPlaylist {
 
         let ctx = cx.ctx;
         let mut chosen = None;
-        let modal = dialog::show(
-            ctx,
-            egui::Id::unique("add_to_playlist"),
-            WIDTH,
-            "Add to playlist",
-            |ui| {
-                // Enter picks the highlighted line, as `main`'s dialog's Confirm did; the field
-                // never sees it, or it would only give up the focus.
-                let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-                let field = ui.add(
-                    TextEdit::singleline(&mut self.typed)
-                        .interactive(!self.busy)
-                        .hint_text("Find a playlist or name a new one")
-                        .desired_width(f32::INFINITY),
-                );
-                if std::mem::take(&mut self.focus) {
-                    field.request_focus();
-                }
-                if field.changed() {
-                    // A different filter: back to the top line.
-                    self.highlighted = 0;
-                    self.scroll_to_highlight = true;
-                }
+        let id = egui::Id::unique("add_to_playlist");
+        // What to type goes under the title rather than in the field, which has the keyboard
+        // from the start and so never shows a hint (`field::single_line`).
+        let subtitle = "Pick one of your playlists, or type a name to make a new one.";
+        let modal = dialog::show(ctx, id, WIDTH, "Add to playlist", Some(subtitle), |ui| {
+            // Enter picks the highlighted line, as `main`'s dialog's Confirm did; the field
+            // never sees it, or it would only give up the focus.
+            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+            let field = ui.add(field::single_line(ui, id.with("field"), &mut self.typed, "").interactive(!self.busy));
+            if std::mem::take(&mut self.focus) {
+                field.request_focus();
+            }
+            if field.changed() {
+                // A different filter: back to the top line.
+                self.highlighted = 0;
+                self.scroll_to_highlight = true;
+                self.keyboard = true;
+            }
 
-                // Up and Down move the highlight, wrapping round as a menu's does; the field has
-                // nothing to move to on one line, and its own focus filter keeps egui from moving
-                // focus with them (`TextEdit` locks the vertical arrows).
-                let rows = self.rows();
-                self.highlighted = self.highlighted.min(rows.len().saturating_sub(1));
-                let (up, down) = ui.input_mut(|input| {
-                    (
-                        input.consume_key(Modifiers::NONE, Key::ArrowUp),
-                        input.consume_key(Modifiers::NONE, Key::ArrowDown),
-                    )
-                });
-                if !rows.is_empty() && !self.busy {
-                    if up || down {
-                        let step = if down { 1 } else { -1 };
-                        self.highlighted = popup::step(Some(self.highlighted), step, rows.len()).unwrap_or(0);
-                        self.scroll_to_highlight = true;
-                    }
-                    if enter {
-                        chosen = Some(self.highlighted);
-                    }
+            // Up and Down move the highlight, wrapping round as a menu's does; the field has
+            // nothing to move to on one line, and its own focus filter keeps egui from moving
+            // focus with them (`TextEdit` locks the vertical arrows).
+            let rows = self.rows();
+            self.highlighted = self.highlighted.min(rows.len().saturating_sub(1));
+            let (up, down) = ui.input_mut(|input| {
+                (
+                    input.consume_key(Modifiers::NONE, Key::ArrowUp),
+                    input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                )
+            });
+            if !rows.is_empty() && !self.busy {
+                if up || down {
+                    let step = if down { 1 } else { -1 };
+                    self.highlighted = popup::step(Some(self.highlighted), step, rows.len()).unwrap_or(0);
+                    self.scroll_to_highlight = true;
+                    self.keyboard = true;
                 }
-                ui.add_space(4.);
-                self.list(ui, &rows, &mut chosen);
-            },
-        );
+                if enter {
+                    chosen = Some(self.highlighted);
+                }
+            }
+            ui.add_space(surface::GAP_FIELD);
+            self.list(ui, &rows, &mut chosen);
+        });
 
         if let Some(index) = chosen {
             self.choose(index, cx);
@@ -209,25 +213,26 @@ impl AddToPlaylist {
         !modal.should_close()
     }
 
-    /// The list under the field: a status line, or the rows, scrolling once it's long.
+    /// The list under the field: a status line, or the rows, scrolling once it's long. Its
+    /// height is worked out from the rows', since a `ScrollArea` given the modal's leftover
+    /// height would keep it at the first frame's.
     fn list(&mut self, ui: &mut Ui, rows: &[Row], chosen: &mut Option<usize>) {
-        let gap = ui.spacing().item_spacing.y;
-        let height = (rows.len() as f32 * (self.row_height + gap))
+        let row_height = row_height(ui);
+        let height = (rows.len() as f32 * (row_height + ROW_GAP) - ROW_GAP)
             .min(LIST_MAX_H)
-            .max(self.row_height);
-        let mut measured = self.row_height;
+            .max(row_height);
         ui.allocate_ui_with_layout(
             vec2(ui.available_width(), height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.lines(ui, rows, chosen, &mut measured));
+                ui.spacing_mut().item_spacing.y = ROW_GAP;
+                egui::ScrollArea::vertical().show(ui, |ui| self.lines(ui, rows, chosen));
             },
         );
-        self.row_height = measured;
     }
 
     /// The list's contents, in the space [`Self::list`] gives it.
-    fn lines(&mut self, ui: &mut Ui, rows: &[Row], chosen: &mut Option<usize>, measured: &mut f32) {
+    fn lines(&mut self, ui: &mut Ui, rows: &[Row], chosen: &mut Option<usize>) {
         match &self.playlists {
             Load::Loading => {
                 ui.label(label::muted(ui, "Loading playlists…"));
@@ -248,12 +253,12 @@ impl AddToPlaylist {
                 let pointer_moved = ui.input(|input| input.pointer.delta() != Vec2::ZERO);
                 for (index, row) in rows.iter().enumerate() {
                     let highlighted = index == self.highlighted;
-                    let response = popup::row(ui, &entry(row), true, highlighted);
-                    *measured = response.rect.height();
+                    let response = playlist_row(ui, row, highlighted, highlighted && self.keyboard);
                     // The pointer takes the highlight, as it does in a menu, so Enter picks the
                     // row under it.
                     if response.hovered() && pointer_moved {
                         self.highlighted = index;
+                        self.keyboard = false;
                     }
                     if highlighted && std::mem::take(&mut self.scroll_to_highlight) {
                         response.scroll_to_me(Some(egui::Align::Center));
@@ -384,19 +389,16 @@ impl EditPlaylist {
 
         let ctx = cx.ctx;
         let mut save = false;
-        let modal = dialog::show(ctx, egui::Id::unique("edit_playlist"), WIDTH, "Edit playlist", |ui| {
+        let id = egui::Id::unique("edit_playlist");
+        let modal = dialog::show(ctx, id, WIDTH, "Edit playlist", None, |ui| {
             // Enter saves, as `main`'s dialog's Confirm did; the field never sees it.
             let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
             if !self.busy {
                 self.keys(ui);
             }
 
-            ui.label(label::muted(ui, "Name"));
-            let field = ui.add(
-                TextEdit::singleline(&mut self.typed)
-                    .interactive(!self.busy)
-                    .desired_width(f32::INFINITY),
-            );
+            field::label(ui, "Name");
+            let field = ui.add(field::single_line(ui, id.with("name"), &mut self.typed, "").interactive(!self.busy));
             if std::mem::take(&mut self.focus) {
                 field.request_focus();
             }
@@ -404,7 +406,7 @@ impl EditPlaylist {
             if field.gained_focus() {
                 self.field = Field::Name;
             }
-            ui.add_space(8.);
+            ui.add_space(surface::GAP_FIELD);
             match &self.public {
                 Load::Loading => {
                     ui.label(label::muted(ui, "Checking who can see it…"));
@@ -422,8 +424,14 @@ impl EditPlaylist {
                 }
             }
             dialog::buttons(ui, |ui| {
-                let can_save = !self.busy && !self.typed.trim().is_empty();
-                if dialog::button(ui, "Save", can_save).clicked() {
+                let state = if self.busy {
+                    State::Loading
+                } else if self.typed.trim().is_empty() {
+                    State::Disabled
+                } else {
+                    State::Ready
+                };
+                if dialog::main(ui, "Save", state).clicked() {
                     save = true;
                 }
                 dialog::cancel(ui);
@@ -548,10 +556,11 @@ impl DeletePlaylist {
         let ctx = cx.ctx;
         let mut delete = false;
         let title = format!("Delete “{}”?", self.name);
-        let modal = dialog::show(ctx, egui::Id::unique("delete_playlist"), WIDTH, &title, |ui| {
+        let modal = dialog::show(ctx, egui::Id::unique("delete_playlist"), WIDTH, &title, None, |ui| {
             ui.label(DELETE_PLAYLIST_NOTE);
             dialog::buttons(ui, |ui| {
-                if dialog::button(ui, "Delete", !self.busy).clicked() {
+                let state = if self.busy { State::Loading } else { State::Ready };
+                if dialog::danger(ui, "Delete", state).clicked() {
                     delete = true;
                 }
                 dialog::cancel(ui);
@@ -610,19 +619,69 @@ fn rows(playlists: &[BaseItemDto], typed: &str) -> Vec<Row> {
     rows
 }
 
-/// One line of the playlist list, as a menu's row: the icon, the name, and the entry count at
-/// the right end.
-fn entry(row: &Row) -> Entry<'static> {
-    match row.playlist_id {
-        Some(_) => {
-            let entry = Entry::new(row.name.clone()).icon(ICON_PLAYLIST_PLAY);
-            match row.entries {
-                Some(count) => entry.detail(entry_count(count)),
-                None => entry,
-            }
-        }
-        None => Entry::new(format!("New playlist “{}”", row.name)).icon(ICON_ADD),
+/// A playlist row's height at the text size in use.
+fn row_height(ui: &Ui) -> f32 {
+    let line = ui.fonts_mut(|fonts| fonts.row_height(&text::font(ui, "base")));
+    line + 2. * ROW_PAD
+}
+
+/// One line of the playlist list, sunk into the dialog like an `AvatarRow`: the icon, the name,
+/// and the entry count at the right end. `inset_hover` while `highlighted`, and the focus ring
+/// as well when the keyboard put the highlight there (`ring`). Painted, and click-only, since
+/// the dialog keeps the keyboard.
+fn playlist_row(ui: &mut Ui, row: &Row, highlighted: bool, ring: bool) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let (name, icon) = match row.playlist_id {
+        Some(_) => (row.name.clone(), ICON_PLAYLIST_PLAY),
+        None => (format!("New playlist “{}”", row.name), ICON_ADD),
+    };
+    let detail = row.entries.map(entry_count);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), row_height(ui)), Sense::CLICK);
+    response.widget_info(|| {
+        let label = match &detail {
+            Some(detail) => format!("{name}, {detail}"),
+            None => name.clone(),
+        };
+        WidgetInfo::labeled(Role::Button, true, label)
+    });
+
+    let painter = ui.painter();
+    let fill = if highlighted { tokens.inset_hover } else { tokens.inset };
+    painter.rect_filled(rect, tokens.radius_control, fill);
+    if ring {
+        focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
     }
+
+    let icon_font = FontId::new(text::font(ui, "lg").size, icon.font_family());
+    let icon_color = if row.playlist_id.is_some() {
+        tokens.ink_muted
+    } else {
+        tokens.brand
+    };
+    let glyph = painter.layout_no_wrap(icon.codepoint.to_owned(), icon_font, icon_color);
+    // The icon font's glyphs sit low in their line, so they're centred by their bounds.
+    let bounds = glyph.rows.first().map_or(glyph.rect, |row| row.rect());
+    let icon_center = pos2(rect.left() + ROW_INSET + bounds.width() / 2., rect.center().y);
+    let left = icon_center.x + bounds.width() / 2. + ROW_INSET;
+    painter.galley(icon_center - bounds.center().to_vec2(), glyph, icon_color);
+
+    let mut right = rect.right() - ROW_INSET;
+    if let Some(detail) = detail {
+        let galley = painter.layout_no_wrap(detail, text::font(ui, "sm"), tokens.ink_muted);
+        right -= galley.size().x;
+        painter.galley(
+            pos2(right, rect.center().y - galley.size().y / 2.),
+            galley,
+            tokens.ink_muted,
+        );
+        right -= ROW_INSET;
+    }
+
+    let mut job = LayoutJob::simple_singleline(name, text::font(ui, "base"), tokens.ink);
+    job.wrap = TextWrapping::truncate_at_width((right - left).max(0.));
+    let galley = painter.layout_job(job);
+    painter.galley(pos2(left, rect.center().y - galley.size().y / 2.), galley, tokens.ink);
+    response
 }
 
 /// The sharing switch: a tick box and its label, with the keyboard's ring on it while the
@@ -641,21 +700,23 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
         Vec2::splat(line),
     );
     if on {
-        // `main`'s checked box: the primary colour with its tick in the foreground.
-        ui.painter()
-            .rect_filled(tick_box, CornerRadius::same(4), tokens.primary);
+        // A checked box: `brand` with its tick in the text on it.
+        ui.painter().rect_filled(tick_box, CornerRadius::same(4), tokens.brand);
         ui.painter().text(
             tick_box.center(),
             Align2::CENTER_CENTER,
             ICON_CHECK.codepoint,
             FontId::new(line * 0.8, ICON_CHECK.font_family()),
-            tokens.primary_foreground,
+            tokens.brand_foreground,
         );
     } else {
-        ui.painter().rect_stroke(
+        // Sunk into the surface, outlined in the muted ink: a panel's outline colour vanishes
+        // on the surface it outlines.
+        ui.painter().rect(
             tick_box,
             CornerRadius::same(4),
-            Stroke::new(1., tokens.input),
+            tokens.inset,
+            Stroke::new(1.5, tokens.ink_muted),
             StrokeKind::Inside,
         );
     }
@@ -664,7 +725,7 @@ fn switch_row(ui: &mut Ui, on: bool, selected: bool) -> Response {
         Align2::LEFT_CENTER,
         "Everyone on this server can see it",
         TextStyle::Body.resolve(ui.style()),
-        tokens.foreground,
+        tokens.ink,
     );
     response
 }

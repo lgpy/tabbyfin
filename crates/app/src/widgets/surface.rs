@@ -1,6 +1,6 @@
 //! The cozy look's raised panel: a [`theme::Tokens::surface`] lifted off the backdrop by a soft
-//! shadow, with the larger radius. The sign-in form sits in one; dialogs and settings groups can
-//! take it as they move to the look. Also what goes on one: its heading, a waiting line, a
+//! shadow, with the larger radius. The sign-in form and the dialogs sit in one; settings groups
+//! can take it as they move to the look. Also what goes on one: its heading, a waiting line, a
 //! notice, and the gaps between them.
 
 use egui::accesskit::Role;
@@ -30,7 +30,11 @@ pub const GAP_ITEM: f32 = SPACE.sm;
 
 /// A surface's frame under `ui`'s theme.
 pub fn frame(ui: &Ui) -> Frame {
-    let tokens = theme::tokens_of(ui);
+    frame_of(theme::tokens_of(ui))
+}
+
+/// A surface's frame in `tokens`, for what has no `Ui` yet (a dialog's modal).
+pub fn frame_of(tokens: &theme::Tokens) -> Frame {
     Frame::new()
         .fill(tokens.surface)
         .stroke(Stroke::new(1., tokens.surface_border))
@@ -46,20 +50,26 @@ pub fn frame(ui: &Ui) -> Frame {
 
 /// A centred title in the surface's ink, with a quieter line under it: the top of a surface.
 pub fn heading(ui: &mut Ui, title: &str, subtitle: &str) {
+    ui.vertical_centered(|ui| heading_lines(ui, title, Some(subtitle)));
+}
+
+/// [`heading`] against the surface's left edge, for a surface that isn't a centred form (a
+/// dialog), with the quieter line only when there's one to say.
+pub fn heading_left(ui: &mut Ui, title: &str, subtitle: Option<&str>) {
+    ui.vertical(|ui| heading_lines(ui, title, subtitle));
+}
+
+fn heading_lines(ui: &mut Ui, title: &str, subtitle: Option<&str>) {
     let tokens = theme::tokens_of(ui);
-    ui.vertical_centered(|ui| {
-        ui.label(
-            egui::RichText::new(title)
-                .font(theme::text::font(ui, "2xl"))
-                .color(tokens.ink),
-        );
+    ui.label(RichText::new(title).font(text::font(ui, "2xl")).color(tokens.ink));
+    if let Some(subtitle) = subtitle {
         ui.add_space(SPACE.xs);
         ui.label(
-            egui::RichText::new(subtitle)
-                .font(theme::text::font(ui, "base"))
+            RichText::new(subtitle)
+                .font(text::font(ui, "base"))
                 .color(tokens.ink_muted),
         );
-    });
+    }
 }
 
 /// A small spinner and a muted line beside it, centred together on the surface's width: what the

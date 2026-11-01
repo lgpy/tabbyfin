@@ -341,6 +341,7 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 - ⬜ **A real pointer**: right-clicking a card, *Add to playlist…* opening the dialog, clicking a playlist row, the Save, Cancel and Delete buttons, the sharing switch, and a click on the backdrop closing the dialog (the same `ModalResponse::should_close` path as Esc).
 - ⬜ A list longer than the 320 px cap scrolling, with the highlight kept on screen.
+- ⬜ **C5's look in the real app**: the dialogs over a real page in both themes, the plum scrim over posters, and *Save* and *Delete* showing their spinner against a slow server (a local proxy that delays `/Playlists`).
 - ⬜ The dialogs with the **server down** (the playlist list fails to load) and for an account with **no playlists** ("No playlists yet. Type a name to make one.").
 
 ## 28. Top bar and search (U1)
