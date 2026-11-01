@@ -150,8 +150,10 @@ def main():
             webbrowser.open(url)
 
 
-# The local server for `target/mockups` (see `link`), and the file that tells it's ours.
+# The local servers for `target/mockups` (see `link`): one per checkout, each on the first free
+# port from PORT, and the file that says which checkout's folder a server serves.
 PORT = 8737
+PORTS = 20
 MARKER = ".tabbyfin-mockups"
 SERVER = """
 import functools, http.server, sys
@@ -169,38 +171,46 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[2])), handler).serve_
 
 def link(path):
     """A URL for `path` that opens from a click in Claude Code: `http://localhost`, served from
-    `target/mockups` by a small server started on the first run and reused after. Terminals
-    (Windows Terminal among them) don't open `file://` links on a click, and on WSL a Linux path
-    means nothing to the Windows browser, while WSL forwards `localhost` to it. Falls back to a
-    `file://` URL if the port is taken by something else."""
+    this checkout's `target/mockups` by a small server started on the first run and reused after.
+    Each checkout (a worktree has its own `target/`) gets its own server: the marker file holds
+    the folder's path, so a port answering for another checkout is passed over. Terminals (Windows
+    Terminal among them) don't open `file://` links on a click, and on WSL a Linux path means
+    nothing to the Windows browser, while WSL forwards `localhost` to it. Falls back to a
+    `file://` URL if no port can be had."""
     mockups = root / "target" / "mockups"
-    (mockups / MARKER).write_text(MARKER)
+    mine = str(mockups.resolve())
+    (mockups / MARKER).write_text(mine)
     relative = quote(path.relative_to(mockups).as_posix())
-    base = f"http://localhost:{PORT}"
-    if not serving(base):
+    for port in range(PORT, PORT + PORTS):
+        base = f"http://localhost:{port}"
+        answer = serving(base)
+        if answer == mine:
+            return f"{base}/{relative}"
+        if answer is not None:
+            continue  # another checkout's server, or something else on the port
         subprocess.Popen(
-            [sys.executable, "-I", "-c", SERVER, str(mockups), str(PORT)],
+            [sys.executable, "-I", "-c", SERVER, mine, str(port)],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
         for _ in range(50):
-            if serving(base):
-                break
+            if serving(base) == mine:
+                return f"{base}/{relative}"
             time.sleep(0.05)
-        else:
-            return path.as_uri()
-    return f"{base}/{relative}"
+    return path.as_uri()
 
 
 def serving(base):
-    """Whether our server answers at `base` (and not something else on the port)."""
+    """What the marker at `base` holds (the folder its server serves), `""` when something else
+    answers there, or None when nothing listens on the port."""
     try:
         with urlopen(f"{base}/{MARKER}", timeout=0.5) as answer:
-            return answer.read().decode() == MARKER
-    except OSError:
-        return False
+            return answer.read().decode()
+    except OSError as error:
+        # An HTTP error status is still something listening.
+        return "" if getattr(error, "code", None) else None
 
 
 def zoom_into(out, env, spec):
@@ -284,6 +294,10 @@ def render_baseline(filters, env, src, out, rendering):
     return cargo(filters, env, src, cwd=tree)
 
 
+# What `cargo` has printed this run, so a later build's copies of it aren't printed again.
+SAID = set()
+
+
 def cargo(filters, env, src, cwd=None):
     """Runs the matching tests, printing only what needs acting on. True if they passed."""
     cmd = ["cargo", "test", "-p", "tabbyfin", "--features", "mockup", "--message-format", "short", *filters]
@@ -308,8 +322,10 @@ def cargo(filters, env, src, cwd=None):
             block.append(line)
     if run.returncode != 0 and not shown:
         shown = lines[-30:]
-    # Each warning comes once per build of the file (the tests, then the preview's): say it once.
-    shown = list(dict.fromkeys(shown))
+    # Each warning comes once per build of the file (the baseline's, the tests', the preview's):
+    # say it once a run.
+    shown = [line for line in dict.fromkeys(shown) if line not in SAID]
+    SAID.update(shown)
     if shown:
         print("\n".join(shown))
     return run.returncode == 0
@@ -1069,4 +1085,5 @@ if (["localhost", "127.0.0.1"].includes(location.hostname)) {
 }
 """
 
-main()
+if __name__ == "__main__":
+    main()
