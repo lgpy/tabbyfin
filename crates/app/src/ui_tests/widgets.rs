@@ -1,12 +1,13 @@
 //! Shared widgets drawn on their own, outside any page: what they name to AccessKit and how
 //! the keyboard reaches them.
 
-use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui::accesskit::{Role, Toggled};
+use egui_kittest::kittest::{NodeT as _, Queryable};
 
 use crate::ui_tests::build_harness;
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::surface::{self, Kind};
+use crate::widgets::toggle;
 
 /// Each kind of notice shows its message as it was given and names its icon by the kind, so a
 /// screen reader hears "Error" before the message rather than a colour it can't see.
@@ -80,4 +81,33 @@ fn a_cozy_button_that_skips_focus_still_clicks() {
     ui.get_by_label("Skipped").click();
     ui.run();
     assert!(clicked.get(), "the click didn't register");
+}
+
+/// A switch tells AccessKit it's a switch, by its name, with its state; a click and Space (once
+/// Tab has put the keyboard on it) each flip it.
+#[test]
+fn a_switch_flips_by_click_and_space_and_names_its_state() {
+    let mut ui = build_harness(egui::vec2(200., 100.), false, |ui, on| {
+        toggle::switch(ui, on, "Animations");
+    });
+    ui.run();
+    let toggled = |ui: &egui_kittest::Harness<'static, bool>| {
+        ui.get_by_role_and_label(Role::Switch, "Animations")
+            .accesskit_node()
+            .toggled()
+    };
+    assert_eq!(toggled(&ui), Some(Toggled::False));
+
+    ui.get_by_label("Animations").click();
+    ui.run();
+    assert!(*ui.state(), "a click turns it on");
+    assert_eq!(toggled(&ui), Some(Toggled::True));
+
+    ui.key_press(egui::Key::Tab);
+    ui.run();
+    assert!(ui.get_by_label("Animations").is_focused(), "Tab reaches it");
+    ui.key_press(egui::Key::Space);
+    ui.run();
+    assert!(!*ui.state(), "Space turns it off");
+    assert_eq!(toggled(&ui), Some(Toggled::False));
 }
