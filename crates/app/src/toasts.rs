@@ -1,6 +1,7 @@
-//! Notifications in the window's bottom-right corner: info, success and error. Each goes away
-//! by itself after a few seconds (not while the pointer is on it), or with its close button,
-//! and can carry one action button (the update notice's Download). Its buttons are
+//! Notifications in the window's bottom-right corner: info, success and error, each a small
+//! surface in the popups' frame. Each goes away by itself after a few seconds (not while the
+//! pointer is on it), or with its close button, and can carry one action button at its right
+//! end (the update notice's Download). Its buttons are
 //! `Sense::CLICK` widgets, not focusable (U8's rule for its dialogs'): a Tab with a toast over
 //! the player mustn't give egui the focus, or egui would keep the player's keys (`keys.rs`).
 //!
@@ -9,8 +10,16 @@
 
 use std::time::{Duration, Instant};
 
-use egui::{Align2, Id, RichText};
+use egui::accesskit::Role;
+use egui::{
+    Align2, Color32, CornerRadius, CursorIcon, FontId, Id, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
+    pos2, vec2,
+};
+use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{ICON_CHECK_CIRCLE, ICON_CLOSE, ICON_ERROR, ICON_INFO};
+
+use crate::theme::{self, SPACE, text};
+use crate::widgets::popup;
 
 /// How long a toast stays up.
 const SHOWN_FOR: Duration = Duration::from_secs(5);
@@ -73,7 +82,7 @@ impl Toast {
         self
     }
 
-    /// A button under the text. Clicking it closes the toast.
+    /// A compact button at the toast's right end. Clicking it closes the toast.
     pub fn action(mut self, label: impl Into<String>, action: ToastAction) -> Self {
         self.action = Some((label.into(), action));
         self
@@ -156,41 +165,19 @@ impl Toasts {
             .anchor(Align2::RIGHT_BOTTOM, [-MARGIN, -MARGIN])
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = GAP;
                 for shown in &mut self.shown {
-                    let response = ui
-                        .push_id(shown.id, |ui| {
-                            egui::Frame::popup(ui.style())
-                                .show(ui, |ui| {
-                                    ui.set_width(WIDTH);
-                                    ui.horizontal_top(|ui| {
-                                        let (icon, color) = icon(shown.toast.kind, ui);
-                                        ui.label(icon.rich_text().size(20.0).color(color));
-                                        ui.vertical(|ui| {
-                                            // What's left beside the icon, after the close button.
-                                            ui.set_width(ui.available_width() - 28.0);
-                                            if let Some(title) = &shown.toast.title {
-                                                ui.label(RichText::new(title).strong());
-                                            }
-                                            ui.label(&shown.toast.text);
-                                            if let Some((label, action)) = &shown.toast.action
-                                                && toast_button(ui, egui::Button::new(label)).clicked()
-                                            {
-                                                clicked = Some(action.clone());
-                                                closed.push(shown.id);
-                                            }
-                                        });
-                                        if toast_button(ui, egui::Button::new(ICON_CLOSE.codepoint).small())
-                                            .on_hover_text("Close")
-                                            .clicked()
-                                        {
-                                            closed.push(shown.id);
-                                        }
-                                    });
-                                })
-                                .response
-                        })
-                        .inner;
-                    shown.rect = Some(response.rect);
+                    let drawn = ui.push_id(shown.id, |ui| draw(ui, &shown.toast)).inner;
+                    if drawn.acted
+                        && let Some((_, action)) = &shown.toast.action
+                    {
+                        clicked = Some(action.clone());
+                        closed.push(shown.id);
+                    }
+                    if drawn.closed {
+                        closed.push(shown.id);
+                    }
+                    shown.rect = Some(drawn.rect);
                 }
             });
         self.shown.retain(|shown| !closed.contains(&shown.id));
@@ -198,22 +185,166 @@ impl Toasts {
     }
 }
 
-/// A toast's action or close button, drawn as the button it's given. Not focusable
-/// (`Sense::CLICK` without `FOCUSABLE`), as U8's dialogs' buttons aren't: a Tab that focused
-/// one over the player would give egui the keyboard and take the player's keys away
-/// (`keys.rs`).
-fn toast_button(ui: &mut egui::Ui, button: egui::Button<'_>) -> egui::Response {
-    ui.add(button.sense(egui::Sense::CLICK))
+/// The room inside a toast, and between toasts.
+const PAD: f32 = 14.;
+const GAP: f32 = 8.;
+/// A toast's corner radius: a popup's (`widgets::popup::RADIUS`).
+const RADIUS: u8 = popup::RADIUS;
+/// The kind's icon, and the room after it.
+const ICON: f32 = 20.;
+const ICON_GAP: f32 = 10.;
+/// The close button's circle, and the action button's height and corners.
+const CLOSE: f32 = 28.;
+const BUTTON_H: f32 = 30.;
+const BUTTON_RADIUS: u8 = 10;
+
+/// What a toast's buttons did this frame, and where it was drawn.
+struct Drawn {
+    rect: Rect,
+    acted: bool,
+    closed: bool,
 }
 
-/// A toast's icon and colour, as `main`'s notifications had them: the theme's info, success and
-/// danger colours.
-fn icon(kind: Kind, ui: &egui::Ui) -> (egui_material_icons::MaterialIcon, egui::Color32) {
-    let tokens = crate::theme::tokens_of(ui);
+/// One toast: a small surface with the kind's icon on its first line, the title in the ink and
+/// the text under it in the muted ink (the text alone is in the ink), and at its right end the
+/// action as a compact brand button and a round close button. Laid out by hand so the buttons
+/// centre on the toast however many lines the text takes.
+fn draw(ui: &mut Ui, toast: &Toast) -> Drawn {
+    let tokens = theme::tokens_of(ui);
+    let painter = ui.painter().clone();
+    let action = toast
+        .action
+        .as_ref()
+        .map(|(label, _)| painter.layout_no_wrap(label.clone(), text::font(ui, "sm"), tokens.brand_foreground));
+    let button_w = action.as_ref().map(|galley| galley.size().x + 2. * SPACE.md);
+    // The close button's circle reaches into the padding, so its icon lines up with the text's
+    // edge rather than the circle's.
+    let close_in = 4.;
+    let right = PAD - close_in + CLOSE;
+    let text_w = WIDTH - PAD - ICON - ICON_GAP - right - button_w.map_or(0., |w| w + ICON_GAP) - ICON_GAP;
+    let title = toast
+        .title
+        .as_ref()
+        .map(|title| painter.layout(title.clone(), text::font(ui, "base"), tokens.ink, text_w));
+    let body_color = if title.is_some() { tokens.ink_muted } else { tokens.ink };
+    let body = painter.layout(toast.text.clone(), text::font(ui, "sm"), body_color, text_w);
+    let title_h = title.as_ref().map_or(0., |galley| galley.size().y + SPACE.xxs);
+    let content_h = (title_h + body.size().y)
+        .max(CLOSE)
+        .max(if action.is_some() { BUTTON_H } else { 0. });
+    let (rect, _) = ui.allocate_exact_size(vec2(WIDTH, content_h + 2. * PAD), Sense::hover());
+
+    let radius = CornerRadius::same(RADIUS);
+    painter.add(theme::popup_shadow(tokens).as_shape(rect, radius));
+    painter.rect(
+        rect,
+        radius,
+        tokens.surface,
+        Stroke::new(1., tokens.surface_border),
+        StrokeKind::Inside,
+    );
+
+    let (glyph, color) = icon(toast.kind, tokens);
+    let first_line = title
+        .as_ref()
+        .unwrap_or(&body)
+        .rows
+        .first()
+        .map_or(ICON, |row| row.height());
+    let icon_rect = Rect::from_min_size(
+        pos2(rect.left() + PAD, rect.top() + PAD + (first_line - ICON) / 2.),
+        Vec2::splat(ICON),
+    );
+    let icon_response = ui.interact(icon_rect, ui.scope_id().with("icon"), Sense::hover());
+    icon_response.widget_info(|| WidgetInfo::labeled(Role::Image, true, kind_label(toast.kind)));
+    paint_icon(&painter, icon_rect.center(), glyph, ICON, color);
+
+    let x = icon_rect.right() + ICON_GAP;
+    let mut y = rect.top() + PAD;
+    if let Some(title) = title {
+        let height = title.size().y;
+        line(ui, "title", Rect::from_min_size(pos2(x, y), title.size()), title.text());
+        painter.galley(pos2(x, y), title, tokens.ink);
+        y += height + SPACE.xxs;
+    }
+    line(ui, "text", Rect::from_min_size(pos2(x, y), body.size()), body.text());
+    painter.galley(pos2(x, y), body, body_color);
+
+    let close_rect = Rect::from_center_size(
+        pos2(rect.right() - PAD + close_in - CLOSE / 2., rect.center().y),
+        Vec2::splat(CLOSE),
+    );
+    let close = ui
+        .interact(close_rect, ui.scope_id().with("close"), Sense::CLICK)
+        .on_hover_cursor(CursorIcon::PointingHand);
+    close.widget_info(|| WidgetInfo::labeled(Role::Button, true, "Close"));
+    let close = close.on_hover_text("Close");
+    if close.hovered() {
+        painter.circle_filled(close_rect.center(), CLOSE / 2., tokens.inset_hover);
+    }
+    let close_color = if close.hovered() { tokens.ink } else { tokens.ink_muted };
+    paint_icon(&painter, close_rect.center(), ICON_CLOSE, 18., close_color);
+
+    let mut acted = false;
+    if let (Some(galley), Some(width), Some((label, _))) = (action, button_w, &toast.action) {
+        let button_rect = Rect::from_center_size(
+            pos2(close_rect.left() - SPACE.xs - width / 2., rect.center().y),
+            vec2(width, BUTTON_H),
+        );
+        // `Sense::CLICK` without `FOCUSABLE`, like the close button (see the module's note).
+        let button = ui
+            .interact(button_rect, ui.scope_id().with("action"), Sense::CLICK)
+            .on_hover_cursor(CursorIcon::PointingHand);
+        button.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
+        let fill = if button.hovered() {
+            tokens.brand_hover
+        } else {
+            tokens.brand
+        };
+        painter.rect_filled(button_rect, CornerRadius::same(BUTTON_RADIUS), fill);
+        painter.galley(
+            button_rect.center() - galley.size() / 2.,
+            galley,
+            tokens.brand_foreground,
+        );
+        acted = button.clicked();
+    }
+
+    Drawn {
+        rect,
+        acted,
+        closed: close.clicked(),
+    }
+}
+
+/// A line of a toast's text to AccessKit: the galleys are painted, so each gets a node of its own.
+fn line(ui: &Ui, salt: &str, rect: Rect, text: &str) {
+    ui.interact(rect, ui.scope_id().with(salt), Sense::hover())
+        .widget_info(|| WidgetInfo::labeled(Role::Label, true, text));
+}
+
+/// A glyph centred by its own bounds: the icon font's glyphs sit low in their line.
+fn paint_icon(painter: &egui::Painter, center: Pos2, icon: MaterialIcon, size: f32, color: Color32) {
+    let galley = painter.layout_no_wrap(icon.codepoint.to_owned(), FontId::new(size, icon.font_family()), color);
+    let glyph = galley.rows.first().map_or(galley.rect, |row| row.rect());
+    painter.galley(center - glyph.center().to_vec2(), galley, color);
+}
+
+/// A toast's icon and colour: the theme's info, success and danger colours.
+fn icon(kind: Kind, tokens: &theme::Tokens) -> (MaterialIcon, Color32) {
     match kind {
         Kind::Info => (ICON_INFO, tokens.info),
         Kind::Success => (ICON_CHECK_CIRCLE, tokens.success),
         Kind::Error => (ICON_ERROR, tokens.danger),
+    }
+}
+
+/// What a screen reader says for a toast's icon.
+fn kind_label(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Info => "Information",
+        Kind::Success => "Success",
+        Kind::Error => "Error",
     }
 }
 
