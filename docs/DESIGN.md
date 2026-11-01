@@ -2,7 +2,7 @@
 
 The design reference for Tabbyfin's new look. The sign-in and restoring screens are the first in it (2026-10-29/30, commits `e70588c`, `4d8c3d5`, `59fc96d`); this doc writes down what they settled so the next screens start from it, and lists what's still open. It's a draft to refine as more screens move over: when a screen settles something new, add it here.
 
-Since C1 the whole app draws in the cozy palette: `theme::visuals` (egui's colours for every page) is built from the cozy tokens, and the classic token names are aliases of them (see *Colour tokens*). The other pages still have their classic layout and widgets, and they move to the look's structure one at a time.
+Since C1 the whole app draws in the cozy palette: `theme::visuals` (egui's colours for every page) is built from the cozy tokens, and the classic token names are aliases of them (see *Colour tokens*). Since C2 the backdrop's gradient runs under the whole shell as well. The other pages still have their classic layout and widgets, and they move to the look's structure one at a time.
 
 ## Principles
 
@@ -22,6 +22,8 @@ Since C1 the whole app draws in the cozy palette: `theme::visuals` (egui's colou
 | Inset | Sunk into a surface: `inset` fill, `inset_hover` under the pointer, `radius_control` (12) | text fields (`theme::visuals`), `AvatarRow`, `code::show` |
 
 The CentralPanel holding a cozy screen is frameless (`Frame::NONE`) so the backdrop covers the window.
+
+**Under the shell.** The signed-in window is on the same backdrop: the shell paints `backdrop::fill` over the whole window, and the top bar and the page are frameless panels on it, with no fill and no separator of their own. Browsing pages have no glow, since the glow goes with the mascot. Where a page scrolls under the bar, it marks its top edge with `backdrop::scroll_edge`: a 1 pt `surface_border` hairline across the scroll area's top, drawn only once the page has scrolled (it comes in over the first 12 points), so a page at its top runs into the bar with nothing between them. The hairline was picked over a 16 pt fade of the backdrop over the content, which read as a smudge over bright posters. Every page's main scroll area calls it (Home, item, library, search, both of Settings' columns). Something that fades a picture into the page (an item's banner) fades into the gradient at its own height with `backdrop::fade_into`, not into a flat colour, which would leave a step.
 
 ## Colour tokens
 
@@ -52,7 +54,7 @@ The classic names, which `main` and the pages not yet restructured draw with, ar
 
 | Classic name | Is | Where it shows |
 |---|---|---|
-| `background` | `backdrop_top` | the page and top bar's flat fill, an item banner's fade |
+| `background` | `backdrop_top` | what a card's hover dims with, and flat fills off the shell (the player's pills) |
 | `foreground`, `accent_foreground` | `ink` | text |
 | `muted_foreground`, `tab_foreground` | `ink_muted` | subtitles, hints, card subtitles |
 | `primary`, `primary_hover`, `primary_foreground` | `brand`, `brand_hover`, `brand_foreground` | primary buttons, the card progress bar and played badge |
@@ -62,7 +64,7 @@ The classic names, which `main` and the pages not yet restructured draw with, ar
 | `border`, `input` | `surface_border` | outlines |
 | `radius` | `radius_control` (12) | controls |
 
-`overlay`, `selection`, the status colours and `radius_lg` (12, for cards and popups) keep their own values. The page's flat fill is `backdrop_top`, the gradient's top end, not the lilac bottom: in dark the bottom end (`#1d1633`) is lighter than `surface` (`#1a1526`), so raised things would look sunk, and in light `inset_hover` rows and `surface_border` outlines disappear against it. The gradient itself goes under the shell with C2. The focus ring (egui's `selection.stroke`) and the cursor rings are `brand`. The player keeps the classic dark set over the video (`theme::over_video::TOKENS`).
+`overlay`, `selection`, the status colours and `radius_lg` (12, for cards and popups) keep their own values. The page's flat fill is `backdrop_top`, the gradient's top end, not the lilac bottom: in dark the bottom end (`#1d1633`) is lighter than `surface` (`#1a1526`), so raised things would look sunk, and in light `inset_hover` rows and `surface_border` outlines disappear against it. Since C2 the shell is on the gradient itself, so `background` no longer fills a page; it stays `backdrop_top` for what still reads it. The gradient's lilac end passes for text: `ink_muted` (card subtitles, shelf titles) is 5.6:1 on light `backdrop_bottom` and 6.9:1 on dark, `ink` 14:1 and 15:1. The focus ring (egui's `selection.stroke`) and the cursor rings are `brand`. The player keeps the classic dark set over the video (`theme::over_video::TOKENS`).
 
 Light `brand` is deeper than the mascot's lavender so white text passes AA (5.9:1); dark uses the mascot's lavender itself with dark text. The status colours (`danger`, `info`, `success`) are too pale for text on a light surface (green and cyan about 2.3:1 on white), so they tint a notice's box, outline and icon, and its text stays `ink`.
 
@@ -146,7 +148,6 @@ The rollout plan is `docs/ROADMAP.md`'s [cozy look backlog](ROADMAP.md#cozy-look
 
 - **Components.** Views compose and widgets draw: anything another page could use lives in `widgets/` and in the component gallery (C3).
 - **Order.** The component library, then shared pieces (popups, selects, toasts, dialogs), then Settings as the first full page, then the top bar, then the browsing pages. The player goes last and changes least.
-- **Backdrop on browsing pages.** Yes, the gradient goes under the whole shell, without the glow. The top bar sits on the backdrop with no fill.
 - **Cards and shelves.** Cards stay image-first: no surface around them, image radius `radius_lg` (22 is too round for posters). The cursor ring, progress and played badge use `brand`.
 - **Mascot and glow.** Sign-in, restoring, loaders and empty states only. The glow always goes with the mascot.
 - **Selects, toggles, menus.** Inset boxes and `inset_hover` rows, with a cozy toggle/checkbox (C3, C4).

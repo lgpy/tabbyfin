@@ -57,7 +57,7 @@ use crate::widgets::text::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, poster_image,
     runtime_text, timestamp,
 };
-use crate::widgets::{button, card, image, mascot, select, shelf, state};
+use crate::widgets::{backdrop, button, card, image, mascot, select, shelf, state};
 
 /// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
 pub fn shuffle<T>(items: &mut [T]) {
@@ -786,7 +786,7 @@ impl ItemPage {
         // finish takes a target, and a shelf's row would be it (U3).
         let mut target = None;
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        let area = egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Frame::NONE
                 .inner_margin(Margin {
                     left: PAGE_PADDING as i8,
@@ -896,6 +896,7 @@ impl ItemPage {
                     }
                 });
         });
+        backdrop::scroll_edge(ui, &area);
 
         if let Some(action) = asked.action {
             // A second click on More closes its menu, as its trigger did on `main`.
@@ -1949,19 +1950,13 @@ fn similar_shelf(
     )
 }
 
-/// Fades the backdrop into the page's background at its bottom, as `main`'s gradient did.
+/// Fades the backdrop image into the page at its bottom, as `main`'s gradient did: into the
+/// window's backdrop at that height, so the picture melts into the gradient rather than ending
+/// on a flat band of colour.
 fn fade_to_background(ui: &Ui, band: Rect) {
-    let background = theme::tokens_of(ui).background;
     // `main`'s first stop: the background at 30 %, so the image shows through at the top.
-    let top = Color32::from_rgba_unmultiplied(background.r(), background.g(), background.b(), 77);
-    let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(pos2(band.left(), band.top()), top);
-    mesh.colored_vertex(pos2(band.right(), band.top()), top);
-    mesh.colored_vertex(pos2(band.left(), band.bottom()), background);
-    mesh.colored_vertex(pos2(band.right(), band.bottom()), background);
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(2, 1, 3);
-    ui.painter().add(egui::Shape::mesh(mesh));
+    let window = ui.ctx().content_rect();
+    backdrop::fade_into(ui.painter(), band, window, 77. / 255., theme::tokens_of(ui));
 }
 
 /// A More menu row. Deleting a playlist can't be taken back, so it's set apart and in red.

@@ -32,7 +32,7 @@ use crate::views::dialogs::AddToPlaylist;
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::Load;
-use crate::widgets::{card, shelf, state};
+use crate::widgets::{backdrop, card, shelf, state};
 
 /// How many items each shelf asks for.
 const SHELF_LIMIT: u32 = 24;
@@ -350,7 +350,7 @@ fn show_shelves(
     let moved = cursor.take_reveal();
     let selected = cursor.selected();
     let mut target = None;
-    egui::ScrollArea::vertical().show(ui, |ui| {
+    let area = egui::ScrollArea::vertical().show(ui, |ui| {
         // `main`'s `py_6`: the page keeps clear of the window's top and bottom edges, and each
         // shelf is inset `px_6` itself, so its row scrolls to the window's edge.
         egui::Frame::NONE
@@ -407,6 +407,7 @@ fn show_shelves(
                 }
             });
     });
+    backdrop::scroll_edge(ui, &area);
     if let Some(route) = asked.open {
         cx.nav.push(NavRequest::Push(route));
     }

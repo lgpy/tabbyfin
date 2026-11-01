@@ -394,6 +394,12 @@ impl PageHarness {
         &self.harness
     }
 
+    /// The harness to give input to directly: the pointer and the wheel, which the page's own
+    /// keys don't cover.
+    pub fn harness_mut(&mut self) -> &mut Harness<'static, PageRun> {
+        &mut self.harness
+    }
+
     /// A key press with its release, routed as `App::raw_input_hook` and the shell route them:
     /// [`keys::take`] removes the press from egui's input first, so egui never sees a key the
     /// page uses.

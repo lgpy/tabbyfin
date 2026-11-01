@@ -43,7 +43,7 @@ use crate::views::value_filters::{self, ValueFilters};
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::{CARD_GAP, POSTER_H, POSTER_W};
-use crate::widgets::{button, card, select, state};
+use crate::widgets::{backdrop, button, card, select, state};
 
 /// Items per request: rows show placeholders until the page holding them arrives.
 const PAGE_SIZE: usize = 100;
@@ -1196,6 +1196,7 @@ impl LibraryPage {
                         }
                     });
                 self.offset = out.state.clamped_offset().y;
+                backdrop::scroll_edge(ui, &out);
             });
             if letters {
                 self.letters(ui, cx);
