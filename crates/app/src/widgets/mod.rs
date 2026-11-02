@@ -20,6 +20,7 @@ pub mod media_row;
 pub mod menu;
 pub mod pill;
 pub mod popup;
+pub mod prompt;
 pub mod round_button;
 pub mod segmented;
 pub mod select;

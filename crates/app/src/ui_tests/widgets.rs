@@ -12,6 +12,7 @@ use crate::widgets::button::{self, Focus, State};
 use crate::widgets::countdown_pill;
 use crate::widgets::list_row::{Handle, Handles, Leading, ListRow};
 use crate::widgets::pill::{self, Mark};
+use crate::widgets::prompt;
 use crate::widgets::round_button::RoundButton;
 use crate::widgets::surface::{self, Kind};
 use crate::widgets::toggle;
@@ -293,7 +294,7 @@ fn a_countdown_pill_is_a_button_and_its_progress_stays_in_range() {
         track: egui::Color32::GRAY,
     };
     let mut ui = build_harness(egui::vec2(400., 200.), 0, move |ui, clicks| {
-        let pill = countdown_pill::show(ui, "Skip intro", ICON_CLOSE, 0.35, colours);
+        let pill = countdown_pill::show(ui, "Skip intro", ICON_CLOSE, Some(0.35), colours);
         *clicks += usize::from(pill.clicked());
     });
     ui.get_by_role_and_label(Role::Button, "Skip intro").click();
@@ -304,4 +305,46 @@ fn a_countdown_pill_is_a_button_and_its_progress_stays_in_range() {
     assert_eq!(countdown_pill::progress(-1., 0., 10.), 0.);
     assert_eq!(countdown_pill::progress(11., 0., 10.), 1.);
     assert_eq!(countdown_pill::progress(5., 5., 5.), 1.);
+}
+
+/// The prompts' pills: a quiet pill is a button named by its label, and a note's action is the
+/// note's one button, its text a label beside it.
+#[test]
+fn a_prompt_pill_and_a_notes_action_are_buttons() {
+    let quiet = prompt::Quiet {
+        ink: egui::Color32::WHITE,
+        outline: egui::Color32::GRAY,
+        hover: egui::Color32::DARK_GRAY,
+    };
+    let note = prompt::Note {
+        frame: egui::Frame::new(),
+        ink: egui::Color32::WHITE,
+        action: egui::Color32::WHITE,
+        action_hover: egui::Color32::WHITE,
+        action_ink: egui::Color32::BLACK,
+    };
+    let mut ui = build_harness(egui::vec2(500., 200.), [0; 2], move |ui, clicks| {
+        clicks[0] += usize::from(prompt::quiet(ui, "Cancel", quiet).clicked());
+        clicks[1] += usize::from(prompt::note(ui, "Resumed from 12:04", ICON_CLOSE, "Start over", note).clicked());
+    });
+    assert!(ui.query_by_role_and_label(Role::Label, "Resumed from 12:04").is_some());
+    ui.get_by_role_and_label(Role::Button, "Cancel").click();
+    ui.run();
+    ui.get_by_role_and_label(Role::Button, "Start over").click();
+    ui.run();
+    assert_eq!(*ui.state(), [1, 1]);
+}
+
+/// A round button with its own tooltip keeps its label as its name, so the player's buttons say
+/// "Back" while their tooltips add the key.
+#[test]
+fn a_round_buttons_tooltip_doesnt_change_its_name() {
+    let ui = build_harness(egui::vec2(200., 100.), (), |ui, _| {
+        RoundButton::icon(ICON_CLOSE, "Back")
+            .tooltip("Back (Esc)")
+            .focus(Focus::Skip)
+            .show(ui);
+    });
+    assert!(ui.query_by_role_and_label(Role::Button, "Back").is_some());
+    assert!(ui.query_by_label("Back (Esc)").is_none());
 }
