@@ -65,7 +65,11 @@ pub fn apply(ctx: &egui::Context, config: &Config) {
     });
     // A press that moves further than this is a drag, not a click: `main`'s shelves used 4 px.
     // (A shelf still scrolls along from the first pixel; only the click is withheld.)
-    ctx.options_mut(|options| options.input_options.max_click_dist = 4.);
+    // A wheel notch scrolls as far as in other apps (`smooth_scroll.rs`).
+    ctx.options_mut(|options| {
+        options.input_options.max_click_dist = 4.;
+        options.input_options.line_scroll_speed = crate::smooth_scroll::line_scroll_speed();
+    });
     apply_text_size(ctx, config.text_size);
     apply_animations(ctx, config.animations.unwrap_or(true));
 }
@@ -1416,11 +1420,4 @@ pub mod over_video {
     /// A slider's thumb, inside its ring: the classic `slider.thumb.background` in the dark theme,
     /// which is what `main`'s player drew whichever theme was chosen.
     pub const THUMB: Color32 = Color32::from_rgb(0x0a, 0x0a, 0x0a);
-
-    /// Behind a card's progress bar, over its image. Dark against the fill, with a light outline
-    /// ([`TRACK_OUTLINE`]) so the bar's full length still shows on dark images.
-    pub const TRACK: Color32 = Color32::from_black_alpha(153);
-
-    /// White at 50 %.
-    pub const TRACK_OUTLINE: Color32 = Color32::from_rgba_premultiplied(128, 128, 128, 128);
 }
