@@ -1,13 +1,14 @@
 //! A button's contents with a material icon before the label, as `main`'s buttons had them: the
-//! library toolbar's, the SyncPlay panel's toggles. And the cozy look's buttons: [`brand`] for a
-//! screen's main action (or [`danger`] when it deletes something), [`quiet`] for the ones beside
-//! it, and [`brand_icon`] and [`quiet_icon`] for a page's row of actions (the item page's).
+//! SyncPlay panel's toggles. And the cozy look's buttons: [`brand`] for a screen's main action (or
+//! [`danger`] when it deletes something), [`quiet`] for the ones beside it, [`text`] for a small
+//! written-out action in a row of controls, and [`brand_icon`] and [`quiet_icon`] for a page's row
+//! of actions (the item page's).
 
 use egui::accesskit::Role;
 use egui::text::LayoutJob;
 use egui::{
-    Align, Button, Color32, FontId, Rect, Response, RichText, Spinner, Stroke, TextFormat, TextStyle, Ui, Vec2,
-    WidgetInfo, WidgetText, pos2, vec2,
+    Align, Button, Color32, FontId, Rect, Response, RichText, Spinner, Stroke, TextFormat, Ui, Vec2, WidgetInfo,
+    WidgetText, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 
@@ -34,13 +35,6 @@ pub fn icon_text(icon: MaterialIcon, icon_size: f32, label: &str, font: FontId, 
         job.append(label, GAP, format(font));
     }
     WidgetText::LayoutJob(job.into())
-}
-
-/// A button with `icon` before `label` at the text's own sizes, in the foreground colour.
-pub fn with_icon(ui: &Ui, icon: MaterialIcon, label: &str) -> Button<'static> {
-    let font = TextStyle::Button.resolve(ui.style());
-    let icon_size = text::icon(ui, icon.font_family()).size;
-    Button::new(icon_text(icon, icon_size, label, font, theme::tokens_of(ui).foreground))
 }
 
 /// The height of the cozy look's buttons: roomier than egui's 32 points.
@@ -263,6 +257,16 @@ pub fn subtle(ui: &mut Ui, label: &str) -> Response {
         .color(tokens.ink_muted)
         .underline();
     ui.add(Button::new(label).frame(false))
+}
+
+/// A small action written out in [`theme::Tokens::brand`], with no frame, for a row of
+/// controls where a button would be one box too many (*Clear filters* in the library's
+/// toolbar). Disabled, it's dimmed like any disabled widget. Clicks only, like the toolbar it
+/// sits in: a page with a cursor rings it itself.
+pub fn text(ui: &mut Ui, label: &str, enabled: bool) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let label = RichText::new(label).font(text::font(ui, "sm")).color(tokens.brand);
+    ui.add_enabled(enabled, Button::new(label).frame(false).sense(egui::Sense::CLICK))
 }
 
 /// The cozy look's rounder, taller button, with its own radius so a `Ui` that changed the

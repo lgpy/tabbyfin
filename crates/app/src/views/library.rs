@@ -26,8 +26,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use egui::{Align, Align2, CornerRadius, FontId, Layout, Response, RichText, Sense, Ui, vec2};
-use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_FILTER_LIST};
+use egui::accesskit::Role;
+use egui::{Align, Align2, CornerRadius, FontId, Layout, Response, Sense, Ui, WidgetInfo, vec2};
+use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD};
 use jellyfin::models::{
     BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemFilterValues, ItemSortBy, QueryResult,
 };
@@ -43,15 +44,16 @@ use crate::views::value_filters::{self, ValueFilters};
 use crate::views::{Page, PageCx};
 use crate::widgets::focus;
 use crate::widgets::menu::{self, MenuAction};
+use crate::widgets::round_button::RoundButton;
 use crate::widgets::text::{CARD_GAP, POSTER_H, POSTER_W};
-use crate::widgets::{backdrop, button, card, select, state};
+use crate::widgets::{backdrop, button, card, label, select, state, surface};
 
 /// Items per request: rows show placeholders until the page holding them arrives.
 const PAGE_SIZE: usize = 100;
 /// `main`'s `px_6` around the toolbar and the grid.
 const GRID_PADDING: f32 = 24.;
-/// Room at the toolbar's ends for the cursor's ring.
-const RING_GAP: f32 = 3.;
+/// The order button's diameter: the selects' height.
+const ORDER_BUTTON: f32 = 32.;
 /// The genres and tags button's width.
 const VALUES_BUTTON_W: f32 = 200.;
 /// The jump bar's letters; `#` is the top (names starting with digits or symbols).
@@ -943,49 +945,47 @@ impl LibraryPage {
         tools
     }
 
+    /// The toolbar on its strip (`surface::strip`), as wide as the grid's padding leaves: the
+    /// filters and the count at the left, the sort at the right.
     fn toolbar(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let tools = self.tools();
         let split = tools.iter().position(|tool| *tool == Tool::Sort).unwrap_or(tools.len());
-        let muted = crate::theme::tokens_of(ui).muted_foreground;
         let mut action = None;
         let mut values_button = None;
         ui.horizontal(|ui| {
-            ui.add_space(GRID_PADDING - RING_GAP);
-            for (index, tool) in tools[..split].iter().copied().enumerate() {
-                let (response, control) = self.tool(ui, tool);
-                action = action.or(control);
-                if self.cursor.is_selected(TOOLBAR, index) {
-                    focus::ring_widget(ui, &response);
-                }
-                if tool == Tool::Values {
-                    values_button = Some(response);
-                }
-            }
-            if let Some(total) = self.total {
-                ui.add_space(12.);
-                ui.label(
-                    RichText::new(item_count(total))
-                        .font(crate::theme::text::font(ui, "sm"))
-                        .color(muted),
-                );
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                // `main`'s `px_6` on the right too: the sort sits clear of the window's edge
-                // now that the page owns the whole width.
-                ui.add_space(GRID_PADDING - RING_GAP);
-                // Right to left: the order button, the sort picker, then its label.
-                for index in (split..tools.len()).rev() {
-                    let (response, control) = self.tool(ui, tools[index]);
-                    action = action.or(control);
-                    if self.cursor.is_selected(TOOLBAR, index) {
-                        focus::ring_widget(ui, &response);
+            ui.add_space(GRID_PADDING);
+            let width = ui.available_width() - GRID_PADDING;
+            surface::strip(ui).show(ui, |ui| {
+                ui.set_width(width - 2. * f32::from(surface::STRIP_PAD[0]));
+                ui.horizontal(|ui| {
+                    for (index, tool) in tools[..split].iter().copied().enumerate() {
+                        let selected = self.cursor.is_selected(TOOLBAR, index);
+                        let (response, control) = self.tool(ui, tool, selected);
+                        action = action.or(control);
+                        if selected && tool != Tool::Order {
+                            focus::ring_widget(ui, &response);
+                        }
+                        if tool == Tool::Values {
+                            values_button = Some(response);
+                        }
                     }
-                }
-                ui.label(
-                    RichText::new("Sort")
-                        .font(crate::theme::text::font(ui, "sm"))
-                        .color(muted),
-                );
+                    if let Some(total) = self.total {
+                        ui.add_space(8.);
+                        ui.label(label::muted(ui, item_count(total)));
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // Right to left: the order button, the sort picker, then its label.
+                        for index in (split..tools.len()).rev() {
+                            let selected = self.cursor.is_selected(TOOLBAR, index);
+                            let (response, control) = self.tool(ui, tools[index], selected);
+                            action = action.or(control);
+                            if selected && tools[index] != Tool::Order {
+                                focus::ring_widget(ui, &response);
+                            }
+                        }
+                        ui.label(label::muted(ui, "Sort"));
+                    });
+                });
             });
         });
         if let Some(anchor) = values_button
@@ -999,7 +999,9 @@ impl LibraryPage {
     }
 
     /// One toolbar control: its response and what it asked for when clicked.
-    fn tool(&self, ui: &mut Ui, tool: Tool) -> (Response, Option<ToolAction>) {
+    /// `selected` is whether the page's cursor is on it, for the controls that draw their own
+    /// ring.
+    fn tool(&self, ui: &mut Ui, tool: Tool, selected: bool) -> (Response, Option<ToolAction>) {
         let view = &self.view;
         match tool {
             Tool::Sort => {
@@ -1051,30 +1053,34 @@ impl LibraryPage {
                 } else {
                     "Sort descending"
                 };
-                let button = egui::Button::new(icon.outlined().rich_text())
-                    .frame(false)
-                    .min_size(vec2(24., ui.spacing().interact_size.y));
-                let response = ui.add(button).on_hover_text(tooltip);
+                let response = RoundButton::icon(icon, tooltip)
+                    .size(ORDER_BUTTON, 20.)
+                    .ringed(selected)
+                    .focus(button::Focus::Skip)
+                    .show(ui);
                 let action = response.clicked().then_some(ToolAction::ToggleOrder);
                 (response, action)
             }
             Tool::Values => {
+                // A select's box, since it opens a list of choices too, at a set width so the
+                // controls after it don't shift as the choice changes.
                 let label = value_filters::summary(view);
-                // A set width, so the controls after it don't shift as the choice changes.
-                let button = button::with_icon(ui, ICON_FILTER_LIST, &label).truncate();
-                let response = ui.add_sized(vec2(VALUES_BUTTON_W, ui.spacing().interact_size.y), button);
+                let size = vec2(VALUES_BUTTON_W, ui.spacing().interact_size.y);
+                let response = select::button(ui, size, &label, "Genres and tags", false);
                 let action = response.clicked().then_some(ToolAction::OpenValues);
                 (response, action)
             }
             Tool::Clear => {
-                let response = ui.add_enabled(self.filtered(), egui::Button::new("Clear filters"));
+                let response = button::text(ui, "Clear filters", self.filtered());
                 let action = response.clicked().then_some(ToolAction::Clear);
                 (response, action)
             }
         }
     }
 
-    fn letters(&mut self, ui: &mut Ui, cx: &mut PageCx) {
+    /// The jump bar: the letters in `ink_muted`, `current` (the first row's) in `brand`, and an
+    /// `inset_hover` pill in `ink` under the pointer.
+    fn letters(&mut self, ui: &mut Ui, current: Option<char>, cx: &mut PageCx) {
         // The letters spread down the whole grid, as `main`'s did, at 12 px each.
         let count = LETTERS.chars().count() as f32;
         let line = 12.;
@@ -1082,24 +1088,28 @@ impl LibraryPage {
         let size = vec2(LETTER_BAR_W, ui.available_height());
         ui.allocate_ui_with_layout(size, Layout::top_down(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.y = gap;
+            let tokens = crate::theme::tokens_of(ui);
             for letter in LETTERS.chars() {
-                let (rect, response) = ui.allocate_exact_size(vec2(LETTER_BAR_W, line), Sense::click());
-                let tokens = crate::theme::tokens_of(ui);
-                if response.hovered() {
-                    let fill = tokens.accent;
+                let (rect, response) = ui.allocate_exact_size(vec2(LETTER_BAR_W, line), Sense::CLICK);
+                let is_current = current == Some(letter);
+                response
+                    .widget_info(|| WidgetInfo::selected(Role::Button, true, is_current, format!("Jump to {letter}")));
+                let hovered = response.hovered();
+                if hovered {
+                    let pill = rect.expand2(vec2(-4., 2.));
                     ui.painter()
-                        .rect_filled(rect.shrink2(vec2(4., 0.)), CornerRadius::same(2), fill);
+                        .rect_filled(pill, CornerRadius::same((pill.height() / 2.) as u8), tokens.inset_hover);
                 }
-                let color = if response.hovered() {
-                    tokens.accent_foreground
-                } else {
-                    tokens.muted_foreground
+                let (color, size) = match (hovered, is_current) {
+                    (_, true) => (tokens.brand, 13.),
+                    (true, false) => (tokens.ink, 11.),
+                    (false, false) => (tokens.ink_muted, 11.),
                 };
                 ui.painter().text(
                     rect.center(),
                     Align2::CENTER_CENTER,
                     letter,
-                    FontId::new(11., egui::FontFamily::Proportional),
+                    FontId::new(size, egui::FontFamily::Proportional),
                     color,
                 );
                 if response.clicked() {
@@ -1107,6 +1117,14 @@ impl LibraryPage {
                 }
             }
         });
+    }
+
+    /// The letter of the first row in view (the first whose cards are at least half on
+    /// screen), by its first card's name; `None` until that card has arrived.
+    fn current_letter(&self, card_height: f32, pitch: f32) -> Option<char> {
+        let row = ((self.offset - card_height / 2.) / pitch).ceil().max(0.) as usize;
+        let item = self.items.get(row * self.columns)?.as_ref()?;
+        Some(letter_of(&item.name))
     }
 
     fn grid(&mut self, ui: &mut Ui, cx: &mut PageCx) {
@@ -1200,7 +1218,8 @@ impl LibraryPage {
                 backdrop::scroll_edge(ui, &out);
             });
             if letters {
-                self.letters(ui, cx);
+                let current = self.current_letter(card_height, pitch);
+                self.letters(ui, current, cx);
             }
         });
         self.visible_pages = visible_pages;
@@ -1402,6 +1421,22 @@ async fn order(
         .collect())
 }
 
+/// The jump bar's letter for `name`: its first letter once a leading article is dropped (as
+/// Jellyfin's sort names drop "The", "A" and "An"), in capitals, or `#` when that isn't a
+/// letter from A to Z.
+pub fn letter_of(name: &str) -> char {
+    let trimmed = name.trim_start();
+    let lower = trimmed.to_lowercase();
+    let rest = ["the ", "an ", "a "]
+        .iter()
+        .find(|article| lower.starts_with(*article) && trimmed.len() > article.len())
+        .map_or(trimmed, |article| trimmed[article.len()..].trim_start());
+    match rest.chars().next() {
+        Some(first) if first.is_ascii_alphabetic() => first.to_ascii_uppercase(),
+        _ => '#',
+    }
+}
+
 /// Cards per row that fit `width`, with the toolbar's padding on both sides.
 fn columns(width: f32) -> usize {
     let inner = (width - 2. * GRID_PADDING).max(0.);
@@ -1439,7 +1474,18 @@ fn item_count(total: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{GRID_PADDING, Jump, chosen, columns, item_count, jump_target, year_choices, years_of};
+    use super::{GRID_PADDING, Jump, chosen, columns, item_count, jump_target, letter_of, year_choices, years_of};
+
+    #[test]
+    fn a_name_is_under_its_first_letter_past_an_article() {
+        assert_eq!(letter_of("Amber Tide"), 'A');
+        assert_eq!(letter_of("the Matrix"), 'M');
+        assert_eq!(letter_of("An Unexpected Turn"), 'U');
+        assert_eq!(letter_of("A"), 'A');
+        assert_eq!(letter_of("Annie"), 'A');
+        assert_eq!(letter_of("2001: A Space Odyssey"), '#');
+        assert_eq!(letter_of("\u{c9}t\u{e9}"), '#');
+    }
 
     #[test]
     fn letters_jump_past_the_names_before_them() {
