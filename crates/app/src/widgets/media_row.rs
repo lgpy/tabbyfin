@@ -16,7 +16,8 @@ use std::sync::Arc;
 use egui::accesskit::Role;
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, Galley, Label, Layout, Rect, Response, RichText, Sense, TextFormat, Ui, UiBuilder, WidgetInfo,
+    Align, Align2, Color32, CornerRadius, Galley, Label, Layout, Rect, Response, RichText, Sense, TextFormat, Ui,
+    UiBuilder, WidgetInfo,
 };
 use egui::{pos2, vec2};
 use egui_material_icons::icons::{ICON_CHECK, ICON_CHECK_CIRCLE, ICON_EXPAND_LESS, ICON_EXPAND_MORE};
@@ -80,6 +81,16 @@ pub const EPISODE_MIN_W: f32 = 420.;
 /// A season row's height, and the narrowest one gets before the list takes fewer columns.
 const SEASON_H: f32 = 84.;
 pub const SEASON_MIN_W: f32 = 300.;
+
+/// A chapter row's thumbnail, the room round it, and its corners: the row's, and the picture's
+/// inside it.
+pub const CHAPTER_THUMB_W: f32 = 128.;
+const CHAPTER_THUMB_H: f32 = 72.;
+const CHAPTER_PAD: f32 = 8.;
+const CHAPTER_ROW_RADIUS: u8 = 10;
+const CHAPTER_IMAGE_RADIUS: u8 = 6;
+/// Between the thumbnail and the chapter's name.
+const CHAPTER_TEXT_GAP: f32 = 14.;
 
 pub struct MediaRow<'a> {
     item: &'a BaseItemDto,
@@ -270,8 +281,8 @@ pub fn season_columns(width: f32) -> usize {
 
 /// A series' season as an inset row `width` wide: its poster, its name, `line` under it in
 /// `ink_muted` (how many episodes, how many are left), and a chevron at the right end. `open`
-/// says its episodes are showing: the row stays `inset_hover`, with a 3 pt `brand` bar at its
-/// left edge and the chevron turned up in `brand`.
+/// says its episodes are showing: the row stays `inset_hover`, with a `brand` bar at its left
+/// (`list_row::open_bar`) and the chevron turned up in `brand`.
 #[allow(clippy::too_many_arguments)]
 pub fn season(
     ui: &mut Ui,
@@ -316,14 +327,70 @@ pub fn season(
     };
     round_button::glyph(ui, pos2(chevron_x, rect.center().y), chevron, 24., color);
     if open {
-        let bar = Rect::from_min_max(
-            pos2(rect.left(), rect.top() + 16.),
-            pos2(rect.left() + 3., rect.bottom() - 16.),
-        );
-        ui.painter().rect_filled(bar, 2, tokens.brand);
+        list_row::open_bar(ui, rect);
     }
     if highlighted {
         focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A chapter row's colours, from the caller: the player draws it over the video, in its own dark
+/// set.
+pub struct ChapterColours {
+    /// The current chapter's row, and its name.
+    pub current: Color32,
+    pub ink_current: Color32,
+    /// A row under the pointer.
+    pub hover: Color32,
+    pub ink: Color32,
+    pub ink_muted: Color32,
+}
+
+/// A chapter of the player's chapters menu: its thumbnail (when the server extracted them), its
+/// name over its start, centred on the thumbnail. The current one is tinted `colours.current`
+/// with its name in `colours.ink_current`, and a row under the pointer takes `colours.hover`. A
+/// click-only button named "name, start" to AccessKit, selected on the current one.
+pub fn chapter(
+    ui: &mut Ui,
+    images: &mut ImageCache,
+    image: Option<&ImageRequest>,
+    name: &str,
+    start: &str,
+    current: bool,
+    colours: ChapterColours,
+) -> Response {
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(ui.available_width(), CHAPTER_THUMB_H + 2. * CHAPTER_PAD),
+        Sense::CLICK,
+    );
+    response.widget_info(|| WidgetInfo::selected(Role::Button, ui.is_enabled(), current, format!("{name}, {start}")));
+    let radius = CornerRadius::same(CHAPTER_ROW_RADIUS);
+    if current {
+        ui.painter().rect_filled(rect, radius, colours.current);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, radius, colours.hover);
+    }
+    let thumb = Rect::from_min_size(
+        rect.min + vec2(CHAPTER_PAD, CHAPTER_PAD),
+        vec2(CHAPTER_THUMB_W, CHAPTER_THUMB_H),
+    );
+    image::show(ui, images, thumb, image, None, CHAPTER_IMAGE_RADIUS);
+    let x = thumb.right() + CHAPTER_TEXT_GAP;
+    let colour = if current { colours.ink_current } else { colours.ink };
+    ui.painter().text(
+        pos2(x, thumb.center().y - 2.),
+        Align2::LEFT_BOTTOM,
+        name,
+        text::font(ui, "base"),
+        colour,
+    );
+    ui.painter().text(
+        pos2(x, thumb.center().y + 2.),
+        Align2::LEFT_TOP,
+        start,
+        text::font(ui, "sm"),
+        colours.ink_muted,
+    );
+    response
 }

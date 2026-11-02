@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use egui::{
     Align, Align2, Color32, CornerRadius, CursorIcon, Id, Layout, Rect, RectAlign, Response, RichText, Sense, Stroke,
-    StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, accesskit::Role, pos2, vec2,
+    StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -54,6 +54,7 @@ use crate::widgets::button::Focus;
 use crate::widgets::countdown_pill;
 use crate::widgets::label;
 use crate::widgets::mascot;
+use crate::widgets::media_row;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
 use crate::widgets::prompt;
 use crate::widgets::round_button::{self, RoundButton};
@@ -115,14 +116,11 @@ const PROMPT_ABOVE_CONTROLS: f32 = 120.;
 const PROMPT_AT_THE_EDGE: f32 = 32.;
 const UP_NEXT_W: f32 = 320.;
 const UP_NEXT_PAD: f32 = 16.;
-/// A chapter row's thumbnail, and the chapters menu's width and scrolling height.
-const CHAPTER_THUMB_W: f32 = 128.;
-const CHAPTER_THUMB_H: f32 = 72.;
+/// The chapters menu's width, and how tall it scrolls.
 const CHAPTERS_W: f32 = 340.;
 /// The room round the chapters' rows inside their menu, as a `PopupMenu`'s, so a row's radius is
 /// concentric with the menu's.
 const CHAPTERS_PAD: f32 = 6.;
-const CHAPTER_ROW_RADIUS: u8 = 10;
 const CHAPTERS_MAX_H: f32 = 420.;
 const SETTINGS_W: f32 = 340.;
 /// How many rows of a settings tab's track list show before it scrolls.
@@ -1077,52 +1075,22 @@ impl PlayerPage {
                         let request = chapter.image_tag.as_ref().map(|tag| ImageRequest {
                             index: Some(chapter.index as u32),
                             ..ImageRequest::new(&menu.item_id, ImageType::Chapter, Some(tag.clone()))
-                                .fill_width((CHAPTER_THUMB_W * 2.) as u32)
+                                .fill_width((media_row::CHAPTER_THUMB_W * 2.) as u32)
                         });
-                        // A menu row's geometry: 8 round the thumbnail, radius 10.
-                        let (rect, row) =
-                            ui.allocate_exact_size(vec2(ui.available_width(), CHAPTER_THUMB_H + 16.), Sense::CLICK);
                         let current = menu.current == Some(chapter.index);
                         let name = chapter
                             .name
                             .clone()
                             .unwrap_or_else(|| format!("Chapter {}", chapter.index + 1));
                         let start = timestamp(chapter.start);
-                        // The row's name for a screen reader: the chapter and when it starts.
-                        row.widget_info(|| {
-                            WidgetInfo::selected(Role::Button, ui.is_enabled(), current, format!("{name}, {start}"))
-                        });
-                        // The current chapter is tinted with the player's lilac, its name in it.
-                        let radius = CornerRadius::same(CHAPTER_ROW_RADIUS);
-                        if current {
-                            ui.painter()
-                                .rect_filled(rect, radius, over_video::BRAND.gamma_multiply(0.16));
-                        } else if row.hovered() {
-                            ui.painter().rect_filled(rect, radius, over_video::ROW_HOVER);
-                        }
-                        let image =
-                            Rect::from_min_size(rect.min + vec2(8., 8.), vec2(CHAPTER_THUMB_W, CHAPTER_THUMB_H));
-                        crate::widgets::image::show(ui, &mut cx.services.images, image, request.as_ref(), None, 6);
-                        // The name over its start, the pair centred on the thumbnail.
-                        let text_x = image.right() + 14.;
-                        let colour = if current {
-                            over_video::BRAND
-                        } else {
-                            over_video::FOREGROUND
-                        };
-                        ui.painter().text(
-                            pos2(text_x, image.center().y - 2.),
-                            Align2::LEFT_BOTTOM,
-                            name,
-                            theme::text::font(ui, "base"),
-                            colour,
-                        );
-                        ui.painter().text(
-                            pos2(text_x, image.center().y + 2.),
-                            Align2::LEFT_TOP,
-                            start,
-                            theme::text::font(ui, "sm"),
-                            over_video::MUTED_FOREGROUND,
+                        let row = media_row::chapter(
+                            ui,
+                            &mut cx.services.images,
+                            request.as_ref(),
+                            &name,
+                            &start,
+                            current,
+                            chapter_colours(),
                         );
                         if row.clicked() {
                             chosen = Some(chapter.start);
@@ -1568,6 +1536,17 @@ fn settings_id() -> Id {
 /// The player's chapters menu.
 fn chapters_id() -> Id {
     Id::unique("player_chapters")
+}
+
+/// A chapter row's colours, in the player's dark set over the video.
+fn chapter_colours() -> media_row::ChapterColours {
+    media_row::ChapterColours {
+        current: over_video::BRAND.gamma_multiply(0.16),
+        ink_current: over_video::BRAND,
+        hover: over_video::ROW_HOVER,
+        ink: over_video::FOREGROUND,
+        ink_muted: over_video::MUTED_FOREGROUND,
+    }
 }
 
 /// The version picker's menu.

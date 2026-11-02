@@ -54,8 +54,8 @@ use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
 use crate::widgets::list_row::{self, Handle, Handles, Leading, ListRow, ListRowResponse};
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
-use crate::widgets::round_button::{self, RoundButton};
-use crate::widgets::{backdrop, badge, field, label, surface};
+use crate::widgets::round_button::RoundButton;
+use crate::widgets::{backdrop, field, state, surface};
 
 /// The bar's height, inside the panel's own margin.
 /// `main`'s bar: 72 points tall, 40-point buttons with 24-point icons.
@@ -990,7 +990,7 @@ impl Shell {
         match &state.group {
             Some(group) => {
                 let (status, dot) = group_status(ui, group.state);
-                panel_header(
+                popup::panel_heading(
                     ui,
                     &group.group_name,
                     Some((status, dot)),
@@ -1012,12 +1012,12 @@ impl Shell {
                 }
             }
             None => {
-                panel_header(ui, "Watch together", None, "Play in sync with others on this server.");
+                popup::panel_heading(ui, "Watch together", None, "Play in sync with others on this server.");
                 ui.add_space(surface::GAP_GROUP);
                 if state.groups.is_empty() {
-                    nobody_watching(ui);
+                    state::icon_message(ui, ICON_GROUPS, "No one is watching together right now.");
                 } else {
-                    panel_section(ui, "Join a group", |_| {});
+                    popup::panel_section(ui, "Join a group", QUEUE_TOGGLE, |_| {});
                 }
                 for (index, group) in state.groups.iter().enumerate() {
                     if index > 0 {
@@ -1413,49 +1413,6 @@ fn group_status(ui: &Ui, state: GroupState) -> (&'static str, Color32) {
     }
 }
 
-/// The panel's top: its title, with `status` at the right end as a dot and a note, over a
-/// muted line saying what the panel is for.
-fn panel_header(ui: &mut Ui, title: &str, status: Option<(&str, Color32)>, line: &str) {
-    // A row is wrapped in `ui.horizontal` so that it measures only itself: a `with_layout`
-    // directly in a vertical `Ui` would take the height left in the panel.
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 6.;
-            if let Some((note, dot)) = status {
-                ui.label(label::note(ui, note));
-                badge::dot(ui, dot);
-            }
-            // The title takes what's left, so a long one truncates rather than pushing the
-            // state out of the panel.
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                let title = label::title(ui, title).font(text::font(ui, "lg"));
-                ui.add(egui::Label::new(title).truncate());
-            });
-        });
-    });
-    ui.add_space(theme::SPACE.xs);
-    // Left aligned: in the panel's justified layout a wrapped line would be stretched to both
-    // edges.
-    ui.with_layout(Layout::top_down(Align::Min), |ui| {
-        ui.label(label::muted(ui, line));
-    });
-}
-
-/// A section's overline, with `right` (its controls) at the other end.
-fn panel_section(ui: &mut Ui, title: &str, right: impl FnOnce(&mut Ui)) {
-    ui.horizontal(|ui| {
-        ui.set_height(QUEUE_TOGGLE);
-        ui.label(label::overline(ui, title));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 4.;
-            // Room for the keyboard's ring inside the panel's edge.
-            ui.add_space(focus::GAP + focus::WIDTH);
-            right(ui);
-        });
-    });
-    ui.add_space(theme::SPACE.xs);
-}
-
 /// A group to join: its members' avatars, its name, who's in it and what it's doing, and a
 /// `brand` Join at the right end. The whole row joins; clicks only, as the panel reads its own
 /// keys.
@@ -1477,23 +1434,14 @@ fn join_row(ui: &mut Ui, group: &GroupInfo, highlight: Option<&MenuEntry>) -> Re
         .row
 }
 
-/// No groups on the server: the groups icon in a soft circle over a muted line.
-fn nobody_watching(ui: &mut Ui) {
-    let tokens = theme::tokens_of(ui);
-    ui.vertical_centered(|ui| {
-        ui.add_space(theme::SPACE.sm);
-        let (rect, _) = ui.allocate_exact_size(vec2(48., 48.), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 24., tokens.inset_hover);
-        round_button::glyph(ui, rect.center(), ICON_GROUPS, 26., tokens.ink_muted);
-        ui.add_space(theme::SPACE.sm);
-        ui.label(label::muted(ui, "No one is watching together right now."));
-        ui.add_space(theme::SPACE.sm);
-    });
-}
-
 /// Who's in the group, a row each, the user marked "you".
 fn group_members(ui: &mut Ui, group: &GroupInfo, user: &str) {
-    panel_section(ui, &format!("Watching · {}", group.participants.len()), |_| {});
+    popup::panel_section(
+        ui,
+        &format!("Watching · {}", group.participants.len()),
+        QUEUE_TOGGLE,
+        |_| {},
+    );
     for name in &group.participants {
         avatar_row::person(ui, name, (name == user).then_some("you"));
     }
@@ -1506,7 +1454,7 @@ fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scr
     let queue = state.queue.as_ref().filter(|queue| !queue.playlist.is_empty())?;
     let mut chosen = None;
     ui.add_space(surface::GAP_GROUP);
-    panel_section(ui, "Queue", |ui| {
+    popup::panel_section(ui, "Queue", QUEUE_TOGGLE, |ui| {
         // Off, all, one: each press moves to the next, as on `main`.
         let (icon, tooltip, on) = match queue.repeat_mode {
             RepeatMode::RepeatNone => (ICON_REPEAT, "Repeat is off", false),
