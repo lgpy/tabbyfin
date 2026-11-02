@@ -9,6 +9,7 @@
 //! subtitles are cut short when they don't fit, and the sizes follow A1's text size.
 
 use egui::emath::GuiRounding as _;
+use egui::emath::{easing, lerp};
 use egui::epaint::Shadow;
 use egui::{
     Align, Align2, Color32, CornerRadius, FontId, Label, Rect, Response, Sense, Ui, Vec2, WidgetText, pos2, vec2,
@@ -34,6 +35,12 @@ const GAP: f32 = 4.;
 
 /// How much bigger the play button gets under the pointer.
 const PLAY_GROWTH: f32 = 1.1;
+/// How big the play button starts as it fades in, against its resting size.
+const PLAY_ENTER_SCALE: f32 = 0.7;
+/// How long the play button takes to fade in as the pointer comes onto its card (or out).
+const PLAY_APPEAR: f32 = 0.18;
+/// How long the play button takes to grow and deepen under the pointer (or settle back).
+const PLAY_GROW: f32 = 0.14;
 /// What lifts the play button off the picture.
 const PLAY_SHADOW: Shadow = Shadow {
     offset: [0, 4],
@@ -303,24 +310,40 @@ pub fn play_button(ui: &Ui, card: &Response) -> bool {
         card.rect.min,
         pos2(card.rect.right(), card.rect.bottom() - text_height(ui)),
     );
-    if !(card.hovered() && ui.rect_contains_pointer(image)) {
-        return false;
-    }
+    let shown = card.hovered() && ui.rect_contains_pointer(image);
     let rest = (image.width().min(image.height()) * 0.16).clamp(16., 28.);
     let center = image.center();
     let within = |pos: Option<egui::Pos2>| pos.is_some_and(|pos| pos.distance(center) <= rest);
-    let on_it = within(card.hover_pos());
+    let on_it = shown && within(card.hover_pos());
+    // It fades and swells in as the pointer comes onto the card and out as it leaves; with the
+    // animations setting off both happen at once.
+    let ctx = ui.ctx();
+    let (appear_time, grow_time) = if theme::animations(ctx) {
+        (PLAY_APPEAR, PLAY_GROW)
+    } else {
+        (0., 0.)
+    };
+    let id = card.id.with("play button");
+    let appear = ctx.animate_bool_with_time_and_easing(id, shown, appear_time, easing::cubic_out);
+    if appear <= 0. {
+        return false;
+    }
+    let grow = ctx.animate_bool_with_time_and_easing(id.with("grow"), on_it, grow_time, easing::cubic_out);
     let tokens = theme::tokens_of(ui);
     // Under the pointer it grows a little and deepens, so it reads as the thing that will be
     // clicked. The shadow lifts it off a picture of its own colour.
-    let (radius, fill) = if on_it {
-        (rest * PLAY_GROWTH, tokens.brand_hover)
-    } else {
-        (rest, tokens.brand)
-    };
+    let radius = rest * lerp(PLAY_ENTER_SCALE..=1., appear) * lerp(1. ..=PLAY_GROWTH, grow);
+    let fill = tokens
+        .brand
+        .lerp_to_gamma(tokens.brand_hover, grow)
+        .gamma_multiply(appear);
     let disc = Rect::from_center_size(center, Vec2::splat(2. * radius));
+    let shadow = Shadow {
+        color: PLAY_SHADOW.color.gamma_multiply(appear),
+        ..PLAY_SHADOW
+    };
     ui.painter()
-        .add(PLAY_SHADOW.as_shape(disc, CornerRadius::same(radius.round() as u8)));
+        .add(shadow.as_shape(disc, CornerRadius::same(radius.round() as u8)));
     ui.painter().circle_filled(center, radius, fill);
     // Centred by the glyph rather than the font's box, and nudged right: a triangle's weight
     // sits left of its box's middle.
@@ -330,12 +353,12 @@ pub fn play_button(ui: &Ui, card: &Response) -> bool {
         center + vec2(size * 0.04, 0.),
         ICON_PLAY_ARROW,
         size,
-        tokens.brand_foreground,
+        tokens.brand_foreground.gamma_multiply(appear),
     );
     if on_it {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    card.clicked() && within(card.interact_pointer_pos())
+    shown && card.clicked() && within(card.interact_pointer_pos())
 }
 
 /// The keyboard cursor's ring, inside the card's edge so scrolling containers don't clip it.
