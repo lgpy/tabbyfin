@@ -345,12 +345,13 @@ pub fn play_button(ui: &Ui, card: &Response) -> bool {
     ui.painter()
         .add(shadow.as_shape(disc, CornerRadius::same(radius.round() as u8)));
     ui.painter().circle_filled(center, radius, fill);
-    // Centred by the glyph rather than the font's box, and nudged right: a triangle's weight
-    // sits left of its box's middle.
+    // Centred by the triangle's own box, then nudged right by a sixth of its width (about 0.08
+    // of the icon's size) so its weight, a third of the way in from its flat side, sits in the
+    // middle.
     let size = radius * 1.25;
     round_button::glyph(
         ui,
-        center + vec2(size * 0.04, 0.),
+        center + vec2(size * 0.08, 0.),
         ICON_PLAY_ARROW,
         size,
         tokens.brand_foreground.gamma_multiply(appear),
