@@ -42,12 +42,17 @@ pub fn tag_width(ui: &Ui, name: &str) -> f32 {
     galley.size().x + 2. * TAG_PAD_X
 }
 
+/// How tall [`tag`] draws, so a wrapping row of tags can be made just that tall.
+pub fn tag_height(ui: &Ui) -> f32 {
+    let font = text::font(ui, "xs");
+    ui.fonts_mut(|fonts| fonts.row_height(&font)) + 2. * TAG_PAD_Y
+}
+
 /// A tag: `inset`, a 1 pt `surface_border` outline, its text `xs` in `ink_muted`.
 pub fn tag(ui: &mut Ui, name: &str) -> Response {
     let tokens = theme::tokens_of(ui);
     let font = text::font(ui, "xs");
-    let height = ui.fonts_mut(|fonts| fonts.row_height(&font)) + 2. * TAG_PAD_Y;
-    let (rect, response) = ui.allocate_exact_size(vec2(tag_width(ui, name), height), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(tag_width(ui, name), tag_height(ui)), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, name));
     shape(ui, rect, tokens.inset, Stroke::new(1., tokens.surface_border));
     let at = pos2(rect.left() + TAG_PAD_X, rect.center().y);
