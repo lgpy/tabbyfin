@@ -1,7 +1,5 @@
 //! Detail page for a movie, series, season or episode, and for collections and playlists
-//! (whose entries can be reordered and removed here). The page, its header, actions, pickers and
-//! shelves are U6's; its seasons, the open season's episodes and playlist entries are U7's; its
-//! cozy look is C11's.
+//! (whose entries can be reordered and removed here).
 //!
 //! The page follows `views/home.rs`: data loads through a [`Task`] polled in `show` and what's on
 //! screen stays until new data arrives, the page loads again when `services.user_data` moves on,
@@ -20,10 +18,10 @@
 //! Watched and Favorite show at once and go back if the server refuses: the services remember
 //! the refusal in a numbered log (`Services::refused_marks`) and the page takes the change back
 //! whenever it next draws, since a reload would fail too while the server is down. The icons pop
-//! as the item turns watched or favorite, as `main`'s did ([`crate::motion`]).
+//! as the item turns watched or favorite ([`crate::motion`]).
 //!
-//! The More and version menus are [`PopupMenu`]s, so the keyboard can walk them, as it could
-//! on `main`; Enter on More opens its menu with the first entry highlighted.
+//! The More and version menus are [`PopupMenu`]s, so the keyboard can walk them; Enter on More
+//! opens its menu with the first entry highlighted.
 
 mod children;
 mod header;
@@ -202,7 +200,7 @@ const SIMILAR_LIMIT: u32 = 12;
 /// The backdrop's height: the header's content starts [`BACKDROP_H`] − 160 down, so the poster
 /// reaches under it.
 const BACKDROP_H: f32 = 420.;
-/// The width the backdrop is fetched at, as `main` did. A fixed width keeps the image cache key
+/// The width the backdrop is fetched at. A fixed width keeps the image cache key
 /// (and so the download and its cache entry) the same while the window is resized, maximised or
 /// zoomed; it is scaled to the band it fills.
 const BACKDROP_FILL_W: u32 = 1280;
@@ -217,7 +215,7 @@ const DETAIL_POSTER_H: f32 = 300.;
 const DETAIL_STILL_H: f32 = 200.;
 const PICKER_W: f32 = 260.;
 const PICKER_H: f32 = 28.;
-/// The version label's column, as on `main`.
+/// The version label's column.
 const PICKER_LABEL_W: f32 = 90.;
 /// Between the page's sections.
 const SECTION_GAP: f32 = 24.;
@@ -228,7 +226,7 @@ const BIG_CARD_SCALE: f32 = 1.2;
 const BIG_CARD_GAP: f32 = 24.;
 /// Between a shelf's title and its cards.
 const SHELF_TITLE_GAP: f32 = 16.;
-/// The item's title, `main`'s fixed 40-point `text_size` (it didn't follow the text size).
+/// The item's title: a fixed 40-point size, which doesn't follow the text size.
 const TITLE_SIZE: f32 = 40.;
 /// Between the action buttons: room for the cursor's ring outside each (`focus::GAP` and its
 /// width) with a little to spare.
@@ -236,7 +234,7 @@ const ACTION_GAP: f32 = 10.;
 /// The More menu's width.
 const MENU_W: f32 = 220.;
 
-/// Cursor sections, top to bottom, as on `main`.
+/// Cursor sections, top to bottom.
 const ACTIONS: usize = 0;
 /// The version picker; Left and Right change it.
 const PICKERS: usize = 1;
@@ -279,7 +277,7 @@ enum EntryAction {
     Remove,
 }
 
-/// When the Watched and Favorite toggles last turned on: `main`'s `Fill`.
+/// When the Watched and Favorite toggles last turned on.
 #[derive(Default)]
 struct Fills {
     played: Fill,
@@ -446,8 +444,8 @@ impl ItemPage {
     }
 
     /// Shows `change` on each copy of the item on the page (itself, a child or an episode of
-    /// the open season), or with `undo`, takes it back from those still showing it. As on
-    /// `main`, the item's own toggle pops its icon when it turns on.
+    /// the open season), or with `undo`, takes it back from those still showing it. The item's
+    /// own toggle pops its icon when it turns on.
     fn show_mark(&mut self, item_id: &str, change: Mark, undo: bool, now: f64) {
         let Load::Loaded(data) = &mut self.data else {
             return;
@@ -675,7 +673,7 @@ impl ItemPage {
                 self.mark(item_id, Mark::Favorite(!favorite), cx);
             }
             // A show plays all its episodes, shuffled, which takes a request; the services run
-            // it so leaving the page doesn't drop it, as `main`'s detached task didn't.
+            // it so leaving the page doesn't drop it.
             ItemAction::Shuffle if matches!(data.item.kind, BaseItemKind::Series | BaseItemKind::Season) => {
                 cx.services.play_shuffled(&data.item);
             }
@@ -794,7 +792,7 @@ impl ItemPage {
         let fills = &self.fills;
         let mut asked = Asked::default();
         // The page's own scroll target, set once every shelf is drawn: the next scroll area to
-        // finish takes a target, and a shelf's row would be it (U3).
+        // finish takes a target, and a shelf's row shouldn't be it.
         let mut target = None;
         // The closing band has folded away.
         let mut folded = false;
@@ -901,9 +899,8 @@ impl ItemPage {
                             Some(position) if position.section == ACTIONS => Some((header, Some(Align::TOP))),
                             Some(position) if position.section == PICKERS => pickers.map(|rect| (rect, None)),
                             Some(position) if position.section == CHAPTERS => chapters_row.map(|rect| (rect, None)),
-                            // The heading comes into view with their first row, as `main`'s
-                            // reveal scrolled the title and then the row: the least scroll
-                            // that shows both, rather than pushing the header away.
+                            // The heading comes into view with their first row: the least
+                            // scroll that shows both, rather than pushing the header away.
                             Some(position) if position.section == CHILDREN => children_row.map(|row| {
                                 let first_row = position.index / children_columns.max(1) == 0;
                                 let rect = match children_title {
@@ -961,7 +958,7 @@ impl ItemPage {
         }
 
         if let Some(action) = asked.action {
-            // A second click on More closes its menu, as its trigger did on `main`.
+            // A second click on More closes its menu, as its trigger does.
             if action == ItemAction::More && PopupMenu::is_open(cx.ctx, more_id) {
                 PopupMenu::close(cx.ctx, more_id);
             } else {
@@ -980,8 +977,8 @@ impl ItemPage {
             cx.nav.push(NavRequest::Push(route));
         }
         if let Some(season) = asked.season {
-            // A click leaves the band where it opens, as on `main`: only the keyboard's Enter
-            // scrolls to it, and a click that moved the page under the pointer would surprise.
+            // A click leaves the band where it opens: only the keyboard's Enter scrolls to it,
+            // and a click that moved the page under the pointer would surprise.
             self.toggle_season(&season, cx);
         }
         if let Some((index, action)) = asked.entry {
@@ -1075,8 +1072,7 @@ impl Page for ItemPage {
     }
 
     fn on_key(&mut self, action: Action, cx: &mut PageCx) -> bool {
-        // The children rows' own keys come before the cursor's, as `main`'s `on_key_down` did:
-        // W is a letter, not a move.
+        // The children rows' own keys come before the cursor's: W is a letter, not a move.
         if self.children_key(action, cx) {
             return true;
         }

@@ -1,5 +1,4 @@
 //! Sign-in: a saved account, or a server address, then username and password or Quick Connect.
-//! Ported from `main`'s `views/login.rs`.
 //!
 //! The form never awaits a request: the running operation is a [`Task`], replaced or dropped
 //! when the user tries something else, which cancels it. While one runs, it reports what it
@@ -92,8 +91,7 @@ impl Field {
     /// The field's own widget id, so the keyboard stays in it while the rows above change (an
     /// error, the starting-up status, the saved accounts): egui's automatic ids shift with the
     /// widgets made before them, and egui drops the focus of an id that no longer draws, which
-    /// left the user's next keystroke with nothing. `main`'s inputs were entities and kept their
-    /// identity the same way.
+    /// left the user's next keystroke with nothing.
     fn id(self) -> egui::Id {
         egui::Id::unique(match self {
             Self::Server => "login_server",
@@ -190,9 +188,8 @@ impl Login {
             retry: Deadline::default(),
             event: None,
         };
-        // As on `main`, which focused the input as the form was made: asking by id focuses the
-        // field the first time it draws, so a key typed at launch can't land in a form that
-        // hasn't taken the keyboard yet.
+        // Focus is asked for by id, which focuses the field the first time it draws, so a key
+        // typed at launch can't land in a form that hasn't taken the keyboard yet.
         if let Some(field) = login.focus {
             ctx.memory_mut(|memory| memory.request_focus(field.id()));
         }
@@ -256,11 +253,11 @@ impl Login {
         // The backdrop under everything; the theme's visuals give the panel's text, fields and
         // buttons their colours.
         widgets::backdrop::fill(ui.painter(), ui.max_rect(), theme::tokens_of(ui));
-        // `main`'s form sat in the middle of the window (`items_center` and `justify_center`),
-        // not at the top of a page. The form's height is only known after it has been laid
-        // out, so the spacer above it comes from the last frame; a step that changes height
-        // asks for the frame that recentres it. A form taller than the window starts at the
-        // top and the scroll area reaches the rest, instead of being cut off.
+        // The form sits in the middle of the window, not at the top of a page. The form's height
+        // is only known after it has been laid out, so the spacer above it comes from the last
+        // frame; a step that changes height asks for the frame that recentres it. A form taller
+        // than the window starts at the top and the scroll area reaches the rest, instead of
+        // being cut off.
         let viewport = ui.available_height();
         // The vertical area fills the window's width, so the form's fixed-width column is
         // centred in it, and only takes the height its contents need.
@@ -537,8 +534,8 @@ impl Login {
                 self.event.get_or_insert(LoginEvent::LoggedIn(session));
             }
             Outcome::Failed(message) => {
-                // A failed sign-in keeps the password field focused, as `main`'s input did;
-                // a failed Quick Connect leaves the step and asks for a new attempt.
+                // A failed sign-in keeps the password field focused; a failed Quick Connect
+                // leaves the step and asks for a new attempt.
                 let from_quick_connect = self.quick_connect_code.take().is_some();
                 self.error = Some(message);
                 if self.server.is_some() && !from_quick_connect {

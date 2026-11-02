@@ -187,7 +187,7 @@ impl ImageCache {
             self.entries.insert(req, entry, size);
             self.trim_later();
         }
-        // A slot freed up, so the next queued images can start. `main` pumped in the same two
+        // A slot freed up, so the next queued images can start. The queue is pumped in two
         // places: after a frame asked (the scheduled look) and as each load finished.
         let scheduled = std::mem::take(&mut self.pump_scheduled);
         if scheduled || finished {

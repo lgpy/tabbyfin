@@ -1,8 +1,8 @@
 //! Mewdusa, the jellycat from the app icon, drawn as the loading indicator.
 //!
-//! Ported from `main`'s `mascot.rs`, which traced the 2000×2000 drawings in `packaging/mascot/`:
-//! the head pulses and bobs, the tentacles wave, and now and then it blinks or flicks an ear.
-//! With animations off it holds still in its rest pose.
+//! Mewdusa traces the 2000×2000 drawings in `packaging/mascot/`: the head pulses and bobs, the
+//! tentacles wave, and now and then it blinks or flicks an ear. With animations off it holds
+//! still in its rest pose.
 //!
 //! It has three faces, each from its own drawing. A loader shows the cute or the evil one (eyes
 //! cut flat by slanted brows, an "ω" mouth), picked at random when it appears. Empty pages show
@@ -21,8 +21,8 @@
 //! tessellates itself, so the meshes' edges are smoothed by the window's multisampling (`main.rs`).
 //!
 //! Every mascot, a loader or the confused one over an empty page, animates and asks for a repaint
-//! once per animation step ([`ANIMATION_STEP`]) for as long as it's up, as `main`'s did; with the
-//! animations setting off none asks for any.
+//! once per animation step ([`ANIMATION_STEP`]) for as long as it's up; with the animations
+//! setting off none asks for any.
 
 use std::collections::hash_map::RandomState;
 use std::f32::consts::TAU;
@@ -238,7 +238,7 @@ impl Face {
     }
 }
 
-/// The size a page draws the mascot at in its loader and over an empty state, as on `main`.
+/// The size a page draws the mascot at in its loader and over an empty state.
 pub const PAGE: f32 = 96.;
 
 /// How far the eyes move toward what the mascot looks at, in drawing units: under an eye's
@@ -326,7 +326,7 @@ pub fn confused(ui: &mut Ui, size: f32) {
 fn show(ui: &mut Ui, size: f32, face: Face) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
     // The animations setting is egui's own animation time, which `theme::apply_animations` turns
-    // off with it: `main`'s loader read the same switch (`cx.reduce_motion()`).
+    // off with it.
     let still = ui.style().animation_time == 0.;
     let moving = !still;
     let pose = if moving {
@@ -349,8 +349,7 @@ fn kept_face(ui: &Ui) -> Face {
 
 /// [`kept_face`] with the pick given, so a test can tell a kept face from a rolled one. The face
 /// is kept in egui's memory under the `ui`'s id for as long as the same place keeps drawing a
-/// loader in consecutive passes; one that goes away and comes back rolls again, as `main`'s
-/// element state did.
+/// loader in consecutive passes; one that goes away and comes back rolls again.
 fn kept_face_with(ui: &Ui, pick: impl FnOnce() -> Face) -> Face {
     #[derive(Clone, Copy)]
     struct Kept {
@@ -589,8 +588,8 @@ impl Shapes {
             eyes: EYES.map(|(center, r)| still(painted(ellipse(center, r, r), WHITE))),
             evil_eyes: std::array::from_fn(|eye| {
                 let (center, r) = EYES[eye];
-                // `main` had no clip either, so the eye is sampled and its points pushed below the
-                // brow; the blink then squashes what's left towards the eye's middle.
+                // The eye's points are sampled and pushed below the brow rather than clipped; the
+                // blink then squashes what's left towards the eye's middle.
                 let points: Vec<P> = (0..EYE_SAMPLES)
                     .map(|i| {
                         let angle = i as f32 / EYE_SAMPLES as f32 * TAU;
@@ -691,7 +690,7 @@ fn tip_ellipse(points: &[P]) -> Mesh {
 }
 
 /// Colours a tentacle's mesh from the top of its stroke down. The gradient spans the stroke's
-/// bounds, so the tip takes the colour at its height there, as `main`'s did.
+/// bounds, so the tip takes the colour at its height there.
 fn gradient(mut mesh: Mesh, tentacle: &Tentacle) -> Mesh {
     let (top, bottom) = bounds_y(tentacle.points);
     let at = |y: f32| ((y - (top - TENTACLE_WIDTH / 2.)) / (bottom - top + TENTACLE_WIDTH)).clamp(0., 1.);
@@ -702,11 +701,9 @@ fn gradient(mut mesh: Mesh, tentacle: &Tentacle) -> Mesh {
 }
 
 /// Each vertex's share of the tentacle's wave: the direction and size it swings (the tip most,
-/// the root not at all), and how much of the wave's phase it trails by. `main` displaced the
-/// drawing's own points by `sway * along^1.3 * sin(phase - along * 2.4 + phase)` perpendicular to
-/// the difference between each point's neighbours; a vertex is placed on that same curve through
-/// its position along the tentacle, so the points themselves move exactly where `main` moved them
-/// and the stroke between them swings with them.
+/// the root not at all), and how much of the wave's phase it trails by. The swing is
+/// `sway * along^1.3`, perpendicular to the difference between each point's neighbours, and the
+/// phase trails by `along * 2.4`, so the stroke between the points swings with them.
 fn wave_shift(tentacle: &Tentacle, mesh: &Mesh) -> Vec<[f32; 3]> {
     let points = tentacle.points;
     let last = points.len() - 1;
@@ -725,7 +722,7 @@ fn wave_shift(tentacle: &Tentacle, mesh: &Mesh) -> Vec<[f32; 3]> {
         .collect()
 }
 
-/// The direction `main`'s wave pushes a tentacle at `along_point`, a fractional point index: the
+/// The direction the wave pushes a tentacle at `along_point`, a fractional point index: the
 /// difference between the point's neighbours, blended between the two points `along_point` lies
 /// between so that the stroke deforms smoothly rather than in steps.
 fn tangent(points: &[P], along_point: f32) -> P {
@@ -793,8 +790,7 @@ struct Drawn<'a> {
     tint: Option<Color32>,
 }
 
-/// Everything `face` shows in this pose, back to front, as `main` painted it, with its shadow
-/// if `shadow`.
+/// Everything `face` shows in this pose, back to front, with its shadow if `shadow`.
 fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face, shadow: bool) -> Vec<Drawn<'a>> {
     let body = pose.body();
     let bob = Affine::translate([0., pose.bob]);
@@ -874,8 +870,7 @@ fn frame<'a>(shapes: &'a Shapes, pose: &Pose, face: Face, shadow: bool) -> Vec<D
                 parts.push(Drawn {
                     part,
                     // The lid comes down: the eye squashes towards its own middle in the drawings'
-                    // space, and then the head's bob and scale move it, as `main`'s clamping of the
-                    // evil eye's points did.
+                    // space, and then the head's bob and scale move it.
                     pose: Affine::scale(center, [1., open]).then(eyes_pose),
                     motion: 0.,
                     tint: None,
@@ -1036,8 +1031,7 @@ fn filled(segments: &[[P; 4]], closed: bool) -> Mesh {
     mesh(buffers)
 }
 
-/// `segments` stroked `width` wide, with round ends and joins: `main`'s strokes had butt ends and
-/// mitred joins, which `main` rounded by stroking each curve and its ends separately.
+/// `segments` stroked `width` wide, with round ends and joins.
 fn stroked(segments: &[[P; 4]], closed: bool, width: f32) -> Mesh {
     let mut tessellator = StrokeTessellator::new();
     let mut buffers = VertexBuffers::new();
@@ -1418,8 +1412,8 @@ mod tests {
         }
     }
 
-    /// `main`'s wave: each of the drawing's points pushed sideways by a travelling wave, the tip
-    /// moving most. The port has to land the points in the same place.
+    /// The wave the drawing's points follow: each pushed sideways by a travelling wave, the tip
+    /// moving most. The vertices have to land on the same points.
     fn main_wave(tentacle: &Tentacle, phase: f32) -> Vec<[f32; 2]> {
         let points = tentacle.points;
         let last = points.len() - 1;

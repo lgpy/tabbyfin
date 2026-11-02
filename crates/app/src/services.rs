@@ -1,12 +1,11 @@
 //! Everything that lives as long as a signed-in session, in one place the app owns.
 //!
-//! On `main` these were globals and entities. Here the app owns one `Services` while
-//! signed in and lends it to the shell and its pages each frame (`PageCx::services`), so
-//! nothing is shared through globals or `Rc<RefCell<…>>`. Code that needs two parts at once
-//! (playback asking SyncPlay, remote control driving playback) is a method here, which can
-//! reach every part; each part's module adds its own `impl Services` block (playback's
-//! controls are in `playback.rs`, SyncPlay's in `syncplay.rs`, remote control's in
-//! `remote.rs`).
+//! The app owns one `Services` while signed in and lends it to the shell and its pages each
+//! frame (`PageCx::services`), so nothing is shared through globals or `Rc<RefCell<…>>`. Code
+//! that needs two parts at once (playback asking SyncPlay, remote control driving playback) is a
+//! method here, which can reach every part; each part's module adds its own `impl Services`
+//! block (playback's controls are in `playback.rs`, SyncPlay's in `syncplay.rs`, remote
+//! control's in `remote.rs`).
 
 use crate::config::SavedServer;
 use crate::images::ImageCache;

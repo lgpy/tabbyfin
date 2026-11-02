@@ -6,14 +6,14 @@
 //! saves in the label's tooltip.
 //!
 //! - **This device** (appearance, playback, subtitles, storage, about) is the config file: one
-//!   per computer, shared by every account signed in on it. Every option keeps `main`'s config
-//!   key and value (a change loads the config fresh, changes it and saves it, so it can't write
-//!   over what playback or the window saved meanwhile), the same choices in the same order, the
-//!   default that applies while the file leaves the key out, and what the change takes effect
-//!   on: the theme, text size and animations apply at once through
-//!   `AppEvent::AppearanceChanged`, the subtitle size goes to the playback manager while a
-//!   session runs, and the rest are read when what they configure next starts (a playback
-//!   session, the player page, the update check at launch).
+//!   per computer, shared by every account signed in on it. Every option keeps its config key
+//!   and value (a change loads the config fresh, changes it and saves it, so it can't write over
+//!   what playback or the window saved meanwhile), its choices in their order, the default that
+//!   applies while the file leaves the key out, and what the change takes effect on: the theme,
+//!   text size and animations apply at once through `AppEvent::AppearanceChanged`, the subtitle
+//!   size goes to the playback manager while a session runs, and the rest are read when what
+//!   they configure next starts (a playback session, the player page, the update check at
+//!   launch).
 //! - **Jellyfin server** (account, languages, home) is the signed-in user's configuration on the
 //!   server, which the web client and every other app share. It's read when the page opens and
 //!   each change is saved in the background, one request at a time ([`ServerSettings`]). The
@@ -27,10 +27,9 @@
 //! of both stores by its section, label, description and key, leaving out the sections with
 //! nothing left; a menu entry leaves the search.
 //!
-//! The page isn't on the browse cursor, as on `main`: [`Page::scope`] is `None`, so egui's own
-//! focus handles Tab (the menu, then the sections' controls, scrolling each into
-//! view), Space or Enter on a menu entry, the arrows in a picker and Space on a switch, and Esc
-//! still goes back.
+//! The page isn't on the browse cursor: [`Page::scope`] is `None`, so egui's own focus handles
+//! Tab (the menu, then the sections' controls, scrolling each into view), Space or Enter on a
+//! menu entry, the arrows in a picker and Space on a switch, and Esc still goes back.
 
 use std::path::Path;
 
@@ -95,7 +94,7 @@ const CONTENT_W: f32 = 760.;
 /// The menu's width: a quarter of the page, within these.
 const MENU_MIN_W: f32 = 190.;
 const MENU_MAX_W: f32 = 250.;
-/// The pickers' width beside their label (`main`'s 220 px).
+/// The pickers' width beside their label (220 px).
 const PICKER_W: f32 = 220.;
 /// The gap under a menu heading, and between one section's card and the next one's title.
 const HEADING_GAP: f32 = 4.;
@@ -419,7 +418,7 @@ const HIDE_PLAYED_IN_LATEST: Row = Row {
     key: "HidePlayedInLatest",
     unset: "",
 };
-// No settings of our own for these, as on `main`: the web client's profile decides.
+// No settings of our own for these: the web client's profile decides.
 const HOME_SECTIONS_NOTE: Row = Row {
     section: Section::Home,
     label: "",
@@ -533,7 +532,7 @@ impl Search {
 
 pub struct SettingsPage {
     /// The config as this page last read or wrote it, for the controls' values. A change reads
-    /// the file again rather than writing this copy back, as `main`'s `save` did.
+    /// the file again rather than writing this copy back.
     config: Config,
     /// What a button started (clearing the image cache, opening the logs folder), until its
     /// outcome is a toast.
@@ -1677,7 +1676,7 @@ impl Pickers {
 
 /// The choice one step (Left is -1, Right is 1) from `current` in `options`, stopping at either
 /// end; `None` when it can't move, or when `current` isn't one of the choices (a bitrate set by
-/// hand: the picker shows the first one, as `main`'s select did, and Left and Right stay put).
+/// hand: the picker shows the first one, and Left and Right stay put).
 fn stepped<T: Copy + PartialEq>(options: &[T], current: T, step: i32) -> Option<T> {
     let index = options.iter().position(|value| *value == current)?;
     let next = (index as i32 + step).clamp(0, options.len() as i32 - 1) as usize;
@@ -1736,10 +1735,10 @@ fn bitrate_choice(config: &Config) -> i32 {
     }
 }
 
-/// The config a bitrate choice writes, as `main` saved it: *Automatic* turns measuring on and
-/// leaves the saved cap alone (the measurement replaces it, and the cap is what turning
-/// *Automatic* off goes back to), any other choice turns measuring off and saves the cap in bits
-/// per second, `None` for no limit.
+/// The config a bitrate choice writes: *Automatic* turns measuring on and leaves the saved cap
+/// alone (the measurement replaces it, and the cap is what turning *Automatic* off goes back
+/// to), any other choice turns measuring off and saves the cap in bits per second, `None` for no
+/// limit.
 fn apply_bitrate(config: &mut Config, mbps: i32) {
     config.automatic_bitrate = Some(mbps == AUTOMATIC);
     if mbps != AUTOMATIC {
@@ -1758,9 +1757,8 @@ fn subtitle_scales(current: f64) -> Vec<f64> {
 }
 
 /// Opens a folder in the desktop's file manager. Not the `opener` crate: it's one program per
-/// OS, and this is the only place the app opens anything on the desktop (`main`'s
-/// `open_with_system`). Waits for the launcher, which exits once the file manager has the
-/// folder, so a missing one is reported.
+/// OS, and this is the only place the app opens anything on the desktop. Waits for the launcher,
+/// which exits once the file manager has the folder, so a missing one is reported.
 fn open_folder(path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     let program = "explorer";

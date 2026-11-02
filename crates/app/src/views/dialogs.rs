@@ -9,8 +9,7 @@
 //! The frame they share (backdrop, width, title, buttons) is `widgets::dialog`.
 //!
 //! Requests run as `Task`s and report as toasts; a change that worked bumps
-//! `services.user_data`, so the pages showing playlists load again. `main` had
-//! `views/add_to_playlist.rs`, `views/edit_playlist.rs` and `confirm_delete` in `views/item.rs`.
+//! `services.user_data`, so the pages showing playlists load again.
 
 use egui::{Key, Modifiers, Response, Ui, Vec2, vec2};
 use egui_material_icons::icons::{ICON_ADD, ICON_PLAYLIST_PLAY};
@@ -28,10 +27,10 @@ use crate::widgets::popup;
 use crate::widgets::text::Load;
 use crate::widgets::{dialog, field, label, surface, toggle};
 
-/// How wide the dialogs are outside: `main`'s 420 points inside, give or take, with the
-/// surface's padding round it.
+/// How wide the dialogs are outside: 420 points inside, give or take, with the surface's
+/// padding round it.
 const WIDTH: f32 = 460.;
-/// The playlist list scrolls once it's this tall, as on `main`.
+/// The playlist list scrolls once it's this tall.
 const LIST_MAX_H: f32 = 320.;
 /// The gap between playlist rows.
 const ROW_GAP: f32 = 6.;
@@ -160,8 +159,8 @@ impl AddToPlaylist {
         // from the start and so never shows a hint (`field::single_line`).
         let subtitle = "Pick one of your playlists, or type a name to make a new one.";
         let modal = dialog::show(ctx, id, WIDTH, "Add to playlist", Some(subtitle), |ui| {
-            // Enter picks the highlighted line, as `main`'s dialog's Confirm did; the field
-            // never sees it, or it would only give up the focus.
+            // Enter picks the highlighted line; the field never sees it, or it would only give
+            // up the focus.
             let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
             let field = ui.add(field::single_line(ui, id.with("field"), &mut self.typed, "").interactive(!self.busy));
             if std::mem::take(&mut self.focus) {
@@ -384,7 +383,7 @@ impl EditPlaylist {
         let mut save = false;
         let id = egui::Id::unique("edit_playlist");
         let modal = dialog::show(ctx, id, WIDTH, "Edit playlist", None, |ui| {
-            // Enter saves, as `main`'s dialog's Confirm did; the field never sees it.
+            // Enter saves; the field never sees it.
             let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
             if !self.busy {
                 self.keys(ui);
@@ -560,7 +559,7 @@ impl DeletePlaylist {
                 }
                 dialog::cancel(ui);
             });
-            // Enter is the confirmation's Delete, as the alert's OK was on `main`.
+            // Enter is the confirmation's Delete.
             if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) && !self.busy {
                 delete = true;
             }
@@ -713,7 +712,7 @@ mod tests {
         let playlists = [playlist("a", "Action", 3)];
         assert_eq!(
             lines(&rows(&playlists, " Watch later ")),
-            // The typed name is trimmed, as the playlist `main` made was.
+            // The typed name is trimmed.
             [("Watch later", None, None)]
         );
     }

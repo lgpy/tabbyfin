@@ -1,6 +1,6 @@
 //! The app's colours as every page gets them: what `theme::apply` leaves egui with, in both
-//! themes, now that the whole app draws in the cozy palette (C1 in `docs/ROADMAP.md`), and the
-//! hairline a page draws under the top bar once it scrolls (C2).
+//! themes, the whole app drawing in the cozy palette, and the hairline a page draws under the
+//! top bar once it scrolls.
 
 use egui::{Event, Modifiers, MouseWheelSource, MouseWheelUnit, TouchPhase, vec2};
 use egui_kittest::Harness;

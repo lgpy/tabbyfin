@@ -13,7 +13,7 @@ use crate::widgets::button::{self, Focus, State};
 use crate::widgets::{backdrop, label, mascot, round_button, surface};
 
 /// The glow's radius behind the page mascot: the sign-in glow (360 behind a 160 mascot) at a
-/// smaller spread, picked by the C8 mockups.
+/// smaller spread.
 const GLOW_RADIUS: f32 = 200.;
 
 /// How far below the mascot's centre the glow is centred, so it pools under the mascot as on

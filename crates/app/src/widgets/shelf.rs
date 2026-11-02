@@ -1,4 +1,4 @@
-//! A titled row of cards that scrolls sideways, with a page back and forward: `main`'s shelves.
+//! A titled row of cards that scrolls sideways, with a page back and forward.
 //!
 //! `id` only has to be unique among the page's own rows and scroll areas: the shell scopes every
 //! page's ids, so two pages can both have a `"cast"` shelf and keep their scroll positions apart.
@@ -6,16 +6,14 @@
 //! The title is `xl` in `ink`. The arrows are round buttons at the title row's right end; they
 //! show once there's more to see than fits and dim at either end. They need the
 //! row's content and viewport widths, which egui only knows after laying it out, so they come
-//! from the last frame (as they did on `main`) and the first frame shows none. An arrow glides
-//! the row a page over, as `main`'s `glide_by` did: a second click while it moves aims further,
-//! and with the animations setting off it jumps.
+//! from the last frame and the first frame shows none. An arrow glides the row a page over: a
+//! second click while it moves aims further, and with the animations setting off it jumps.
 //!
-//! The row is `main`'s `rail_drag.rs` on egui: the wheel keeps scrolling the page (the row takes
-//! none of it), a press and a move drags the row with the mouse and the closed hand shows while
-//! it moves, a drag doesn't open the card it ends on, and the row follows the pointer 1:1 and
-//! stops with it (no egui coasting after the release, no rubber band past the ends, which `main`
-//! had neither of). The keyboard's `scroll_to_me` still brings a card into view, through egui's
-//! own scroll animation.
+//! The row drags like a rail: the wheel keeps scrolling the page (the row takes none of it), a
+//! press and a move drags the row with the mouse and the closed hand shows while it moves, a
+//! drag doesn't open the card it ends on, and the row follows the pointer 1:1 and stops with it
+//! (no egui coasting after the release, no rubber band past the ends). The keyboard's
+//! `scroll_to_me` still brings a card into view, through egui's own scroll animation.
 
 use std::hash::Hash;
 
@@ -30,10 +28,10 @@ use crate::theme::text;
 use crate::widgets::label;
 use crate::widgets::round_button::RoundButton;
 
-/// A shelf's side padding, `main`'s `px_6`: the page adds none of its own, so the row can
-/// scroll a card to the window's edge. Item pages that already inset their content pass 0.
+/// A shelf's side padding: the page adds none of its own, so the row can scroll a card to the
+/// window's edge. Item pages that already inset their content pass 0.
 pub const PADDING: f32 = 24.;
-/// Under the row, `main`'s `pb_2`, so the cards keep clear of the next shelf.
+/// Under the row, so the cards keep clear of the next shelf.
 const BOTTOM_PADDING: f32 = 8.;
 /// The title row's height, the arrows' size, so the shelf keeps it when they hide.
 const TITLE_H: f32 = ARROW;
@@ -85,14 +83,14 @@ fn shelf_inner(
     cards: impl FnOnce(&mut Ui),
 ) -> Rect {
     // The row's top before the title takes its place: a page scrolls the whole row into view
-    // (its title and cards together), as `main`'s `browse::reveal` scrolled a whole section.
+    // (its title and cards together).
     let top = ui.cursor().min;
     let id = ui.make_persistent_id(id);
     let mut state: State = ui.data(|data| data.get_temp(id)).unwrap_or_default();
     let now = ui.input(|input| input.time);
     let animations = theme::animations(ui.ctx());
     // One page is what shows at once, so no card is ever skipped. The arrows move what shows
-    // between the row's side paddings, as `main`'s did.
+    // between the row's side paddings.
     let page = (state.viewport - 2. * padding).max(0.);
     let max = (state.content - state.viewport).max(0.);
     let arrows = Arrows::of(state);
@@ -167,10 +165,10 @@ fn shelf_inner(
     });
     ui.add_space(title_gap);
 
-    // `main`'s glide: a click starts one (or aims a running one further), and each frame of one
-    // moves the row on. `main` also stopped when something else had scrolled the row since its
-    // last step (`glide.last_set`); that check comes after the area is drawn, where egui has
-    // applied a drag or the keyboard.
+    // The glide: a click starts one (or aims a running one further), and each frame of one moves
+    // the row on. It also stops when something else has scrolled the row since its last step
+    // (`glide.last_set`); that check comes after the area is drawn, where egui has applied a
+    // drag or the keyboard.
     let mut jump = None;
     if distance != 0. {
         if animations {
@@ -179,7 +177,7 @@ fn shelf_inner(
                 _ => state.glide = Some(Glide::new(state.offset, distance, max, now)),
             }
         } else {
-            // `main` jumped with reduced motion (the animations setting).
+            // With animations off, it jumps.
             state.glide = None;
             jump = Some((state.offset + distance).clamp(0., max));
         }
@@ -198,25 +196,24 @@ fn shelf_inner(
     let mut area = ScrollArea::horizontal()
         .id_salt(id)
         .auto_shrink([false, true])
-        // The arrows show where the row is, as on `main`; a bar under every shelf would not.
+        // The arrows show where the row is; a bar under every shelf would not.
         .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-        // `main`'s rail dragging: a press on the row and a move scrolls it with the mouse. The
-        // wheel is the page's, as on `main`, where the row undid the sideways scroll the toolkit
-        // gave it.
+        // Rail dragging: a press on the row and a move scrolls it with the mouse. The wheel is
+        // the page's, so only the arrows and a drag move the row sideways.
         .scroll_source(ScrollSource {
             drag: DragScroll::Always,
             mouse_wheel: false,
             scroll_bar: false,
         })
-        // The closed hand `main` showed while a row was being dragged.
+        // The closed hand while a row is being dragged.
         .on_drag_cursor(egui::CursorIcon::Grabbing);
     if let Some(offset) = offset {
         // Clamped here: egui would take the overshoot and spring back, which reads as the row
         // jumping past its end.
         area = area.horizontal_scroll_offset(offset);
     }
-    // The row follows the pointer 1:1 and stops with it, as `main`'s rail drag did: no coasting
-    // after a release, no rubber band past the ends (which are egui's defaults).
+    // The row follows the pointer 1:1 and stops with it: no coasting after a release, no rubber
+    // band past the ends (which are egui's defaults).
     let kinetic = ui.style().spacing.scroll.kinetic;
     ui.style_mut().spacing.scroll.kinetic = KineticScrollStyle {
         decay_time: 0.,
@@ -224,8 +221,8 @@ fn shelf_inner(
         ..kinetic
     };
     let out = area.show(ui, |ui| {
-        // `main`'s `px_6` is inside the row, so a card scrolls to the window's edge and the
-        // arrows' page is what shows between the paddings.
+        // The padding is inside the row, so a card scrolls to the window's edge and the arrows'
+        // page is what shows between the paddings.
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(padding as i8, 0))
             .show(ui, |ui| {
@@ -246,8 +243,8 @@ fn shelf_inner(
         .glide
         .is_some_and(|glide| (glide.last_set - measured.offset).abs() > 0.01)
     {
-        // A drag, a scroll bar or the keyboard's reveal moved the row: the glide stops there, as
-        // `main`'s did when the offset wasn't the one it had set.
+        // A drag, a scroll bar or the keyboard's reveal moved the row: the glide stops there,
+        // since the offset isn't the one it set.
         measured.glide = None;
     }
     if measured != state || measured.glide.is_some() {
@@ -258,7 +255,7 @@ fn shelf_inner(
         ui.ctx().request_repaint();
     }
     ui.data_mut(|data| data.insert_temp(id, measured));
-    // `main`'s `pb_2` under the row.
+    // The gap under the row.
     ui.add_space(BOTTOM_PADDING);
     // The row's own height, not its viewport's: the viewport is clipped to what's on screen, so
     // a row half below the page's edge would look like it ends at the edge and never scroll.

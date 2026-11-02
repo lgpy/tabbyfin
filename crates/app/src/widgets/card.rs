@@ -1,12 +1,12 @@
-//! Cards: a cover image with the item's title under it, in `main`'s sizes and scales: poster,
+//! Cards: a cover image with the item's title under it, in the app's sizes and scales: poster,
 //! landscape, episode, chapter and person cards, and the grey placeholder a grid shows while it
 //! loads.
 //!
 //! A card allocates its own space (the image plus a block for the text) and answers the pointer
 //! with its [`Response`], so the caller handles clicks, scrolling the selected card into view
-//! (`Cursor::take_reveal`) and the item's context menu. What `main` drew over the image comes with it: the played
-//! badge, the progress bar, dimming under the pointer and the cursor's ring. Titles and
-//! subtitles are cut short when they don't fit, and the sizes follow A1's text size.
+//! (`Cursor::take_reveal`) and the item's context menu. Over the image come the played badge,
+//! the progress bar, dimming under the pointer and the cursor's ring. Titles and subtitles are
+//! cut short when they don't fit, and the sizes follow the text size setting.
 
 use egui::emath::GuiRounding as _;
 use egui::emath::{easing, lerp};
@@ -30,7 +30,7 @@ use crate::widgets::text::{
 };
 use crate::widgets::{avatar, badge, image, round_button};
 
-/// Between a card's image and its title, and between its lines (`main`'s `gap_1`).
+/// Between a card's image and its title, and between its lines.
 const GAP: f32 = 4.;
 
 /// How much bigger the play button gets under the pointer.
@@ -223,7 +223,7 @@ pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scal
             .filter_map(|word| word.chars().next())
             .take(2)
             .collect();
-        // `main`'s `text_2xl`, whatever the card's scale, and it grows with the text size.
+        // `text_2xl`, whatever the card's scale, and it grows with the text size.
         ui.painter().text(
             image.center(),
             Align2::CENTER_CENTER,
@@ -256,7 +256,7 @@ pub fn placeholder(ui: &mut Ui) {
 }
 
 /// The room a card takes under its image: the gap down from the image, the title, the gap
-/// between the lines and the subtitle — `main`'s `4 + 20 + 4 + 16`. `CARD_TEXT_H` is the floor,
+/// between the lines and the subtitle — 4 + 20 + 4 + 16. `CARD_TEXT_H` is the floor,
 /// so a grid's rows keep their height whatever the text size.
 pub fn text_height(ui: &Ui) -> f32 {
     let heights = line_heights(ui, "sm", "xs");
@@ -480,8 +480,8 @@ fn line(ui: &Ui, text: &str, style: &str, muted: bool) -> WidgetText {
 }
 
 /// Puts a line at the left of `rect`, cut short when it doesn't fit. `Ui::put` centres and
-/// justifies its widget, which stretched a title across the card's width; `main`'s lines sat at
-/// the card's left edge and kept their length.
+/// justifies its widget, which would stretch a title across the card's width; these lines sit
+/// at the card's left edge and keep their length.
 fn put(ui: &mut Ui, rect: Rect, text: WidgetText) {
     // Whole pixels, so the text is crisp and egui's debug "Unaligned" overlay stays off.
     let rect = rect.round_ui();

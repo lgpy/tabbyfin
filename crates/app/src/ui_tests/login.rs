@@ -146,7 +146,7 @@ fn sign_in_steps_from_the_address_to_a_session() {
 
 /// A fresh install's form takes the keyboard by itself: the very first thing typed at launch
 /// lands in the address field, with no click and no Tab before it, and each step on from it
-/// (the username, then the password, Enter taking each one to the next as `main`'s did) is
+/// (the username, then the password, Enter taking each one to the next) is
 /// focused before anything is typed into it. The sign-in the mock only matches with the typed
 /// credentials is what proves they arrived.
 #[test]
@@ -174,7 +174,7 @@ fn the_form_takes_the_keyboard_at_launch() {
         "typing at launch didn't reach the address field"
     );
 
-    // Enter connects, as on `main`, and the username field is focused for the next thing typed.
+    // Enter connects, and the username field is focused for the next thing typed.
     ui.key_press(egui::Key::Enter);
     ui.step();
     step_until(&mut ui, "the credentials step", |harness| {
@@ -247,9 +247,8 @@ fn a_failed_connect_keeps_the_keyboard_in_the_address_field() {
 
 /// The keyboard stays in the address field while the rows above it change: it keeps its own
 /// widget id, where egui's automatic ones come and go with the widgets made before them, and
-/// egui drops the focus of an id that stops drawing (`main`'s inputs were entities and kept
-/// theirs). Here the parked account behind *Add account* goes away, which takes its button
-/// away from above the field.
+/// egui drops the focus of an id that stops drawing. Here the parked account behind *Add account*
+/// goes away, which takes its button away from above the field.
 #[test]
 fn the_keyboard_stays_in_the_field_when_the_rows_above_it_change() {
     let mut ui = login_harness(|ctx| Login::new(ctx, "ui-test-device".into(), Vec::new(), true, None));
@@ -273,7 +272,7 @@ fn the_keyboard_stays_in_the_field_when_the_rows_above_it_change() {
 }
 
 /// A refused sign-in says so and stays on the form, with the password field ready for another
-/// try (as `main`'s did); no session reaches the app.
+/// try; no session reaches the app.
 #[test]
 fn a_wrong_password_keeps_the_form_and_says_why() {
     let server = FixtureServer::start();
