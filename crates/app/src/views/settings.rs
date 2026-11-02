@@ -54,8 +54,9 @@ use crate::widgets::avatar_row::AvatarRow;
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
 use crate::widgets::label;
+use crate::widgets::list_row;
 use crate::widgets::round_button::RoundButton;
-use crate::widgets::{backdrop, select, surface, toggle};
+use crate::widgets::{backdrop, pill, select, surface, toggle};
 
 /// The theme choices, in the order the picker lists them.
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -94,8 +95,6 @@ const CONTENT_W: f32 = 760.;
 /// The menu's width: a quarter of the page, within these.
 const MENU_MIN_W: f32 = 190.;
 const MENU_MAX_W: f32 = 250.;
-/// The `brand` bar at the open section's menu entry.
-const MENU_BAR_W: f32 = 3.;
 /// The pickers' width beside their label (`main`'s 220 px).
 const PICKER_W: f32 = 220.;
 /// The gap under a menu heading, and between one section's card and the next one's title.
@@ -824,16 +823,11 @@ impl SettingsPage {
     /// server's can't be mistaken for each other, and, when `explain`, a line saying what that
     /// means (with how saving to the server is going).
     fn heading(&self, ui: &mut Ui, cx: &PageCx, section: Section, explain: bool) {
-        let tokens = theme::tokens_of(ui);
         let store = section.store();
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(section.title())
-                    .font(text::font(ui, "xl"))
-                    .color(tokens.ink),
-            );
+            ui.label(label::heading(ui, section.title()));
             ui.add_space(SPACE.xs);
-            store_tag(ui, store);
+            pill::icon_tag(ui, store.icon(), store.title());
         });
         if !explain {
             return;
@@ -1381,11 +1375,7 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
         ui.painter().rect_filled(rect, radius, tokens.inset_hover);
     }
     if selected {
-        let bar = Rect::from_center_size(
-            pos2(rect.left() + MENU_BAR_W / 2. + 2., rect.center().y),
-            vec2(MENU_BAR_W, rect.height() - 16.),
-        );
-        ui.painter().rect_filled(bar, MENU_BAR_W / 2., tokens.brand);
+        list_row::open_bar(ui, rect);
     }
     if focused {
         focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
@@ -1423,23 +1413,6 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
         );
     }
     response
-}
-
-/// Where a section's settings are kept, by its title: the store's icon and name on an inset pill.
-fn store_tag(ui: &mut Ui, store: Store) {
-    let tokens = theme::tokens_of(ui);
-    let font = text::font(ui, "sm");
-    egui::Frame::NONE
-        .fill(tokens.inset)
-        .corner_radius(egui::CornerRadius::same(u8::MAX))
-        .inner_margin(egui::Margin::symmetric(10, 3))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 6.;
-            ui.horizontal(|ui| {
-                ui.label(store.icon().rich_text().size(font.size).color(tokens.ink_muted));
-                ui.label(RichText::new(store.title()).font(font).color(tokens.ink_muted));
-            });
-        });
 }
 
 /// A section's rows on one surface spanning the column. The rows space themselves and draw the
@@ -1730,7 +1703,6 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
     }
     hairline(ui);
     ui.add_space(ROW_PAD);
-    let font = text::font(ui, "sm");
     let description = label::muted(ui, row.description);
     let mut clicked = false;
     match link {
@@ -1739,10 +1711,7 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
         Some(link) => {
             ui.horizontal_wrapped(|ui| {
                 ui.label(description);
-                let link = RichText::new(format!("{link} ›"))
-                    .font(font)
-                    .color(theme::tokens_of(ui).brand);
-                clicked = ui.link(link).clicked();
+                clicked = button::link(ui, link, "sm").clicked();
             });
         }
         None => {

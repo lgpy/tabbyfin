@@ -6,10 +6,11 @@
 //! confused; a failed load then has a danger notice and a `brand` *Retry*.
 
 use egui::{Align, Layout, Rect, RichText, Sense, Ui, UiBuilder, Vec2, vec2};
+use egui_material_icons::MaterialIcon;
 
 use crate::theme::{self, text};
 use crate::widgets::button::{self, Focus, State};
-use crate::widgets::{backdrop, mascot, surface};
+use crate::widgets::{backdrop, label, mascot, round_button, surface};
 
 /// The glow's radius behind the page mascot: the sign-in glow (360 behind a 160 mascot) at a
 /// smaller spread, picked by the C8 mockups.
@@ -51,6 +52,21 @@ pub fn empty(ui: &mut Ui, message: impl Into<String>) {
         glowing(ui, |ui| mascot::confused(ui, mascot::PAGE));
         ui.add_space(GAP);
         ui.label(line(ui, message));
+    });
+}
+
+/// A compact empty state without the mascot, for a panel or a popover: `icon` in an `inset_hover`
+/// circle over `message` in `label::muted`, centred.
+pub fn icon_message(ui: &mut Ui, icon: MaterialIcon, message: &str) {
+    let tokens = theme::tokens_of(ui);
+    ui.vertical_centered(|ui| {
+        ui.add_space(theme::SPACE.sm);
+        let (rect, _) = ui.allocate_exact_size(vec2(48., 48.), Sense::hover());
+        ui.painter().circle_filled(rect.center(), 24., tokens.inset_hover);
+        round_button::glyph(ui, rect.center(), icon, 26., tokens.ink_muted);
+        ui.add_space(theme::SPACE.sm);
+        ui.label(label::muted(ui, message));
+        ui.add_space(theme::SPACE.sm);
     });
 }
 

@@ -9,7 +9,9 @@
 
 use egui::accesskit::Role;
 use egui::text::{LayoutJob, TextWrapping};
-use egui::{Align2, Color32, CornerRadius, Frame, Id, Margin, Response, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
+use egui::{
+    Align2, Color32, CornerRadius, Frame, Id, Margin, Rect, Response, Sense, Stroke, Ui, WidgetInfo, pos2, vec2,
+};
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_PLAY_ARROW};
 
@@ -40,6 +42,9 @@ const COMPACT_H: f32 = 36.;
 const COMPACT_PAD: f32 = 11.;
 /// The room between a [`block`] and its rows.
 const BLOCK_INSET: i8 = 4;
+/// [`open_bar`]'s width, and how far it sits inside the row's left edge.
+const OPEN_BAR_W: f32 = 3.;
+const OPEN_BAR_INSET: f32 = 2.;
 
 /// A regular row's height at the text size in use, for a list that sizes itself to its rows.
 pub fn regular_height(ui: &Ui) -> f32 {
@@ -96,6 +101,17 @@ pub fn block<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         .inner_margin(Margin::same(BLOCK_INSET))
         .show(ui, add)
         .inner
+}
+
+/// The `brand` bar marking a row as open or selected: 3 wide and round at that width, 60 % of
+/// the row's height, down its left edge.
+pub fn open_bar(ui: &Ui, rect: Rect) {
+    let tokens = theme::tokens_of(ui);
+    let bar = Rect::from_center_size(
+        pos2(rect.left() + OPEN_BAR_INSET + OPEN_BAR_W / 2., rect.center().y),
+        vec2(OPEN_BAR_W, (rect.height() * 0.6).round()),
+    );
+    ui.painter().rect_filled(bar, 2, tokens.brand);
 }
 
 /// What sits at a row's left end.

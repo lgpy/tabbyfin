@@ -9,7 +9,7 @@
 //! their handles showing on the row under the pointer or the cursor. A collection keeps its
 //! poster cards. Picked by C11's mockup over posters with the episodes in an inset panel.
 
-use egui::{Layout, Rect, RichText, Ui, pos2, vec2};
+use egui::{Layout, Rect, Ui, pos2, vec2};
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 
 use super::{Asked, BIG_CARD_GAP, BIG_CARD_SCALE, CHILDREN, EPISODES, EntryAction, ItemData, OpenSeason, SECTION_GAP};
@@ -23,7 +23,7 @@ use crate::widgets::text::{
     LANDSCAPE_H, Load, POSTER_W, card_text, episode_label, is_placeholder_episode_name, landscape_image, poster_image,
     runtime_text,
 };
-use crate::widgets::{card, menu, state};
+use crate::widgets::{card, label, menu, state};
 use crate::{motion, theme};
 
 /// Between a list's heading and its first row.
@@ -45,7 +45,7 @@ pub(super) fn children_heading(data: &ItemData) -> Option<&'static str> {
 
 /// A list's heading, the shelves' size and weight.
 pub(super) fn heading(ui: &mut Ui, title: &str) -> Rect {
-    ui.label(RichText::new(title).heading().strong()).rect
+    ui.label(label::heading(ui, title)).rect
 }
 
 /// How many children a row of `available` points holds: a series' season rows, or a
