@@ -124,19 +124,10 @@ fn info_column(
         && let Some(series) = &item.series_name
     {
         // `main`'s series line took the body size; the lines under the title are `text_sm`. It
-        // opens the series, underlined under the pointer like a link.
-        let label = Label::new(RichText::new(series).font(text::font(ui, "base")).color(weak));
+        // opens the series.
         match &item.series_id {
             Some(id) => {
-                let response = ui
-                    .add(label.sense(Sense::click()))
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
-                if response.hovered() {
-                    let rect = response.rect;
-                    ui.painter()
-                        .hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1., weak));
-                }
-                if response.clicked() {
+                if button::link(ui, series, "base").clicked() {
                     asked.open = Some(Route::Item {
                         id: id.clone(),
                         name: series.clone(),
@@ -144,7 +135,7 @@ fn info_column(
                 }
             }
             None => {
-                ui.add(label);
+                ui.label(RichText::new(series).font(text::font(ui, "base")).color(weak));
             }
         }
     }

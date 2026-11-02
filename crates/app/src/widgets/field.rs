@@ -5,7 +5,7 @@ use egui::{Id, Margin, Pos2, Response, RichText, TextBuffer, TextEdit, Ui, pos2}
 use egui_material_icons::MaterialIcon;
 
 use crate::theme::{self, text};
-use crate::widgets::round_button::RoundButton;
+use crate::widgets::round_button::{self, RoundButton};
 
 /// A field's name above it, in the muted ink.
 pub fn label(ui: &mut Ui, label: &str) {
@@ -69,4 +69,34 @@ pub fn trailing_button<'a>(ui: &Ui, icon: MaterialIcon, label: &'a str) -> Round
 /// Where a [`trailing`] button's centre is in `field`.
 pub fn trailing_center(field: &Response) -> Pos2 {
     pos2(field.rect.right() - TRAILING / 2., field.rect.center().y)
+}
+
+/// The room a [`leading`] icon takes at a field's left end: what [`single_line`]'s margin has
+/// to leave, so the text starts after it.
+pub fn leading_room(ui: &Ui) -> f32 {
+    12. + text::font(ui, "lg").size + 8.
+}
+
+/// [`single_line`] with room at its left end for a [`leading`] icon.
+pub fn with_leading<'t>(ui: &Ui, id: Id, text: &'t mut dyn TextBuffer, hint: &str) -> TextEdit<'t> {
+    single_line(ui, id, text, hint).margin(Margin {
+        left: leading_room(ui).round() as i8,
+        right: 12,
+        top: 9,
+        bottom: 9,
+    })
+}
+
+/// An icon inside `field`'s left end, such as a search box's magnifier. Painted, so it takes no
+/// room in `ui`'s layout and sits over the field: draw it after the field is added, or the
+/// field's own background covers it.
+pub fn leading(ui: &Ui, field: &Response, icon: MaterialIcon) {
+    let size = text::font(ui, "lg").size;
+    round_button::glyph(
+        ui,
+        pos2(field.rect.left() + 12. + size / 2., field.rect.center().y),
+        icon,
+        size,
+        theme::tokens_of(ui).ink_muted,
+    );
 }
