@@ -987,10 +987,10 @@ impl PlayerPage {
                         segment.end.as_secs_f64(),
                     );
                     let colours = countdown_pill::Colours {
-                        fill: over_video::SKIP,
-                        hover: over_video::SKIP_HOVER,
-                        ink: over_video::SKIP_FOREGROUND,
-                        track: over_video::SKIP_TRACK,
+                        fill: over_video::BRAND,
+                        hover: over_video::BRAND_HOVER,
+                        ink: over_video::BRAND_FOREGROUND,
+                        track: over_video::BRAND_TRACK,
                     };
                     let label = segment.kind.skip_label();
                     if countdown_pill::show(ui, label, ICON_SKIP_NEXT, fraction, colours).clicked() {
