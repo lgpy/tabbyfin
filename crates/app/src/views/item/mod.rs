@@ -1,16 +1,19 @@
 //! Detail page for a movie, series, season or episode, and for collections and playlists
 //! (whose entries can be reordered and removed here). The page, its header, actions, pickers and
-//! shelves are U6's; its seasons, the open season's episodes and playlist entries are U7's.
+//! shelves are U6's; its seasons, the open season's episodes and playlist entries are U7's; its
+//! cozy look is C11's.
 //!
 //! The page follows `views/home.rs`: data loads through a [`Task`] polled in `show` and what's on
 //! screen stays until new data arrives, the page loads again when `services.user_data` moves on,
 //! the browse cursor moves over its sections, and what the drawing asked for is carried out
-//! after the frame.
+//! after the frame. This file holds the page's state, keys and loading; `header.rs` draws the
+//! header and its actions, `children.rs` the seasons and rows, `shelves.rs` the shelves under
+//! them.
 //!
-//! A series shows its seasons as a grid, and the season chosen opens its episodes in a band
-//! under them; a season's page and a playlist's list their children as rows with the image,
-//! heading, runtime, three lines of overview and the Watched toggle. A playlist's rows also move
-//! and remove their entry: on screen at once, then on the server one edit at a time in the order
+//! A series shows its seasons as inset rows, and the season chosen lists its episodes under
+//! them; a season's page and a playlist's list their children as rows with the image, heading,
+//! runtime, three lines of overview and the Watched toggle. A playlist's rows also move and
+//! remove their entry: on screen at once, then on the server one edit at a time in the order
 //! they were made. The queue is the services' (`item_menu.rs`), so leaving the page doesn't lose
 //! an edit on its way.
 //!
@@ -22,21 +25,16 @@
 //! The More and version menus are [`PopupMenu`]s, so the keyboard can walk them, as it could
 //! on `main`; Enter on More opens its menu with the first entry highlighted.
 
-use egui::text::LayoutJob;
-use egui::{
-    Align, Align2, Color32, CornerRadius, FontId, Id, Label, Layout, Margin, Rect, RectAlign, Response, RichText,
-    Sense, Stroke, TextFormat, TextStyle, Ui, UiBuilder, pos2, vec2,
-};
-use egui_material_icons::MaterialIcon;
-use egui_material_icons::icons::{
-    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_DELETE, ICON_EDIT, ICON_MORE_HORIZ, ICON_MOVIE,
-    ICON_OPEN_IN_NEW, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY, ICON_SHUFFLE, ICON_STAR,
-};
-use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ImageType, ItemField, ItemSortBy, MediaSourceInfo};
-use jellyfin::{Client, ImageRequest, ItemsQuery, Ticks};
+mod children;
+mod header;
+mod shelves;
+
+use egui::{Align, Id, Margin, RectAlign, Response, Ui};
+use egui_material_icons::icons::{ICON_DELETE, ICON_EDIT, ICON_PLAYLIST_ADD};
+use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ItemField, ItemSortBy};
+use jellyfin::{Client, ItemsQuery, Ticks};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
-use crate::images::ImageCache;
 use crate::item_menu::{
     Mark, PlaylistEdit, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played,
     resume_point,
@@ -46,19 +44,15 @@ use crate::motion;
 use crate::nav::{NavRequest, Route};
 use crate::playback::PlayOptions;
 use crate::task::Task;
-use crate::theme;
-use crate::theme::text;
 use crate::toasts::Toast;
 use crate::views::dialogs::{AddToPlaylist, DeletePlaylist, EditPlaylist};
 use crate::views::{Page, PageCx};
-use crate::widgets::focus::{self, Place};
-use crate::widgets::menu::{self, MenuAction, RefusedMarks};
+use crate::widgets::menu::{MenuAction, RefusedMarks};
 use crate::widgets::popup::{Entry, Opened, PopupMenu};
-use crate::widgets::text::{
-    CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, poster_image,
-    runtime_text, timestamp,
-};
-use crate::widgets::{backdrop, button, card, image, select, shelf, state};
+use crate::widgets::text::{Load, episode_label, runtime_text};
+use crate::widgets::{backdrop, state};
+use children::{band_reveal, with_gap_above};
+use header::version_label;
 
 /// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
 pub fn shuffle<T>(items: &mut [T]) {
@@ -233,30 +227,13 @@ const BIG_CARD_SCALE: f32 = 1.2;
 const BIG_CARD_GAP: f32 = 24.;
 /// Between a shelf's title and its cards.
 const SHELF_TITLE_GAP: f32 = 16.;
-const ACTION_SIZE: f32 = 48.;
-const ACTION_ICON: f32 = 24.;
-/// The side padding of an action button, level with the 48-point height's own margins.
-const ACTION_PADDING: f32 = 16.;
 /// The item's title, `main`'s fixed 40-point `text_size` (it didn't follow the text size).
 const TITLE_SIZE: f32 = 40.;
-/// Between the action buttons, less the room each side keeps for the cursor's ring.
-const ACTION_GAP: f32 = 16.;
-const ACTION_RING_GAP: f32 = 3.;
+/// Between the action buttons: room for the cursor's ring outside each (`focus::GAP` and its
+/// width) with a little to spare.
+const ACTION_GAP: f32 = 10.;
 /// The More menu's width.
 const MENU_W: f32 = 220.;
-
-/// A row of a season's episodes or a playlist's entries, as `main` drew it: its image, the text
-/// beside it, then the Watched toggle (and, in a playlist, the entry's buttons).
-const ROW_PAD: f32 = 8.;
-const ROW_GAP: f32 = 16.;
-/// Between the heading, the runtime line and the overview.
-const ROW_LINE_GAP: f32 = 4.;
-const ENTRY_BUTTON: f32 = 28.;
-const WATCHED_SIZE: f32 = 32.;
-/// How many lines of an entry's overview show, as `main`'s `line_clamp(3)`.
-const OVERVIEW_ROWS: usize = 3;
-/// The band the open season's episodes sit in, tinted like `main`'s `muted` at 35 %.
-const BAND_ALPHA: u8 = 89;
 
 /// Cursor sections, top to bottom, as on `main`.
 const ACTIONS: usize = 0;
@@ -593,12 +570,21 @@ impl ItemPage {
         }
     }
 
-    /// The children rows' keys: W toggles the highlighted entry watched, and a playlist's entries
-    /// also move and remove. Returns whether the page used the key.
+    /// The children rows' keys: W toggles the highlighted entry (or open season's episode)
+    /// watched, and a playlist's entries also move and remove. Returns whether the page used the
+    /// key.
     fn children_key(&mut self, action: Action, cx: &mut PageCx) -> bool {
         let Some(position) = self.cursor.selected() else {
             return false;
         };
+        if position.section == EPISODES && action == Action::ToggleWatched {
+            let Some(episode) = self.open_episodes().get(position.index) else {
+                return false;
+            };
+            let (id, played) = (episode.id.clone(), is_played(episode));
+            self.set_played(id, !played, cx);
+            return true;
+        }
         if position.section != CHILDREN {
             return false;
         }
@@ -761,13 +747,14 @@ impl ItemPage {
     fn show_content(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         let more_id = more_menu_id(ui);
         let versions_id = versions_menu_id(ui);
-        // The season cards' column count comes from the page's width, which the padded content
-        // area has; the keys then use the layout the page last showed.
-        let columns = grid_columns((ui.available_width() - 2. * PAGE_PADDING).max(1.));
-        self.columns = columns;
         let Load::Loaded(data) = &self.data else {
             return;
         };
+        // The seasons' (or a collection's posters') column count comes from the page's width,
+        // which the padded content area has; the keys then use the layout the page last showed.
+        let width = (ui.available_width() - 2. * PAGE_PADDING).max(1.);
+        let columns = children::grid_columns(data.item.kind, width);
+        self.columns = columns;
         let actions = item_actions(&data.item, data.up_next.as_ref());
         let version = self.version;
         let open = self.open_season.as_ref().map(|season| season.id.clone());
@@ -796,55 +783,58 @@ impl ItemPage {
                     bottom: 0,
                 })
                 .show(ui, |ui| {
-                    let header = header(ui, data, &actions, selected, fills, images, &mut asked);
+                    let header = header::header(ui, data, &actions, selected, fills, images, &mut asked);
                     let mut pickers = None;
                     if data.item.media_sources.len() > 1 {
                         ui.add_space(SECTION_GAP);
-                        pickers = Some(pickers_row(ui, data, selected, version, &mut asked));
+                        pickers = Some(header::pickers_row(ui, data, selected, version, &mut asked));
                     }
                     let mut chapters_row = None;
                     if !chapters(&data.item).is_empty() {
                         ui.add_space(SECTION_GAP);
-                        chapters_row = Some(chapters_shelf(ui, data, moved, cursor, images, &mut asked));
+                        chapters_row = Some(shelves::chapters_shelf(ui, data, moved, cursor, images, &mut asked));
                     }
                     let mut children_title = None;
                     let mut children_row = None;
-                    if let Some(title) = children_heading(data) {
+                    if let Some(title) = children::children_heading(data) {
                         ui.add_space(SECTION_GAP);
-                        children_title = Some(ui.label(RichText::new(title).heading().strong()).rect);
-                        ui.add_space(12.);
+                        children_title = Some(children::heading(ui, title));
+                        ui.add_space(children::HEADING_GAP);
                         children_row = match data.item.kind {
-                            BaseItemKind::Series | BaseItemKind::BoxSet => {
-                                season_rows(ui, data, columns, open.as_deref(), cursor, images, &mut asked)
+                            BaseItemKind::Series => {
+                                children::seasons(ui, data, columns, open.as_deref(), cursor, images, &mut asked)
                             }
-                            _ => {
-                                let playlist = data.item.kind == BaseItemKind::Playlist;
-                                entry_rows(ui, data, playlist, cursor, images, &mut asked)
+                            BaseItemKind::BoxSet => children::posters(ui, data, columns, cursor, images, &mut asked),
+                            kind => {
+                                let playlist = kind == BaseItemKind::Playlist;
+                                let rows =
+                                    children::rows(ui, &data.children, CHILDREN, playlist, cursor, images, &mut asked);
+                                rows.selected
                             }
                         };
                     }
-                    let mut episodes_row = None;
+                    let mut band = None;
                     if let Some(open) = &self.open_season {
                         ui.add_space(SECTION_GAP);
-                        // The band rises in each time a season opens, as `main`'s did.
-                        episodes_row = Some(motion::enter(ui, ("season-episodes", open.id.as_str()), 0.0, |ui| {
-                            episodes_band(ui, open, moved, cursor, images, &mut asked)
+                        // The episodes rise in each time a season opens, as `main`'s band did.
+                        band = Some(motion::enter(ui, ("season-episodes", open.id.as_str()), 0.0, |ui| {
+                            children::episodes_band(ui, open, cursor, images, &mut asked)
                         }));
                     }
                     let mut people_row = None;
                     if !data.item.people.is_empty() {
                         ui.add_space(SECTION_GAP);
-                        people_row = Some(people_shelf(ui, data, moved, cursor, images, &mut asked));
+                        people_row = Some(shelves::people_shelf(ui, data, moved, cursor, images, &mut asked));
                     }
                     let mut extras_row = None;
                     if !data.extras.is_empty() {
                         ui.add_space(SECTION_GAP);
-                        extras_row = Some(extras_shelf(ui, data, moved, cursor, images, &mut asked));
+                        extras_row = Some(shelves::extras_shelf(ui, data, moved, cursor, images, &mut asked));
                     }
                     let mut similar_row = None;
                     if !data.similar.is_empty() {
                         ui.add_space(SECTION_GAP);
-                        similar_row = Some(similar_shelf(ui, data, moved, cursor, images, &mut asked));
+                        similar_row = Some(shelves::similar_shelf(ui, data, moved, cursor, images, &mut asked));
                     }
                     ui.add_space(BOTTOM_PADDING);
 
@@ -867,24 +857,28 @@ impl ItemPage {
                                 };
                                 (rect, None)
                             }),
-                            // The band with its gap, scrolled as little as shows it: a short
-                            // window keeps the seasons above in view.
-                            Some(position) if position.section == EPISODES => {
-                                episodes_row.map(|rect| (with_gap_above(rect, SECTION_GAP), None))
-                            }
+                            // The first episode comes with the season's name above it and the
+                            // section's gap; the others alone, scrolled as little as shows them.
+                            Some(position) if position.section == EPISODES => band.as_ref().and_then(|band| {
+                                let rect = match position.index {
+                                    0 => with_gap_above(band.top, SECTION_GAP),
+                                    _ => band.selected?,
+                                };
+                                Some((rect, None))
+                            }),
                             Some(position) if position.section == PEOPLE => people_row.map(|rect| (rect, None)),
                             Some(position) if position.section == EXTRAS => extras_row.map(|rect| (rect, None)),
                             Some(position) if position.section == SIMILAR => similar_row.map(|rect| (rect, None)),
                             _ => None,
                         };
                     } else if let Some(reveal) = self.reveal_band
-                        && let Some(band) = episodes_row
+                        && let Some(band) = &band
                         && reveal != BandReveal::Waiting
                     {
                         // Enter opened a season: the least scroll that shows its row with the
-                        // band, once as it opens and once more when its episodes arrive (the
-                        // loaded band is taller than the spinner's line).
-                        target = Some((band_reveal(children_row, band, ui.clip_rect().height()), None));
+                        // season's name and first episode, once as it opens and once more when
+                        // its episodes arrive (a row is taller than the mascot's line).
+                        target = Some((band_reveal(children_row, band.top, ui.clip_rect().height()), None));
                         // The loaded band gets a reveal of its own when its episodes arrive.
                         self.reveal_band = if reveal == BandReveal::Opening {
                             Some(BandReveal::Waiting)
@@ -955,410 +949,6 @@ impl ItemPage {
     }
 }
 
-/// The chapters shelf: their image, name and start. Chosen, the item plays from there with the
-/// version picked below its title.
-fn chapters_shelf(
-    ui: &mut Ui,
-    data: &ItemData,
-    moved: bool,
-    cursor: &mut Cursor,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Rect {
-    let chapters = chapters(&data.item);
-    shelf::shelf_with_gaps(ui, "chapters", "Chapters", CARD_GAP, SHELF_TITLE_GAP, 0., |ui| {
-        for (index, chapter) in chapters.iter().enumerate() {
-            let is_selected = cursor.is_selected(CHAPTERS, index);
-            let response = card::chapter(ui, images, &data.item.id, index, chapter, is_selected);
-            if is_selected && moved {
-                response.scroll_to_me(None);
-            }
-            if response.clicked() {
-                asked.play_from = Some(chapter.start_position_ticks);
-            }
-        }
-    })
-}
-
-/// The heading over the item's children: a series' seasons, a collection's items, a season's
-/// episodes or a playlist's entries, as on `main`. Nothing when there are none.
-fn children_heading(data: &ItemData) -> Option<&'static str> {
-    if data.children.is_empty() {
-        return None;
-    }
-    Some(match data.item.kind {
-        BaseItemKind::Series => "Seasons",
-        BaseItemKind::BoxSet => "In this collection",
-        BaseItemKind::Playlist => "Playlist",
-        _ => "Episodes",
-    })
-}
-
-/// Poster cards at [`BIG_CARD_SCALE`] that fit `available` points in a row, [`BIG_CARD_GAP`]
-/// between them: `main`'s count for a series' seasons.
-fn grid_columns(available: f32) -> usize {
-    let card = POSTER_W * BIG_CARD_SCALE;
-    (((available + BIG_CARD_GAP) / (card + BIG_CARD_GAP)).floor() as usize).max(1)
-}
-
-/// `rect` with `gap` points added above it, for a scroll that leaves the section's gap.
-fn with_gap_above(rect: Rect, gap: f32) -> Rect {
-    Rect::from_min_max(pos2(rect.left(), rect.top() - gap), rect.max)
-}
-
-/// What a season the keyboard just opened scrolls to: the union of the season's row and its
-/// episodes band, so the least scroll shows which season opened and its episodes (`None`
-/// rather than `TOP`, as the children's heading is revealed). A window too short to hold both
-/// shows the band alone, with the section's gap above it, as a move onto the band does.
-fn band_reveal(row: Option<Rect>, band: Rect, visible: f32) -> Rect {
-    match row.map(|row| row.union(band)) {
-        Some(union) if union.height() <= visible => union,
-        _ => with_gap_above(band, SECTION_GAP),
-    }
-}
-
-/// A series' seasons (or a collection's items) as poster cards in rows of `columns`, the open
-/// season highlighted like the cursor's. A season card opens its episodes here; a collection's
-/// items open their pages. Right-clicking one gives the item menu, as on `main`. Returns the
-/// row holding the cursor, for the page to scroll into view with its heading.
-#[allow(clippy::too_many_arguments)]
-fn season_rows(
-    ui: &mut Ui,
-    data: &ItemData,
-    columns: usize,
-    open: Option<&str>,
-    cursor: &mut Cursor,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Option<Rect> {
-    let columns = columns.max(1);
-    let selected_row = cursor
-        .selected()
-        .filter(|position| position.section == CHILDREN)
-        .map(|position| position.index / columns);
-    let mut row_rect = None;
-    for (row, children) in data.children.chunks(columns).enumerate() {
-        let drawn = ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = BIG_CARD_GAP;
-            for (column, child) in children.iter().enumerate() {
-                let index = row * columns + column;
-                let is_open = open == Some(child.id.as_str());
-                let selected = cursor.is_selected(CHILDREN, index);
-                let response = card::poster_scaled(ui, images, child, BIG_CARD_SCALE, selected || is_open);
-                if response.clicked() {
-                    if child.kind == BaseItemKind::Season {
-                        asked.season = Some(child.clone());
-                    } else {
-                        asked.open = Some(Route::for_item(child));
-                    }
-                }
-                if let Some(action) = menu::item_menu(&response, child) {
-                    asked.menu = Some((action, child.clone()));
-                }
-            }
-        });
-        if selected_row == Some(row) {
-            row_rect = Some(drawn.response.rect);
-        }
-        ui.add_space(BIG_CARD_GAP);
-    }
-    row_rect
-}
-
-/// A season's episodes or a playlist's entries, one row each: its image, its heading and
-/// runtime, three lines of overview, the Watched toggle and, in a playlist, the entry's buttons.
-/// A click (or Enter) opens the item; the toggle and the buttons don't, as on `main`. Returns
-/// the row holding the cursor, for the page to scroll into view with the heading.
-fn entry_rows(
-    ui: &mut Ui,
-    data: &ItemData,
-    playlist: bool,
-    cursor: &mut Cursor,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Option<Rect> {
-    let len = data.children.len();
-    let mut selected_rect = None;
-    for (index, entry) in data.children.iter().enumerate() {
-        let selected = cursor.is_selected(CHILDREN, index);
-        let response = entry_row(ui, entry, index, len, playlist, selected, images, asked);
-        if selected {
-            selected_rect = Some(response.rect);
-            focus::ring(ui, response.rect, 8., Place::Inside);
-        }
-        if response.clicked() {
-            asked.open = Some(Route::for_item(entry));
-        }
-        if let Some(action) = menu::item_menu(&response, entry) {
-            asked.menu = Some((action, entry.clone()));
-        }
-    }
-    selected_rect
-}
-
-/// One row of [`entry_rows`]. Returns the row's response, which covers the whole row; the
-/// Watched toggle and the entry buttons are added after it, so they take the clicks on them.
-#[allow(clippy::too_many_arguments)]
-fn entry_row(
-    ui: &mut Ui,
-    entry: &BaseItemDto,
-    index: usize,
-    len: usize,
-    playlist: bool,
-    selected: bool,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Response {
-    // `main`'s rows: a `text_base` heading with `text_sm` under it.
-    let small = text::font(ui, "sm");
-    let heading_font = text::font(ui, "base");
-    let weak = theme::tokens_of(ui).muted_foreground;
-    let width = ui.available_width();
-    let inner_width = width - 2. * ROW_PAD;
-    // The entry buttons, and the gap between them and the Watched toggle.
-    let buttons_w = if playlist { 3. * ENTRY_BUTTON + ROW_GAP } else { 0. };
-    let text_width = (inner_width - LANDSCAPE_W - 2. * ROW_GAP - buttons_w - WATCHED_SIZE).max(1.);
-    let overview = entry
-        .overview
-        .as_deref()
-        .filter(|text| !text.is_empty())
-        .map(|text| overview_galley(ui, text, text_width));
-    let heading_h = ui.fonts_mut(|fonts| fonts.row_height(&heading_font));
-    let runtime_h = ui.fonts_mut(|fonts| fonts.row_height(&small));
-    let mut text_h = heading_h + ROW_LINE_GAP + runtime_h;
-    if let Some(galley) = &overview {
-        text_h += ROW_LINE_GAP + galley.size().y;
-    }
-    let height = LANDSCAPE_H.max(text_h) + 2. * ROW_PAD;
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
-    if selected || ui.rect_contains_pointer(rect) {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), theme::tokens_of(ui).accent);
-    }
-    let inner = rect.shrink(ROW_PAD);
-    // The row's content goes in a Ui of its own, so that placing the toggle and the buttons in
-    // their rects moves that Ui's cursor rather than the page's (`scope_builder` would
-    // otherwise leave the page's cursor inside the row, and the next one would overlap it).
-    let mut row = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
-    let image_rect = Rect::from_min_size(inner.min, vec2(LANDSCAPE_W, LANDSCAPE_H));
-    image::show(
-        &row,
-        images,
-        image_rect,
-        landscape_image(entry).as_ref(),
-        Some(entry),
-        image::RADIUS,
-    );
-
-    // The text beside the image: episodes read "S1:E2 · Name"; a movie in a playlist its name,
-    // and the year on the line below.
-    let (name, episode_line) = card_text(entry);
-    let is_episode = entry.kind == BaseItemKind::Episode;
-    let heading = if is_episode { episode_line } else { name };
-    let runtime = [
-        entry
-            .production_year
-            .filter(|_| !is_episode)
-            .map(|year| year.to_string()),
-        entry.run_time_ticks.map(runtime_text),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" · ");
-    // A very narrow window (or a big zoom) can leave nothing beside the image; the column keeps
-    // a point rather than turning the rect inside out.
-    let text_left = image_rect.right() + ROW_GAP;
-    let text_rect = Rect::from_min_max(
-        pos2(text_left, inner.top()),
-        pos2(
-            (inner.right() - buttons_w - WATCHED_SIZE - ROW_GAP).max(text_left + 1.),
-            inner.bottom(),
-        ),
-    );
-    let mut text_ui = row.new_child(
-        UiBuilder::new()
-            .max_rect(text_rect)
-            .layout(Layout::top_down(Align::Min)),
-    );
-    text_ui.spacing_mut().item_spacing.y = ROW_LINE_GAP;
-    text_ui.add(Label::new(RichText::new(&heading).font(heading_font).strong()).truncate());
-    if !runtime.is_empty() {
-        text_ui.add(Label::new(RichText::new(&runtime).font(small).color(weak)).truncate());
-    }
-    if let Some(galley) = overview {
-        text_ui.add(Label::new(galley).selectable(false));
-    }
-
-    // The Watched toggle at the row's right end, pressed while watched like the page's own.
-    let played = is_played(entry);
-    let watched_rect = Rect::from_min_size(
-        pos2(inner.right() - WATCHED_SIZE, inner.top()),
-        vec2(WATCHED_SIZE, WATCHED_SIZE),
-    );
-    let toggle = row
-        .scope_builder(UiBuilder::new().max_rect(watched_rect), |ui| {
-            // On, the toggle's accent fill would merge with the row's own accent highlight:
-            // a muted outline keeps it readable.
-            let button = egui::Button::new(menu::played_icon(ui, played))
-                .sense(Sense::CLICK)
-                .min_size(vec2(WATCHED_SIZE, WATCHED_SIZE));
-            let mut button = theme::selected(ui, played, button);
-            if played {
-                button = button.stroke(Stroke::new(1., theme::tokens_of(ui).muted_foreground));
-            }
-            ui.add(button)
-        })
-        .inner
-        .on_hover_text("Watched (W)");
-    if toggle.clicked() {
-        // Don't open the item underneath.
-        asked.played = Some((entry.id.clone(), !played));
-    }
-
-    if playlist {
-        // Up, Down and Remove, left to right, as on `main`; added right to left here.
-        let buttons = [
-            (EntryAction::Remove, ICON_CLOSE, "Remove from playlist (Delete)"),
-            (EntryAction::Down, ICON_ARROW_DOWNWARD, "Move down (Alt+Down)"),
-            (EntryAction::Up, ICON_ARROW_UPWARD, "Move up (Alt+Up)"),
-        ];
-        let mut right = inner.right() - WATCHED_SIZE - ROW_GAP;
-        for (action, icon, tooltip) in buttons {
-            right -= ENTRY_BUTTON;
-            let enabled = match action {
-                EntryAction::Up => index > 0,
-                EntryAction::Down => index + 1 < len,
-                EntryAction::Remove => true,
-            };
-            let at = Rect::from_min_size(
-                pos2(right, inner.top() + (WATCHED_SIZE - ENTRY_BUTTON) * 0.5),
-                vec2(ENTRY_BUTTON, ENTRY_BUTTON),
-            );
-            let button = row
-                .scope_builder(UiBuilder::new().max_rect(at), |ui| {
-                    ui.add_enabled(
-                        enabled,
-                        egui::Button::new(icon.outlined().rich_text().size(18.))
-                            .frame(false)
-                            .sense(Sense::CLICK)
-                            .min_size(vec2(ENTRY_BUTTON, ENTRY_BUTTON)),
-                    )
-                })
-                .inner
-                .on_hover_text(tooltip)
-                .on_disabled_hover_text(tooltip);
-            if button.clicked() {
-                asked.entry = Some((index, action));
-            }
-        }
-    }
-    response
-}
-
-/// `text` wrapped to `width`, cut off after [`OVERVIEW_ROWS`] lines with an ellipsis, as
-/// `main`'s `line_clamp(3)` did. Laid out here rather than through a `Label`: a label replaces
-/// the job's wrapping, and with it the row limit.
-fn overview_galley(ui: &Ui, text: &str, width: f32) -> std::sync::Arc<egui::Galley> {
-    let mut job = LayoutJob::default();
-    job.append(
-        text,
-        0.,
-        TextFormat {
-            font_id: self::text::font(ui, "sm"),
-            color: theme::tokens_of(ui).foreground,
-            ..Default::default()
-        },
-    );
-    job.wrap.max_width = width;
-    job.wrap.max_rows = OVERVIEW_ROWS;
-    ui.fonts_mut(|fonts| fonts.layout_job(job))
-}
-
-/// The open season's episodes, as a band under the seasons: the season's name, then its episode
-/// cards, a spinner while they load or a line when there are none. Returns the band's rectangle,
-/// for the cursor scrolling it into view.
-fn episodes_band(
-    ui: &mut Ui,
-    open: &OpenSeason,
-    moved: bool,
-    cursor: &mut Cursor,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Rect {
-    let top = ui.cursor().min;
-    // The band's background goes under what's drawn in it, but its height is only known once
-    // it's drawn: a placeholder takes its place in the layer and is filled in at the end.
-    let background = ui.painter().add(egui::Shape::Noop);
-    egui::Frame::NONE
-        .inner_margin(Margin {
-            left: PAGE_PADDING as i8,
-            right: PAGE_PADDING as i8,
-            top: 16,
-            bottom: 16,
-        })
-        .show(ui, |ui| match &open.episodes {
-            Load::Loaded(episodes) if !episodes.is_empty() => {
-                // Keyed by the season: each season's row starts at its first episode.
-                shelf::shelf_with_gaps(
-                    ui,
-                    ("season-episodes", open.id.as_str()),
-                    &open.name,
-                    BIG_CARD_GAP,
-                    SHELF_TITLE_GAP,
-                    // The band already insets its content.
-                    0.,
-                    |ui| {
-                        for (index, episode) in episodes.iter().enumerate() {
-                            let selected = cursor.is_selected(EPISODES, index);
-                            let response = card::episode(ui, images, episode, BIG_CARD_SCALE, selected);
-                            if selected && moved {
-                                response.scroll_to_me(None);
-                            }
-                            if response.clicked() {
-                                asked.open = Some(Route::for_item(episode));
-                            }
-                            if let Some(action) = menu::item_menu(&response, episode) {
-                                asked.menu = Some((action, episode.clone()));
-                            }
-                        }
-                    },
-                );
-            }
-            Load::Loaded(_) => band_note(ui, "No episodes in this season.", false),
-            Load::Loading => band_note(ui, "", true),
-            Load::Failed(message) => band_note(ui, message, false),
-        });
-    let rect = Rect::from_min_max(
-        pos2(ui.clip_rect().left(), top.y),
-        pos2(ui.clip_rect().right(), ui.cursor().min.y),
-    );
-    let muted = theme::tokens_of(ui).muted;
-    let band = Color32::from_rgba_unmultiplied(muted.r(), muted.g(), muted.b(), BAND_ALPHA);
-    ui.painter()
-        .set(background, egui::Shape::rect_filled(rect, CornerRadius::ZERO, band));
-    // `main`'s `mb_6`: room between the band and the shelf under it.
-    ui.add_space(SECTION_GAP);
-    rect
-}
-
-/// A line in the episodes band at the height the cards would take: the mascot while they load,
-/// or a message.
-fn band_note(ui: &mut Ui, message: &str, loading: bool) {
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), LANDSCAPE_H),
-        Layout::top_down(egui::Align::Center),
-        |ui| {
-            ui.set_min_height(LANDSCAPE_H);
-            if loading {
-                state::spinner(ui);
-            } else {
-                state::message(ui, message);
-            }
-        },
-    );
-}
-
 /// What the page's drawing asked for this frame, carried out once the page is drawn.
 #[derive(Default)]
 struct Asked {
@@ -1382,568 +972,6 @@ struct Asked {
     more: Option<Response>,
     /// The version picker's response, which its menu hangs from.
     version_picker: Option<Response>,
-}
-
-/// The header: the backdrop with its fade, the poster, and the item's title, actions and text.
-/// Returns its rectangle, for the cursor scrolling back to the actions.
-fn header(
-    ui: &mut Ui,
-    data: &ItemData,
-    actions: &[ItemAction],
-    selected: Option<Position>,
-    fills: &Fills,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Rect {
-    let item = &data.item;
-    let top = ui.cursor().min;
-    let backdrop = item.backdrop_image();
-    if let Some(backdrop) = &backdrop {
-        // Full width, past the page's padding: `main`'s backdrop ran edge to edge.
-        let band = Rect::from_min_max(
-            pos2(ui.clip_rect().left(), top.y),
-            pos2(ui.clip_rect().right(), top.y + BACKDROP_H),
-        );
-        image::show_at_width(ui, images, band, Some(backdrop), Some(item), 0, BACKDROP_FILL_W);
-        fade_to_background(ui, band);
-    }
-    ui.add_space(if backdrop.is_some() { BACKDROP_H - 160. } else { 24. });
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = 24.;
-        let (request, size) = header_image(item);
-        let (poster, _) = ui.allocate_exact_size(size, Sense::hover());
-        image::show(ui, images, poster, request.as_ref(), Some(item), image::RADIUS);
-        ui.vertical(|ui| {
-            if backdrop.is_some() {
-                // Lines the text up beside the poster, as on `main`.
-                ui.add_space(120.);
-            }
-            info_column(ui, data, actions, selected, fills, asked);
-        });
-    });
-    Rect::from_min_max(top, pos2(ui.max_rect().right(), ui.cursor().min.y))
-}
-
-/// The header's picture and its size: the item's poster, or for an episode its own still in a
-/// wide frame (an episode's image is a screen grab, which a tall poster would crop), and its
-/// series' poster when it has no image of its own.
-fn header_image(item: &BaseItemDto) -> (Option<ImageRequest>, egui::Vec2) {
-    let poster = vec2(DETAIL_POSTER_W, DETAIL_POSTER_H);
-    if item.kind != BaseItemKind::Episode {
-        return (item.primary_image(), poster);
-    }
-    match item.image(ImageType::Primary) {
-        // A tall image is a poster after all, and goes in the poster's frame.
-        Some(own) => match item.primary_image_aspect_ratio {
-            Some(ratio) if ratio < 1. => (Some(own), poster),
-            // Episode stills are 16:9 when the server doesn't say.
-            ratio => {
-                let ratio = ratio.unwrap_or(16. / 9.).clamp(1., 2.4) as f32;
-                (Some(own), vec2(DETAIL_STILL_H * ratio, DETAIL_STILL_H))
-            }
-        },
-        None => (poster_image(item), poster),
-    }
-}
-
-/// The title's column: the series line, the title and its actions, the meta line, genres,
-/// studios, the synopsis and the tags.
-fn info_column(
-    ui: &mut Ui,
-    data: &ItemData,
-    actions: &[ItemAction],
-    selected: Option<Position>,
-    fills: &Fills,
-    asked: &mut Asked,
-) {
-    let item = &data.item;
-    let weak = theme::tokens_of(ui).muted_foreground;
-    ui.spacing_mut().item_spacing.y = 8.;
-    if matches!(item.kind, BaseItemKind::Episode | BaseItemKind::Season)
-        && let Some(series) = &item.series_name
-    {
-        // `main`'s series line took the body size; the lines under the title are `text_sm`. It
-        // opens the series, underlined under the pointer like a link.
-        let label = Label::new(RichText::new(series).font(text::font(ui, "base")).color(weak));
-        match &item.series_id {
-            Some(id) => {
-                let response = ui
-                    .add(label.sense(Sense::click()))
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
-                if response.hovered() {
-                    let rect = response.rect;
-                    ui.painter()
-                        .hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1., weak));
-                }
-                if response.clicked() {
-                    asked.open = Some(Route::Item {
-                        id: id.clone(),
-                        name: series.clone(),
-                    });
-                }
-            }
-            None => {
-                ui.add(label);
-            }
-        }
-    }
-
-    let episode = data
-        .up_next
-        .as_ref()
-        .map(episode_label)
-        .filter(|label| !label.is_empty());
-    let actions_width = actions_width(ui, data, actions, episode.as_deref());
-    // `main`'s 40-point title: a fixed size, so the text size setting doesn't move the header.
-    let title_font = FontId::new(TITLE_SIZE, text::font(ui, "base").family);
-    let available = ui.available_width();
-    let gap = 16.;
-    if available >= TITLE_MIN_W + gap + actions_width {
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            let title_w = available - gap - actions_width;
-            ui.vertical(|ui| {
-                ui.set_max_width(title_w);
-                ui.add(Label::new(RichText::new(&item.name).font(title_font.clone())).wrap());
-            });
-            ui.add_space((ui.available_width() - actions_width).max(0.));
-            actions_row(ui, data, actions, selected, episode.as_deref(), fills, asked);
-        });
-    } else {
-        // A narrow window: the actions go under the title rather than squeeze it to a word a
-        // line.
-        ui.add(Label::new(RichText::new(&item.name).font(title_font)).wrap());
-        actions_row(ui, data, actions, selected, episode.as_deref(), fills, asked);
-    }
-
-    let meta = meta_line(item);
-    if !meta.is_empty() {
-        let font = text::font(ui, "sm");
-        // The text font has no ★, so the rating's star is drawn from the icon font.
-        let mut job = LayoutJob::default();
-        let format = |font_id| TextFormat {
-            font_id,
-            color: weak,
-            valign: Align::Center,
-            ..Default::default()
-        };
-        for (index, part) in meta.split('★').enumerate() {
-            if index > 0 {
-                job.append(
-                    ICON_STAR.codepoint,
-                    0.,
-                    format(FontId::new(font.size, ICON_STAR.font_family())),
-                );
-            }
-            job.append(part, 0., format(font.clone()));
-        }
-        ui.label(job);
-    }
-    if !item.genres.is_empty() {
-        ui.label(
-            RichText::new(item.genres.join(", "))
-                .font(text::font(ui, "sm"))
-                .color(weak),
-        );
-    }
-    if !item.studios.is_empty() {
-        let studios: Vec<&str> = item.studios.iter().map(|studio| studio.name.as_str()).collect();
-        ui.label(RichText::new(studios.join(", ")).font(text::font(ui, "sm")).color(weak));
-    }
-    if let Some(overview) = &item.overview
-        && !overview.is_empty()
-    {
-        ui.add_space(8.);
-        ui.scope(|ui| {
-            ui.set_max_width(ui.available_width().min(TEXT_MAX_W));
-            // The synopsis is `main`'s `text_base`, a step above the meta lines.
-            ui.add(Label::new(RichText::new(overview.clone()).font(text::font(ui, "base"))).wrap());
-        });
-    }
-    if !item.tags.is_empty() {
-        ui.add_space(16.);
-        ui.scope(|ui| {
-            ui.set_max_width(ui.available_width().min(TEXT_MAX_W));
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(4., 4.);
-                for tag in &item.tags {
-                    // A frame doesn't wrap as a unit, so its label would break per letter in the
-                    // row's leftover space; start a new row when the whole chip doesn't fit.
-                    let text_width = ui
-                        .painter()
-                        .layout_no_wrap(tag.clone(), text::font(ui, "xs"), weak)
-                        .size()
-                        .x;
-                    if ui.available_size_before_wrap().x < text_width + 16. + 1. {
-                        ui.end_row();
-                    }
-                    egui::Frame::NONE
-                        .fill(theme::tokens_of(ui).muted)
-                        // `main`'s `rounded_lg`, 8 points.
-                        .corner_radius(CornerRadius::same(8))
-                        .inner_margin(Margin::symmetric(8, 2))
-                        .show(ui, |ui| {
-                            ui.add(Label::new(RichText::new(tag).font(text::font(ui, "xs")).color(weak)).extend());
-                        });
-                }
-            });
-        });
-    }
-}
-
-/// What an action button shows: its icon, its tooltip, and the label playing it carries.
-struct ActionLook {
-    icon: MaterialIcon,
-    tooltip: String,
-    label: Option<String>,
-    primary: bool,
-}
-
-fn action_look(action: ItemAction, item: &BaseItemDto, episode: Option<&str>) -> ActionLook {
-    let labelled = |verb: &str| {
-        Some(match episode {
-            Some(episode) => format!("{verb} {episode}"),
-            None => verb.to_owned(),
-        })
-    };
-    match action {
-        ItemAction::Resume(position) => ActionLook {
-            icon: ICON_PLAY_ARROW,
-            tooltip: format!("Resume from {}", timestamp(position.into())),
-            label: labelled("Resume"),
-            primary: true,
-        },
-        ItemAction::PlayFromStart => ActionLook {
-            icon: ICON_REPLAY,
-            tooltip: "Play from beginning".to_owned(),
-            label: None,
-            primary: false,
-        },
-        ItemAction::Play => ActionLook {
-            icon: ICON_PLAY_ARROW,
-            tooltip: "Play".to_owned(),
-            label: labelled("Play"),
-            primary: true,
-        },
-        ItemAction::PlayAll => ActionLook {
-            icon: ICON_PLAY_ARROW,
-            tooltip: "Play all".to_owned(),
-            label: Some("Play all".to_owned()),
-            primary: true,
-        },
-        ItemAction::Shuffle => ActionLook {
-            icon: ICON_SHUFFLE,
-            tooltip: "Shuffle".to_owned(),
-            label: None,
-            primary: false,
-        },
-        ItemAction::Trailer => ActionLook {
-            icon: if item.local_trailer_count.unwrap_or(0) > 0 {
-                ICON_MOVIE
-            } else {
-                ICON_OPEN_IN_NEW
-            },
-            tooltip: "Trailer".to_owned(),
-            label: None,
-            primary: false,
-        },
-        ItemAction::More => ActionLook {
-            icon: ICON_MORE_HORIZ,
-            tooltip: "More".to_owned(),
-            label: None,
-            primary: false,
-        },
-        // Drawn as toggles, which take their icon from the item's state, and the More menu's
-        // entries, which have their own icons.
-        ItemAction::TogglePlayed
-        | ItemAction::ToggleFavorite
-        | ItemAction::AddToPlaylist
-        | ItemAction::EditPlaylist
-        | ItemAction::DeletePlaylist => ActionLook {
-            icon: ICON_MORE_HORIZ,
-            tooltip: String::new(),
-            label: None,
-            primary: false,
-        },
-    }
-}
-
-/// How wide the actions row is, for the title to know what's left of its line. A pixel over is
-/// fine: the row right-aligns itself in what the title leaves.
-fn actions_width(ui: &Ui, data: &ItemData, actions: &[ItemAction], episode: Option<&str>) -> f32 {
-    let body = TextStyle::Button.resolve(ui.style());
-    let mut width = 0.;
-    for (index, &action) in actions.iter().enumerate() {
-        if index > 0 {
-            width += ACTION_GAP - 2. * ACTION_RING_GAP;
-        }
-        width += ACTION_SIZE + 2. * ACTION_RING_GAP;
-        if let Some(label) = action_look(action, &data.item, episode).label {
-            // The icon and the button's padding around the label, roughly: only the choice
-            // between one line and two depends on it.
-            let text = ui
-                .fonts_mut(|fonts| fonts.layout_no_wrap(label, body.clone(), Color32::WHITE))
-                .size()
-                .x;
-            width += text + ACTION_SIZE;
-        }
-    }
-    width
-}
-
-/// The buttons under the title: playing it, named, then icon toggles and the More menu.
-fn actions_row(
-    ui: &mut Ui,
-    data: &ItemData,
-    actions: &[ItemAction],
-    selected: Option<Position>,
-    episode: Option<&str>,
-    fills: &Fills,
-    asked: &mut Asked,
-) {
-    let item = &data.item;
-    let played = is_played(item);
-    let favorite = is_favorite(item);
-    let now = ui.input(|input| input.time);
-    // With the animations setting off the icons are drawn at their size, at once.
-    let animations = theme::animations(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = ACTION_GAP - 2. * ACTION_RING_GAP;
-        for (index, &action) in actions.iter().enumerate() {
-            let ringed = selected
-                == Some(Position {
-                    section: ACTIONS,
-                    index,
-                });
-            let response = match action {
-                ItemAction::TogglePlayed => {
-                    let icon = menu::played_icon(ui, played);
-                    let scale = if animations { fills.played.scale(now) } else { 1. };
-                    toggle(ui, icon, played, "Watched", scale)
-                }
-                ItemAction::ToggleFavorite => {
-                    let icon = menu::favorite_icon(ui, favorite);
-                    let scale = if animations { fills.favorite.scale(now) } else { 1. };
-                    toggle(ui, icon, favorite, "Favorite", scale)
-                }
-                _ => {
-                    let look = action_look(action, item, episode);
-                    // A primary action's hover and pressed colours come from the theme's style,
-                    // which only a scope can give this button.
-                    let response = if look.primary {
-                        ui.scope(|ui| {
-                            theme::primary_style(ui);
-                            ui.spacing_mut().button_padding.x = ACTION_PADDING;
-                            ui.add(action_button(ui, &look))
-                        })
-                        .inner
-                    } else {
-                        ui.scope(|ui| {
-                            ui.spacing_mut().button_padding.x = ACTION_PADDING;
-                            ui.add(action_button(ui, &look))
-                        })
-                        .inner
-                    };
-                    let response = response.on_hover_text(look.tooltip.as_str());
-                    if action == ItemAction::More {
-                        asked.more = Some(response.clone());
-                    }
-                    response
-                }
-            };
-            if ringed {
-                focus::ring_widget(ui, &response);
-            }
-            if response.clicked() {
-                asked.action = Some(action);
-            }
-        }
-    });
-    if animations && (fills.played.popping(now) || fills.favorite.popping(now)) {
-        // The icons are still growing into place: keep the frames coming.
-        ui.ctx().request_repaint();
-    }
-}
-
-/// An action button: its icon, and a label for the actions that are named. Not focusable: the
-/// page's keys are the browse cursor's (`keys.rs`).
-fn action_button(ui: &Ui, look: &ActionLook) -> egui::Button<'static> {
-    let body = TextStyle::Button.resolve(ui.style());
-    let tokens = theme::tokens_of(ui);
-    let color = if look.primary {
-        tokens.primary_foreground
-    } else {
-        tokens.foreground
-    };
-    let label = look.label.as_deref().unwrap_or_default();
-    egui::Button::new(button::icon_text(look.icon, ACTION_ICON, label, body, color))
-        .sense(Sense::CLICK)
-        .min_size(vec2(ACTION_SIZE, ACTION_SIZE))
-}
-
-/// Watched and Favorite: pressed while on (the theme's accent behind it, as `main`'s checked
-/// toggles had), with the icon filled in green or red and a muted outline so the pressed toggle
-/// still reads on a highlighted row, whose own fill is the same accent. `scale` is the icon's
-/// pop as it turns on, which fits in the button's own size.
-fn toggle(ui: &mut Ui, icon: RichText, on: bool, tooltip: &str, scale: f32) -> Response {
-    let tokens = theme::tokens_of(ui);
-    let mut button = egui::Button::new(icon.size(ACTION_ICON * scale))
-        .selected(on)
-        .sense(Sense::CLICK)
-        .min_size(vec2(ACTION_SIZE, ACTION_SIZE));
-    if on {
-        // A selected button paints itself with the selection colour; `main`'s toggles used the
-        // accent, and the icon keeps its own green or red.
-        button = button
-            .fill(tokens.accent)
-            .stroke(Stroke::new(1., tokens.muted_foreground));
-    }
-    ui.add(button).on_hover_text(tooltip)
-}
-
-/// The version label's column and the picker, when the item has more than one version.
-fn pickers_row(ui: &mut Ui, data: &ItemData, selected: Option<Position>, version: usize, asked: &mut Asked) -> Rect {
-    let top = ui.cursor().min;
-    let sources = &data.item.media_sources;
-    let current = version.min(sources.len() - 1);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 16.;
-        let (label, _) = ui.allocate_exact_size(vec2(PICKER_LABEL_W, PICKER_H), Sense::hover());
-        ui.painter().text(
-            label.left_center(),
-            Align2::LEFT_CENTER,
-            "Version",
-            text::font(ui, "sm"),
-            theme::tokens_of(ui).muted_foreground,
-        );
-        let ringed = selected
-            == Some(Position {
-                section: PICKERS,
-                index: 0,
-            });
-        let name = version_label(&sources[current], current);
-        let response = picker(ui, &name, ringed);
-        asked.version_picker = Some(response);
-    });
-    Rect::from_min_max(top, pos2(ui.max_rect().right(), ui.cursor().min.y))
-}
-
-/// The version select (`widgets::select`), with the cursor's ring round it. Clicking it opens
-/// the list of versions; the keyboard changes the choice on the cursor instead.
-fn picker(ui: &mut Ui, name: &str, ringed: bool) -> Response {
-    let response = select::button(ui, vec2(PICKER_W, PICKER_H), name, "Version", false);
-    if ringed {
-        focus::ring_widget(ui, &response);
-    }
-    response
-}
-
-fn version_label(source: &MediaSourceInfo, index: usize) -> String {
-    source.name.clone().unwrap_or_else(|| format!("Version {}", index + 1))
-}
-
-/// The people shelf: each one's photo or initials, role and job, opening their page.
-fn people_shelf(
-    ui: &mut Ui,
-    data: &ItemData,
-    moved: bool,
-    cursor: &mut Cursor,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Rect {
-    let people = &data.item.people;
-    shelf::shelf_with_gaps(ui, "people", "Cast & crew", BIG_CARD_GAP, SHELF_TITLE_GAP, 0., |ui| {
-        for (index, person) in people.iter().enumerate() {
-            let is_selected = cursor.is_selected(PEOPLE, index);
-            let response = card::person(ui, images, person, BIG_CARD_SCALE, is_selected);
-            if is_selected && moved {
-                response.scroll_to_me(None);
-            }
-            if response.clicked() {
-                asked.open = Some(Route::Person {
-                    id: person.id.clone(),
-                    name: person.name.clone(),
-                });
-            }
-        }
-    })
-}
-
-/// Trailers and extras, played from the start when chosen.
-fn extras_shelf(
-    ui: &mut Ui,
-    data: &ItemData,
-    moved: bool,
-    cursor: &mut Cursor,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Rect {
-    let extras = &data.extras;
-    shelf::shelf_with_gaps(
-        ui,
-        "extras",
-        "Extras",
-        crate::widgets::text::CARD_GAP,
-        SHELF_TITLE_GAP,
-        // The page already insets its content.
-        0.,
-        |ui| {
-            for (index, extra) in extras.iter().enumerate() {
-                let is_selected = cursor.is_selected(EXTRAS, index);
-                let response = card::landscape(ui, images, extra, is_selected);
-                if is_selected && moved {
-                    response.scroll_to_me(None);
-                }
-                if response.clicked() {
-                    asked.extra = Some(extra.clone());
-                }
-            }
-        },
-    )
-}
-
-/// "More like this": larger cards, opening their pages, with the item menu.
-fn similar_shelf(
-    ui: &mut Ui,
-    data: &ItemData,
-    moved: bool,
-    cursor: &mut Cursor,
-    images: &mut ImageCache,
-    asked: &mut Asked,
-) -> Rect {
-    let similar = &data.similar;
-    shelf::shelf_with_gaps(
-        ui,
-        "similar",
-        "More like this",
-        BIG_CARD_GAP,
-        SHELF_TITLE_GAP,
-        0.,
-        |ui| {
-            for (index, item) in similar.iter().enumerate() {
-                let is_selected = cursor.is_selected(SIMILAR, index);
-                let response = card::poster_scaled(ui, images, item, BIG_CARD_SCALE, is_selected);
-                if is_selected && moved {
-                    response.scroll_to_me(None);
-                }
-                if response.clicked() {
-                    asked.open = Some(Route::for_item(item));
-                }
-                if let Some(action) = menu::item_menu(&response, item) {
-                    asked.menu = Some((action, item.clone()));
-                }
-            }
-        },
-    )
-}
-
-/// Fades the backdrop image into the page at its bottom, as `main`'s gradient did: into the
-/// window's backdrop at that height, so the picture melts into the gradient rather than ending
-/// on a flat band of colour.
-fn fade_to_background(ui: &Ui, band: Rect) {
-    // `main`'s first stop: the background at 30 %, so the image shows through at the top.
-    let window = ui.ctx().content_rect();
-    backdrop::fade_into(ui.painter(), band, window, 77. / 255., theme::tokens_of(ui));
 }
 
 /// A More menu row. Deleting a playlist can't be taken back, so it's set apart and in red.
@@ -2095,7 +1123,7 @@ impl Browse for ItemPage {
             Section::grid(pickers, 1),
             Section::row(chapters(&data.item).len()),
             self.children_section(data),
-            Section::row(self.open_episodes().len()),
+            Section::grid(self.open_episodes().len(), 1),
             Section::row(data.item.people.len()),
             Section::row(data.extras.len()),
             Section::row(data.similar.len()),
