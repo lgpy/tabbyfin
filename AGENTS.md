@@ -57,4 +57,4 @@ Development happens in WSL2 without a GPU (Linux video falls back to software). 
 ## Conventions
 
 - Match the surrounding comment style: doc comments explain why, plain English, no filler.
-- Keep `docs/ROADMAP.md` (✅ markers), `docs/PLAN.md` and `docs/TESTING.md` in step with behavior changes.
+- Keep `docs/PLAN.md`, `docs/ROADMAP.md` and `docs/TESTING.md` in step with behavior changes. They describe the present, not history (that's git's): when a roadmap item is finished, remove its row and add it to its area's *Done* line; when a check in `TESTING.md` has been done, delete it; don't name the stage that built something (C7, U6).
