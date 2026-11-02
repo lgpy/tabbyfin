@@ -22,6 +22,44 @@ pub const SETTLE: f32 = 0.5;
 /// than 8 as already smooth, and adds it to the frame's scroll in one go.
 const SMOOTH_STEP: f32 = 7.;
 
+/// Points one line of a wheel notch scrolls: a browser's 100 px for the usual 3 lines a notch.
+const LINE_POINTS: f32 = 100. / 3.;
+
+/// How far one line of a wheel notch scrolls, for egui's `line_scroll_speed`: the system's
+/// lines-per-notch setting on Windows (3 elsewhere) of [`LINE_POINTS`] each. egui's own 40
+/// points a notch felt sluggish next to other apps, which scroll about 100.
+pub fn line_scroll_speed() -> f32 {
+    wheel_lines() * LINE_POINTS
+}
+
+/// The lines a wheel notch scrolls, from Windows' mouse settings. "One screen at a time"
+/// (`WHEEL_PAGESCROLL`) and an unreadable setting fall back to the default 3.
+#[cfg(windows)]
+fn wheel_lines() -> f32 {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETWHEELSCROLLLINES, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    let mut lines: u32 = 3;
+    // SAFETY: SPI_GETWHEELSCROLLLINES writes one u32 through the pointer, which outlives the call.
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWHEELSCROLLLINES,
+            0,
+            Some((&raw mut lines).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    match read {
+        Ok(()) if (1..=100).contains(&lines) => lines as f32,
+        _ => 3.,
+    }
+}
+
+#[cfg(not(windows))]
+fn wheel_lines() -> f32 {
+    3.
+}
+
 /// A glide in progress: an exponential approach to `target`, as `main`'s `Glide` did.
 ///
 /// egui's offsets grow as the content scrolls down or right, where `main`'s went negative; the
