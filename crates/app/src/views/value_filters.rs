@@ -9,17 +9,13 @@
 //! outside closes it (egui's popup). The popover's open state is egui's popup memory, so
 //! `keys::egui_wants_keys` leaves the keyboard to it.
 
-use egui::accesskit::Role;
-use egui::{
-    Align, Align2, CornerRadius, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Sense, Stroke, StrokeKind, Ui,
-    WidgetInfo, pos2, vec2,
-};
-use egui_material_icons::icons::{ICON_CHECK, ICON_REMOVE, ICON_SEARCH};
+use egui::{Align, Align2, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Ui, pos2, vec2};
+use egui_material_icons::icons::ICON_SEARCH;
 
 use crate::config::LibraryView;
 use crate::theme::{self, text};
 use crate::views::library::{FilterValues, ValueKind};
-use crate::widgets::focus::{self, Place};
+use crate::widgets::pill::{self, Mark};
 use crate::widgets::popup;
 use crate::widgets::{field, label};
 
@@ -27,21 +23,10 @@ use crate::widgets::{field, label};
 const WIDTH: f32 = 380.;
 /// How tall the pills may get before they scroll.
 const LIST_MAX_H: f32 = 320.;
-/// A pill's room left and right of its contents, and between its icon and label.
-const PILL_INSET: f32 = 12.;
-const ICON_GAP: f32 = 4.;
 /// The room between pills, across and down.
 const PILL_GAP: f32 = 6.;
 /// The room around the popover's contents, inside the panel's own padding.
 const PAD: f32 = 8.;
-
-/// Where a value stands in the view.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mark {
-    Off,
-    Included,
-    Excluded,
-}
 
 /// The popover's own state, kept by the page between frames.
 #[derive(Default)]
@@ -147,7 +132,7 @@ impl ValueFilters {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
                 for (kind, value, mark) in &chosen {
-                    let response = pill(ui, value, *mark, false);
+                    let response = pill::filter(ui, value, *mark, false);
                     if response.clicked() || response.secondary_clicked() {
                         cycled = Some((*kind, value.clone(), response.secondary_clicked()));
                     }
@@ -182,7 +167,7 @@ impl ValueFilters {
                     ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
                     for value in group {
                         let highlighted = self.highlighted == Some(index);
-                        let response = pill(ui, value, mark(view, kind, value), highlighted);
+                        let response = pill::filter(ui, value, mark(view, kind, value), highlighted);
                         if response.clicked() || response.secondary_clicked() {
                             cycled = Some((kind, value.clone(), response.secondary_clicked()));
                             self.highlighted = Some(index);
@@ -318,78 +303,6 @@ fn set_off(view: &mut LibraryView, kind: ValueKind, value: &str) {
     let (included, excluded) = lists_mut(view, kind);
     included.retain(|v| v != value);
     excluded.retain(|v| v != value);
-}
-
-/// A value as a pill: sunk in `inset` with the field's outline while off, filled `brand` with a
-/// tick while included, and outlined in `danger` with a minus while excluded. `highlighted`
-/// rings it for the keyboard.
-fn pill(ui: &mut Ui, label: &str, mark: Mark, highlighted: bool) -> Response {
-    let tokens = theme::tokens_of(ui);
-    let font = text::font(ui, "sm");
-    let icon = match mark {
-        Mark::Off => None,
-        Mark::Included => Some(ICON_CHECK),
-        Mark::Excluded => Some(ICON_REMOVE),
-    };
-    let icon_font = text::icon(ui, ICON_CHECK.font_family());
-    let icon_w = icon.map_or(0., |_| icon_font.size + ICON_GAP);
-    let painter = ui.painter().clone();
-    let galley = painter.layout_no_wrap(label.to_owned(), font.clone(), tokens.ink);
-    let height = (font.size + 14.).max(28.);
-    let max_w = ui.available_width().max(height);
-    let width = (galley.size().x + icon_w + 2. * PILL_INSET).min(max_w);
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::CLICK);
-    response.widget_info(|| {
-        let state = match mark {
-            Mark::Off => "",
-            Mark::Included => ", included",
-            Mark::Excluded => ", excluded",
-        };
-        WidgetInfo::labeled(Role::Button, true, format!("{label}{state}"))
-    });
-
-    // Under the pointer, the inset ones take `inset_hover` and the included one `brand_hover`.
-    let hovered = response.hovered();
-    let inset = if hovered { tokens.inset_hover } else { tokens.inset };
-    let (fill, stroke, color) = match mark {
-        Mark::Off => (inset, Stroke::new(1., tokens.surface_border), tokens.ink),
-        Mark::Included => (
-            if hovered { tokens.brand_hover } else { tokens.brand },
-            Stroke::NONE,
-            tokens.brand_foreground,
-        ),
-        Mark::Excluded => (inset, Stroke::new(1., tokens.danger), tokens.danger),
-    };
-    let radius = CornerRadius::same((height / 2.) as u8);
-    painter.rect(rect, radius, fill, stroke, StrokeKind::Inside);
-    if highlighted {
-        focus::ring(ui, rect, height / 2., Place::Outside);
-    }
-
-    let mut x = rect.left() + PILL_INSET;
-    if let Some(icon) = icon {
-        painter.text(
-            pos2(x + icon_font.size / 2., rect.center().y),
-            Align2::CENTER_CENTER,
-            icon.codepoint,
-            icon_font.clone(),
-            color,
-        );
-        x += icon_w;
-    }
-    // A name too long for the popover ends in an ellipsis.
-    let mut job = egui::text::LayoutJob::single_section(
-        label.to_owned(),
-        egui::TextFormat {
-            font_id: font,
-            color,
-            ..Default::default()
-        },
-    );
-    job.wrap = egui::text::TextWrapping::truncate_at_width((rect.right() - PILL_INSET - x).max(0.));
-    let galley = painter.layout_job(job);
-    painter.galley(pos2(x, rect.center().y - galley.size().y / 2.), galley, color);
-    response
 }
 
 #[cfg(test)]

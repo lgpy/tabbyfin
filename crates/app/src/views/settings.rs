@@ -48,6 +48,7 @@ use crate::widgets::avatar_row::AvatarRow;
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
 use crate::widgets::label;
+use crate::widgets::round_button::RoundButton;
 use crate::widgets::{backdrop, field, select, surface, toggle};
 
 /// The theme choices, in the order the picker lists them.
@@ -748,20 +749,12 @@ impl SettingsPage {
             self.search.text.clear();
         }
         if clear {
-            // Not focusable, as the top bar's isn't: Esc clears from the keyboard. Drawn like
-            // `field::trailing` (which is focusable): muted, `ink` over a soft circle on hover.
+            // Not focusable, as the top bar's isn't: Esc clears from the keyboard.
             let center = pos2(rect.right() - 12. - icon.size / 2., rect.center().y);
-            let hit = Rect::from_center_size(center, vec2(icon.size + 8., icon.size + 8.));
-            let button = ui.interact(hit, Id::unique("settings_search_clear"), Sense::CLICK);
-            button.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), "Clear search"));
-            let color = if button.hovered() {
-                ui.painter().circle_filled(center, hit.width() / 2., tokens.inset_hover);
-                tokens.ink
-            } else {
-                tokens.ink_muted
-            };
-            ui.painter()
-                .text(center, Align2::CENTER_CENTER, ICON_CLOSE.codepoint, icon, color);
+            let button = RoundButton::icon(ICON_CLOSE, "Clear search")
+                .size(icon.size + 8., icon.size)
+                .focus(Focus::Skip)
+                .show_at(ui, center, Id::unique("settings_search_clear"));
             if button.clicked() {
                 self.search.text.clear();
             }

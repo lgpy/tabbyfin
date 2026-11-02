@@ -7,7 +7,10 @@ use egui_material_icons::icons::{ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICO
 
 use crate::ui_tests::build_harness;
 use crate::widgets::avatar_row::{self, AvatarRow};
+use crate::widgets::badge;
 use crate::widgets::button::{self, Focus, State};
+use crate::widgets::list_row::{Handle, Handles, Leading, ListRow};
+use crate::widgets::pill::{self, Mark};
 use crate::widgets::round_button::RoundButton;
 use crate::widgets::surface::{self, Kind};
 use crate::widgets::toggle;
@@ -206,4 +209,74 @@ fn a_switch_flips_by_click_and_space_and_names_its_state() {
     ui.run();
     assert!(!*ui.state(), "Space turns it off");
     assert_eq!(toggled(&ui), Some(Toggled::False));
+}
+
+/// A row's handles exist only while it's active, say which one was pressed, stop at the list's
+/// ends, and don't press the row under them.
+#[test]
+fn a_list_rows_handles_show_while_active_and_report_the_press() {
+    #[derive(Default)]
+    struct State {
+        highlighted: bool,
+        handle: Option<Handle>,
+        row_clicks: usize,
+    }
+    let mut ui = build_harness(egui::vec2(400., 200.), State::default(), |ui, state| {
+        let row = ListRow::new("Sintel")
+            .compact()
+            .leading(Leading::Number(2))
+            .handles(Handles { up: false, down: true }, "Remove (Delete)")
+            .highlighted(state.highlighted)
+            .role(Role::MenuItem)
+            .label("Sintel, playing")
+            .show(ui);
+        state.handle = row.handle.or(state.handle);
+        state.row_clicks += usize::from(row.row.clicked());
+    });
+    assert!(ui.query_by_role_and_label(Role::MenuItem, "Sintel, playing").is_some());
+    assert!(ui.query_by_label("Move down (Alt+Down)").is_none());
+
+    ui.state_mut().highlighted = true;
+    ui.run();
+    assert!(ui.get_by_label("Move up (Alt+Up)").accesskit_node().is_disabled());
+    ui.get_by_label("Move down (Alt+Down)").click();
+    ui.run();
+    assert_eq!(ui.state().handle, Some(Handle::Down));
+    assert_eq!(ui.state().row_clicks, 0);
+}
+
+/// A dialog's row reads its detail too, and a click lands on the row.
+#[test]
+fn a_sunk_list_row_clicks_and_reads_its_detail() {
+    let mut ui = build_harness(egui::vec2(400., 200.), 0, |ui, clicks| {
+        let row = ListRow::new("Road trip")
+            .sunk()
+            .detail(Some("12 items"))
+            .label("Road trip, 12 items")
+            .no_hover()
+            .show(ui);
+        *clicks += usize::from(row.row.clicked());
+    });
+    ui.get_by_role_and_label(Role::Button, "Road trip, 12 items").click();
+    ui.run();
+    assert_eq!(*ui.state(), 1);
+}
+
+/// A filter's state reaches a screen reader, not just its colour and icon, and a tag and a label
+/// read as text rather than as something to press.
+#[test]
+fn pills_and_labels_name_themselves() {
+    let ui = build_harness(egui::vec2(400., 200.), (), |ui, _| {
+        pill::filter(ui, "Drama", Mark::Off, false);
+        pill::filter(ui, "Comedy", Mark::Included, false);
+        pill::filter(ui, "Horror", Mark::Excluded, false);
+        pill::tag(ui, "dystopia");
+        badge::label(ui, "Transcoding", egui::Color32::BLACK, egui::Color32::WHITE);
+    });
+    for name in ["Drama", "Comedy, included", "Horror, excluded"] {
+        assert!(ui.query_by_role_and_label(Role::Button, name).is_some(), "{name}");
+    }
+    for name in ["dystopia", "Transcoding"] {
+        assert!(ui.query_by_role_and_label(Role::Label, name).is_some(), "{name}");
+    }
 }
