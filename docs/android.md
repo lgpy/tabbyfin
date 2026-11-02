@@ -78,7 +78,8 @@ After that: Android TV, picture-in-picture, background audio, downloads.
 
 ## Testing
 
-- WSL has no GPU and likely no emulator acceleration, so testing happens on a real phone through `adb` from the Windows host, or the Android emulator on Windows.
+- **Emulator, in WSL:** KVM is available (the user needs to be in the `kvm` group), so an x86_64 emulator runs at full speed. It runs headless (`-no-window`, nothing opens on the desktop) and draws in software (SwiftShader, which still offers Vulkan and GLES). Drive it with `adb shell input` (taps, swipes, text) and take screenshots with `adb exec-out screencap -p`. It's good for the app starting, sign-in and the touch layout, not for judging video. It takes 2–3 GB, so don't run it during a big cargo build.
+- **Real phone, over Wi-Fi:** the phone's *Wireless debugging* (Developer options), paired from WSL with `adb pair` and `adb connect`; WSL's mirrored networking puts it on the phone's network. This is where playback, the video spike, battery, rotation and the real soft keyboard get tested.
 - The `egui_kittest` UI tests keep running on the desktop; a compact-width variant of the page tests covers the phone layout.
 - `TESTING.md` gets an Android section for what only a device can show: rotation, going to the background during playback, the soft keyboard, the back gesture.
 
