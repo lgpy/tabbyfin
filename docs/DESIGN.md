@@ -130,6 +130,7 @@ All in `crates/app/src/widgets/`.
 - **`select::select` / `select::button`** — sunk like a field: `inset` fill, `surface_border` outline that darkens to `ink_muted` under the pointer, `radius_control`, the value in `ink` at `sm` and a muted caret; the keyboard gets `focus::ring` outside it. Its height is the caller's (32 by default, the toolbar's).
 - **Toasts** (`toasts.rs`) — 340 wide in the bottom-right corner, 8 apart, each a popup surface with 14 pt padding: the kind's icon (20 pt, named to AccessKit like a notice's) on the first line, the title in `ink` at `base` over the text in `ink_muted` at `sm` (the text alone is in `ink`), and at the right end, centred on the toast, the action as a compact `brand` button (30 tall, radius 10) and a round close button that fills `inset_hover` on hover. Both buttons are `Sense::CLICK` only, so a toast never takes the keyboard from the player.
 - **`mascot::watching(ui, rect, Watch, shadow)`** — the mascot reacting to the view: `look_at` (a caret or the thing being read), `eyes_shut`, `puzzled`. Its place is allocated first but it's painted last, so it follows this frame's caret. `mascot::loader` and `mascot::confused` remain for pages.
+- **`state::spinner`, `empty`, `error`, `message`** — what a page shows instead of its content, centred in the space it has left. The page mascot (96) always sits in a small glow (`backdrop::glow`, radius 200, centred 18 below it). `spinner` is the loader; `empty` the confused mascot over a `base` `ink_muted` line 16 below; `error` the confused mascot over a danger `notice` at most 420 wide and a `brand` *Retry* (120 wide, `GAP_FIELD` under the notice), returning whether it was pressed; `message` a lone `base` `ink_muted` line (a note with nothing to retry).
 
 ## Anatomy of a cozy screen
 
@@ -233,7 +234,7 @@ The rollout plan is `docs/ROADMAP.md`'s [cozy look backlog](ROADMAP.md#cozy-look
 
 - **Components.** Views compose and widgets draw: anything another page could use lives in `widgets/` and in the component gallery (C3).
 - **Order.** The component library, then shared pieces (popups, selects, toasts, dialogs), then Settings as the first full page, then the top bar, then the browsing pages. The player goes last and changes least.
-- **Mascot and glow.** Sign-in, restoring, loaders and empty states only. The glow always goes with the mascot.
+- **Mascot and glow.** Sign-in, restoring and the page states (loading, empty, failed) only. The glow always goes with the mascot; the player's loader over the video is the one mascot without it.
 - **Toggles.** The switch landed with Settings (C6, see *Components*); the dialog's sharing is a switch row. Lists that tick several things (genres, tags) keep `popup::row`'s ticks. Selects and menus settled in C4.
 - **The player.** Stays dark (`theme::over_video`) and only borrows `brand` for its accents.
 - **Retiring the classic tokens.** They're aliases since C1; C13 removes them.
