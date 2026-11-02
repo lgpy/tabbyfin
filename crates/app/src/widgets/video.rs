@@ -134,7 +134,7 @@ impl Video {
     /// player renders frames at this size in physical pixels (never larger than the video), so
     /// they're drawn one to one unless the video is smaller. The response senses clicks for the
     /// player's controls, and isn't focusable: a Tab that gave egui the focus would take the
-    /// player's keys from it (U8's rule for the dialogs).
+    /// player's keys from it (as the dialogs are).
     pub fn show(&mut self, ui: &mut egui::Ui) -> egui::Response {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::CLICK);
         let pixels_per_point = ui.ctx().pixels_per_point();

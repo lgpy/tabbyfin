@@ -3,7 +3,7 @@
 //!
 //! - `TABBYFIN_KEYS="down right enter wait escape"` presses keys after startup, on any screen
 //!   (sign-in too). `wait` pauses for a second; `down*40` presses a key 40 times, 30 ms apart (a
-//!   held key, roughly). Keys are named as on `main`: `ctrl-f`, `shift-tab`, `alt-left`, `pageup`,
+//!   held key, roughly). Keys are named `ctrl-f`, `shift-tab`, `alt-left`, `pageup`,
 //!   `]`, `a`. They're injected into egui's input from `App::raw_input_hook`, so they take the
 //!   same path as real keys (`keys.rs`), and printable ones type their text into a focused field.
 //!   A press is only injected in a pass that will draw: eframe runs logic-only passes for a window
@@ -94,7 +94,7 @@ impl ScriptKey {
     }
 }
 
-/// Every press of `script` with its time from the start, as `main`'s replay timed them.
+/// Every press of `script` with its time from the start.
 fn schedule(script: &str) -> Vec<(Duration, ScriptKey)> {
     let mut at = FIRST_KEY_AFTER;
     let mut presses = Vec::new();
@@ -132,7 +132,7 @@ fn schedule(script: &str) -> Vec<(Duration, ScriptKey)> {
     presses
 }
 
-/// A key as `main` named them: modifiers joined with `-` (`ctrl`, `alt`, `shift`, `cmd`, and
+/// A key from its name: modifiers joined with `-` (`ctrl`, `alt`, `shift`, `cmd`, and
 /// `secondary` for Cmd on macOS and Ctrl elsewhere), then the key. Modifiers come out as
 /// egui-winit reports them, so bindings match as they do for real keys. Also returns the text
 /// the key types, if it types any.

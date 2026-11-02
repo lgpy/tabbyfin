@@ -1,12 +1,12 @@
-//! `main`'s animations (`motion.rs`) on egui: a page entering, the shelves' stagger, an image
-//! fading in, a toggle's pop, the player's prompt sliding in and its controls fading in. Plus
-//! one of tabbyfin's own: a band unfolding under what opened it (a series' season episodes).
+//! The app's animations: a page entering, the shelves' stagger, an image fading in, a toggle's
+//! pop, the player's prompt sliding in and its controls fading in, and a band unfolding under
+//! what opened it (a series' season episodes).
 //!
-//! The times, curves and the stagger are `main`'s. egui can't move what a `Ui` lays out without
-//! moving the layout, so a lift is the room above the content closing as it rises, and a fade is
-//! the painter's opacity. An animation plays when what it wraps appears: a page opened, a shelf
-//! drawn for the first time, an image loaded, the player's controls shown, a prompt appearing.
-//! Each helper asks for frames only while it runs, so an idle page costs nothing.
+//! egui can't move what a `Ui` lays out without moving the layout, so a lift is the room above
+//! the content closing as it rises, and a fade is the painter's opacity. An animation plays when
+//! what it wraps appears: a page opened, a shelf drawn for the first time, an image loaded, the
+//! player's controls shown, a prompt appearing. Each helper asks for frames only while it runs,
+//! so an idle page costs nothing.
 //!
 //! The animations setting is egui's own animation time ([`theme::animations`], set by
 //! `theme::apply_animations`): with it off every helper draws its content at the end state, at
@@ -16,15 +16,15 @@ use egui::{Id, Rect, Ui, UiBuilder, vec2};
 
 use crate::theme;
 
-/// How far an element rises as it fades in (`main`'s `LIFT`).
+/// How far an element rises as it fades in.
 pub const LIFT: f32 = 12.;
-/// How long an element takes to rise and fade in (`main`'s `ENTER`).
+/// How long an element takes to rise and fade in.
 pub const ENTER: f64 = 0.260;
-/// How long a loaded image fades in (`main`'s `FADE`).
+/// How long a loaded image fades in.
 pub const FADE: f64 = 0.220;
-/// How long a toggle's icon pops (`main`'s `POP`).
+/// How long a toggle's icon pops.
 pub const POP: f64 = 0.420;
-/// The delay between one shelf appearing and the next (`main`'s `SHELF_STAGGER`).
+/// The delay between one shelf appearing and the next.
 pub const SHELF_STAGGER: f64 = 0.060;
 
 /// How long a band takes to unfold to its height (or fold away, or follow its content's).
@@ -36,13 +36,13 @@ pub const ROW_STAGGER: f64 = 0.045;
 /// The most lines a stagger waits for: a long season's last rows don't trail in.
 const STAGGER_LINES: usize = 6;
 
-/// `main`'s easing: quick off the mark, settling gently (`ease_out_quint`).
+/// Quick off the mark, settling gently (`ease_out_quint`).
 fn ease_out_quint(t: f32) -> f32 {
     1. - (1. - t).powi(5)
 }
 
 /// How far into its animation something that appeared at `started` is, `delay` after it appeared:
-/// 0 until the delay is over, 1 once `duration` is, eased as `main` eased it.
+/// 0 until the delay is over, 1 once `duration` is, eased the same way.
 pub fn progress(started: f64, now: f64, delay: f64, duration: f64) -> f32 {
     let t = ((now - started - delay) / duration).clamp(0., 1.) as f32;
     ease_out_quint(t)
@@ -82,7 +82,7 @@ pub fn shelf_delay(index: usize) -> f64 {
 
 /// The time `id` last appeared: now, unless it was drawn in the previous pass. A page that comes
 /// back on top, a card scrolled out and back, an image that finished loading after its card went
-/// away: each starts its animation again, as `main`'s element state did.
+/// away: each starts its animation again.
 ///
 /// Passes, not frames: egui can run several passes in one frame (a discard pass for a `Grid` or a
 /// popup's sizing, say), and an element drawn in both is one appearance. Counting frames, the
@@ -111,8 +111,8 @@ pub fn appear(ctx: &egui::Context, id: impl std::hash::Hash + std::fmt::Debug) -
     seen.started
 }
 
-/// Draws `content` as `main`'s `motion::enter` did: faded in while it rises into place, starting
-/// `delay` after it appears. Returns what `content` returned.
+/// Draws `content` faded in while it rises into place, starting `delay` after it appears.
+/// Returns what `content` returned.
 pub fn enter<R>(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
@@ -129,17 +129,15 @@ pub fn enter<R>(
     if t >= 1. {
         return content(ui);
     }
-    // `main` moved the element up with `relative().top()`, which took no room in the layout;
-    // egui can only move what it lays out, so the room the element takes above itself closes
-    // as it rises instead.
+    // egui can only move what it lays out, so the room the element takes above itself closes as
+    // it rises instead.
     ui.add_space(LIFT * (1. - t));
     let drawn = faded(ui, t, content);
     ctx.request_repaint();
     drawn
 }
 
-/// The opacity a loaded image has, `main`'s `motion::fade_in`: it fades in when it first shows,
-/// over its blurhash.
+/// The opacity a loaded image has: it fades in when it first shows, over its blurhash.
 pub fn image_alpha(ui: &Ui, id: impl std::hash::Hash + std::fmt::Debug) -> f32 {
     let ctx = ui.ctx();
     if !theme::animations(ctx) {
@@ -266,8 +264,8 @@ pub fn unfold<R>(
     Unfolded { inner, settled }
 }
 
-/// Runs `content` with the painter's opacity multiplied by `alpha`, as `main`'s `opacity` did,
-/// and puts the opacity back afterwards so what's drawn next isn't faded with it.
+/// Runs `content` with the painter's opacity multiplied by `alpha`, and puts the opacity back
+/// afterwards so what's drawn next isn't faded with it.
 pub fn faded<R>(ui: &mut Ui, alpha: f32, content: impl FnOnce(&mut Ui) -> R) -> R {
     if alpha >= 1. {
         return content(ui);
@@ -327,7 +325,7 @@ mod tests {
         assert!((pop_scale(0.) - 0.5).abs() < 1e-6, "a pop starts at half size");
         assert!((pop_scale(POP) - 1.).abs() < 1e-6);
         assert_eq!(pop_scale(POP + 1.), 1., "an older toggle is drawn as it is");
-        // A little past its size partway through, as `main`'s did.
+        // A little past its size partway through.
         let overshoot = (1..100)
             .map(|i| pop_scale(POP * f64::from(i) / 100.))
             .fold(0.5_f32, f32::max);

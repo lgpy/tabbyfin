@@ -29,7 +29,7 @@
 
 use egui::{Key, Modifiers};
 
-/// Where a binding applies, like a key context on `main`.
+/// Where a binding applies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     /// Whatever is on screen, sign-in included: the app-wide keys (zoom).
@@ -191,7 +191,7 @@ pub fn egui_wants_keys(ctx: &egui::Context) -> bool {
 /// egui sees the input. Releases stay in: egui ignores the release of a key it never saw pressed.
 ///
 /// The app's own keys are taken even while egui wants the keyboard (a text field with the focus,
-/// a menu, a dialog): `main` bound them globally, and Ctrl/Cmd with `=`, `-` and `0` mean
+/// a menu, a dialog): Ctrl/Cmd with `=`, `-` and `0` mean
 /// nothing to egui's widgets. Everything else waits for egui to be done with the keyboard.
 pub fn take(ctx: &egui::Context, input: &mut egui::RawInput, scopes: &[Scope]) -> Vec<Press> {
     let mut taken = if scopes.contains(&Scope::App) {

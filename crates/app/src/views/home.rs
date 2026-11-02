@@ -11,10 +11,10 @@
 //! - The browse cursor: [`Browse`] for the keys, `Cursor::take_reveal` and
 //!   [`browse::hide_on_click`] while drawing.
 //! - Cards and shelves are `widgets/`, the item menu `widgets/menu.rs`; what a menu asks for is
-//!   carried out here, after the frame's drawing. *Add to playlist…* opens U8's dialog.
+//!   carried out here, after the frame's drawing. *Add to playlist…* opens the dialog
+//!   (`views/dialogs.rs`).
 //!
-//! The shelves come in one after another as the page appears, as `main`'s did
-//! ([`crate::motion`]).
+//! The shelves come in one after another as the page appears ([`crate::motion`]).
 
 use std::collections::HashMap;
 
@@ -40,11 +40,9 @@ const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
 /// Home's cards are larger than the other pages', with more room between them.
 const CARD_SCALE: f32 = 1.2;
 const CARD_GAP: f32 = 24.;
-/// Home's cards start closer under their shelf's title than the other pages' (`main`'s
-/// `shelf_with_rail` argument of 8 px).
+/// Home's cards start closer under their shelf's title than the other pages' (8 px).
 const TITLE_GAP: f32 = 8.;
-/// The page's top and bottom padding, and the space between its shelves (`main`'s `py_6` and
-/// `gap_8`).
+/// The page's top and bottom padding, and the space between its shelves.
 const PAGE_PADDING: f32 = 24.;
 const SHELF_GAP: f32 = 32.;
 
@@ -338,8 +336,8 @@ impl Page for HomePage {
                     self.loaded_at = None;
                 }
             }
-            // `main` showed the same line whenever there was no shelf to draw, whether the
-            // server has no libraries or the user hid every section in the web client.
+            // The same line shows whenever there's no shelf to draw, whether the server has no
+            // libraries or the user hid every section in the web client.
             Load::Loaded(data) if shelves(data).is_empty() => {
                 state::empty(ui, "Your server has no libraries yet.");
             }
@@ -381,8 +379,8 @@ fn show_shelves(
     let selected = cursor.selected();
     let mut target = None;
     let area = egui::ScrollArea::vertical().show(ui, |ui| {
-        // `main`'s `py_6`: the page keeps clear of the window's top and bottom edges, and each
-        // shelf is inset `px_6` itself, so its row scrolls to the window's edge.
+        // The page keeps clear of the window's top and bottom edges, and each shelf is inset by
+        // its own padding, so its row scrolls to the window's edge.
         egui::Frame::NONE
             .inner_margin(egui::Margin {
                 left: 0,

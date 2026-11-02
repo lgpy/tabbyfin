@@ -4,8 +4,8 @@
 //!
 //! The menu returns what was chosen instead of carrying it out. [`Services::carry_out`] does
 //! everything only the services can — playing, playing a series' next episode, marking it
-//! watched or favorite — and hands back *Add to playlist…* for the page to open U8's dialog.
-//! `main`'s menu did all of it itself, through globals.
+//! watched or favorite — and hands back *Add to playlist…* for the page to open its own
+//! dialog.
 //!
 //! Each action that takes a request first ([`Services::mark`], [`Services::play_up_next`],
 //! [`Services::play_shuffled`]) runs it on tokio and reports back in
@@ -43,11 +43,11 @@ pub enum MenuAction {
     UpNext,
     /// Set watched or favorite state.
     Mark(Mark),
-    /// Open U8's *Add to playlist* dialog.
+    /// Open the *Add to playlist* dialog.
     AddToPlaylist,
 }
 
-/// The menu worn by `response`, as `main`'s `with_item_menu` did: right-click it to open it.
+/// The menu worn by `response`: right-click it to open it.
 /// Kinds with none of the entries (libraries, people) get no menu.
 pub fn item_menu(response: &Response, item: &BaseItemDto) -> Option<MenuAction> {
     if !can_mark(item) {
@@ -127,8 +127,7 @@ pub(crate) struct RefusedMark {
 /// The recent marks the server refused. A page remembers the last sequence it applied and takes
 /// the newer ones while it draws, so a refusal that came while the page was off screen (under
 /// another page, behind the player, or with the window hidden) is still taken back, and only
-/// once. `main` kept the page's own request open for the length of the mark, which navigation
-/// dropped.
+/// once.
 #[derive(Default)]
 pub(crate) struct RefusedMarks {
     sequence: u64,
@@ -164,10 +163,10 @@ impl RefusedMarks {
 impl Services {
     /// Carries out a choice from the item menu: playing the item, playing a series' or season's
     /// next episode, marking it watched or favorite. Everything is done here except *Add to
-    /// playlist…*, which needs U8's dialog and comes back for the page to open.
+    /// playlist…*, which comes back for the page to open.
     pub fn carry_out(&mut self, action: MenuAction, item: &BaseItemDto) -> Option<MenuAction> {
         match action {
-            // `start` only, as `main`'s menu did: the player still offers to start over.
+            // `start` only: the player still offers to start over.
             MenuAction::Play { start } => {
                 self.play(
                     item,
@@ -276,7 +275,7 @@ impl Services {
 
     /// Plays all of a series' or season's episodes in random order, for the item page's
     /// *Shuffle*: which episodes takes a request, so it runs on tokio and outlives the page —
-    /// going Back still starts the shuffle, as `main`'s detached task did.
+    /// going Back still starts the shuffle.
     pub fn play_shuffled(&mut self, item: &BaseItemDto) {
         let client = self.session.client.clone();
         let item = item.clone();

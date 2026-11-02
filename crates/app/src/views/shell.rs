@@ -10,9 +10,9 @@
 //! [`PopupMenu`]; the SyncPlay panel is drawn and driven here: its keys are read before egui's
 //! focus pass can hand them to a button or card behind it.
 //!
-//! The SyncPlay panel (`render_syncplay` on `main`) lists the server's groups to join, or the
-//! group this session is in: its state, its members and the group's queue, which the keyboard
-//! can play, move, remove and toggle (`menu_entries` on `main`).
+//! The SyncPlay panel lists the server's groups to join, or the group this session is in: its
+//! state, its members and the group's queue, which the keyboard can play, move, remove and
+//! toggle.
 //!
 //! The search box is the bar's only text field: typing opens the results page (or comes back
 //! to it from a page opened from them), clearing it closes them, and Enter or Down moves into
@@ -58,7 +58,7 @@ use crate::widgets::round_button::RoundButton;
 use crate::widgets::{backdrop, field, state, surface};
 
 /// The bar's height, inside the panel's own margin.
-/// `main`'s bar: 72 points tall, 40-point buttons with 24-point icons.
+/// 72 points tall, 40-point buttons with 24-point icons.
 const BAR_H: f32 = 72.;
 /// The size of the bar's buttons, and of the slot each takes (so the right-hand side lines up
 /// whatever the icon is).
@@ -73,7 +73,7 @@ const SEARCH_ID: &str = "top_bar_search";
 /// The account menu's width, and its id.
 const ACCOUNT_MENU_W: f32 = 240.;
 const ACCOUNT_MENU: &str = "account_menu";
-/// The SyncPlay panel's width: roomier than `main`'s 300 for its avatar rows and padding.
+/// The SyncPlay panel's width: room for its avatar rows and padding.
 const SYNCPLAY_PANEL_W: f32 = 340.;
 /// The SyncPlay panel's id in egui's popup memory (egui keeps the keyboard while it's open
 /// only if it is in that memory, as for the account menu), and the id it lives under.
@@ -156,8 +156,7 @@ fn bar_position(items: &[BarItem], item: BarItem) -> usize {
 }
 
 /// One step along `items` from `current`: Left and Right stop at either end, and without a
-/// current item this is where the keyboard enters the bar. `main`'s `focus_top_bar` started on
-/// Back, or on Search when there was nowhere to go back to.
+/// current item this is where the keyboard enters the bar.
 fn bar_step(items: &[BarItem], current: Option<BarItem>, step: i32) -> Option<BarItem> {
     if items.is_empty() {
         return None;
@@ -181,7 +180,7 @@ pub struct Shell {
         Task<jellyfin::Result<jellyfin::models::BaseItemDto>>,
         playback::PlayOptions,
     )>,
-    /// The saved accounts, read from the config when the account menu opens, as on `main`.
+    /// The saved accounts, read from the config when the account menu opens.
     accounts: Vec<SavedServer>,
     /// The bar item the keyboard is on; `None` while the page has the keyboard.
     bar_key: Option<BarItem>,
@@ -317,7 +316,7 @@ impl Shell {
             // Between the backdrop and the bar's contents: where a page paints what runs up
             // behind the bar. The bar's rectangle is only known once it's laid out.
             let mut under_bar = UnderBar::reserve(ui.painter());
-            // `main`'s bar keeps its contents 24 points from the window's edges; the pages own
+            // The bar keeps its contents 24 points from the window's edges; the pages own
             // their own 24 (or less, for a grid's own padding), so the panel adds none.
             let bar = egui::Panel::top("top_bar")
                 .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(24, 0)))
@@ -334,8 +333,8 @@ impl Shell {
                 let entry = self.stack.last_mut().expect("the page stack is never empty");
                 let serial = entry.serial;
                 ui.push_id(serial, |ui| {
-                    // A page rises in as it opens, as `main`'s did (the player takes the
-                    // window on its own, without the entry).
+                    // A page rises in as it opens (the player takes the window on its own,
+                    // without the entry).
                     motion::enter(ui, ("page", serial), 0.0, |ui| entry.page.show(ui, cx));
                 });
             });
@@ -370,7 +369,7 @@ impl Shell {
             if let Some(action) = self.top().scope().and_then(|scope| press.action(scope)) {
                 self.bar_key_action(action, cx);
             } else if let Some(action) = press.action(Scope::Shell) {
-                // Esc goes back to the page, not a page back, as on `main`.
+                // Esc goes back to the page, not a page back.
                 match action {
                     Action::Back => self.leave_top_bar(cx),
                     Action::OpenSearch => self.focus_search(cx),
@@ -439,8 +438,8 @@ impl Shell {
             Action::Move(Move::Left) => self.bar_key = bar_step(items, self.bar_key, -1),
             Action::Move(Move::Right) => self.bar_key = bar_step(items, self.bar_key, 1),
             Action::Move(Move::Down) => self.leave_top_bar(cx),
-            // Up stays in the bar and Tab isn't the bar's, as on `main`; both are swallowed
-            // rather than moving the page's cursor behind the bar's highlight.
+            // Up stays in the bar and Tab isn't the bar's; both are swallowed rather than
+            // moving the page's cursor behind the bar's highlight.
             Action::Move(Move::Up | Move::NextSection | Move::PrevSection) => {}
             Action::Activate => {
                 if let Some(item) = self.bar_key {
@@ -530,7 +529,7 @@ impl Shell {
             {
                 cx.services.syncplay.move_entry(id, step);
                 // The highlight is the entry, so it follows it to its new place once the queue
-                // update lands; `main` moved an index instead (see §6).
+                // update lands.
                 self.syncplay_scroll = true;
             }
             cancel_focus(ctx);
@@ -595,8 +594,7 @@ impl Shell {
 
     /// Does what a SyncPlay entry says. Shuffle and repeat leave the panel open, to see the
     /// change; anything else closes it, and a choice made with the keyboard gives the keyboard
-    /// back to the page, as `main`'s `leave_top_bar` did. A click only closes the panel: the
-    /// page's cursor stays where it was (`main`'s clickable rows never went near it).
+    /// back to the page. A click only closes the panel: the page's cursor stays where it was.
     fn choose_syncplay_entry(&mut self, entry: MenuEntry, from_keyboard: bool, cx: &mut PageCx) {
         match entry {
             MenuEntry::ToggleShuffle => return cx.services.syncplay.toggle_shuffle(),
@@ -620,7 +618,7 @@ impl Shell {
     }
 
     /// Opens the account menu from the keyboard, its first entry highlighted, loading the saved
-    /// accounts as `main` did when its menu opened.
+    /// accounts.
     fn open_account_menu(&mut self, ctx: &egui::Context) {
         self.accounts = Config::load().accounts;
         PopupMenu::open(ctx, account_menu_id(), Opened::Keyboard);
@@ -643,7 +641,7 @@ impl Shell {
     }
 
     /// The Settings button: opens Settings, or closes it (back to the page before) when it's on
-    /// top, as on `main`.
+    /// top.
     fn toggle_settings(&mut self, cx: &mut PageCx) {
         self.bar_key = None;
         let on_top = self
@@ -751,7 +749,7 @@ impl Shell {
 
     /// Esc in the search box: over the results, closes them and clears the box, back to the
     /// page they were opened from; over a page that searches itself, clears its search too, as
-    /// its own box did; over another page, back to that page, as on `main`.
+    /// its own box did; over another page, back to that page.
     fn escape_search(&mut self, cx: &mut PageCx) {
         if self.own_search.is_some() {
             self.search_text.clear();
@@ -769,7 +767,7 @@ impl Shell {
     /// Enter or Down in the search box. With the results on top it asks them to take the
     /// keyboard (`Page::enter_results`); if they have nothing to move onto yet (still
     /// searching, or nothing found) the box keeps it. With no results page on top (the box
-    /// over another page) the keyboard goes back to that page instead, as on `main`.
+    /// over another page) the keyboard goes back to that page instead.
     fn enter_search_results(&mut self, cx: &mut PageCx) {
         if self.top_is_search() {
             let took = self.stack.last_mut().is_some_and(|entry| entry.page.enter_results(cx));
@@ -829,13 +827,13 @@ impl Shell {
                 if can_go_back {
                     let back = bar_button(ICON_ARROW_BACK, "Back", keyboard == Some(BarItem::Back)).show(ui);
                     if back.clicked() {
-                        // A mouse click leaves no keyboard in the bar, as on `main` going back
-                        // focused the page.
+                        // A mouse click leaves no keyboard in the bar, since going back focuses
+                        // the page.
                         self.bar_key = None;
                         cx.nav.push(NavRequest::Back);
                     }
                 }
-                // `main`'s bar title: `text_xl` semibold.
+                // The bar's title: `text_xl` semibold.
                 ui.add(egui::Label::new(RichText::new(title).font(text::font(ui, "xl")).strong()).truncate());
             },
         );
@@ -855,7 +853,7 @@ impl Shell {
                 if settings.clicked() {
                     self.toggle_settings(cx);
                 }
-                // On while in a group, as `main` pressed it.
+                // On while in a group.
                 let syncplay = bar_button(
                     ICON_GROUPS,
                     "Watch together (SyncPlay)",
@@ -942,9 +940,9 @@ impl Shell {
         let actions = self.accounts.len();
         if index < actions {
             let account = self.accounts[index].clone();
-            // Choosing the account already signed in just closes the menu, as on `main`:
-            // switching to it would end the session and lose the page stack. The keyboard stays
-            // in the bar, like a menu that closed without a choice.
+            // Choosing the account already signed in just closes the menu: switching to it
+            // would end the session and lose the page stack. The keyboard stays in the bar,
+            // like a menu that closed without a choice.
             if account.credential_account() != cx.services.session.account_key() {
                 self.bar_key = None;
                 cx.services.events.push(AppEvent::SwitchAccount(account));
@@ -1096,8 +1094,8 @@ impl Shell {
                     // Drawn over the field, or the field's own background would cover it.
                     field::leading(ui, &response, ICON_SEARCH);
                     if clear {
-                        // Not focusable (R6's rule for painted controls): a Tab that gave egui
-                        // the keyboard would take the box's keys.
+                        // Not focusable, like the app's other painted controls: a Tab that gave
+                        // egui the keyboard would take the box's keys.
                         clear_clicked = field::trailing_button(ui, ICON_CLOSE, "Clear search")
                             .focus(Focus::Skip)
                             .show_at(
@@ -1111,8 +1109,8 @@ impl Shell {
                 },
             )
             .inner;
-        // Clearing keeps the keyboard in the box, as `main`'s clear button did; the results
-        // close through `search_changed` from the empty text, as clearing with the keyboard does.
+        // Clearing keeps the keyboard in the box; the results close through `search_changed`
+        // from the empty text, as clearing with the keyboard does.
         if clear_clicked {
             self.search_text.clear();
             self.want_search_focus = true;
@@ -1160,8 +1158,7 @@ impl Shell {
     }
 
     /// Closes the top page, unless it's Home. Leaving the results clears the box they were
-    /// for; coming back to them (from an item opened there) puts the keyboard in the box again,
-    /// as `main` did.
+    /// for; coming back to them (from an item opened there) puts the keyboard in the box again.
     fn back(&mut self, cx: &mut PageCx) {
         if self.stack.len() > 1
             && let Some(entry) = self.stack.pop()
@@ -1303,7 +1300,7 @@ fn syncplay_panel_id() -> Id {
     Id::unique(SYNCPLAY_PANEL)
 }
 
-/// The name *New group* gives the group: `main`'s `"{user}'s group"`.
+/// The name *New group* gives the group: `"{user}'s group"`.
 fn new_group_name(session: &Session) -> String {
     format!("{}'s group", session.user.name)
 }
@@ -1370,7 +1367,7 @@ fn resolve_highlight(highlight: &mut Option<Highlight>, entries: &[MenuEntry]) {
 }
 
 /// One step of the panel's keyboard highlight: Down goes to the first entry when none is picked
-/// and stops at the last, Up goes to the last and stops at the first, as `main`'s menu did.
+/// and stops at the last, Up goes to the last and stops at the first.
 fn highlight_step(current: Option<usize>, step: i32, len: usize) -> Option<usize> {
     if len == 0 {
         return None;
@@ -1455,7 +1452,7 @@ fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scr
     let mut chosen = None;
     ui.add_space(surface::GAP_GROUP);
     popup::panel_section(ui, "Queue", QUEUE_TOGGLE, |ui| {
-        // Off, all, one: each press moves to the next, as on `main`.
+        // Off, all, one: each press moves to the next.
         let (icon, tooltip, on) = match queue.repeat_mode {
             RepeatMode::RepeatNone => (ICON_REPEAT, "Repeat is off", false),
             RepeatMode::RepeatAll => (ICON_REPEAT, "Repeating the queue", true),
@@ -1576,8 +1573,8 @@ fn account_menu_id() -> Id {
 }
 
 /// The app icon at the start of the bar: the 128 px copy rather than the 512 px one the
-/// packages ship, as `main` used it, resized once to twice the 32 px it's drawn at. egui-wgpu
-/// uploads one mip level (I1), so a 128 px texture drawn at 32 px would alias.
+/// packages ship, resized once to twice the 32 px it's drawn at. egui-wgpu uploads one mip
+/// level, so a 128 px texture drawn at 32 px would alias.
 fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let pixels = image::load_from_memory_with_format(include_bytes!("../../assets/logo.png"), image::ImageFormat::Png)
         .ok()?
@@ -1669,7 +1666,7 @@ mod tests {
                 MenuEntry::NewGroup,
             ]
         );
-        // `main` highlighted *New group* with `groups.len()`.
+        // *New group* comes last, after a row per group.
         assert_eq!(entries.len() - 1, groups.len());
         assert_eq!(syncplay_entries(None, &[], None), vec![MenuEntry::NewGroup]);
     }
@@ -1693,7 +1690,7 @@ mod tests {
 
     #[test]
     fn a_group_without_a_queue_lists_only_leave() {
-        // `main` showed no queue at all (not even the toggles) until it had an entry.
+        // No queue at all (not even the toggles) until it has an entry.
         let empty = queue(&[], -1);
         assert_eq!(
             syncplay_entries(Some(&group("g")), &[], Some(&empty)),
@@ -1712,7 +1709,7 @@ mod tests {
         assert_eq!(highlight_step(None, -1, 3), Some(2));
         assert_eq!(highlight_step(Some(0), 1, 3), Some(1));
         assert_eq!(highlight_step(Some(1), 1, 3), Some(2));
-        // Up and Down stop rather than wrapping round, as `main`'s menu did.
+        // Up and Down stop rather than wrapping round.
         assert_eq!(highlight_step(Some(2), 1, 3), Some(2));
         assert_eq!(highlight_step(Some(0), -1, 3), Some(0));
         assert_eq!(highlight_step(Some(0), 1, 0), None);
