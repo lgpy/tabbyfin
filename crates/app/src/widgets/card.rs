@@ -9,10 +9,9 @@
 //! subtitles are cut short when they don't fit, and the sizes follow A1's text size.
 
 use egui::emath::GuiRounding as _;
-use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, CornerRadius, FontId, Label, Rect, Response, Sense, Stroke, StrokeKind, TextFormat, Ui, Vec2,
-    WidgetText, pos2, vec2,
+    Align, Align2, CornerRadius, FontId, Label, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetText, pos2,
+    vec2,
 };
 use egui_material_icons::FONT_FAMILY;
 use egui_material_icons::icons::{ICON_CHECK, ICON_PLAY_ARROW};
@@ -25,8 +24,8 @@ use crate::theme;
 use crate::theme::text;
 use crate::widgets::focus::{self, Place};
 use crate::widgets::text::{
-    CARD_TEXT_H, LANDSCAPE_H, LANDSCAPE_W, PERSON_H, PERSON_W, POSTER_H, POSTER_W, card_text,
-    is_placeholder_episode_name, kind_label, landscape_image, poster_image, timestamp,
+    CARD_TEXT_H, LANDSCAPE_H, LANDSCAPE_W, PERSON_H, PERSON_W, POSTER_H, POSTER_W, card_text, kind_label,
+    landscape_image, poster_image, timestamp,
 };
 use crate::widgets::{avatar, image};
 
@@ -76,18 +75,6 @@ fn item_card(
     let lines = lines(ui, image, "sm", "xs", GAP);
     put(ui, lines.title, line(ui, &title, "sm", false));
     put(ui, lines.subtitle, line(ui, &subtitle, "xs", true));
-    response
-}
-
-/// An episode in its season's row: "Episode 2" and its name (the season is the row's title),
-/// `scale` times a landscape card's size.
-pub fn episode(ui: &mut Ui, cache: &mut ImageCache, episode: &BaseItemDto, scale: f32, selected: bool) -> Response {
-    let size = vec2(LANDSCAPE_W * scale, LANDSCAPE_H * scale);
-    let (response, image) = picture(ui, cache, size, landscape_image(episode).as_ref(), Some(episode));
-    cursor_ring(ui, image, selected);
-    // `main`'s episode title had `pt_1`, a gap of its own on top of the card's: 8 px in all.
-    let lines = lines(ui, image, "base", "xs", 2. * GAP);
-    put(ui, lines.title, episode_title(ui, episode));
     response
 }
 
@@ -355,28 +342,6 @@ fn line(ui: &Ui, text: &str, style: &str, muted: bool) -> WidgetText {
         label = label.color(theme::tokens_of(ui).muted_foreground);
     }
     label.into()
-}
-
-/// "Episode 2" then its name, dimmer, on one line: the number stays whole, the name is cut
-/// short when it doesn't fit.
-fn episode_title(ui: &Ui, episode: &BaseItemDto) -> WidgetText {
-    let font = text::font(ui, "base");
-    let tokens = theme::tokens_of(ui);
-    let mut job = LayoutJob::default();
-    let style = |color| TextFormat {
-        font_id: font.clone(),
-        color,
-        ..Default::default()
-    };
-    if let Some(number) = episode.index_number {
-        job.append(&format!("Episode {number}"), 0., style(tokens.foreground));
-    }
-    // Untitled episodes are named "Episode 3" by Jellyfin, which would say it twice.
-    let name = episode.name.trim();
-    if !name.is_empty() && !is_placeholder_episode_name(name) {
-        job.append(&format!("  {name}"), 0., style(tokens.muted_foreground));
-    }
-    WidgetText::LayoutJob(job.into())
 }
 
 /// Puts a line at the left of `rect`, cut short when it doesn't fit. `Ui::put` centres and
