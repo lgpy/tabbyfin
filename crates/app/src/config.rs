@@ -88,9 +88,9 @@ pub struct Config {
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreference {
     /// Follows the system's light or dark appearance, also when it changes.
+    #[default]
     System,
     Light,
-    #[default]
     Dark,
 }
 

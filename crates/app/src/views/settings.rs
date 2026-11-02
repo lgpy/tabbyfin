@@ -1875,7 +1875,7 @@ mod tests {
     #[test]
     fn the_defaults_the_page_shows() {
         let config = Config::default();
-        assert_eq!(config.theme, ThemePreference::Dark);
+        assert_eq!(config.theme, ThemePreference::System);
         assert_eq!(config.text_size, None); // the system's
         assert_eq!(config.animations, None); // on
         assert_eq!(config.autoplay_next_episode, None); // on

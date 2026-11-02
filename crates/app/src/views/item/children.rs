@@ -2,8 +2,10 @@
 //! episodes and a playlist's entries, and the open season's episodes under a series' seasons.
 //!
 //! A series' seasons are inset rows (`media_row::season`) in as many columns as fit; the season
-//! chosen lists its episodes under them, as a season's own page lists them: one inset
-//! `MediaRow` each, with its Watched toggle. A playlist's rows also move and remove their entry,
+//! chosen lists its episodes under them, as a season's own page lists them: one compact inset
+//! `MediaRow` each, with its Watched toggle, in as many columns as fit (`media_row::
+//! episode_columns`), so a long season isn't a long scroll. A playlist keeps full rows, one per
+//! line, which also move and remove their entry,
 //! their handles showing on the row under the pointer or the cursor. A collection keeps its
 //! poster cards. Picked by C11's mockup over posters with the episodes in an inset panel.
 
@@ -22,6 +24,7 @@ use crate::widgets::text::{
     runtime_text,
 };
 use crate::widgets::{card, menu, state};
+use crate::{motion, theme};
 
 /// Between a list's heading and its first row.
 pub(super) const HEADING_GAP: f32 = 12.;
@@ -178,64 +181,110 @@ pub(super) fn posters(
     row_rect
 }
 
-/// `items` as inset rows, one per line, the cursor's `section`: a season's episodes or a
-/// playlist's entries (with their handles when `playlist`). A click (or Enter) opens the item;
-/// the toggle and the handles don't, as on `main`. Returns the rows of the first item and of the
-/// cursor's, for the page to scroll into view.
+/// `items` as inset rows, the cursor's `section`: a season's episodes as compact rows in rows of
+/// `columns`, or a playlist's entries as full rows one per line, with their handles. A click (or
+/// Enter) opens the item; the toggle and the handles don't, as on `main`. Returns the rows of the
+/// first item and of the cursor's, for the page to scroll into view.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn rows(
     ui: &mut Ui,
     items: &[BaseItemDto],
     section: usize,
     playlist: bool,
+    columns: usize,
+    stagger: Option<f64>,
     cursor: &mut Cursor,
     images: &mut ImageCache,
     asked: &mut Asked,
 ) -> Rows {
-    let len = items.len();
+    let columns = if playlist { 1 } else { columns.max(1) };
+    let gap = media_row::GAP;
+    let width = (ui.available_width() - gap * (columns - 1) as f32) / columns as f32;
     let mut drawn = Rows::default();
-    for (index, item) in items.iter().enumerate() {
-        if index > 0 {
-            ui.add_space(media_row::GAP);
+    let now = ui.input(|input| input.time);
+    let mut fading = false;
+    for (line, chunk) in items.chunks(columns).enumerate() {
+        if line > 0 {
+            ui.add_space(gap);
         }
-        let selected = cursor.is_selected(section, index);
-        let (heading, detail) = row_text(item);
-        let mut row = MediaRow::new(item, landscape_image(item), &heading, &detail)
-            .overview(item.overview.as_deref())
-            .played(is_played(item))
-            .highlighted(selected);
-        if playlist {
-            row = row.handles(Handles {
-                up: index > 0,
-                down: index + 1 < len,
+        let alpha = stagger.map_or(1., |started| {
+            motion::progress(started, now, motion::row_delay(line), motion::ENTER)
+        });
+        fading |= alpha < 1.;
+        motion::faded(ui, alpha, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for (column, item) in chunk.iter().enumerate() {
+                    let index = line * columns + column;
+                    ui.allocate_ui(vec2(width, 0.), |ui| {
+                        ui.set_width(width);
+                        row(
+                            ui, items, index, item, section, playlist, cursor, images, asked, &mut drawn,
+                        );
+                    });
+                }
             });
-        }
-        let response = row.show(ui, images);
-        if index == 0 {
-            drawn.first = Some(response.row.rect);
-        }
-        if selected {
-            drawn.selected = Some(response.row.rect);
-        }
-        if response.row.hovered() {
-            asked.hovered = Some(Route::for_item(item));
-        }
-        if let Some(handle) = response.handle {
-            let action = match handle {
-                Handle::Up => EntryAction::Up,
-                Handle::Down => EntryAction::Down,
-                Handle::Remove => EntryAction::Remove,
-            };
-            asked.entry = Some((index, action));
-        } else if response.watched.clicked() {
-            asked.played = Some((item.id.clone(), !is_played(item)));
-        } else if response.row.clicked() {
-            asked.open = Some(Route::for_item(item));
-        }
-        if let Some(action) = menu::item_menu(&response.row, item) {
-            asked.menu = Some((action, item.clone()));
-        }
+        });
+    }
+    if fading {
+        ui.ctx().request_repaint();
     }
     drawn
+}
+
+/// One of [`rows`]' rows, `item` at `index` in `items`.
+#[allow(clippy::too_many_arguments)]
+fn row(
+    ui: &mut Ui,
+    items: &[BaseItemDto],
+    index: usize,
+    item: &BaseItemDto,
+    section: usize,
+    playlist: bool,
+    cursor: &mut Cursor,
+    images: &mut ImageCache,
+    asked: &mut Asked,
+    drawn: &mut Rows,
+) {
+    let len = items.len();
+    let selected = cursor.is_selected(section, index);
+    let (heading, detail) = row_text(item);
+    let mut row = MediaRow::new(item, landscape_image(item), &heading, &detail)
+        .overview(item.overview.as_deref())
+        .played(is_played(item))
+        .highlighted(selected)
+        .compact(!playlist);
+    if playlist {
+        row = row.handles(Handles {
+            up: index > 0,
+            down: index + 1 < len,
+        });
+    }
+    let response = row.show(ui, images);
+    if index == 0 {
+        drawn.first = Some(response.row.rect);
+    }
+    if selected {
+        drawn.selected = Some(response.row.rect);
+    }
+    if response.row.hovered() {
+        asked.hovered = Some(Route::for_item(item));
+    }
+    if let Some(handle) = response.handle {
+        let action = match handle {
+            Handle::Up => EntryAction::Up,
+            Handle::Down => EntryAction::Down,
+            Handle::Remove => EntryAction::Remove,
+        };
+        asked.entry = Some((index, action));
+    } else if response.watched.clicked() {
+        asked.played = Some((item.id.clone(), !is_played(item)));
+    } else if response.row.clicked() {
+        asked.open = Some(Route::for_item(item));
+    }
+    if let Some(action) = menu::item_menu(&response.row, item) {
+        asked.menu = Some((action, item.clone()));
+    }
 }
 
 /// Where [`rows`] drew the first row and the cursor's.
@@ -277,27 +326,44 @@ pub(super) struct Band {
     pub selected: Option<Rect>,
 }
 
-/// The open season's episodes under the seasons: the season's name, then its episodes as rows,
+/// The open season's episodes under the seasons: the season's name, then its episodes as rows
+/// in rows of `columns`,
 /// the mascot while they load or a line when there are none.
 pub(super) fn episodes_band(
     ui: &mut Ui,
     open: &OpenSeason,
+    columns: usize,
     cursor: &mut Cursor,
     images: &mut ImageCache,
     asked: &mut Asked,
 ) -> Band {
     let top = ui.cursor().min;
-    heading(ui, &open.name);
+    let ctx = ui.ctx().clone();
+    // The season's name fades in as it opens (another season opening in its place included),
+    // then what's under it, its rows one line after another as they arrive.
+    let animations = theme::animations(&ctx);
+    let now = ctx.input(|input| input.time);
+    let opened = motion::appear(&ctx, ("season-band", open.id.as_str()));
+    let name_alpha = if animations {
+        motion::progress(opened, now, 0., motion::FADE)
+    } else {
+        1.
+    };
+    motion::faded(ui, name_alpha, |ui| heading(ui, &open.name));
     ui.add_space(HEADING_GAP);
     let (first, selected) = match &open.episodes {
         Load::Loaded(episodes) if !episodes.is_empty() => {
-            let drawn = rows(ui, episodes, EPISODES, false, cursor, images, asked);
+            let stagger = animations.then(|| motion::appear(&ctx, ("season-rows", open.id.as_str())));
+            let drawn = rows(ui, episodes, EPISODES, false, columns, stagger, cursor, images, asked);
             (drawn.first, drawn.selected)
         }
         Load::Loaded(_) => (Some(band_note(ui, "No episodes in this season.", false)), None),
         Load::Loading => (Some(band_note(ui, "", true)), None),
         Load::Failed(message) => (Some(band_note(ui, message, false)), None),
     };
+    if name_alpha < 1. {
+        ctx.request_repaint();
+    }
     let right = ui.max_rect().right();
     let first_bottom = first.map_or(ui.cursor().min.y, |first| first.bottom());
     Band {
