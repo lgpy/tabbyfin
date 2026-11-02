@@ -14,7 +14,7 @@ use egui::{
     vec2,
 };
 use egui_material_icons::FONT_FAMILY;
-use egui_material_icons::icons::{ICON_CHECK, ICON_PLAY_ARROW};
+use egui_material_icons::icons::ICON_PLAY_ARROW;
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemDto, BaseItemPerson, ChapterInfo, ImageType};
 
@@ -27,7 +27,7 @@ use crate::widgets::text::{
     CARD_TEXT_H, LANDSCAPE_H, LANDSCAPE_W, PERSON_H, PERSON_W, POSTER_H, POSTER_W, card_text, kind_label,
     landscape_image, poster_image, timestamp,
 };
-use crate::widgets::{avatar, image};
+use crate::widgets::{avatar, badge, image};
 
 /// Between a card's image and its title, and between its lines (`main`'s `gap_1`).
 const GAP: f32 = 4.;
@@ -195,7 +195,7 @@ fn picture(
     }
     if let Some(item) = item {
         if is_played(item) {
-            played_badge(ui, image);
+            badge::check(ui, image);
         }
         if let Some(fraction) = progress(item) {
             progress_bar(ui, image, fraction);
@@ -249,22 +249,6 @@ fn cursor_ring(ui: &Ui, image: Rect, selected: bool) {
     if selected {
         focus::ring(ui, image, image::RADIUS as f32, Place::Inside);
     }
-}
-
-/// A tick in a filled circle, 4 px in from the image's top right corner: `main`'s primary
-/// colour with the tick in its foreground, so it reads on a dark theme and a light one alike.
-fn played_badge(ui: &Ui, image: Rect) {
-    let radius = 8.;
-    let center = image.right_top() + vec2(-4. - radius, 4. + radius);
-    let tokens = theme::tokens_of(ui);
-    ui.painter().circle_filled(center, radius, tokens.primary);
-    ui.painter().text(
-        center,
-        Align2::CENTER_CENTER,
-        ICON_CHECK.codepoint,
-        FontId::new(2. * radius - 4., egui::FontFamily::Name(FONT_FAMILY.into())),
-        tokens.primary_foreground,
-    );
 }
 
 /// How far through it is, for the bar along the bottom of its card.

@@ -15,7 +15,8 @@ use crate::browse::Cursor;
 use crate::images::ImageCache;
 use crate::item_menu::is_played;
 use crate::nav::Route;
-use crate::widgets::media_row::{self, Handle, Handles, MediaRow};
+use crate::widgets::list_row::{Handle, Handles};
+use crate::widgets::media_row::{self, MediaRow};
 use crate::widgets::text::{
     LANDSCAPE_H, Load, POSTER_W, card_text, episode_label, is_placeholder_episode_name, landscape_image, poster_image,
     runtime_text,
