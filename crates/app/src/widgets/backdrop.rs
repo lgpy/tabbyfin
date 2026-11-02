@@ -95,11 +95,7 @@ pub fn glow(painter: &Painter, center: Pos2, radius: f32, tokens: &Tokens) {
     let mut mesh = Mesh::default();
     for ring in 0..=GLOW_RINGS {
         let at = ring as f32 / GLOW_RINGS as f32;
-        // (1 - t²)³: bright in the middle, and so flat as it reaches zero that the outer rings'
-        // alpha rounds to a step of 1 at most, which a light backdrop would otherwise show as
-        // a faint edge.
-        let falloff = (1. - at * at).powi(3);
-        let color = tokens.glow.gamma_multiply(falloff);
+        let color = tokens.glow.gamma_multiply(ring_falloff(at));
         for step in 0..GLOW_STEPS {
             let angle = step as f32 / GLOW_STEPS as f32 * TAU;
             let offset = vec2(angle.cos(), angle.sin() * GLOW_SQUASH) * radius * at;
@@ -115,6 +111,65 @@ pub fn glow(painter: &Painter, center: Pos2, radius: f32, tokens: &Tokens) {
         }
     }
     painter.add(mesh);
+}
+
+/// A ring's brightness `at` its share of the glow's radius: (1 - t²)³, bright in the middle,
+/// and so flat as it reaches zero that the outer rings' alpha rounds to a step of 1 at most,
+/// which a light backdrop would otherwise show as a faint edge.
+fn ring_falloff(at: f32) -> f32 {
+    (1. - at * at).powi(3)
+}
+
+/// How bright [`glow`]'s mesh is at `point`: its rings' falloff, interpolated between them as
+/// the GPU does.
+fn glow_falloff(center: Pos2, radius: f32, point: Pos2) -> f32 {
+    let offset = point - center;
+    let at = vec2(offset.x, offset.y / GLOW_SQUASH).length() / radius.max(f32::EPSILON);
+    if at >= 1. {
+        return 0.;
+    }
+    let ring = at * GLOW_RINGS as f32;
+    let inner = ring.floor();
+    let t = ring - inner;
+    let [a, b] = [inner, inner + 1.].map(|ring| ring_falloff(ring / GLOW_RINGS as f32));
+    a + (b - a) * t
+}
+
+/// Grid cells across each side of a [`veil`]: fine enough that the glow's curve under it doesn't
+/// show as facets.
+const VEIL_CELLS: u32 = 16;
+
+/// A shape covering `rect` with what's under it, the backdrop and a [`glow`] drawn at
+/// `glow_alpha` around `glow_center`, at `cover` opacity. Drawn over something opaque, it fades
+/// that something as one piece: egui fades each shape on its own, so faded parts that overlap
+/// show through each other and stack up brighter (the mascot as a page fades in).
+pub fn veil(
+    rect: Rect,
+    window: Rect,
+    (glow_center, glow_radius, glow_alpha): (Pos2, f32, f32),
+    cover: f32,
+    tokens: &Tokens,
+) -> Shape {
+    let mut mesh = Mesh::default();
+    let side = VEIL_CELLS + 1;
+    for row in 0..side {
+        for column in 0..side {
+            let point = rect.min + vec2(column as f32, row as f32) / VEIL_CELLS as f32 * rect.size();
+            let glow = tokens
+                .glow
+                .gamma_multiply(glow_falloff(glow_center, glow_radius, point) * glow_alpha);
+            let under = color_at(window, point.y, tokens).blend(glow);
+            mesh.colored_vertex(point, under.gamma_multiply(cover));
+        }
+    }
+    for row in 0..VEIL_CELLS {
+        for column in 0..VEIL_CELLS {
+            let a = row * side + column;
+            mesh.add_triangle(a, a + 1, a + side);
+            mesh.add_triangle(a + 1, a + side + 1, a + side);
+        }
+    }
+    Shape::mesh(mesh)
 }
 
 #[cfg(test)]
@@ -138,5 +193,32 @@ mod tests {
         // Past either end it holds the end's colour.
         assert_eq!(color_at(window, -50., tokens), tokens.backdrop_top);
         assert_eq!(color_at(window, 900., tokens), tokens.backdrop_bottom);
+    }
+
+    #[test]
+    fn the_glow_falloff_matches_the_rings() {
+        let center = Pos2::ZERO;
+        assert_eq!(glow_falloff(center, 100., center), 1.);
+        assert_eq!(glow_falloff(center, 100., Pos2::new(100., 0.)), 0.);
+        assert_eq!(glow_falloff(center, 100., Pos2::new(0., 90.)), 0.);
+        // On a ring it's the ring's own value; between two it's halfway.
+        assert!((glow_falloff(center, 100., Pos2::new(30., 0.)) - ring_falloff(0.3)).abs() < 1e-5);
+        let between = glow_falloff(center, 100., Pos2::new(35., 0.));
+        assert!((between - (ring_falloff(0.3) + ring_falloff(0.4)) / 2.).abs() < 1e-5);
+    }
+
+    /// Over nothing but the backdrop and the glow, a full veil is what's already there.
+    #[test]
+    fn a_full_veil_is_the_backdrop_and_glow_under_it() {
+        let tokens = crate::theme::tokens(&egui::Visuals::dark());
+        let window = Rect::from_min_size(Pos2::ZERO, vec2(400., 400.));
+        let rect = Rect::from_center_size(Pos2::new(200., 200.), vec2(96., 96.));
+        let Shape::Mesh(mesh) = veil(rect, window, (rect.center(), 200., 1.), 1., tokens) else {
+            panic!("a veil is a mesh");
+        };
+        let middle = &mesh.vertices[(VEIL_CELLS / 2 * (VEIL_CELLS + 1) + VEIL_CELLS / 2) as usize];
+        assert_eq!(middle.pos, rect.center());
+        assert_eq!(middle.color, color_at(window, 200., tokens).blend(tokens.glow));
+        assert_eq!(middle.color.a(), 255);
     }
 }
