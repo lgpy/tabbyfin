@@ -4,7 +4,7 @@
 use egui::accesskit::{Role, Toggled};
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_material_icons::icons::{
-    ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
+    ICON_ARROW_UPWARD, ICON_CLOSE, ICON_DNS, ICON_GROUPS, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
 };
 
 use crate::ui_tests::build_harness;
@@ -15,8 +15,10 @@ use crate::widgets::countdown_pill;
 use crate::widgets::field;
 use crate::widgets::list_row::{Handle, Handles, Leading, ListRow};
 use crate::widgets::pill::{self, Mark};
+use crate::widgets::popup;
 use crate::widgets::prompt;
 use crate::widgets::round_button::RoundButton;
+use crate::widgets::state;
 use crate::widgets::surface::{self, Kind};
 use crate::widgets::toggle;
 
@@ -393,4 +395,37 @@ fn a_leading_icon_leaves_the_fields_text_room() {
         state.text_left,
         state.room
     );
+}
+
+/// A tag with an icon is named by its name alone, the icon left to itself.
+#[test]
+fn an_icon_tag_reads_as_its_name() {
+    let ui = build_harness(egui::vec2(400., 200.), (), |ui, _| {
+        pill::icon_tag(ui, ICON_DNS, "Jellyfin server");
+    });
+    assert!(ui.query_by_role_and_label(Role::Label, "Jellyfin server").is_some());
+}
+
+/// The compact empty state shows its message under its icon.
+#[test]
+fn an_icon_message_shows_its_message() {
+    let ui = build_harness(egui::vec2(320., 200.), (), |ui, _| {
+        state::icon_message(ui, ICON_GROUPS, "No one is watching together right now.");
+    });
+    assert!(ui.query_by_label("No one is watching together right now.").is_some());
+}
+
+/// A panel's heading shows its title, and its status beside it.
+#[test]
+fn a_panel_heading_shows_its_title_and_status() {
+    let ui = build_harness(egui::vec2(340., 200.), (), |ui, _| {
+        popup::panel_heading(
+            ui,
+            "Watch together",
+            Some(("Playing", egui::Color32::GREEN)),
+            "Play in sync with others on this server.",
+        );
+    });
+    assert!(ui.query_by_label("Watch together").is_some());
+    assert!(ui.query_by_label("Playing").is_some());
 }
