@@ -110,9 +110,10 @@ Titles are `ink`; everything secondary is `ink_muted`. Get fonts with `text::fon
 All in `crates/app/src/widgets/`.
 
 - **`surface::frame(ui)`** — the panel (`frame_of(tokens)` where there's no `Ui` yet). **`surface::heading(ui, title, subtitle)`** — centred `2xl` title over a `base` muted line; every panel starts with one. The title names the step ("Sign in to *server*", "Approve this sign-in", "Welcome back"); the subtitle says what to do or where you are. **`surface::heading_left(ui, title, Option<subtitle>)`** — the same against the left edge, for a surface that isn't a centred form (a dialog), the subtitle only when there's something to explain.
+- **`surface::strip(ui)`** — a surface one row of controls tall for a page's toolbar: the surface's fill and outline at radius 16 (`STRIP_RADIUS`), 8 × 6 inside (`STRIP_PAD`), and the popup's closer shadow, since a panel's would be as tall as the strip.
 - **`surface::waiting(ui, line)`** — small spinner and a muted `sm` line, centred together. For a wait the user can't act on ("Waiting for approval…", "server is starting").
 - **`field::label` + `field::single_line`** — muted `sm` label above a full-width `base` field. Hint text only while empty *and* unfocused (egui's hint next to the caret reads as typed text). **`field::with_trailing` + `field::trailing`** — an icon button inside the field's right end (show/hide password), named and tooltipped by its label: a `RoundButton` 28 across with the icon at `lg`. `field::trailing_button` and `trailing_center` give the same button for a caller that sets its focus (the search box's clear button skips it).
-- **`button::brand`** — the main action, full width, `brand` fill. **`button::quiet`** — same size, outlined on the surface; **`button::quiet_danger`** is the same with its label in `danger`, for leaving or losing something that isn't the view's main action (*Leave group*). **`button::subtle`** — muted, underlined `sm` link with no frame, for asides under the panel ("Use another server", "Cancel"). Buttons take a `State`: `Ready`, `Disabled`, or `Loading` (disabled, spinner at the right end, label doesn't move). A view with several actions runs them through one helper so the running one loads and the others disable. `brand` and `quiet` also take a `Focus`: `Tab` (a Tab stop, pressed by Space or Enter, as on sign-in) or `Skip` (clicks only, `Sense::CLICK`), which dialogs use because their keys are their own (`widgets/dialog.rs`). **`button::danger`** — `brand`'s shape in `danger_action`, for a main action that deletes something.
+- **`button::brand`** — the main action, full width, `brand` fill. **`button::quiet`** — same size, outlined on the surface; **`button::quiet_danger`** is the same with its label in `danger`, for leaving or losing something that isn't the view's main action (*Leave group*). **`button::subtle`** — muted, underlined `sm` link with no frame, for asides under the panel ("Use another server", "Cancel"). Buttons take a `State`: `Ready`, `Disabled`, or `Loading` (disabled, spinner at the right end, label doesn't move). A view with several actions runs them through one helper so the running one loads and the others disable. `brand` and `quiet` also take a `Focus`: `Tab` (a Tab stop, pressed by Space or Enter, as on sign-in) or `Skip` (clicks only, `Sense::CLICK`), which dialogs use because their keys are their own (`widgets/dialog.rs`). **`button::danger`** — `brand`'s shape in `danger_action`, for a main action that deletes something. **`button::text(ui, label, enabled)`** — a small action written out in `brand` at `sm` with no frame, for a row of controls where a button would be one box too many (*Clear filters*); clicks only, dimmed while disabled.
 - **`dialog::show`** — a dialog: an `egui::Modal` in a surface frame over the page dimmed with `scrim`, `heading_left`, `GAP_GROUP` under it. **`dialog::buttons`** puts its buttons at the bottom right, `GAP_ITEM` apart: `dialog::main` (`brand`) or `dialog::danger`, then `dialog::cancel` (`quiet`), all `Focus::Skip` and as wide as their label plus room for the loading spinner (96 at least). A list in a dialog (*Add to playlist*) is inset rows: `inset` at rest, `inset_hover` on the row Enter would pick, with the focus ring inside it while the keyboard put it there.
 - **`avatar::paint`** — a pastel circle with the name's initial; the colour is stable per name across launches.
 - **`AvatarRow::new(names, title, subtitle, label)`** — avatar, title, muted subtitle, as one button named by `label`. Inset fill, `inset_hover` on hover/focus, the focus ring (inside) on focus or `.highlighted(true)` (a list that keeps its own keyboard). Several names overlap as 14-point avatars (up to three, each parted from the one under it by a ring of the row's fill) for a group. `.status(colour)` puts a dot before the subtitle. At the right end, `.remove(tooltip)` adds a ✕ (a second focus stop), or `.action(label)` a compact `brand` button (30 tall, radius 10, `brand_hover` with the row) that is part of the row: a click anywhere on it presses it. `.focus(Focus::Skip)` for clicks only. **`avatar_row::person(ui, name, aside)`** — a person in a list that isn't a list of buttons: a 14-point avatar, the name in `ink` at `base` and an optional `xs` muted aside ("you"), 36 tall, a `ListItem` to AccessKit.
@@ -192,6 +193,31 @@ SyncPlay panel (popup::panel, 340 wide)
 ```
 
 One main action per view holds here as elsewhere: with groups to join, each row's *Join* is the `brand` one and *New group* is `quiet`; with none, *New group* is `brand`.
+
+The library page (C10, picked by a mockup on 2026-11-02, the strip over a bare toolbar):
+
+```
+toolbar (surface::strip, 24 from the window's sides, 16 above it and above the grid)
+  Progress · Rating · Genres and tags · Year · Resolution
+                           — select boxes, 32 tall; Genres and tags is a select's box too
+                             (its summary, a caret), opening the popover
+  Clear filters            — button::text: brand, dimmed while there's nothing to clear
+  n items                  — label::muted
+  Sort [Name ▾] (↑)        — label::muted, a select, the order as RoundButton 32/20
+jump bar (right edge, while sorted by name)
+  # A B …                  — ink_muted at 11; the first row's letter (by its first card's name,
+                             past a leading article) brand at 13; an inset_hover pill in ink
+                             under the pointer; each a Button "Jump to X", the current selected
+genres and tags popover (popup::panel, 380 wide)
+  search                   — field::single_line, search icon in its left end
+  chosen pills             — the ones picked so far
+  GENRES / TAGS            — overlines over the pills
+  pills                    — 12 inset, full radius: inset + surface_border off (inset_hover
+                             under the pointer), brand + tick included, inset + danger outline,
+                             danger text and minus excluded; focus::ring outside the highlighted
+```
+
+The strip is the one surface on a browsing page: it sets the controls apart from the posters, whose own pictures are busy enough that selects standing on the backdrop among them read as part of the grid. The selects are insets sunk into it, as fields are in a panel.
 
 ## Behaviour
 

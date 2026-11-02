@@ -2,8 +2,9 @@
 //! first key, moved by the arrows and Tab, Enter opening the card under it) and the toolbar's
 //! pickers stepping to their next choice. The grid's items are the captured `/Items` fixture.
 
+use egui::accesskit::{Role, Toggled};
 use egui::{Key, Modifiers};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 use jellyfin::models::{BaseItemDto, CollectionType, QueryResult};
 
 use crate::config::{Config, LibraryView};
@@ -206,4 +207,32 @@ fn the_toolbar_steps_through_its_choices() {
     let descending = saved_view().descending;
     ui.press(Key::Enter);
     assert_eq!(saved_view().descending, !descending);
+}
+
+/// The toolbar's controls name themselves: *Genres and tags* is a select like the pickers,
+/// *Clear filters* is there but disabled with nothing to clear, and the order button says what
+/// a click does. The jump bar marks the letter of the first row, here the first movie's.
+#[test]
+fn the_toolbar_and_the_letters_name_themselves() {
+    let _config = ConfigDir::new("library-names");
+    let server = fixture_server();
+    let mut ui = library_harness(&server, LIBRARY);
+    wait_for_page(&mut ui);
+    let harness = ui.harness();
+
+    let values = harness.get_by_label("Genres and tags");
+    assert_eq!(values.accesskit_node().role(), Role::ComboBox);
+    assert_eq!(values.accesskit_node().value().as_deref(), Some("Genres and tags"));
+    assert!(harness.get_by_label("Clear filters").accesskit_node().is_disabled());
+    harness.get_by_label("Sort descending");
+
+    let letter = |letter: char| {
+        harness
+            .get_by_label(&format!("Jump to {letter}"))
+            .accesskit_node()
+            .toggled()
+    };
+    assert_eq!(movies()[0].name.chars().next(), Some('S'));
+    assert_eq!(letter('S'), Some(Toggled::True), "the first row's letter");
+    assert_eq!(letter('T'), Some(Toggled::False));
 }
