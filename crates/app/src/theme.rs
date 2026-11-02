@@ -1416,11 +1416,4 @@ pub mod over_video {
     /// A slider's thumb, inside its ring: the classic `slider.thumb.background` in the dark theme,
     /// which is what `main`'s player drew whichever theme was chosen.
     pub const THUMB: Color32 = Color32::from_rgb(0x0a, 0x0a, 0x0a);
-
-    /// Behind a card's progress bar, over its image. Dark against the fill, with a light outline
-    /// ([`TRACK_OUTLINE`]) so the bar's full length still shows on dark images.
-    pub const TRACK: Color32 = Color32::from_black_alpha(153);
-
-    /// White at 50 %.
-    pub const TRACK_OUTLINE: Color32 = Color32::from_rgba_premultiplied(128, 128, 128, 128);
 }
