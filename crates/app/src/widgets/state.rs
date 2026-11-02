@@ -31,14 +31,14 @@ const RETRY_WIDTH: f32 = 120.;
 
 /// The mascot in its glow, centred, for a page that's still loading.
 pub fn spinner(ui: &mut Ui) {
-    centred(ui, |ui| glowing(ui, |ui| mascot::loader(ui, mascot::PAGE)));
+    centred(ui, true, |ui| glowing(ui, |ui| mascot::loader(ui, mascot::PAGE)));
 }
 
 /// A centred line of muted text, for a note that isn't an empty page: "Type in the search box
 /// to search.", or a failed load with nothing to retry.
 pub fn message(ui: &mut Ui, message: impl Into<String>) {
     let message = message.into();
-    centred(ui, |ui| {
+    centred(ui, false, |ui| {
         ui.label(line(ui, message));
     });
 }
@@ -47,7 +47,7 @@ pub fn message(ui: &mut Ui, message: impl Into<String>) {
 /// few seconds and then holds still (see `widgets::mascot`), so an empty page is idle.
 pub fn empty(ui: &mut Ui, message: impl Into<String>) {
     let message = message.into();
-    centred(ui, |ui| {
+    centred(ui, true, |ui| {
         glowing(ui, |ui| mascot::confused(ui, mascot::PAGE));
         ui.add_space(GAP);
         ui.label(line(ui, message));
@@ -59,7 +59,7 @@ pub fn empty(ui: &mut Ui, message: impl Into<String>) {
 pub fn error(ui: &mut Ui, message: impl Into<String>) -> bool {
     let message = message.into();
     let mut retry = false;
-    centred(ui, |ui| {
+    centred(ui, true, |ui| {
         glowing(ui, |ui| mascot::confused(ui, mascot::PAGE));
         ui.add_space(GAP);
         let width = NOTICE_WIDTH.min(ui.available_width());
@@ -98,14 +98,23 @@ fn glowing(ui: &mut Ui, draw: impl FnOnce(&mut Ui)) {
     draw(&mut mascot);
 }
 
-/// Draws `contents` as one block in the middle of the space the `ui` has left and centred
-/// across it. The block's height is last frame's (a wrapped notice's depends on the width), and
-/// a frame that measures a different one is drawn again rather than shown off-centre.
-fn centred(ui: &mut Ui, contents: impl FnOnce(&mut Ui)) {
+/// Draws `contents` as one block in the space the `ui` has left, centred across it. Without a
+/// mascot the block sits in the middle; with one (`has_mascot`, the block's top) the mascot does, and
+/// what's under it hangs below, so it stays put going from the loader to an empty page or a
+/// failed load. The block moves up only as far as it must to fit. Its height is last frame's (a
+/// wrapped notice's depends on the width), and a frame that measures a different one is drawn
+/// again rather than shown off-centre.
+fn centred(ui: &mut Ui, has_mascot: bool, contents: impl FnOnce(&mut Ui)) {
     let id = ui.scope_id().with("state-height");
     let height = ui.data(|data| data.get_temp::<f32>(id)).unwrap_or(0.);
     ui.scope_builder(UiBuilder::new().layout(Layout::top_down(Align::Center)), |ui| {
-        ui.add_space(((ui.available_height() - height) * 0.5).max(0.));
+        let room = ui.available_height();
+        let top = if has_mascot {
+            ((room - mascot::PAGE) * 0.5).min(room - height)
+        } else {
+            (room - height) * 0.5
+        };
+        ui.add_space(top.max(0.));
         let top = ui.cursor().top();
         contents(ui);
         let measured = ui.min_rect().bottom() - top;
