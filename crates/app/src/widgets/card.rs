@@ -14,7 +14,7 @@ use egui::{
     vec2,
 };
 use egui_material_icons::FONT_FAMILY;
-use egui_material_icons::icons::ICON_PLAY_ARROW;
+use egui_material_icons::icons::{ICON_HIDE_IMAGE, ICON_PLAY_ARROW};
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemDto, BaseItemPerson, ChapterInfo, ImageType};
 
@@ -78,7 +78,9 @@ fn item_card(
     response
 }
 
-/// A chapter of `item_id`: its image when the server extracted one, its name and start.
+/// A chapter of `item_id`: its image when the server extracted one (a crossed-out picture when it
+/// didn't for this one), its name and start. A shelf none of whose chapters has an image uses
+/// [`chapter_without_image`] instead.
 pub fn chapter(
     ui: &mut Ui,
     cache: &mut ImageCache,
@@ -93,8 +95,11 @@ pub fn chapter(
     });
     let size = vec2(LANDSCAPE_W, LANDSCAPE_H);
     let (response, image) = picture(ui, cache, size, request.as_ref(), None);
+    if request.is_none() {
+        missing_image(ui, &response, image);
+    }
     cursor_ring(ui, image, selected);
-    let name = chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1));
+    let name = chapter_name(index, chapter);
     let lines = lines(ui, image, "sm", "xs", GAP);
     put(ui, lines.title, line(ui, &name, "sm", false));
     put(
@@ -103,6 +108,70 @@ pub fn chapter(
         line(ui, &timestamp(chapter.start_position_ticks.into()), "xs", true),
     );
     response
+}
+
+/// A chapter with no image to show, for a shelf none of whose chapters has one: a short tile
+/// with its number, name and start, rather than a row of empty pictures.
+pub fn chapter_without_image(ui: &mut Ui, index: usize, chapter: &ChapterInfo, selected: bool) -> Response {
+    const PADDING: f32 = 12.;
+    let heights = line_heights(ui, "sm", "xs");
+    let size = vec2(LANDSCAPE_W, PADDING + lines_height(&heights) - GAP + PADDING);
+    let (tile, response) = ui.allocate_exact_size(size, Sense::click());
+    let tokens = theme::tokens_of(ui);
+    ui.painter().rect_filled(tile, image::RADIUS, tokens.muted);
+    if response.hovered() {
+        image::dim(ui, tile, image::RADIUS);
+    }
+    // The number gets the room of two digits, so the names line up along the shelf.
+    let number_font = text::font(ui, "2xl");
+    let number_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap("00".into(), number_font.clone(), tokens.muted_foreground)
+            .size()
+            .x
+    });
+    ui.painter().text(
+        pos2(tile.left() + PADDING, tile.center().y),
+        Align2::LEFT_CENTER,
+        (index + 1).to_string(),
+        number_font,
+        tokens.muted_foreground,
+    );
+    let left = tile.left() + PADDING + number_width + PADDING;
+    let width = (tile.right() - PADDING - left).max(0.);
+    let title = Rect::from_min_size(pos2(left, tile.top() + PADDING), vec2(width, heights.title));
+    let subtitle = Rect::from_min_size(pos2(left, title.bottom() + GAP), vec2(width, heights.subtitle));
+    put(ui, title, line(ui, &chapter_name(index, chapter), "sm", false));
+    put(
+        ui,
+        subtitle,
+        line(ui, &timestamp(chapter.start_position_ticks.into()), "xs", true),
+    );
+    cursor_ring(ui, tile, selected);
+    response
+}
+
+/// A chapter's name, or its number when it has none.
+fn chapter_name(index: usize, chapter: &ChapterInfo) -> String {
+    chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1))
+}
+
+/// A crossed-out picture in the middle of an image that has nothing to show.
+fn missing_image(ui: &Ui, card: &Response, image: Rect) {
+    let tokens = theme::tokens_of(ui);
+    // Over the grey box, under the dimming, so the icon dims with the card.
+    ui.painter().rect_filled(image, image::RADIUS, tokens.muted);
+    let size = (image.height() * 0.3).clamp(20., 40.);
+    ui.painter().text(
+        image.center(),
+        Align2::CENTER_CENTER,
+        ICON_HIDE_IMAGE.codepoint,
+        FontId::new(size, egui::FontFamily::Name(FONT_FAMILY.into())),
+        tokens.muted_foreground,
+    );
+    if card.hovered() && ui.rect_contains_pointer(image) {
+        image::dim(ui, image, image::RADIUS);
+    }
 }
 
 /// A cast or crew member, `scale` times the base size: their photo, or their initials on their
