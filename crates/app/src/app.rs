@@ -543,6 +543,7 @@ fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Si
         services: &mut services,
         nav: &mut nav,
         render_state: frame.wgpu_render_state(),
+        under_bar: None,
     });
     SignedIn { services, shell }
 }
@@ -663,6 +664,7 @@ impl eframe::App for App {
                     services,
                     nav: &mut nav,
                     render_state: frame.wgpu_render_state(),
+                    under_bar: None,
                 };
                 shell.show(ui, keys, &mut cx);
             }
