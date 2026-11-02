@@ -48,6 +48,26 @@ pub fn frame_of(tokens: &theme::Tokens) -> Frame {
         })
 }
 
+/// The radius of a [`strip`]: smaller than a panel's, since a strip is only a control's height
+/// and a few points more.
+pub const STRIP_RADIUS: u8 = 16;
+/// The room inside a [`strip`], across and down: the controls sit 8 points from its ends and 6
+/// from its top and bottom, so the strip is a little taller than they are.
+pub const STRIP_PAD: [i8; 2] = [8, 6];
+
+/// A surface one row of controls tall, holding a page's toolbar (the library's filters and
+/// sort): the surface's fill and outline at [`STRIP_RADIUS`], with a popup's closer shadow
+/// rather than a panel's, which would be as tall as the strip itself.
+pub fn strip(ui: &Ui) -> Frame {
+    let tokens = theme::tokens_of(ui);
+    Frame::new()
+        .fill(tokens.surface)
+        .stroke(Stroke::new(1., tokens.surface_border))
+        .corner_radius(CornerRadius::same(STRIP_RADIUS))
+        .inner_margin(Margin::symmetric(STRIP_PAD[0], STRIP_PAD[1]))
+        .shadow(theme::popup_shadow(tokens))
+}
+
 /// A centred title in the surface's ink, with a quieter line under it: the top of a surface.
 pub fn heading(ui: &mut Ui, title: &str, subtitle: &str) {
     ui.vertical_centered(|ui| heading_lines(ui, title, Some(subtitle)));
