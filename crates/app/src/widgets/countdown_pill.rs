@@ -5,7 +5,7 @@
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 use egui::accesskit::Role;
-use egui::{Color32, CursorIcon, Rect, Response, Sense, Shape, Stroke, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, CursorIcon, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, WidgetInfo, pos2, vec2};
 use egui_material_icons::MaterialIcon;
 
 use crate::theme::text;
@@ -58,18 +58,27 @@ fn ring(ui: &Ui, rect: Rect, fraction: f32, icon: MaterialIcon, colours: Colours
         rect.right() - PAD_RIGHT - RING_WIDTH / 2. - RING_RADIUS,
         rect.center().y,
     );
+    // The track is a line like the arc rather than a `circle_stroke`, which egui draws outside
+    // its radius: the arc, centred on it, would run 1.5 points inside the track.
     let painter = ui.painter();
-    painter.circle_stroke(center, RING_RADIUS, Stroke::new(RING_WIDTH, colours.track));
+    let track = Stroke::new(RING_WIDTH, colours.track);
+    painter.add(Shape::closed_line(arc(center, 1.), track));
     let fraction = fraction.clamp(0., 1.);
-    let steps = (RING_STEPS * fraction).ceil() as usize;
-    if steps > 0 {
-        let points = (0..=steps).map(|step| {
-            let angle = TAU * fraction * step as f32 / steps as f32 - FRAC_PI_2;
-            center + RING_RADIUS * vec2(angle.cos(), angle.sin())
-        });
-        painter.add(Shape::line(points.collect(), Stroke::new(RING_WIDTH, colours.ink)));
+    if fraction > 0. {
+        painter.add(Shape::line(arc(center, fraction), Stroke::new(RING_WIDTH, colours.ink)));
     }
     round_button::glyph(ui, center, icon, ICON, colours.ink);
+}
+
+/// The points of `fraction` of the ring round `center`, clockwise from the top.
+fn arc(center: Pos2, fraction: f32) -> Vec<Pos2> {
+    let steps = (RING_STEPS * fraction).ceil() as usize;
+    (0..=steps)
+        .map(|step| {
+            let angle = TAU * fraction * step as f32 / steps as f32 - FRAC_PI_2;
+            center + RING_RADIUS * vec2(angle.cos(), angle.sin())
+        })
+        .collect()
 }
 
 /// How far `position` is through a span from `start` to `end`, for a pill's ring.
