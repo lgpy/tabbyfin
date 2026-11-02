@@ -824,14 +824,9 @@ impl SettingsPage {
     /// server's can't be mistaken for each other, and, when `explain`, a line saying what that
     /// means (with how saving to the server is going).
     fn heading(&self, ui: &mut Ui, cx: &PageCx, section: Section, explain: bool) {
-        let tokens = theme::tokens_of(ui);
         let store = section.store();
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(section.title())
-                    .font(text::font(ui, "xl"))
-                    .color(tokens.ink),
-            );
+            ui.label(label::heading(ui, section.title()));
             ui.add_space(SPACE.xs);
             store_tag(ui, store);
         });
@@ -1730,7 +1725,6 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
     }
     hairline(ui);
     ui.add_space(ROW_PAD);
-    let font = text::font(ui, "sm");
     let description = label::muted(ui, row.description);
     let mut clicked = false;
     match link {
@@ -1739,10 +1733,7 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
         Some(link) => {
             ui.horizontal_wrapped(|ui| {
                 ui.label(description);
-                let link = RichText::new(format!("{link} ›"))
-                    .font(font)
-                    .color(theme::tokens_of(ui).brand);
-                clicked = ui.link(link).clicked();
+                clicked = button::link(ui, link, "sm").clicked();
             });
         }
         None => {

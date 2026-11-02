@@ -9,11 +9,10 @@
 //! outside closes it (egui's popup). The popover's open state is egui's popup memory, so
 //! `keys::egui_wants_keys` leaves the keyboard to it.
 
-use egui::{Align, Align2, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Ui, pos2, vec2};
+use egui::{Align, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Ui, vec2};
 use egui_material_icons::icons::ICON_SEARCH;
 
 use crate::config::LibraryView;
-use crate::theme::{self, text};
 use crate::views::library::{FilterValues, ValueKind};
 use crate::widgets::pill::{self, Mark};
 use crate::widgets::popup;
@@ -193,26 +192,12 @@ impl ValueFilters {
     /// The search box: the cozy field, with its icon inside the left padding as the top bar's
     /// and Settings' have it. Returns whether its text changed.
     fn search_box(&mut self, ui: &mut Ui) -> bool {
-        let icon = text::icon(ui, ICON_SEARCH.font_family());
-        let inset = (12. + icon.size + 6.).round() as i8;
-        let edit = field::single_line(ui, Self::id().with("search"), &mut self.search, "Find a genre or tag");
-        let response = ui.add(edit.margin(egui::Margin {
-            left: inset,
-            right: 12,
-            top: 9,
-            bottom: 9,
-        }));
+        let edit = field::with_leading(ui, Self::id().with("search"), &mut self.search, "Find a genre or tag");
+        let response = ui.add(edit);
         if std::mem::take(&mut self.focus_search) {
             response.request_focus();
         }
-        let rect = response.rect;
-        ui.painter().text(
-            pos2(rect.left() + 12. + icon.size / 2., rect.center().y),
-            Align2::CENTER_CENTER,
-            ICON_SEARCH.codepoint,
-            icon,
-            theme::tokens_of(ui).ink_muted,
-        );
+        field::leading(ui, &response, ICON_SEARCH);
         response.changed()
     }
 }

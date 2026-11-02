@@ -21,12 +21,13 @@ use std::hash::Hash;
 
 use egui::containers::scroll_area::{DragScroll, ScrollBarVisibility, ScrollSource};
 use egui::style::KineticScrollStyle;
-use egui::{Align, Layout, Rect, RichText, ScrollArea, Ui};
+use egui::{Align, Layout, Rect, ScrollArea, Ui};
 use egui_material_icons::icons::{ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT};
 
 use crate::smooth_scroll::Glide;
 use crate::theme;
 use crate::theme::text;
+use crate::widgets::label;
 use crate::widgets::round_button::RoundButton;
 
 /// A shelf's side padding, `main`'s `px_6`: the page adds none of its own, so the row can
@@ -139,11 +140,7 @@ fn shelf_inner(
                 *opened |= response.clicked();
             }
             None => {
-                ui.label(
-                    RichText::new(title)
-                        .font(text::font(ui, "xl"))
-                        .color(theme::tokens_of(ui).ink),
-                );
+                ui.label(label::heading(ui, title));
             }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

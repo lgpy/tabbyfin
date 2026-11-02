@@ -73,8 +73,6 @@ const SEARCH_ID: &str = "top_bar_search";
 /// The account menu's width, and its id.
 const ACCOUNT_MENU_W: f32 = 240.;
 const ACCOUNT_MENU: &str = "account_menu";
-/// Where the search icon starts inside the box: the field's own text margin.
-const SEARCH_ICON_INSET: f32 = 12.;
 /// The SyncPlay panel's width: roomier than `main`'s 300 for its avatar rows and padding.
 const SYNCPLAY_PANEL_W: f32 = 340.;
 /// The SyncPlay panel's id in egui's popup memory (egui keeps the keyboard while it's open
@@ -1069,16 +1067,13 @@ impl Shell {
                 |ui| {
                     let tokens = theme::tokens_of(ui);
                     let clear = !self.search_text.is_empty();
-                    // The icon sits in the field's left margin, as `main`'s input prefix did.
-                    let icon_size = text::font(ui, "lg").size + 2.;
-                    let icon_room = SEARCH_ICON_INSET + icon_size + 8.;
                     let mut field = egui::TextEdit::singleline(&mut self.search_text)
                         .id(Id::unique(SEARCH_ID))
                         .font(text::font(ui, "base"))
                         .text_color(tokens.ink)
                         .desired_width(rect.width())
                         .margin(egui::Margin {
-                            left: icon_room.round() as i8,
+                            left: field::leading_room(ui).round() as i8,
                             right: if clear { field::TRAILING as i8 } else { 12 },
                             top: 9,
                             bottom: 9,
@@ -1099,16 +1094,7 @@ impl Shell {
                     }
                     let response = ui.add(field);
                     // Drawn over the field, or the field's own background would cover it.
-                    round_button::glyph(
-                        ui,
-                        egui::pos2(
-                            rect.left() + SEARCH_ICON_INSET + icon_size / 2.,
-                            response.rect.center().y,
-                        ),
-                        ICON_SEARCH,
-                        icon_size,
-                        tokens.ink_muted,
-                    );
+                    field::leading(ui, &response, ICON_SEARCH);
                     if clear {
                         // Not focusable (R6's rule for painted controls): a Tab that gave egui
                         // the keyboard would take the box's keys.

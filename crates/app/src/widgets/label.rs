@@ -30,6 +30,13 @@ pub fn title(ui: &Ui, line: impl Into<String>) -> RichText {
         .strong()
 }
 
+/// A page's section heading: a shelf's title, a list's heading. `xl` in `ink`.
+pub fn heading(ui: &Ui, line: impl Into<String>) -> RichText {
+    RichText::new(line)
+        .font(text::font(ui, "xl"))
+        .color(theme::tokens_of(ui).ink)
+}
+
 /// A small heading over a section of a menu or a panel: `xs`, strong and in capitals, in
 /// `ink_muted`.
 pub fn overline(ui: &Ui, line: &str) -> RichText {

@@ -3,13 +3,16 @@
 
 use egui::accesskit::{Role, Toggled};
 use egui_kittest::kittest::{NodeT as _, Queryable};
-use egui_material_icons::icons::{ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICON_SETTINGS, ICON_SHUFFLE};
+use egui_material_icons::icons::{
+    ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
+};
 
 use crate::ui_tests::build_harness;
 use crate::widgets::avatar_row::{self, AvatarRow};
 use crate::widgets::badge;
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::countdown_pill;
+use crate::widgets::field;
 use crate::widgets::list_row::{Handle, Handles, Leading, ListRow};
 use crate::widgets::pill::{self, Mark};
 use crate::widgets::prompt;
@@ -347,4 +350,47 @@ fn a_round_buttons_tooltip_doesnt_change_its_name() {
     });
     assert!(ui.query_by_role_and_label(Role::Button, "Back").is_some());
     assert!(ui.query_by_label("Back (Esc)").is_none());
+}
+
+/// A link is a `Link` named without the › it draws, and a click on it registers.
+#[test]
+fn a_link_names_its_label_without_the_arrow_and_clicks() {
+    let mut ui = build_harness(egui::vec2(400., 200.), 0, |ui, clicks| {
+        *clicks += usize::from(button::link(ui, "Languages", "sm").clicked());
+    });
+    assert!(ui.query_by_role_and_label(Role::Link, "Languages").is_some());
+    assert!(ui.query_by_label("Languages ›").is_none(), "the arrow is its name");
+    ui.get_by_role_and_label(Role::Link, "Languages").click();
+    ui.run();
+    assert_eq!(*ui.state(), 1);
+}
+
+/// A field with an icon at its left end starts its text after the icon's room, so the two don't
+/// overlap.
+#[test]
+fn a_leading_icon_leaves_the_fields_text_room() {
+    #[derive(Default)]
+    struct State {
+        text: String,
+        text_left: f32,
+        room: f32,
+    }
+    let mut ui = build_harness(egui::vec2(400., 200.), State::default(), |ui, state| {
+        let mut text = std::mem::take(&mut state.text);
+        let field = field::with_leading(ui, egui::Id::unique("search"), &mut text, "Find a genre or tag");
+        let shown = field.show(ui);
+        field::leading(ui, &shown.response, ICON_SEARCH);
+        state.text = text;
+        state.text_left = shown.galley_pos.x;
+        state.room = shown.response.rect.left() + field::leading_room(ui);
+    });
+    ui.state_mut().text = "drama".to_owned();
+    ui.run();
+    let state = ui.state();
+    assert!(
+        state.text_left >= state.room,
+        "the text runs under the icon: {} is left of {}",
+        state.text_left,
+        state.room
+    );
 }
