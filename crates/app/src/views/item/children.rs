@@ -15,13 +15,12 @@ use crate::browse::Cursor;
 use crate::images::ImageCache;
 use crate::item_menu::is_played;
 use crate::nav::Route;
-use crate::theme;
 use crate::widgets::media_row::{self, Handle, Handles, MediaRow};
 use crate::widgets::text::{
     LANDSCAPE_H, Load, POSTER_W, card_text, episode_label, is_placeholder_episode_name, landscape_image, poster_image,
     runtime_text,
 };
-use crate::widgets::{card, mascot, menu};
+use crate::widgets::{card, menu, state};
 
 /// Between a list's heading and its first row.
 pub(super) const HEADING_GAP: f32 = 12.;
@@ -300,16 +299,18 @@ pub(super) fn episodes_band(
     }
 }
 
-/// A line where the episodes go, at a row's height: the mascot while they load, or a message.
+/// A note where the episodes go, at least a row's height: the page's loader (the mascot in its
+/// glow) while they load, or a message (C8's `widgets::state`).
 fn band_note(ui: &mut Ui, message: &str, loading: bool) -> Rect {
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), LANDSCAPE_H),
-        Layout::centered_and_justified(egui::Direction::LeftToRight),
+        Layout::top_down(egui::Align::Center),
         |ui| {
+            ui.set_min_height(LANDSCAPE_H);
             if loading {
-                mascot::loader(ui, mascot::PAGE);
+                state::spinner(ui);
             } else {
-                ui.label(RichText::new(message).color(theme::tokens_of(ui).ink_muted));
+                state::message(ui, message);
             }
         },
     )
