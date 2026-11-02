@@ -783,6 +783,9 @@ const paintMarks = () => {
   }
   for (const marks of allMarks) {
     const name = marks.dataset.for;
+    // A comparison's marks learn their mockup on its first draw, which may come after another
+    // section's draw paints every mark.
+    if (!name) continue;
     const pick = marks.querySelector(".pick");
     if (pick) {
       const on = reply.picks[groupOf(name)] === name;
