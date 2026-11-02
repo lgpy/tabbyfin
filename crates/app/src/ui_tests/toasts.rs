@@ -115,3 +115,17 @@ fn the_action_sits_at_the_right_end() {
     );
     assert!(ui.query_by_role_and_label(Role::Image, "Information").is_some());
 }
+
+/// A one-line toast's text and icon centre on the close button, not sit above it.
+#[test]
+fn a_short_toast_centres_its_text_on_the_close_button() {
+    let mut toasts = Toasts::default();
+    toasts.push(Toast::info("Joined lgpy's group"));
+    let ui = toast_harness(toasts);
+
+    let close = ui.get_by_label("Close").rect().center().y;
+    let text = ui.get_by_label("Joined lgpy's group").rect().center().y;
+    let icon = ui.get_by_role_and_label(Role::Image, "Information").rect().center().y;
+    assert!((text - close).abs() < 1., "the text sits off the close button's line");
+    assert!((icon - close).abs() < 1., "the icon sits off the close button's line");
+}
