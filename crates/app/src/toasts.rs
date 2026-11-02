@@ -208,7 +208,7 @@ struct Drawn {
 /// One toast: a small surface with the kind's icon on its first line, the title in the ink and
 /// the text under it in the muted ink (the text alone is in the ink), and at its right end the
 /// action as a compact brand button and a round close button. Laid out by hand so the buttons
-/// centre on the toast however many lines the text takes.
+/// centre on the toast however many lines the text takes, and a short text centres on them.
 fn draw(ui: &mut Ui, toast: &Toast) -> Drawn {
     let tokens = theme::tokens_of(ui);
     let painter = ui.painter().clone();
@@ -229,10 +229,13 @@ fn draw(ui: &mut Ui, toast: &Toast) -> Drawn {
     let body_color = if title.is_some() { tokens.ink_muted } else { tokens.ink };
     let body = painter.layout(toast.text.clone(), text::font(ui, "sm"), body_color, text_w);
     let title_h = title.as_ref().map_or(0., |galley| galley.size().y + SPACE.xxs);
-    let content_h = (title_h + body.size().y)
+    let text_h = title_h + body.size().y;
+    let content_h = text_h
         .max(CLOSE)
         .max(if action.is_some() { BUTTON_H } else { 0. });
     let (rect, _) = ui.allocate_exact_size(vec2(WIDTH, content_h + 2. * PAD), Sense::hover());
+    // Text shorter than the buttons centres on them, like the buttons on the toast.
+    let text_top = rect.top() + PAD + (content_h - text_h) / 2.;
 
     let radius = CornerRadius::same(RADIUS);
     painter.add(theme::popup_shadow(tokens).as_shape(rect, radius));
@@ -252,7 +255,7 @@ fn draw(ui: &mut Ui, toast: &Toast) -> Drawn {
         .first()
         .map_or(ICON, |row| row.height());
     let icon_rect = Rect::from_min_size(
-        pos2(rect.left() + PAD, rect.top() + PAD + (first_line - ICON) / 2.),
+        pos2(rect.left() + PAD, text_top + (first_line - ICON) / 2.),
         Vec2::splat(ICON),
     );
     let icon_response = ui.interact(icon_rect, ui.scope_id().with("icon"), Sense::hover());
@@ -260,7 +263,7 @@ fn draw(ui: &mut Ui, toast: &Toast) -> Drawn {
     paint_icon(&painter, icon_rect.center(), glyph, ICON, color);
 
     let x = icon_rect.right() + ICON_GAP;
-    let mut y = rect.top() + PAD;
+    let mut y = text_top;
     if let Some(title) = title {
         let height = title.size().y;
         line(ui, "title", Rect::from_min_size(pos2(x, y), title.size()), title.text());
