@@ -242,7 +242,7 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
    - **Next episode** (button, Shift+N, or automatically when an episode plays to the end) starts a session for the next episode from its resume point.
    - **Chapters and segments** (`markers.rs`) are fetched with the details: chapters from the item (`Fields=Chapters`), segments from `GET /MediaSegments/{id}`.
      - The server only returns segments from provider plugins (e.g. Intro Skipper) that are enabled for the library. Without any, segments are guessed from chapter names: Intro/Opening/OP, Recap/Previously, Preview/Next Episode, Credits/Ending/ED/Outro/End Credits.
-     - A "Skip intro" (recap, preview, ad) button shows during those segments.
+     - A "Skip intro" (recap, preview, ad) button shows during those segments, with a ring that closes as the segment plays out (`widgets::countdown_pill`).
      - From the Outro segment, or 20 s before the end without one, an up-next card offers the next episode with *Play now* and *Cancel*. Cancel (or Esc) means the session ends at the end of the file instead of autoplaying. *Settings → Playback* turns autoplay off altogether.
      - PgUp/PgDn seek to chapter starts from our own list, so PgDn in the last chapter does nothing (mpv's `add chapter 1` would end the file).
    - Sessions are numbered, so when one replaces another, the old one's end doesn't close the new player.

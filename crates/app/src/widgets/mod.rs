@@ -7,6 +7,7 @@ pub mod badge;
 pub mod button;
 pub mod card;
 pub mod code;
+pub mod countdown_pill;
 pub mod dialog;
 pub mod field;
 pub mod focus;
