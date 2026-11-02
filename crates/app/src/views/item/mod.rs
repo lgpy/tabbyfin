@@ -41,7 +41,6 @@ use crate::item_menu::{
     resume_point,
 };
 use crate::keys::{Action, Scope};
-use crate::motion;
 use crate::nav::{NavRequest, Route};
 use crate::playback::PlayOptions;
 use crate::task::Task;
@@ -51,7 +50,8 @@ use crate::views::{Page, PageCx};
 use crate::widgets::menu::{MenuAction, RefusedMarks};
 use crate::widgets::popup::{Entry, Opened, PopupMenu};
 use crate::widgets::text::{Load, episode_label, runtime_text};
-use crate::widgets::{backdrop, state};
+use crate::widgets::{backdrop, media_row, state};
+use crate::{motion, theme};
 use children::{band_reveal, with_gap_above};
 use header::version_label;
 
@@ -341,14 +341,19 @@ pub struct ItemPage {
     /// Season cards per row from the last frame: the keys use the layout the page last showed,
     /// since the column count only comes out of its width.
     columns: usize,
+    /// Episode rows per row from the last frame (a season's own and the open season's), for
+    /// the keys as `columns` is.
+    episode_columns: usize,
     /// A series' season whose episodes show in a band under the seasons.
     open_season: Option<OpenSeason>,
+    /// A season just closed, kept while its band folds away under the seasons.
+    closing_season: Option<OpenSeason>,
     /// A band the page still has to scroll into view, set by Enter on a season card: the band
     /// opens below the fold at the default window size, so without this the key looks like a
     /// no-op until the next one.
     reveal_band: Option<BandReveal>,
     /// The open season's episodes request; the next season's replaces it, which cancels it.
-    episodes: Option<Task<jellyfin::Result<jellyfin::models::QueryResult<BaseItemDto>>>>,
+    episodes: Option<Task<jellyfin::Result<Vec<BaseItemDto>>>>,
     /// The More menu was asked for this frame, by the button or by Enter on the cursor (which
     /// starts its highlight on the first entry): its popup opens before the frame draws it.
     more_requested: Option<Opened>,
@@ -377,7 +382,9 @@ impl ItemPage {
             version: 0,
             cursor: Cursor::default(),
             columns: 1,
+            episode_columns: 1,
             open_season: None,
+            closing_season: None,
             reveal_band: None,
             episodes: None,
             more_requested: None,
@@ -476,8 +483,13 @@ impl ItemPage {
                 episodes: Load::Loading,
             });
             self.load_episodes(cx);
+            // The band unfolds again from where the closing one had folded to.
+            self.closing_season = None;
         } else {
-            self.open_season = None;
+            // Its band folds away rather than vanishing; with the animations off there's
+            // nothing to fold.
+            let open = self.open_season.take();
+            self.closing_season = open.filter(|_| theme::animations(cx.ctx));
             // Its episodes aren't shown any more, so their request goes with them.
             self.episodes = None;
             // A band that isn't drawn has nothing left to reveal.
@@ -497,9 +509,7 @@ impl ItemPage {
         let series_id = self.item_id.clone();
         let season_id = open.id.clone();
         self.episodes = Some(Task::spawn(cx.ctx, async move {
-            client
-                .episodes(&series_id, Some(&season_id), &[ItemField::Overview])
-                .await
+            season_episodes(&client, &series_id, &season_id).await
         }));
     }
 
@@ -511,12 +521,13 @@ impl ItemPage {
         }
     }
 
-    /// The children's layout: a series' or collection's cards in the grid last shown, and a
-    /// season's or playlist's entries one per row.
+    /// The children's layout: a series' or collection's cards and a season's episodes in the
+    /// grids last shown, and a playlist's entries one per row.
     fn children_section(&self, data: &ItemData) -> Section {
         match data.item.kind {
             BaseItemKind::Series | BaseItemKind::BoxSet => Section::grid(data.children.len(), self.columns),
-            BaseItemKind::Season | BaseItemKind::Playlist => Section::grid(data.children.len(), 1),
+            BaseItemKind::Season => Section::grid(data.children.len(), self.episode_columns),
+            BaseItemKind::Playlist => Section::grid(data.children.len(), 1),
             _ => Section::row(0),
         }
     }
@@ -764,13 +775,15 @@ impl ItemPage {
         let width = (ui.available_width() - 2. * PAGE_PADDING).max(1.);
         let columns = children::grid_columns(data.item.kind, width);
         self.columns = columns;
+        let episode_columns = media_row::episode_columns(width);
+        self.episode_columns = episode_columns;
         let actions = item_actions(&data.item, data.up_next.as_ref());
         let version = self.version;
         let open = self.open_season.as_ref().map(|season| season.id.clone());
-        // Rows of cards only for a series' seasons and a collection's items; the rows under a
-        // season's or playlist's heading are one per line.
+        // A playlist's rows are the only children one per line.
         let children_columns = match data.item.kind {
             BaseItemKind::Series | BaseItemKind::BoxSet => columns,
+            BaseItemKind::Season => episode_columns,
             _ => 1,
         };
         let moved = self.cursor.take_reveal();
@@ -783,6 +796,8 @@ impl ItemPage {
         // The page's own scroll target, set once every shelf is drawn: the next scroll area to
         // finish takes a target, and a shelf's row would be it (U3).
         let mut target = None;
+        // The closing band has folded away.
+        let mut folded = false;
 
         let area = egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Frame::NONE
@@ -817,19 +832,49 @@ impl ItemPage {
                             BaseItemKind::BoxSet => children::posters(ui, data, columns, cursor, images, &mut asked),
                             kind => {
                                 let playlist = kind == BaseItemKind::Playlist;
-                                let rows =
-                                    children::rows(ui, &data.children, CHILDREN, playlist, cursor, images, &mut asked);
+                                let rows = children::rows(
+                                    ui,
+                                    &data.children,
+                                    CHILDREN,
+                                    playlist,
+                                    episode_columns,
+                                    None,
+                                    cursor,
+                                    images,
+                                    &mut asked,
+                                );
                                 rows.selected
                             }
                         };
                     }
                     let mut band = None;
-                    if let Some(open) = &self.open_season {
-                        ui.add_space(SECTION_GAP);
-                        // The episodes rise in each time a season opens, as `main`'s band did.
-                        band = Some(motion::enter(ui, ("season-episodes", open.id.as_str()), 0.0, |ui| {
-                            children::episodes_band(ui, open, cursor, images, &mut asked)
-                        }));
+                    let mut band_settled = true;
+                    let shown_band = match (&self.open_season, &self.closing_season) {
+                        (Some(open), _) => Some((open, true)),
+                        (None, Some(closing)) => Some((closing, false)),
+                        (None, None) => None,
+                    };
+                    if let Some((season, open)) = shown_band {
+                        // The episodes unfold under the seasons, and fold away when it closes.
+                        // The gap above is the band's, so it goes with it.
+                        let unfolded = motion::unfold(ui, "season-band", open, |ui| {
+                            ui.add_space(SECTION_GAP);
+                            if open {
+                                children::episodes_band(ui, season, episode_columns, cursor, images, &mut asked)
+                            } else {
+                                // A closing band is only drawn: it has no cursor and takes no
+                                // clicks.
+                                let mut cursor = Cursor::default();
+                                let mut asked = Asked::default();
+                                children::episodes_band(ui, season, episode_columns, &mut cursor, images, &mut asked)
+                            }
+                        });
+                        band_settled = unfolded.settled;
+                        if open {
+                            band = Some(unfolded.inner);
+                        } else if unfolded.settled {
+                            folded = true;
+                        }
                     }
                     let mut people_row = None;
                     if !data.item.people.is_empty() {
@@ -867,12 +912,12 @@ impl ItemPage {
                                 };
                                 (rect, None)
                             }),
-                            // The first episode comes with the season's name above it and the
-                            // section's gap; the others alone, scrolled as little as shows them.
+                            // The first row of episodes comes with the season's name above it and
+                            // the section's gap; the others alone, scrolled as little as shows them.
                             Some(position) if position.section == EPISODES => band.as_ref().and_then(|band| {
-                                let rect = match position.index {
-                                    0 => with_gap_above(band.top, SECTION_GAP),
-                                    _ => band.selected?,
+                                let rect = match position.index < episode_columns {
+                                    true => with_gap_above(band.top, SECTION_GAP),
+                                    false => band.selected?,
                                 };
                                 Some((rect, None))
                             }),
@@ -888,13 +933,22 @@ impl ItemPage {
                         // Enter opened a season: the least scroll that shows its row with the
                         // season's name and first episode, once as it opens and once more when
                         // its episodes arrive (a row is taller than the mascot's line).
+                        // Asked for again each pass while the band unfolds, since the page under
+                        // it isn't long enough yet for the scroll to get there.
                         target = Some((band_reveal(children_row, band.top, ui.clip_rect().height()), None));
                         // The loaded band gets a reveal of its own when its episodes arrive.
-                        self.reveal_band = if reveal == BandReveal::Opening {
-                            Some(BandReveal::Waiting)
-                        } else {
-                            None
-                        };
+                        // Episodes that arrived while it unfolded were part of this reveal.
+                        let loading = self
+                            .open_season
+                            .as_ref()
+                            .is_some_and(|open| matches!(open.episodes, Load::Loading));
+                        if band_settled {
+                            self.reveal_band = if reveal == BandReveal::Opening && loading {
+                                Some(BandReveal::Waiting)
+                            } else {
+                                None
+                            };
+                        }
                     }
                     if let Some((rect, align)) = target {
                         ui.scroll_to_rect(rect, align);
@@ -902,6 +956,9 @@ impl ItemPage {
                 });
         });
         backdrop::scroll_edge(ui, &area);
+        if folded {
+            self.closing_season = None;
+        }
 
         if let Some(action) = asked.action {
             // A second click on More closes its menu, as its trigger did on `main`.
@@ -1068,7 +1125,7 @@ impl Page for ItemPage {
             self.episodes = None;
             if let Some(open) = &mut self.open_season {
                 open.episodes = match result {
-                    Ok(episodes) => Load::Loaded(episodes.items),
+                    Ok(episodes) => Load::Loaded(episodes),
                     Err(err) => Load::Failed(cx.services.handle_error(&err)),
                 };
             }
@@ -1127,7 +1184,7 @@ impl Browse for ItemPage {
     }
 
     /// The sections in the order they appear on the page: a series' or collection's children as
-    /// the grid last shown, and the open season's episodes as a row.
+    /// the grid last shown, and the open season's episodes in theirs.
     fn sections(&self) -> Vec<Section> {
         let Load::Loaded(data) = &self.data else {
             return Vec::new();
@@ -1139,7 +1196,7 @@ impl Browse for ItemPage {
             Section::grid(pickers, 1),
             Section::row(chapters(&data.item).len()),
             self.children_section(data),
-            Section::grid(self.open_episodes().len(), 1),
+            Section::grid(self.open_episodes().len(), self.episode_columns),
             Section::row(data.item.people.len()),
             Section::row(data.extras.len()),
             Section::row(data.similar.len()),
@@ -1258,10 +1315,7 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
         BaseItemKind::Series => client.seasons(&item.id, &[]).await?.items,
         BaseItemKind::Season => {
             let series_id = item.series_id.as_deref().unwrap_or_default();
-            client
-                .episodes(series_id, Some(&item.id), &[ItemField::Overview])
-                .await?
-                .items
+            season_episodes(&client, series_id, &item.id).await?
         }
         BaseItemKind::BoxSet => collection_items(&client, &item.id, &[ItemField::PrimaryImageAspectRatio]).await?,
         BaseItemKind::Playlist => client.playlist_items(&item.id, &[ItemField::Overview]).await?.items,
@@ -1279,6 +1333,22 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
         similar,
         up_next,
     })
+}
+
+/// A season's own episodes. Jellyfin also lists the specials that air within the season (their
+/// `AirsBeforeSeasonNumber` and so on) among them; those belong to the Specials season, which
+/// lists them itself.
+async fn season_episodes(client: &Client, series_id: &str, season_id: &str) -> jellyfin::Result<Vec<BaseItemDto>> {
+    let episodes = client
+        .episodes(series_id, Some(season_id), &[ItemField::Overview])
+        .await?;
+    Ok(own_episodes(episodes.items, season_id))
+}
+
+/// `episodes` without those of another season (an episode that names no season stays).
+fn own_episodes(mut episodes: Vec<BaseItemDto>, season_id: &str) -> Vec<BaseItemDto> {
+    episodes.retain(|episode| episode.season_id.as_deref().is_none_or(|id| id == season_id));
+    episodes
 }
 
 /// The episode Play starts on a series' or season's page. Without it there's no Play button,
@@ -1342,7 +1412,7 @@ mod tests {
     use jellyfin::Ticks;
     use jellyfin::models::BaseItemDto;
 
-    use super::{CHILDREN, EntryAction, ItemAction, ItemData, ItemPage, band_reveal, item_actions};
+    use super::{CHILDREN, EntryAction, ItemAction, ItemData, ItemPage, band_reveal, item_actions, own_episodes};
     use crate::browse::{self, Position, Section};
     use crate::item_menu::{Mark, PlaylistEdit, is_favorite, is_played};
     use crate::keys::Action;
@@ -1492,6 +1562,26 @@ mod tests {
 
     fn order(page: &ItemPage) -> Vec<&str> {
         data(page).children.iter().map(|entry| entry.id.as_str()).collect()
+    }
+
+    /// Jellyfin lists a special that airs within Season 1 among Season 1's episodes; the page
+    /// leaves it to the Specials season.
+    #[test]
+    fn a_seasons_episodes_leave_out_specials_airing_within_it() {
+        let episode = |id: &str, season: Option<&str>| -> BaseItemDto {
+            serde_json::from_value(serde_json::json!({
+                "Id": id, "Name": id, "Type": "Episode", "SeasonId": season,
+            }))
+            .expect("episode")
+        };
+        let listed = vec![
+            episode("e1", Some("s1")),
+            episode("special", Some("s0")),
+            episode("e2", Some("s1")),
+            episode("unknown", None),
+        ];
+        let ids: Vec<_> = own_episodes(listed, "s1").into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, ["e1", "e2", "unknown"]);
     }
 
     #[test]
