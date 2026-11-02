@@ -11,6 +11,7 @@ pub mod field;
 pub mod focus;
 pub mod image;
 pub mod label;
+pub mod library_tile;
 pub mod mascot;
 pub mod menu;
 pub mod popup;

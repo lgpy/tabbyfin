@@ -1,9 +1,10 @@
 //! A person as a pastel circle with their initial, for where there's no picture: a saved
-//! account on the sign-in screen, and anywhere else a user is listed.
+//! account on the sign-in screen, and anywhere else a user is listed. A cast card without a
+//! photo takes the same pastel ([`colour`]).
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use egui::{Align2, FontId, Pos2, Ui};
+use egui::{Align2, Color32, FontId, Pos2, Ui};
 
 use crate::theme;
 
@@ -12,7 +13,7 @@ use crate::theme;
 pub fn paint(ui: &Ui, center: Pos2, radius: f32, name: &str) {
     let tokens = theme::tokens_of(ui);
     let painter = ui.painter();
-    painter.circle_filled(center, radius, tokens.avatars[colour_index(name, tokens.avatars.len())]);
+    painter.circle_filled(center, radius, colour(tokens, name));
     painter.text(
         center,
         Align2::CENTER_CENTER,
@@ -20,6 +21,11 @@ pub fn paint(ui: &Ui, center: Pos2, radius: f32, name: &str) {
         FontId::proportional(radius * 0.95),
         tokens.avatar_foreground,
     );
+}
+
+/// `name`'s pastel: their avatar's colour, and the fill of a person card without a picture.
+pub fn colour(tokens: &theme::Tokens, name: &str) -> Color32 {
+    tokens.avatars[colour_index(name, tokens.avatars.len())]
 }
 
 /// The first letter of `name`, upper-cased, or "?" for an empty one.
