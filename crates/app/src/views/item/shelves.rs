@@ -121,6 +121,9 @@ pub(super) fn similar_shelf(
                 if is_selected && moved {
                     response.scroll_to_me(None);
                 }
+                if response.hovered() {
+                    asked.hovered = Some(Route::for_item(item));
+                }
                 if response.clicked() {
                     asked.open = Some(Route::for_item(item));
                 }
