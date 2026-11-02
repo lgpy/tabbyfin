@@ -12,8 +12,8 @@ use crate::nav::Route;
 use crate::widgets::text::CARD_GAP;
 use crate::widgets::{card, menu, shelf};
 
-/// The chapters shelf: their image, name and start. Chosen, the item plays from there with the
-/// version picked below its title.
+/// The chapters shelf: their image, name and start, or short text tiles when none of them has an
+/// image. Chosen, the item plays from there with the version picked below its title.
 pub(super) fn chapters_shelf(
     ui: &mut Ui,
     data: &ItemData,
@@ -23,10 +23,15 @@ pub(super) fn chapters_shelf(
     asked: &mut Asked,
 ) -> Rect {
     let chapters = chapters(&data.item);
+    let any_image = chapters.iter().any(|chapter| chapter.image_tag.is_some());
     shelf::shelf_with_gaps(ui, "chapters", "Chapters", CARD_GAP, SHELF_TITLE_GAP, 0., |ui| {
         for (index, chapter) in chapters.iter().enumerate() {
             let is_selected = cursor.is_selected(CHAPTERS, index);
-            let response = card::chapter(ui, images, &data.item.id, index, chapter, is_selected);
+            let response = if any_image {
+                card::chapter(ui, images, &data.item.id, index, chapter, is_selected)
+            } else {
+                card::chapter_without_image(ui, index, chapter, is_selected)
+            };
             if is_selected && moved {
                 response.scroll_to_me(None);
             }
