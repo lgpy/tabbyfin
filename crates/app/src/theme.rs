@@ -1081,6 +1081,17 @@ mod tests {
         assert_eq!(tokens.tab_foreground, egui::Color32::from_rgb(0xd4, 0xd4, 0xd4));
     }
 
+    /// The player's accents are the dark theme's lilac in either theme, since it's always dark,
+    /// and its menu rows hover in the classic grey rather than the cozy purple-grey.
+    #[test]
+    fn the_player_borrows_the_dark_brand() {
+        use super::over_video;
+        assert_eq!(over_video::BRAND, egui::Color32::from_rgb(0xc3, 0x96, 0xe7));
+        assert_eq!(over_video::BRAND_FOREGROUND, Tokens::DARK.brand_foreground);
+        assert_eq!(over_video::ROW_HOVER, egui::Color32::from_rgb(0x26, 0x26, 0x26));
+        assert_ne!(over_video::ROW_HOVER, Tokens::DARK.inset_hover);
+    }
+
     #[test]
     fn egui_draws_with_the_tokens() {
         for (tokens, dark) in [(Tokens::LIGHT, false), (Tokens::DARK, true)] {
@@ -1343,6 +1354,19 @@ pub mod over_video {
     /// What the player paints its own controls with: the classic dark theme, as before the app
     /// moved to the cozy palette, so its bars and menus stay neutral over the picture.
     pub const TOKENS: &Tokens = &Tokens::CLASSIC_DARK;
+
+    /// The player's one accent, the dark theme's `brand` whichever theme is chosen: the seek
+    /// bar's played part, the chosen track, speed and chapter, and a prompt's main button.
+    pub const BRAND: Color32 = Tokens::DARK.brand;
+
+    pub const BRAND_HOVER: Color32 = Tokens::DARK.brand_hover;
+
+    /// Text and icons on [`BRAND`].
+    pub const BRAND_FOREGROUND: Color32 = Tokens::DARK.brand_foreground;
+
+    /// A menu row under the pointer: the classic grey rather than the cozy `inset_hover`, which
+    /// is tinted purple.
+    pub const ROW_HOVER: Color32 = TOKENS.muted;
 
     /// Behind the picture, and its letterbox bars.
     pub const BACKDROP: Color32 = Color32::BLACK;

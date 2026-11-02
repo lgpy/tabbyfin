@@ -315,7 +315,13 @@ impl PopupMenu {
                     if highlighted && moved {
                         ui.scroll_to_rect(rect, None);
                     }
-                    paint_row(ui, rect, entry, slot, highlighted);
+                    paint_row(
+                        ui,
+                        rect,
+                        entry,
+                        slot,
+                        highlighted.then(|| theme::tokens_of(ui).inset_hover),
+                    );
                     response.widget_info(|| row_info(entry, true));
                     if response.clicked() {
                         out.chosen = Some(index);
@@ -435,19 +441,15 @@ fn reset(ctx: &egui::Context, id: Id, opened: Opened) {
     ctx.data_mut(|data| data.insert_temp(state_id(id), state));
 }
 
-/// One of a menu's rows in a list of the caller's own, `ui`'s width, filled while `highlighted`
-/// or under the pointer. It takes no focus: the list reads its keys itself. `slot` keeps the
-/// icon's room on a row without one, as a menu does once any of its rows has one.
-pub fn row(ui: &mut Ui, entry: &Entry, slot: bool, highlighted: bool) -> Response {
+/// One of a menu's rows in a list of the caller's own, `ui`'s width, filled with `fill` while
+/// `highlighted` or under the pointer (the player's menus keep their neutral grey over the
+/// video). It takes no focus: the list reads its keys itself. `slot` keeps the icon's room on a
+/// row without one, as a menu does once any of its rows has one.
+pub fn row(ui: &mut Ui, entry: &Entry, slot: bool, highlighted: bool, fill: Color32) -> Response {
     let height = row_height(ui);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::CLICK);
-    paint_row(
-        ui,
-        rect,
-        entry,
-        slot || entry.has_slot(),
-        highlighted || response.hovered(),
-    );
+    let highlight = (highlighted || response.hovered()).then_some(fill);
+    paint_row(ui, rect, entry, slot || entry.has_slot(), highlight);
     response.widget_info(|| row_info(entry, false));
     response
 }
@@ -486,15 +488,16 @@ pub fn separator(ui: &mut Ui) {
     );
 }
 
-fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlighted: bool) {
+/// `highlight` is the row's fill while it's highlighted (a danger row has its own).
+fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlight: Option<Color32>) {
     let tokens = theme::tokens_of(ui);
     let painter = ui.painter();
     let color = if entry.danger { tokens.danger } else { tokens.ink };
-    if highlighted {
+    if let Some(fill) = highlight {
         let fill = if entry.danger {
             tokens.danger.gamma_multiply(0.14)
         } else {
-            tokens.inset_hover
+            fill
         };
         painter.rect_filled(rect, CornerRadius::same(RADIUS - PAD as u8), fill);
     }
