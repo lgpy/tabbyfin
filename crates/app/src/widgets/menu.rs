@@ -18,7 +18,7 @@
 
 use std::collections::VecDeque;
 
-use egui::{Id, Response, RichText, Ui};
+use egui::{Id, Response};
 use egui_material_icons::icons::{
     ICON_CHECK, ICON_CHECK_CIRCLE, ICON_FAVORITE, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY,
 };
@@ -110,24 +110,6 @@ pub fn item_menu(response: &Response, item: &BaseItemDto) -> Option<MenuAction> 
         .show(response, &entries)
         .chosen;
     chosen.map(|index| actions[index])
-}
-
-/// Watched's icon: a check, filled in green once it's watched (`main`'s `success`).
-pub fn played_icon(ui: &Ui, played: bool) -> RichText {
-    if played {
-        ICON_CHECK_CIRCLE.rich_text().color(theme::tokens_of(ui).success)
-    } else {
-        ICON_CHECK.outlined().rich_text()
-    }
-}
-
-/// Favorite's icon: a heart, filled in red once it's a favorite (`main`'s base red).
-pub fn favorite_icon(ui: &Ui, favorite: bool) -> RichText {
-    if favorite {
-        ICON_FAVORITE.rich_text().color(theme::tokens_of(ui).red)
-    } else {
-        ICON_FAVORITE.outlined().rich_text()
-    }
 }
 
 /// How many refused marks the services remember. A page left off screen catches up with the

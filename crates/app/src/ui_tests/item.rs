@@ -1,10 +1,12 @@
-//! The item page's seasons through the keyboard: Enter on a season card opens its episodes
-//! band under the seasons, which at the app's window sizes starts below the fold, so the page
-//! scrolls it into view (X5). And an episode's series line, which opens the series.
+//! The item page's seasons through the keyboard: Enter on a season row opens its episodes under
+//! the seasons, which at the app's window sizes start below the fold, so the page scrolls them
+//! into view (X5). An episode's series line, which opens the series. And C11's cozy pieces: the
+//! actions' names and toggles, season rows, and a playlist's handles on the active row.
 
 use egui::Key;
+use egui::accesskit::{Role, Toggled};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 use jellyfin::models::BaseItemDto;
 
 use crate::nav::{NavRequest, Route};
@@ -144,4 +146,115 @@ fn many_tags_wrap_inside_the_window() {
         .map(|tag| tag.min.y as i32)
         .collect();
     assert!(rows.windows(2).any(|pair| pair[1] > pair[0]), "the tags wrapped");
+}
+
+/// A movie's actions: playing it is one button, Watched and Favorite are toggles, and More is a
+/// plain button (C11's quiet icon buttons name themselves to AccessKit).
+#[test]
+fn the_actions_name_themselves_and_the_toggles_say_their_state() {
+    let _config = ConfigDir::new("item-actions");
+    let server = FixtureServer::start();
+    let movie: serde_json::Value = fixture_json("item_movie");
+    server.json_value("GET", "/Items/d265861eae31cee1d44b13adac305eac", &movie);
+    let name = movie["Name"].as_str().unwrap_or_default().to_owned();
+    let mut ui = PageHarness::new(session(&server), move |cx| {
+        crate::views::open(
+            Route::Item {
+                id: MOVIE.to_owned(),
+                name,
+            },
+            cx,
+        )
+    });
+    ui.step_until("the movie's actions", |harness| {
+        harness.query_by_label("More").is_some()
+    });
+
+    let harness = ui.harness();
+    for name in ["Watched", "Favorite"] {
+        let toggle = harness.get_by_role_and_label(Role::Button, name);
+        assert!(
+            toggle.accesskit_node().toggled().is_some(),
+            "{name:?} reads as a toggle"
+        );
+    }
+    let more = harness.get_by_role_and_label(Role::Button, "More");
+    assert_eq!(more.accesskit_node().toggled(), None);
+}
+
+/// A series' seasons are rows: clicking one marks it open and lists its episodes under the
+/// seasons, as rows too.
+#[test]
+fn a_season_row_lists_its_episodes() {
+    let _config = ConfigDir::new("item-season-rows");
+    let server = series_server();
+    let mut ui = series_harness(&server);
+    ui.step_until("the series' seasons", |harness| {
+        harness.query_by_label("Seasons").is_some()
+    });
+    let season = ui.harness().get_by_role_and_label(Role::Button, "Season 1");
+    assert_eq!(season.accesskit_node().toggled(), Some(Toggled::False));
+    let at = season.rect().center();
+
+    ui.click_at(at);
+    ui.step_until("the season's episodes", |harness| {
+        harness.query_all_by_role(Role::Button).any(|row| {
+            row.accesskit_node()
+                .label()
+                .is_some_and(|label| label.contains("S01E01"))
+        })
+    });
+    let season = ui.harness().get_by_role_and_label(Role::Button, "Season 1");
+    assert_eq!(
+        season.accesskit_node().toggled(),
+        Some(Toggled::True),
+        "the open season is marked"
+    );
+}
+
+/// The playlist the tests make up from the fixtures' episodes.
+const PLAYLIST: &str = "5a1e7c0ffee0000000000000000000aa";
+
+/// A playlist's ↑ ↓ ✕ show only on the row the cursor (or the pointer) is on, and Up is
+/// disabled on the first row.
+#[test]
+fn a_playlists_handles_show_on_the_active_row() {
+    let _config = ConfigDir::new("item-playlist-handles");
+    let server = FixtureServer::start();
+    let playlist = serde_json::json!({ "Id": PLAYLIST, "Name": "Watchlist", "Type": "Playlist" });
+    server.json_value("GET", "/Items/5a1e7c0ffee0000000000000000000aa", &playlist);
+    let mut entries: serde_json::Value = fixture_json("episodes");
+    for entry in entries["Items"].as_array_mut().expect("episodes") {
+        entry["PlaylistItemId"] = entry["Id"].clone();
+    }
+    server.json_value("GET", "/Playlists/5a1e7c0ffee0000000000000000000aa/Items", &entries);
+    let mut ui = PageHarness::new(session(&server), move |cx| {
+        crate::views::open(
+            Route::Item {
+                id: PLAYLIST.to_owned(),
+                name: "Watchlist".to_owned(),
+            },
+            cx,
+        )
+    });
+    ui.step_until("the playlist's rows", |harness| {
+        harness.query_by_label("Playlist").is_some()
+    });
+    let removes =
+        |harness: &Harness<'static, PageRun>| harness.query_all_by_label("Remove from playlist (Delete)").count();
+    assert_eq!(removes(ui.harness()), 0, "no handles before a row is active");
+
+    // The first Tab shows the cursor on the actions; the second moves it to the first entry.
+    ui.press(Key::Tab);
+    ui.press(Key::Tab);
+    ui.step();
+    assert_eq!(removes(ui.harness()), 1, "the cursor's row has its handles");
+    let up = ui.harness().get_by_label("Move up (Alt+Up)");
+    assert!(up.accesskit_node().is_disabled(), "the first entry can't move up");
+
+    ui.press(Key::ArrowDown);
+    ui.step();
+    assert_eq!(removes(ui.harness()), 1, "the handles moved with the cursor");
+    let up = ui.harness().get_by_label("Move up (Alt+Up)");
+    assert!(!up.accesskit_node().is_disabled());
 }

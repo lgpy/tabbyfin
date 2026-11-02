@@ -508,33 +508,6 @@ pub fn tokens_of(ui: &egui::Ui) -> &'static Tokens {
     tokens(ui.visuals())
 }
 
-/// The widget style a primary button draws with, as `main`'s `.primary()` buttons had it:
-/// `primary` behind `primary_foreground` text, and `primary_hover` under the pointer or pressed.
-/// Apply it in a [`egui::Ui::scope`] around the button.
-pub fn primary_style(ui: &mut egui::Ui) {
-    let tokens = tokens_of(ui);
-    let widgets = &mut ui.visuals_mut().widgets;
-    for visuals in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.active] {
-        visuals.weak_bg_fill = tokens.primary;
-        visuals.bg_stroke = Stroke::NONE;
-        visuals.fg_stroke.color = tokens.primary_foreground;
-    }
-    widgets.hovered.weak_bg_fill = tokens.primary_hover;
-    widgets.active.weak_bg_fill = tokens.primary_hover;
-}
-
-/// `main`'s fill for a selected control — a menu row, a toggle, a checked box — which egui would
-/// paint in the text selection's colour. The button keeps its `selected` state (AccessKit's
-/// selected/toggled flag) and is filled with `accent` when it's on.
-pub fn selected<'a>(ui: &egui::Ui, selected: bool, button: egui::Button<'a>) -> egui::Button<'a> {
-    let button = button.selected(selected);
-    if selected {
-        button.fill(tokens_of(ui).accent)
-    } else {
-        button
-    }
-}
-
 /// The spacing scale (`main`'s `gap_1`, `p_2`, `px_6`, …), in points. It's the same in
 /// both themes.
 #[derive(Clone, Copy, Debug, PartialEq)]

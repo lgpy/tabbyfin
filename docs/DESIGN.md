@@ -116,6 +116,9 @@ All in `crates/app/src/widgets/`.
 - **`avatar::paint`** — a pastel circle with the name's initial; the colour is stable per name across launches.
 - **`AvatarRow::new(names, title, subtitle, label)`** — avatar, title, muted subtitle, as one button named by `label`. Inset fill, `inset_hover` on hover/focus, the focus ring (inside) on focus or `.highlighted(true)` (a list that keeps its own keyboard). Several names overlap as 14-point avatars (up to three, each parted from the one under it by a ring of the row's fill) for a group. `.status(colour)` puts a dot before the subtitle. At the right end, `.remove(tooltip)` adds a ✕ (a second focus stop), or `.action(label)` a compact `brand` button (30 tall, radius 10, `brand_hover` with the row) that is part of the row: a click anywhere on it presses it. `.focus(Focus::Skip)` for clicks only. **`avatar_row::person(ui, name, aside)`** — a person in a list that isn't a list of buttons: a 14-point avatar, the name in `ink` at `base` and an optional `xs` muted aside ("you"), 36 tall, a `ListItem` to AccessKit.
 - **`RoundButton`** (`round_button.rs`) — a round button holding an icon (`RoundButton::icon`) or a person's avatar (`RoundButton::avatar`, 4 points inside the circle): no frame at rest and the icon in `ink_muted`; under the pointer an `inset_hover` circle and `ink`. `.on(bool)` makes it a toggle (selected to AccessKit): on keeps the circle with the icon in `brand`. Disabled is dimmed `ink_muted` at 45 %. `.ringed(true)` (or egui's focus) puts `focus::ring` round it, a circle round the circle (round the avatar for an avatar). Named and tooltipped by its label. Sizes: 40 with a 24-point icon (the top bar), 30/18 (the SyncPlay panel's toggles), 28/`lg` (a field's trailing button), 26/16 (a queue row's buttons). `round_button::glyph` centres an icon on its own bounds, which the icon font needs. Picked by a mockup, 2026-11-01.
+- **`button::brand_icon(ui, icon, label, ringed)`** — `brand` as wide as its icon (22) and label need, 42 tall, for a page's main action in a row of others (the item page's Play/Resume). **`button::quiet_icon(ui, icon, label, on, icon_scale, ringed)`** — the actions beside it: a 42-point square with `radius_control`, `surface` fill and a `surface_border` outline, the icon in `ink_muted` (`ink` and `inset_hover` under the pointer); with `on` it's a toggle (selected to AccessKit) that while on is `inset_hover` with a `brand` outline and icon. Both are `Sense::CLICK` only; `ringed` draws `focus::ring` outside for a page's cursor. Picked over round icon buttons for the item page, where the actions sit on the backdrop's picture (C11, 2026-11-02).
+- **`MediaRow`** (`media_row.rs`) — an item in a list (a season's episodes, a playlist's entries, the open season's episodes on a series): `inset` at rest, `inset_hover` under the pointer or `.highlighted(true)` with the ring inside, `radius_control`, `media_row::GAP` (8) apart, 10 inside. The wide image (radius 6), the heading in `ink` at `base`, a muted `sm` line, up to three lines of `sm` overview in `ink_muted`, and a round Watched toggle (36/20) level with the heading. `.handles(…)` adds a playlist's ↑ ↓ ✕ (round, 30/18) before the toggle, shown only while the row is active; the text keeps their room either way, so it doesn't reflow on hover. **`media_row::season`** — a series' season as a row 84 tall (poster, name, a muted line, a chevron), in `season_columns` of at least 300; the open one keeps `inset_hover` with a 3 pt `brand` bar at its left and the chevron turned up in `brand`. A `Button` to AccessKit, selected while open.
+- **`tag::show(ui, text)`** — a tag as a pill: `inset`, a `surface_border` outline, fully round, `xs` text in `ink_muted`. `tag::width` lets a wrapping row break before a pill that wouldn't fit.
 - **`code::show`** — a code to read off: inset, 36 pt monospace split in two halves, copy button at the right end that turns into a check mark for 1.5 s.
 - **`surface::notice(ui, Kind, text)`** — a message under the heading: a box tinted with the kind's colour at 10 %, a 1 pt outline in it, `radius_control`, 12 × 9 margin, then the kind's icon (the toasts' icons, `lg`) and the message in `ink` at `base`, wrapping under itself rather than under the icon. Kinds: `Danger` (something failed), `Info` (something to know), `Success` (something worked). The icon names the kind to AccessKit ("Error", "Information", "Success"), so the kind isn't told by colour alone.
 - **`focus::ring(ui, rect, radius, Place)`** — the keyboard's ring, wherever the keyboard (egui focus or a page's cursor) sits on something: 2 pt `brand`, the same on every widget and page. `Place::Outside` for free-standing controls (bar buttons, selects, pills, the item page's actions): 2 pt clear of the control, with the control's radius plus the gap, so a circle gets a circle and a pill a pill. `Place::Inside` for rows and cards, on their own edge, since the lists and scroll areas they sit in would clip a ring outside them. **`focus::ring_widget(ui, &response)`** rings an egui `Button` or `TextEdit` on the theme's widget radius. Picked over the old per-page rings (1–3 pt, `brand` or `ink`, square rings round round buttons) by a mockup, 2026-11-01.
@@ -187,6 +190,24 @@ SyncPlay panel (popup::panel, 340 wide)
 ```
 
 One main action per view holds here as elsewhere: with groups to join, each row's *Join* is the `brand` one and *New group* is `quiet`; with none, *New group* is `brand`.
+
+The item page (C11, picked by a mockup on 2026-11-02):
+
+```
+backdrop image fading into the gradient (backdrop::fade_into), edge to edge
+poster (or an episode's still) · series line (ink_muted, a link)
+  title (40, ink)      brand_icon Play/Resume · quiet_icon squares: from start, shuffle,
+                       trailer, Watched and Favorite (toggles), More
+  meta, genres, studios (sm, ink_muted) · synopsis (base, ink) · tag pills
+version select
+Chapters shelf
+Seasons: media_row::season rows in columns, the open one with a brand bar
+  Season n: MediaRow per episode
+Episodes / Playlist (a season's or playlist's page): MediaRow per entry,
+  a playlist's ↑ ↓ ✕ on the active row
+In this collection (a collection): poster cards
+Cast & crew · Extras · More like this shelves
+```
 
 ## Behaviour
 
