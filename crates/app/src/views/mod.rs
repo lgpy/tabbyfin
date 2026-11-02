@@ -27,6 +27,44 @@ pub struct PageCx<'a> {
     pub nav: &'a mut Vec<NavRequest>,
     /// The device and texture registry egui draws with, for video. `None` in tests.
     pub render_state: Option<&'a egui_wgpu::RenderState>,
+    /// Where the page may paint behind the top bar. The shell sets it before the page draws;
+    /// `None` outside the shell (tests, the shell's own setup).
+    pub under_bar: Option<UnderBar>,
+}
+
+/// A place in the paint order under the top bar's contents and over the window's backdrop, for
+/// a picture that runs up behind the bar (the item page's banner). The bar is laid out before
+/// the page, so anything the page paints itself lands over the bar; the shell keeps this slot
+/// for it instead.
+#[derive(Clone)]
+pub struct UnderBar {
+    painter: egui::Painter,
+    slot: egui::layers::ShapeIdx,
+    /// The bar's rectangle, the room above the page's own top. The shell sets it once the bar
+    /// is laid out.
+    pub bar: egui::Rect,
+}
+
+impl UnderBar {
+    /// Reserves the slot on `painter` (the window's), at this point of the paint order.
+    pub fn reserve(painter: &egui::Painter) -> Self {
+        let slot = painter.add(egui::Shape::Noop);
+        Self {
+            painter: painter.clone(),
+            slot,
+            bar: egui::Rect::NOTHING,
+        }
+    }
+
+    /// Fills the slot with `shapes`, at `ui`'s opacity, so the picture fades in with its page.
+    /// Clipped to the bar and `ui`'s own clip rectangle together, the part of the window the
+    /// page shows plus the bar above it.
+    pub fn paint(&self, ui: &egui::Ui, shapes: Vec<egui::Shape>) {
+        let clip = self.bar.union(ui.clip_rect());
+        let mut painter = self.painter.with_clip_rect(clip);
+        painter.multiply_opacity(ui.opacity());
+        painter.set(self.slot, egui::Shape::Vec(shapes));
+    }
 }
 
 pub trait Page {
