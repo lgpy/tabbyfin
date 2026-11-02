@@ -24,8 +24,8 @@
 
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, Color32, CornerRadius, Direction, FontId, Id, Label, Layout, Margin, Rect, RectAlign, Response,
-    RichText, Sense, Stroke, TextFormat, TextStyle, Ui, UiBuilder, pos2, vec2,
+    Align, Align2, Color32, CornerRadius, FontId, Id, Label, Layout, Margin, Rect, RectAlign, Response, RichText,
+    Sense, Stroke, TextFormat, TextStyle, Ui, UiBuilder, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -58,7 +58,7 @@ use crate::widgets::text::{
     CARD_GAP, LANDSCAPE_H, LANDSCAPE_W, Load, POSTER_W, card_text, episode_label, landscape_image, poster_image,
     runtime_text, timestamp,
 };
-use crate::widgets::{backdrop, button, card, image, mascot, select, shelf, state};
+use crate::widgets::{backdrop, button, card, image, select, shelf, state};
 
 /// Fisher-Yates with a random seed (uuid's v4 is the randomness the app already has).
 pub fn shuffle<T>(items: &mut [T]) {
@@ -1347,12 +1347,13 @@ fn episodes_band(
 fn band_note(ui: &mut Ui, message: &str, loading: bool) {
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), LANDSCAPE_H),
-        Layout::centered_and_justified(Direction::LeftToRight),
+        Layout::top_down(egui::Align::Center),
         |ui| {
+            ui.set_min_height(LANDSCAPE_H);
             if loading {
-                mascot::loader(ui, mascot::PAGE);
+                state::spinner(ui);
             } else {
-                ui.label(RichText::new(message).color(theme::tokens_of(ui).muted_foreground));
+                state::message(ui, message);
             }
         },
     );
