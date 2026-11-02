@@ -11,8 +11,8 @@
 
 use egui::accesskit::Role;
 use egui::{
-    Align, Align2, CornerRadius, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Sense, Stroke, StrokeKind,
-    TextEdit, Ui, WidgetInfo, pos2, vec2,
+    Align, Align2, CornerRadius, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Sense, Stroke, StrokeKind, Ui,
+    WidgetInfo, pos2, vec2,
 };
 use egui_material_icons::icons::{ICON_CHECK, ICON_REMOVE, ICON_SEARCH};
 
@@ -20,15 +20,15 @@ use crate::config::LibraryView;
 use crate::theme::{self, text};
 use crate::views::library::{FilterValues, ValueKind};
 use crate::widgets::focus::{self, Place};
-use crate::widgets::label;
 use crate::widgets::popup;
+use crate::widgets::{field, label};
 
 /// The popover's width.
 const WIDTH: f32 = 380.;
 /// How tall the pills may get before they scroll.
 const LIST_MAX_H: f32 = 320.;
 /// A pill's room left and right of its contents, and between its icon and label.
-const PILL_INSET: f32 = 10.;
+const PILL_INSET: f32 = 12.;
 const ICON_GAP: f32 = 4.;
 /// The room between pills, across and down.
 const PILL_GAP: f32 = 6.;
@@ -176,7 +176,7 @@ impl ValueFilters {
                 if index > 0 {
                     ui.add_space(12.);
                 }
-                ui.label(label::muted(ui, title));
+                ui.label(label::overline(ui, title));
                 ui.add_space(6.);
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
@@ -205,29 +205,24 @@ impl ValueFilters {
         cycled
     }
 
-    /// The search box, with its icon inside the left padding as the top bar's and Settings'
-    /// have it. Returns whether its text changed.
+    /// The search box: the cozy field, with its icon inside the left padding as the top bar's
+    /// and Settings' have it. Returns whether its text changed.
     fn search_box(&mut self, ui: &mut Ui) -> bool {
         let icon = text::icon(ui, ICON_SEARCH.font_family());
-        let inset = (10. + icon.size + 6.).round() as i8;
-        let response = ui.add(
-            TextEdit::singleline(&mut self.search)
-                .id(Self::id().with("search"))
-                .hint_text("Find a genre or tag")
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin {
-                    left: inset,
-                    right: 10,
-                    top: 7,
-                    bottom: 7,
-                }),
-        );
+        let inset = (12. + icon.size + 6.).round() as i8;
+        let edit = field::single_line(ui, Self::id().with("search"), &mut self.search, "Find a genre or tag");
+        let response = ui.add(edit.margin(egui::Margin {
+            left: inset,
+            right: 12,
+            top: 9,
+            bottom: 9,
+        }));
         if std::mem::take(&mut self.focus_search) {
             response.request_focus();
         }
         let rect = response.rect;
         ui.painter().text(
-            pos2(rect.left() + 10. + icon.size / 2., rect.center().y),
+            pos2(rect.left() + 12. + icon.size / 2., rect.center().y),
             Align2::CENTER_CENTER,
             ICON_SEARCH.codepoint,
             icon,
@@ -325,9 +320,9 @@ fn set_off(view: &mut LibraryView, kind: ValueKind, value: &str) {
     excluded.retain(|v| v != value);
 }
 
-/// A value as a pill: outlined while off, filled in the primary colour with a tick while
-/// included, and in the danger colour with a minus while excluded. `highlighted` rings it for
-/// the keyboard.
+/// A value as a pill: sunk in `inset` with the field's outline while off, filled `brand` with a
+/// tick while included, and outlined in `danger` with a minus while excluded. `highlighted`
+/// rings it for the keyboard.
 fn pill(ui: &mut Ui, label: &str, mark: Mark, highlighted: bool) -> Response {
     let tokens = theme::tokens_of(ui);
     let font = text::font(ui, "sm");
@@ -339,7 +334,7 @@ fn pill(ui: &mut Ui, label: &str, mark: Mark, highlighted: bool) -> Response {
     let icon_font = text::icon(ui, ICON_CHECK.font_family());
     let icon_w = icon.map_or(0., |_| icon_font.size + ICON_GAP);
     let painter = ui.painter().clone();
-    let galley = painter.layout_no_wrap(label.to_owned(), font.clone(), tokens.foreground);
+    let galley = painter.layout_no_wrap(label.to_owned(), font.clone(), tokens.ink);
     let height = (font.size + 14.).max(28.);
     let max_w = ui.available_width().max(height);
     let width = (galley.size().x + icon_w + 2. * PILL_INSET).min(max_w);
@@ -353,27 +348,17 @@ fn pill(ui: &mut Ui, label: &str, mark: Mark, highlighted: bool) -> Response {
         WidgetInfo::labeled(Role::Button, true, format!("{label}{state}"))
     });
 
+    // Under the pointer, the inset ones take `inset_hover` and the included one `brand_hover`.
     let hovered = response.hovered();
+    let inset = if hovered { tokens.inset_hover } else { tokens.inset };
     let (fill, stroke, color) = match mark {
-        Mark::Off => (
-            if hovered {
-                tokens.accent
-            } else {
-                egui::Color32::TRANSPARENT
-            },
-            Stroke::new(1., tokens.border),
-            tokens.foreground,
-        ),
+        Mark::Off => (inset, Stroke::new(1., tokens.surface_border), tokens.ink),
         Mark::Included => (
-            if hovered { tokens.primary_hover } else { tokens.primary },
+            if hovered { tokens.brand_hover } else { tokens.brand },
             Stroke::NONE,
-            tokens.primary_foreground,
+            tokens.brand_foreground,
         ),
-        Mark::Excluded => (
-            tokens.danger.gamma_multiply(if hovered { 0.26 } else { 0.16 }),
-            Stroke::new(1., tokens.danger.gamma_multiply(0.7)),
-            tokens.danger,
-        ),
+        Mark::Excluded => (inset, Stroke::new(1., tokens.danger), tokens.danger),
     };
     let radius = CornerRadius::same((height / 2.) as u8);
     painter.rect(rect, radius, fill, stroke, StrokeKind::Inside);
