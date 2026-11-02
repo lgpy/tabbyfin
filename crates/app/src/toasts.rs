@@ -230,9 +230,7 @@ fn draw(ui: &mut Ui, toast: &Toast) -> Drawn {
     let body = painter.layout(toast.text.clone(), text::font(ui, "sm"), body_color, text_w);
     let title_h = title.as_ref().map_or(0., |galley| galley.size().y + SPACE.xxs);
     let text_h = title_h + body.size().y;
-    let content_h = text_h
-        .max(CLOSE)
-        .max(if action.is_some() { BUTTON_H } else { 0. });
+    let content_h = text_h.max(CLOSE).max(if action.is_some() { BUTTON_H } else { 0. });
     let (rect, _) = ui.allocate_exact_size(vec2(WIDTH, content_h + 2. * PAD), Sense::hover());
     // Text shorter than the buttons centres on them, like the buttons on the toast.
     let text_top = rect.top() + PAD + (content_h - text_h) / 2.;
