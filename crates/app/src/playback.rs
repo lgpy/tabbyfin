@@ -288,13 +288,17 @@ impl NowPlaying {
         if self.next.is_none() || self.next_cancelled || self.loading {
             return false;
         }
+        self.up_next_from().is_some_and(|from| self.position >= from)
+    }
+
+    /// Where the up-next card comes up: the credits' start, or a little before the end.
+    pub fn up_next_from(&self) -> Option<Duration> {
         let credits = self
             .segments
             .iter()
             .find(|s| s.kind == SegmentKind::Outro)
             .map(|s| s.start);
-        let near_end = self.duration.map(|d| d.saturating_sub(UP_NEXT_BEFORE_END));
-        credits.or(near_end).is_some_and(|from| self.position >= from)
+        credits.or_else(|| self.duration.map(|d| d.saturating_sub(UP_NEXT_BEFORE_END)))
     }
 
     /// The resume point to offer starting over from: shown for the first [`RESUME_PROMPT_FOR`]

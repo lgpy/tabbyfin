@@ -1,6 +1,8 @@
 //! A pill-shaped button that counts something down: its label, and a ring at the right end that
 //! closes round a mark as the time runs out. The player's skip button is one, so the ring says
-//! how long is left to skip. It takes no keyboard focus, as the player's keys are `keys.rs`'s.
+//! how long is left to skip, and so is the up-next card's *Play now* while autoplay counts down
+//! (without autoplay it keeps its place for the ring but draws only the mark). It takes no
+//! keyboard focus, as the player's keys are `keys.rs`'s.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
@@ -34,8 +36,9 @@ pub struct Colours {
     pub track: Color32,
 }
 
-/// Adds the pill to `ui`, with `fraction` of its ring closed, from the top clockwise.
-pub fn show(ui: &mut Ui, label: &str, icon: MaterialIcon, fraction: f32, colours: Colours) -> Response {
+/// Adds the pill to `ui`, with `fraction` of its ring closed, from the top clockwise, or with
+/// no ring for `None`.
+pub fn show(ui: &mut Ui, label: &str, icon: MaterialIcon, fraction: Option<f32>, colours: Colours) -> Response {
     let font = text::font(ui, "base");
     let galley = ui.painter().layout_no_wrap(label.to_owned(), font, colours.ink);
     let width = PAD_LEFT + galley.size().x + GAP + 2. * RING_RADIUS + RING_WIDTH + PAD_RIGHT;
@@ -53,7 +56,7 @@ pub fn show(ui: &mut Ui, label: &str, icon: MaterialIcon, fraction: f32, colours
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
-fn ring(ui: &Ui, rect: Rect, fraction: f32, icon: MaterialIcon, colours: Colours) {
+fn ring(ui: &Ui, rect: Rect, fraction: Option<f32>, icon: MaterialIcon, colours: Colours) {
     let center = pos2(
         rect.right() - PAD_RIGHT - RING_WIDTH / 2. - RING_RADIUS,
         rect.center().y,
@@ -61,11 +64,13 @@ fn ring(ui: &Ui, rect: Rect, fraction: f32, icon: MaterialIcon, colours: Colours
     // The track is a line like the arc rather than a `circle_stroke`, which egui draws outside
     // its radius: the arc, centred on it, would run 1.5 points inside the track.
     let painter = ui.painter();
-    let track = Stroke::new(RING_WIDTH, colours.track);
-    painter.add(Shape::closed_line(arc(center, 1.), track));
-    let fraction = fraction.clamp(0., 1.);
-    if fraction > 0. {
-        painter.add(Shape::line(arc(center, fraction), Stroke::new(RING_WIDTH, colours.ink)));
+    if let Some(fraction) = fraction {
+        let track = Stroke::new(RING_WIDTH, colours.track);
+        painter.add(Shape::closed_line(arc(center, 1.), track));
+        let fraction = fraction.clamp(0., 1.);
+        if fraction > 0. {
+            painter.add(Shape::line(arc(center, fraction), Stroke::new(RING_WIDTH, colours.ink)));
+        }
     }
     round_button::glyph(ui, center, icon, ICON, colours.ink);
 }

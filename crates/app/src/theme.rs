@@ -1371,6 +1371,16 @@ pub mod over_video {
     /// is tinted purple.
     pub const ROW_HOVER: Color32 = TOKENS.muted;
 
+    /// A round button's circle over the video, under the pointer or while its menu is open, and
+    /// a quiet pill's hover: white at 16 %, a lift on dark and bright pictures alike.
+    pub const ROUND_HOVER: Color32 = Color32::from_rgba_premultiplied(41, 41, 41, 41);
+
+    /// A quiet pill's outline: white at 20 %.
+    pub const QUIET_OUTLINE: Color32 = Color32::from_rgba_premultiplied(51, 51, 51, 51);
+
+    /// Under a menu or prompt surface.
+    pub const SHADOW: Color32 = Color32::from_black_alpha(110);
+
     /// Behind the picture, and its letterbox bars.
     pub const BACKDROP: Color32 = Color32::BLACK;
 

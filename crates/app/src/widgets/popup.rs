@@ -428,6 +428,24 @@ pub fn frame(tokens: &theme::Tokens) -> egui::Frame {
         .shadow(theme::popup_shadow(tokens))
 }
 
+/// A popup's frame over the video, `margin` inside: the player's menus and its up-next card. It
+/// keeps the classic dark set (`theme::over_video`) so it stays neutral over the picture, with a
+/// popup's radius and a shadow dark enough to lift it off a dark frame.
+pub fn over_video_frame(margin: i8) -> egui::Frame {
+    let tokens = theme::over_video::TOKENS;
+    egui::Frame::new()
+        .fill(tokens.popover)
+        .stroke(Stroke::new(1., tokens.border))
+        .corner_radius(CornerRadius::same(RADIUS))
+        .inner_margin(egui::Margin::same(margin))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 6],
+            blur: 20,
+            spread: 0,
+            color: theme::over_video::SHADOW,
+        })
+}
+
 fn state_id(id: Id) -> Id {
     id.with("popup_menu_state")
 }

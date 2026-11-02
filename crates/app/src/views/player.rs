@@ -28,8 +28,8 @@
 use std::time::Duration;
 
 use egui::{
-    Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Id, Layout, Margin, Rect, RectAlign, Response, RichText,
-    Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, accesskit::Role, pos2, vec2,
+    Align, Align2, Color32, CornerRadius, CursorIcon, Id, Layout, Rect, RectAlign, Response, RichText, Sense, Stroke,
+    StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, accesskit::Role, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -50,14 +50,18 @@ use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
 use crate::widgets::badge;
+use crate::widgets::button::Focus;
 use crate::widgets::countdown_pill;
+use crate::widgets::label;
 use crate::widgets::mascot;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
+use crate::widgets::prompt;
+use crate::widgets::round_button::{self, RoundButton};
 use crate::widgets::segmented;
 use crate::widgets::select;
 use crate::widgets::stepper::{self, Step};
 use crate::widgets::tabs;
-use crate::widgets::text::{card_text, timestamp};
+use crate::widgets::text::{card_text, episode_label, timestamp};
 use crate::widgets::video::Video;
 
 /// Seconds per seek key press (and remote rewind or fast-forward).
@@ -94,7 +98,7 @@ const BOTTOM_BAR_H: f32 = 32. + SEEK_H + 8. + PLAY_CONTROL + PADDING;
 /// A control's square, and play/pause's larger one; icons are this share of a side.
 const CONTROL: f32 = 40.;
 const PLAY_CONTROL: f32 = 48.;
-const CONTROL_ICON: f32 = 0.52;
+const CONTROL_ICON: f32 = 0.55;
 /// The volume slider's width, and the row it sits in (a slider's 24-point track).
 const VOLUME_W: f32 = 96.;
 const VOLUME_H: f32 = 24.;
@@ -110,10 +114,15 @@ const PROMPT_MARGIN: f32 = 24.;
 const PROMPT_ABOVE_CONTROLS: f32 = 120.;
 const PROMPT_AT_THE_EDGE: f32 = 32.;
 const UP_NEXT_W: f32 = 320.;
+const UP_NEXT_PAD: f32 = 16.;
 /// A chapter row's thumbnail, and the chapters menu's width and scrolling height.
 const CHAPTER_THUMB_W: f32 = 128.;
 const CHAPTER_THUMB_H: f32 = 72.;
 const CHAPTERS_W: f32 = 340.;
+/// The room round the chapters' rows inside their menu, as a `PopupMenu`'s, so a row's radius is
+/// concentric with the menu's.
+const CHAPTERS_PAD: f32 = 6.;
+const CHAPTER_ROW_RADIUS: u8 = 10;
 const CHAPTERS_MAX_H: f32 = 420.;
 const SETTINGS_W: f32 = 340.;
 /// How many rows of a settings tab's track list show before it scrolls.
@@ -309,7 +318,7 @@ impl PlayerPage {
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                if control_button(ui, ICON_ARROW_BACK, "Back (Esc)").clicked() {
+                if control(ICON_ARROW_BACK, CONTROL, "Back (Esc)").show(ui).clicked() {
                     self.exit(cx);
                 }
                 ui.label("Starting playback…");
@@ -637,12 +646,22 @@ impl PlayerPage {
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                if control_button(ui, ICON_ARROW_BACK, "Back (Esc)").clicked() {
+                if control(ICON_ARROW_BACK, CONTROL, "Back (Esc)").show(ui).clicked() {
                     self.exit(cx);
                 }
                 let title_w = (ui.available_width() - badge_w).max(0.);
                 ui.allocate_ui_with_layout(vec2(title_w, TOP_BAR_H), Layout::left_to_right(Align::Center), |ui| {
-                    ui.add(egui::Label::new(RichText::new(&view.title).heading()).truncate());
+                    ui.spacing_mut().item_spacing.x = 10.;
+                    let title = RichText::new(&view.title)
+                        .font(theme::text::font(ui, "lg"))
+                        .color(over_video::FOREGROUND);
+                    ui.add(egui::Label::new(title).truncate().selectable(false));
+                    if let Some(aside) = &view.title_aside {
+                        let aside = RichText::new(aside)
+                            .font(theme::text::font(ui, "sm"))
+                            .color(over_video::MUTED_FOREGROUND);
+                        ui.add(egui::Label::new(aside).truncate().selectable(false));
+                    }
                 });
                 for name in &badges {
                     label_badge(ui, name);
@@ -672,22 +691,28 @@ impl PlayerPage {
                 ui.spacing_mut().item_spacing.x = GAP;
                 let tip = if view.paused { "Play (Space)" } else { "Pause (Space)" };
                 let icon = if view.paused { ICON_PLAY_ARROW } else { ICON_PAUSE };
-                if sized_control(ui, icon, PLAY_CONTROL, tip, false).clicked() {
+                if control(icon, PLAY_CONTROL, tip).show(ui).clicked() {
                     cx.services.control(UiCommand::TogglePause);
                     self.show_controls();
                 }
-                if control_button(ui, ICON_FAST_REWIND, "Back 10 s (Left)").clicked() {
+                if control(ICON_FAST_REWIND, CONTROL, "Back 10 s (Left)")
+                    .show(ui)
+                    .clicked()
+                {
                     cx.services.control(UiCommand::SeekBy(-SEEK_STEP));
                     self.show_controls();
                 }
-                if control_button(ui, ICON_FAST_FORWARD, "Forward 10 s (Right)").clicked() {
+                if control(ICON_FAST_FORWARD, CONTROL, "Forward 10 s (Right)")
+                    .show(ui)
+                    .clicked()
+                {
                     cx.services.control(UiCommand::SeekBy(SEEK_STEP));
                     self.show_controls();
                 }
                 let muted = view.muted || view.volume == 0.;
                 let icon = if muted { ICON_VOLUME_OFF } else { ICON_VOLUME_UP };
                 let tip = if muted { "Unmute (M)" } else { "Mute (M)" };
-                if control_button(ui, icon, tip).clicked() {
+                if control(icon, CONTROL, tip).show(ui).clicked() {
                     cx.services.control(UiCommand::ToggleMute);
                     self.show_controls();
                 }
@@ -695,7 +720,7 @@ impl PlayerPage {
                 // `main`'s `ml_2` on the clock, on top of the bar's gap.
                 ui.add_space(8.);
                 let clock = ui.add(
-                    egui::Label::new(RichText::new(&view.time).small())
+                    egui::Label::new(RichText::new(&view.time).font(theme::text::font(ui, "sm")))
                         .sense(Sense::CLICK)
                         .selectable(false),
                 );
@@ -730,31 +755,25 @@ impl PlayerPage {
                 } else {
                     "Fullscreen (F)"
                 };
-                if control_button(ui, icon, tip).clicked() {
+                if control(icon, CONTROL, tip).show(ui).clicked() {
                     toggle_fullscreen(ui.ctx());
                 }
                 let open = egui::Popup::is_id_open(ui.ctx(), settings_id());
                 let lit = open.then(|| view.lit_button(self.settings_tab));
                 let is_lit = |button| lit == Some(button);
-                let settings = sized_control(
-                    ui,
-                    ICON_SETTINGS,
-                    CONTROL,
-                    "Playback settings",
-                    is_lit(SettingsTab::General),
-                );
+                let settings = menu_button(ui, ICON_SETTINGS, "Playback settings", is_lit(SettingsTab::General));
                 if settings.clicked() {
                     pressed = Some(SettingsTab::General);
                 }
                 settings_button = Some(settings);
                 let subtitles = SettingsTab::Subtitles;
                 if view.subtitles_button
-                    && sized_control(ui, ICON_CLOSED_CAPTION, CONTROL, "Subtitles", is_lit(subtitles)).clicked()
+                    && menu_button(ui, ICON_CLOSED_CAPTION, "Subtitles", is_lit(subtitles)).clicked()
                 {
                     pressed = Some(subtitles);
                 }
                 let audio = SettingsTab::Audio;
-                if view.audio_button && sized_control(ui, ICON_AUDIOTRACK, CONTROL, "Audio", is_lit(audio)).clicked() {
+                if view.audio_button && menu_button(ui, ICON_AUDIOTRACK, "Audio", is_lit(audio)).clicked() {
                     pressed = Some(audio);
                 }
                 if let Some(button) = pressed {
@@ -762,7 +781,7 @@ impl PlayerPage {
                 }
                 if view.chapter_count >= 2 {
                     let open = egui::Popup::is_id_open(ui.ctx(), chapters_id());
-                    let chapters = sized_control(ui, ICON_VIEW_LIST, CONTROL, "Chapters", open);
+                    let chapters = menu_button(ui, ICON_VIEW_LIST, "Chapters", open);
                     if chapters.clicked() {
                         toggle_menu(ui.ctx(), chapters_id());
                     }
@@ -776,12 +795,12 @@ impl PlayerPage {
                     versions_button = Some(picker);
                 }
                 if let Some(tip) = &view.next_tip
-                    && control_button(ui, ICON_SKIP_NEXT, tip).clicked()
+                    && control(ICON_SKIP_NEXT, CONTROL, tip).show(ui).clicked()
                 {
                     cx.services.play_next();
                 }
                 if let Some(tip) = &view.previous_tip
-                    && control_button(ui, ICON_SKIP_PREVIOUS, tip).clicked()
+                    && control(ICON_SKIP_PREVIOUS, CONTROL, tip).show(ui).clicked()
                 {
                     cx.services.play_previous();
                 }
@@ -988,69 +1007,52 @@ impl PlayerPage {
                         segment.start.as_secs_f64(),
                         segment.end.as_secs_f64(),
                     );
-                    let colours = countdown_pill::Colours {
-                        fill: over_video::BRAND,
-                        hover: over_video::BRAND_HOVER,
-                        ink: over_video::BRAND_FOREGROUND,
-                        track: over_video::BRAND_TRACK,
-                    };
+                    let colours = pill_colours();
                     let label = segment.kind.skip_label();
-                    if countdown_pill::show(ui, label, ICON_SKIP_NEXT, fraction, colours).clicked() {
+                    if countdown_pill::show(ui, label, ICON_SKIP_NEXT, Some(fraction), colours).clicked() {
                         cx.services.control(UiCommand::SeekTo(segment.end));
                     }
                 } else if view.show_up_next {
                     self.up_next_card(ui, view, cx);
                 } else if let Some(from) = view.resume {
-                    egui::Frame::new()
-                        .fill(over_video::SURFACE)
-                        .corner_radius(CornerRadius::same(12))
-                        .inner_margin(Margin::same(12))
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing.x = GAP;
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("Resumed from {}", timestamp(from))).small());
-                                if prompt_button(ui, ButtonKind::Primary, Some(ICON_RESTART_ALT), "Start over")
-                                    .clicked()
-                                {
-                                    cx.services.start_over();
-                                }
-                            });
-                        });
+                    let note = format!("Resumed from {}", timestamp(from));
+                    if prompt::note(ui, &note, ICON_RESTART_ALT, "Start over", note_colours()).clicked() {
+                        cx.services.start_over();
+                    }
                 }
             });
     }
 
-    /// What plays next: its name, when it starts (with autoplay), and Play now or Cancel.
+    /// What plays next: its name, Play now (counting down to autoplay with its ring) and Cancel.
     fn up_next_card(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
         let Some(label) = &view.next_label else { return };
-        egui::Frame::new()
-            .fill(over_video::SURFACE)
-            .corner_radius(CornerRadius::same(12))
-            .inner_margin(Margin::same(12))
-            .show(ui, |ui| {
-                // `main`'s `w(320)` is the card's width with its padding included.
-                ui.set_width(UP_NEXT_W - 2. * 12.);
-                ui.spacing_mut().item_spacing = vec2(8., 8.);
-                ui.label(RichText::new("Up next").small().color(over_video::MUTED_FOREGROUND));
-                let name = theme::text::font(ui, "base");
-                ui.add(egui::Label::new(RichText::new(label).font(name)).truncate());
-                if view.autoplay
-                    && let Some(remaining) = view.remaining
-                {
-                    let text = format!("Starts in {} s", remaining.as_secs());
-                    ui.label(RichText::new(text).small().color(over_video::MUTED_FOREGROUND));
+        popup::over_video_frame(UP_NEXT_PAD as i8).show(ui, |ui| {
+            // The card's width with its padding included.
+            ui.set_width(UP_NEXT_W - 2. * UP_NEXT_PAD);
+            ui.spacing_mut().item_spacing = vec2(8., 4.);
+            ui.label(label::overline(ui, "Up next").color(over_video::MUTED_FOREGROUND));
+            let name = RichText::new(label)
+                .font(theme::text::font(ui, "base"))
+                .strong()
+                .color(over_video::FOREGROUND);
+            ui.add(egui::Label::new(name).truncate().selectable(false));
+            ui.add_space(10.);
+            ui.horizontal(|ui| {
+                if countdown_pill::show(ui, "Play now", ICON_PLAY_ARROW, view.autoplay_in, pill_colours()).clicked() {
+                    cx.services.play_next();
                 }
-                ui.horizontal(|ui| {
-                    if prompt_button(ui, ButtonKind::Primary, Some(ICON_PLAY_ARROW), "Play now").clicked() {
-                        cx.services.play_next();
-                    }
-                    if prompt_button(ui, ButtonKind::Ghost, None, "Cancel").clicked()
-                        && let Some(state) = cx.services.playback.now_playing_mut()
-                    {
-                        state.next_cancelled = true;
-                    }
-                });
+                let quiet = prompt::Quiet {
+                    ink: over_video::FOREGROUND,
+                    outline: over_video::QUIET_OUTLINE,
+                    hover: over_video::ROUND_HOVER,
+                };
+                if prompt::quiet(ui, "Cancel", quiet).clicked()
+                    && let Some(state) = cx.services.playback.now_playing_mut()
+                {
+                    state.next_cancelled = true;
+                }
             });
+        });
     }
 
     /// The chapters list: each chapter's image (when the server extracted them), name and start,
@@ -1066,9 +1068,10 @@ impl PlayerPage {
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .width(CHAPTERS_W + 24.)
-            .frame(menu_frame())
+            .frame(popup::over_video_frame(CHAPTERS_PAD as i8))
             .show(|ui| {
-                ui.set_width(CHAPTERS_W);
+                ui.set_width(CHAPTERS_W + 24. - 2. * CHAPTERS_PAD);
+                ui.spacing_mut().item_spacing.y = 2.;
                 egui::ScrollArea::vertical().max_height(CHAPTERS_MAX_H).show(ui, |ui| {
                     for chapter in &menu.rows {
                         let request = chapter.image_tag.as_ref().map(|tag| ImageRequest {
@@ -1076,10 +1079,10 @@ impl PlayerPage {
                             ..ImageRequest::new(&menu.item_id, ImageType::Chapter, Some(tag.clone()))
                                 .fill_width((CHAPTER_THUMB_W * 2.) as u32)
                         });
+                        // A menu row's geometry: 8 round the thumbnail, radius 10.
                         let (rect, row) =
-                            ui.allocate_exact_size(vec2(ui.available_width(), CHAPTER_THUMB_H + 8.), Sense::CLICK);
+                            ui.allocate_exact_size(vec2(ui.available_width(), CHAPTER_THUMB_H + 16.), Sense::CLICK);
                         let current = menu.current == Some(chapter.index);
-                        let tokens = over_video::TOKENS;
                         let name = chapter
                             .name
                             .clone()
@@ -1090,32 +1093,36 @@ impl PlayerPage {
                             WidgetInfo::selected(Role::Button, ui.is_enabled(), current, format!("{name}, {start}"))
                         });
                         // The current chapter is tinted with the player's lilac, its name in it.
+                        let radius = CornerRadius::same(CHAPTER_ROW_RADIUS);
                         if current {
-                            ui.painter().rect_filled(
-                                rect,
-                                CornerRadius::same(8),
-                                over_video::BRAND.gamma_multiply(0.16),
-                            );
+                            ui.painter()
+                                .rect_filled(rect, radius, over_video::BRAND.gamma_multiply(0.16));
                         } else if row.hovered() {
-                            // `main`'s chapter row hovered with the muted fill.
-                            ui.painter().rect_filled(rect, CornerRadius::same(8), tokens.muted);
+                            ui.painter().rect_filled(rect, radius, over_video::ROW_HOVER);
                         }
                         let image =
-                            Rect::from_min_size(rect.min + vec2(4., 4.), vec2(CHAPTER_THUMB_W, CHAPTER_THUMB_H));
-                        crate::widgets::image::show(ui, &mut cx.services.images, image, request.as_ref(), None, 4);
+                            Rect::from_min_size(rect.min + vec2(8., 8.), vec2(CHAPTER_THUMB_W, CHAPTER_THUMB_H));
+                        crate::widgets::image::show(ui, &mut cx.services.images, image, request.as_ref(), None, 6);
+                        // The name over its start, the pair centred on the thumbnail.
+                        let text_x = image.right() + 14.;
+                        let colour = if current {
+                            over_video::BRAND
+                        } else {
+                            over_video::FOREGROUND
+                        };
                         ui.painter().text(
-                            pos2(image.right() + 12., image.top() + 2.),
-                            Align2::LEFT_TOP,
+                            pos2(text_x, image.center().y - 2.),
+                            Align2::LEFT_BOTTOM,
                             name,
-                            theme::text::font(ui, "sm"),
-                            if current { over_video::BRAND } else { tokens.foreground },
+                            theme::text::font(ui, "base"),
+                            colour,
                         );
                         ui.painter().text(
-                            pos2(image.right() + 12., image.top() + 24.),
+                            pos2(text_x, image.center().y + 2.),
                             Align2::LEFT_TOP,
                             start,
-                            theme::text::font(ui, "xs"),
-                            tokens.muted_foreground,
+                            theme::text::font(ui, "sm"),
+                            over_video::MUTED_FOREGROUND,
                         );
                         if row.clicked() {
                             chosen = Some(chapter.start);
@@ -1156,7 +1163,7 @@ impl PlayerPage {
             .gap(4.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .width(SETTINGS_W + 24.)
-            .frame(menu_frame())
+            .frame(popup::over_video_frame(12))
             .show(|ui| {
                 ui.set_width(SETTINGS_W);
                 if let Some(choice) = settings_tabs(ui, tabs, tab) {
@@ -1310,6 +1317,8 @@ impl Keys {
 /// the same time. The heavy parts of a menu's data are read only while it's open.
 struct View {
     title: String,
+    /// Beside the title, muted: an episode's series and number.
+    title_aside: Option<String>,
     paused: bool,
     muted: bool,
     loading: bool,
@@ -1333,9 +1342,9 @@ struct View {
     skippable: Option<Segment>,
     show_up_next: bool,
     next_label: Option<String>,
-    /// How long the item has left, for the up-next card's countdown.
-    remaining: Option<Duration>,
-    autoplay: bool,
+    /// How far the up-next card is through its countdown to autoplay, for *Play now*'s ring;
+    /// `None` without autoplay.
+    autoplay_in: Option<f32>,
     resume: Option<Duration>,
     chapters: Option<ChaptersMenu>,
     settings: Option<SettingsMenu>,
@@ -1371,12 +1380,14 @@ struct Menus {
 
 impl View {
     fn read(state: &NowPlaying, menus: Menus, show_remaining: bool) -> Self {
-        let (name, subtitle) = card_text(&state.item);
-        let title = if state.item.kind == BaseItemKind::Episode {
-            format!("{name} · {subtitle}")
-        } else {
-            name
-        };
+        let title = state.item.name.clone();
+        let title_aside = (state.item.kind == BaseItemKind::Episode).then(|| {
+            let (series, _) = card_text(&state.item);
+            match episode_label(&state.item) {
+                label if label.is_empty() => series,
+                label => format!("{series} · {label}"),
+            }
+        });
         let mut time = match state.duration {
             Some(duration) if show_remaining => format!(
                 "-{} / {}",
@@ -1418,6 +1429,7 @@ impl View {
         });
         Self {
             title,
+            title_aside,
             paused: state.paused,
             muted: state.muted,
             loading: state.loading,
@@ -1444,8 +1456,13 @@ impl View {
             skippable: state.skippable(),
             show_up_next: state.show_up_next(),
             next_label,
-            remaining: state.duration.map(|duration| duration.saturating_sub(state.position)),
-            autoplay: state.autoplay,
+            autoplay_in: state
+                .autoplay
+                .then(|| state.up_next_from().zip(state.duration))
+                .flatten()
+                .map(|(from, end)| {
+                    countdown_pill::progress(state.position.as_secs_f64(), from.as_secs_f64(), end.as_secs_f64())
+                }),
             resume: state.resume_prompt(),
             chapters: menus.chapters.then(|| ChaptersMenu {
                 item_id: state.item.id.clone(),
@@ -1604,36 +1621,36 @@ fn toggle_fullscreen(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen(ctx)));
 }
 
-/// A control-bar button: an icon in a square, filled with the accent while its menu is open and
-/// half of it under the pointer, as `main`'s ghost button is. Not focusable: egui's focus would
-/// take every key from the player (`keys.rs`), as U8's dialogs avoid for their buttons. Its
-/// AccessKit name is the tooltip's text without the key hint, so a screen reader reads "Back"
-/// rather than "Back (Esc)".
-fn sized_control(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, tooltip: &str, active: bool) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::CLICK);
+/// The control bars' buttons over the video: white icons with no frame at rest, a white circle
+/// at 16 % under the pointer, and while a button's menu is open the circle stays with its icon in
+/// `BRAND` (as SyncPlay's button is while in a group). White rather than a muted ink, so the
+/// icons read on bright pictures.
+const CONTROLS: round_button::Colours = round_button::Colours {
+    circle: over_video::ROUND_HOVER,
+    ink: over_video::FOREGROUND,
+    ink_hover: over_video::FOREGROUND,
+    on: over_video::BRAND,
+};
+
+/// A control-bar button, `size` across. Not focusable: egui's focus would take every key from
+/// the player (`keys.rs`). Its AccessKit name is the tooltip's text without the key hint, so a
+/// screen reader reads "Back" rather than "Back (Esc)".
+fn control(icon: MaterialIcon, size: f32, tooltip: &str) -> RoundButton<'_> {
     let name = tooltip.split(" (").next().unwrap_or(tooltip);
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), name));
-    let tokens = over_video::TOKENS;
-    let fill = if active {
-        tokens.accent
-    } else if response.hovered() {
-        ghost_hover()
-    } else {
-        Color32::TRANSPARENT
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(tokens.radius), fill);
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        icon.codepoint,
-        FontId::new(size * CONTROL_ICON, icon.font_family()),
-        over_video::FOREGROUND,
-    );
-    response.on_hover_text(tooltip)
+    RoundButton::icon(icon, name)
+        .size(size, (size * CONTROL_ICON).round())
+        .tooltip(tooltip)
+        .colours(CONTROLS)
+        .focus(Focus::Skip)
 }
 
-/// `main`'s ghost button under the pointer: the classic accent at half strength in the dark theme,
-/// which is what the player draws in either theme.
+/// A button that opens a menu, lit while it's `open`.
+fn menu_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str, open: bool) -> Response {
+    control(icon, CONTROL, tooltip).on(open).show(ui)
+}
+
+/// `main`'s ghost button under the pointer: the classic accent at half strength in the dark
+/// theme, which the settings menu's tabs hover with.
 fn ghost_hover() -> Color32 {
     let [r, g, b, _] = over_video::TOKENS.accent.to_srgba_unmultiplied();
     Color32::from_rgba_unmultiplied(r, g, b, 128)
@@ -1646,101 +1663,30 @@ fn slider_thumb(painter: &egui::Painter, center: egui::Pos2) {
     painter.circle_filled(center, THUMB_R - THUMB_RING, over_video::THUMB);
 }
 
-fn control_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str) -> Response {
-    sized_control(ui, icon, CONTROL, tooltip, false)
+/// A prompt's countdown pill (Skip intro, Play now): `BRAND` with the dark ink on it.
+fn pill_colours() -> countdown_pill::Colours {
+    countdown_pill::Colours {
+        fill: over_video::BRAND,
+        hover: over_video::BRAND_HOVER,
+        ink: over_video::BRAND_FOREGROUND,
+        track: over_video::BRAND_TRACK,
+    }
 }
 
-/// How a prompt's button is painted, as `main`'s variants were: a primary one in the player's lilac
-/// (Play now, Start over) and a ghost one (Cancel).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ButtonKind {
-    Primary,
-    Ghost,
-}
-
-/// A button of the player's prompt, as `main` drew one: 32 points high with `main`'s padding,
-/// radius and 16-point icon. Drawn by the page rather than as an
-/// `egui::Button` for those measurements, and so it can't take the keyboard.
-fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>, label: &str) -> Response {
-    let tokens = over_video::TOKENS;
-    let (padding, gap, text, icon_size) = (10., 8., theme::text::font(ui, "sm"), 16.);
-    let (fg, fill, stroke, hover, pressed) = match kind {
-        ButtonKind::Primary => (
-            over_video::BRAND_FOREGROUND,
-            over_video::BRAND,
-            over_video::BRAND,
-            over_video::BRAND_HOVER,
-            over_video::BRAND_HOVER,
-        ),
-        ButtonKind::Ghost => (
-            tokens.foreground,
-            Color32::TRANSPARENT,
-            Color32::TRANSPARENT,
-            ghost_hover(),
-            tokens.accent,
-        ),
-    };
-    let galley = ui.painter().layout_no_wrap(label.to_owned(), text, fg);
-    let mut width = galley.size().x + 2. * padding;
-    if icon.is_some() {
-        width += icon_size + gap;
+/// The resume prompt's pill: the menus' surface, its *Start over* in `BRAND`.
+fn note_colours() -> prompt::Note {
+    prompt::Note {
+        frame: popup::over_video_frame(0),
+        ink: over_video::FOREGROUND,
+        action: over_video::BRAND,
+        action_hover: over_video::BRAND_HOVER,
+        action_ink: over_video::BRAND_FOREGROUND,
     }
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 32.), Sense::CLICK);
-    let fill = if response.is_pointer_button_down_on() {
-        pressed
-    } else if response.hovered() {
-        hover
-    } else {
-        fill
-    };
-    let painter = ui.painter();
-    painter.rect(
-        rect,
-        CornerRadius::same(tokens.radius),
-        fill,
-        if stroke == Color32::TRANSPARENT {
-            Stroke::NONE
-        } else {
-            Stroke::new(1., stroke)
-        },
-        StrokeKind::Inside,
-    );
-    let mut left = rect.left() + padding;
-    if let Some(icon) = icon {
-        painter.text(
-            pos2(left, rect.center().y),
-            Align2::LEFT_CENTER,
-            icon.codepoint,
-            FontId::new(icon_size, icon.font_family()),
-            fg,
-        );
-        left += icon_size + gap;
-    }
-    painter.galley(pos2(left, rect.center().y - galley.size().y / 2.), galley, fg);
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), label));
-    response
 }
 
 /// A small label in the player's bars (SyncPlay, Transcoding, the speed).
 fn label_badge(ui: &mut egui::Ui, text: &str) {
     badge::label(ui, text, over_video::SURFACE_SUBTLE, over_video::MUTED_FOREGROUND);
-}
-
-/// The frame a player menu draws in: `main`'s popover surface (its `popover_style`), with
-/// its 12-point inset and its soft shadow, rather than egui's thinner popup frame.
-fn menu_frame() -> egui::Frame {
-    let tokens = over_video::TOKENS;
-    egui::Frame::new()
-        .fill(tokens.popover)
-        .stroke(Stroke::new(1., tokens.border))
-        .corner_radius(CornerRadius::same(popup::RADIUS))
-        .inner_margin(Margin::same(12))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 6],
-            blur: 20,
-            spread: 0,
-            color: Color32::from_black_alpha(110),
-        })
 }
 
 /// The settings menu's tabs. Returns the tab clicked.
@@ -1900,8 +1846,8 @@ mod tests {
 
     use super::{
         CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, SETTINGS_W, SettingsTab,
-        VOLUME_STEP, delay_stepper, delay_text, lit_button, menu_frame, press_settings, scroll_steps, settings_id,
-        settings_tabs, sized_control, speed_group, stepped_delay, time_at, toggle_menu, wheel_notches,
+        VOLUME_STEP, control, delay_stepper, delay_text, lit_button, menu_button, press_settings, scroll_steps,
+        settings_id, settings_tabs, speed_group, stepped_delay, time_at, toggle_menu, wheel_notches,
     };
     use crate::widgets::popup::{self, Entry};
 
@@ -1940,7 +1886,7 @@ mod tests {
                     let mut anchor = None;
                     ui.horizontal(|ui| {
                         for (button, name) in [(SettingsTab::Audio, "Audio button"), (SettingsTab::General, "Gear")] {
-                            let response = sized_control(ui, ICON_SETTINGS, CONTROL, name, false);
+                            let response = control(ICON_SETTINGS, CONTROL, name).show(ui);
                             if response.clicked() {
                                 pressed = Some(button);
                             }
@@ -2004,7 +1950,7 @@ mod tests {
             })
             .build_ui_state(
                 |ui, menu: &mut Menu| {
-                    let trigger = sized_control(ui, ICON_SETTINGS, CONTROL, "Playback settings", true);
+                    let trigger = menu_button(ui, ICON_SETTINGS, "Playback settings", true);
                     if trigger.clicked() {
                         // As the player's own triggers do: a popup remembered by id is toggled
                         // by the page rather than by `Popup::menu`'s click handling.
@@ -2015,7 +1961,7 @@ mod tests {
                         .open_memory(None::<egui::SetOpenCommand>)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .width(SETTINGS_W + 24.)
-                        .frame(menu_frame())
+                        .frame(popup::over_video_frame(12))
                         .show(|ui| {
                             ui.set_width(SETTINGS_W);
                             if let Some(choice) = settings_tabs(ui, &SettingsTab::ALL, menu.tab) {

@@ -3,6 +3,7 @@
 //!
 //! No frame at rest; under the pointer an `inset_hover` circle comes up behind it and the icon
 //! goes from `ink_muted` to `ink`. A toggle that is on keeps the circle with its icon in `brand`.
+//! Over the video the caller gives its own colours ([`RoundButton::colours`]).
 
 use egui::accesskit::Role;
 use egui::{CursorIcon, FontId, Id, Pos2, Rect, Response, Sense, Ui, Vec2, WidgetInfo};
@@ -21,10 +22,23 @@ enum Content<'a> {
     Avatar(&'a str),
 }
 
+/// A button's colours when they aren't the theme's: the player's, over the video.
+#[derive(Clone, Copy)]
+pub struct Colours {
+    /// The circle under the pointer, and kept while on.
+    pub circle: egui::Color32,
+    pub ink: egui::Color32,
+    pub ink_hover: egui::Color32,
+    /// The icon while on.
+    pub on: egui::Color32,
+}
+
 pub struct RoundButton<'a> {
     content: Content<'a>,
-    /// What a screen reader says, and the tooltip.
+    /// What a screen reader says, and the tooltip unless it has its own.
     label: &'a str,
+    tooltip: Option<&'a str>,
+    colours: Option<Colours>,
     size: f32,
     icon_size: f32,
     /// `Some` for a toggle: whether it's on.
@@ -49,6 +63,8 @@ impl<'a> RoundButton<'a> {
         Self {
             content,
             label,
+            tooltip: None,
+            colours: None,
             size: 40.,
             icon_size: 24.,
             on: None,
@@ -84,6 +100,18 @@ impl<'a> RoundButton<'a> {
         self
     }
 
+    /// A tooltip other than the label, such as one with the button's key ("Back (Esc)").
+    pub fn tooltip(mut self, tooltip: &'a str) -> Self {
+        self.tooltip = Some(tooltip);
+        self
+    }
+
+    /// Paints it in `colours` rather than the theme's.
+    pub fn colours(mut self, colours: Colours) -> Self {
+        self.colours = Some(colours);
+        self
+    }
+
     pub fn focus(mut self, focus: Focus) -> Self {
         self.focus = focus;
         self
@@ -113,6 +141,12 @@ impl<'a> RoundButton<'a> {
 
     fn paint(self, ui: &Ui, rect: Rect, response: Response) -> Response {
         let tokens = theme::tokens_of(ui);
+        let colours = self.colours.unwrap_or(Colours {
+            circle: tokens.inset_hover,
+            ink: tokens.ink_muted,
+            ink_hover: tokens.ink,
+            on: tokens.brand,
+        });
         let (label, enabled) = (self.label, self.enabled);
         match self.on {
             Some(on) => response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, on, label)),
@@ -122,7 +156,7 @@ impl<'a> RoundButton<'a> {
         let hovered = enabled && response.hovered();
         let painter = ui.painter();
         if hovered || on {
-            painter.circle_filled(rect.center(), self.size / 2., tokens.inset_hover);
+            painter.circle_filled(rect.center(), self.size / 2., colours.circle);
         }
         // The focus by id, not `Response::has_focus`, which is false while the window lacks the
         // OS's focus (`docs/DESIGN.md`, *Behaviour*).
@@ -130,13 +164,13 @@ impl<'a> RoundButton<'a> {
         let ring = match self.content {
             Content::Icon(icon) => {
                 let color = if !enabled {
-                    tokens.ink_muted.gamma_multiply(0.45)
+                    colours.ink.gamma_multiply(0.45)
                 } else if on {
-                    tokens.brand
+                    colours.on
                 } else if hovered {
-                    tokens.ink
+                    colours.ink_hover
                 } else {
-                    tokens.ink_muted
+                    colours.ink
                 };
                 glyph(ui, rect.center(), icon, self.icon_size, color);
                 rect
@@ -155,7 +189,7 @@ impl<'a> RoundButton<'a> {
         }
         response
             .on_hover_cursor(CursorIcon::PointingHand)
-            .on_hover_text(self.label)
+            .on_hover_text(self.tooltip.unwrap_or(self.label))
     }
 }
 
