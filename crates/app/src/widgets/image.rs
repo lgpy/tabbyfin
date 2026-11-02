@@ -34,16 +34,22 @@ pub fn show(
     radius: u8,
 ) {
     ui.painter()
-        .extend(shapes(ui, cache, rect, request, blurhash_from, radius, None));
+        .extend(shapes(ui, cache, rect, request, blurhash_from, radius, None, 0.5));
 }
+
+/// How far down a banner taller than its band is cut, as a share of what doesn't fit: 0 keeps
+/// its top edge, 0.5 cuts evenly. Backdrops mostly have their subject in the top third, and on a
+/// wide window a 16:9 one is about twice the band's height, so an even cut loses the faces;
+/// keeping the very top shows sky above them. Picked from the user's own library by a mockup
+/// (IT: Welcome to Derry, Frieren, Amélie, The Usual Suspects), 2026-11-02.
+const BANNER_ANCHOR: f32 = 0.15;
 
 /// A banner's shapes, for the caller to paint where it wants them (the item page's backdrop,
 /// under the top bar: `views::UnderBar`). Square, and asking the server for a fixed `width`
 /// rather than twice the drawn width: a banner that fills the window would otherwise be fetched
 /// (and kept in the cache) again at every window size, maximised state or zoom level. It is
-/// still scaled to `rect` and cropped around its middle, like a card: a picture taller than the
-/// band loses as much of its top as of its bottom, so the band shows its middle rather than
-/// its sky.
+/// still scaled to `rect`, and a picture taller than the band is cut a little below its top
+/// ([`BANNER_ANCHOR`]).
 pub fn banner(
     ui: &Ui,
     cache: &mut ImageCache,
@@ -52,7 +58,7 @@ pub fn banner(
     blurhash_from: Option<&BaseItemDto>,
     width: u32,
 ) -> Vec<Shape> {
-    shapes(ui, cache, rect, request, blurhash_from, 0, Some(width))
+    shapes(ui, cache, rect, request, blurhash_from, 0, Some(width), BANNER_ANCHOR)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -64,6 +70,7 @@ fn shapes(
     blurhash_from: Option<&BaseItemDto>,
     radius: u8,
     width: Option<u32>,
+    anchor: f32,
 ) -> Vec<Shape> {
     let radius = CornerRadius::same(radius);
     // What shows before the blurhash arrives, or when there's no image at all: `main`'s `muted`
@@ -85,7 +92,7 @@ fn shapes(
         Some(_) => None,
     };
     let picture = |texture: &egui::TextureHandle, tint: Color32| {
-        let uv = cover_uv(texture.size_vec2(), rect.size());
+        let uv = cover_uv(texture.size_vec2(), rect.size(), anchor);
         Shape::from(RectShape::filled(rect, radius, tint).with_texture(texture.id(), uv))
     };
     if let Some(texture) = &image {
@@ -111,12 +118,14 @@ pub fn dim(ui: &Ui, rect: Rect, radius: u8) {
 }
 
 /// The part of a texture to show so it fills `target` without stretching it: the widest or
-/// tallest band of the texture that has `target`'s aspect ratio, centred.
-fn cover_uv(image: Vec2, target: Vec2) -> Rect {
+/// tallest band of the texture that has `target`'s aspect ratio, centred across, and `anchor`
+/// of the way down what's cut off its height (0 keeps the top edge, 0.5 cuts evenly).
+fn cover_uv(image: Vec2, target: Vec2, anchor: f32) -> Rect {
     let scale = (target.x / image.x).max(target.y / image.y);
     let shown = target / scale;
     let size = Vec2::new((shown.x / image.x).clamp(0., 1.), (shown.y / image.y).clamp(0., 1.));
-    Rect::from_center_size(egui::pos2(0.5, 0.5), size)
+    let top = (1. - size.y) * anchor;
+    Rect::from_min_size(egui::pos2((1. - size.x) / 2., top), size)
 }
 
 #[cfg(test)]
@@ -126,7 +135,7 @@ mod tests {
     use super::cover_uv;
 
     fn uv(size: [f32; 2], target: [f32; 2]) -> Rect {
-        cover_uv(Vec2::from(size), Vec2::from(target))
+        cover_uv(Vec2::from(size), Vec2::from(target), 0.5)
     }
 
     #[test]
@@ -140,14 +149,21 @@ mod tests {
     }
 
     #[test]
-    fn a_banner_shows_the_middle_of_a_taller_picture() {
-        // A 16:9 backdrop in a wide, short band: the full width, and as much cut off the top as
-        // off the bottom.
-        let banner = cover_uv(Vec2::new(1280., 720.), Vec2::new(1280., 400.));
+    fn a_banner_is_cut_a_little_below_its_top() {
+        // A 16:9 backdrop in a wide, short band: the full width, and `BANNER_ANCHOR` of what
+        // doesn't fit cut off the top, the rest off the bottom.
+        let banner = cover_uv(Vec2::new(1280., 720.), Vec2::new(1280., 400.), super::BANNER_ANCHOR);
         assert!((banner.width() - 1.).abs() < 1e-6);
         assert!((banner.height() - 400. / 720.).abs() < 1e-6);
-        assert!((banner.top() - (1. - banner.bottom())).abs() < 1e-6);
-        assert!(banner.top() > 0.);
+        let cut = 1. - banner.height();
+        assert!((banner.top() - cut * super::BANNER_ANCHOR).abs() < 1e-6);
+        assert!((1. - banner.bottom() - cut * (1. - super::BANNER_ANCHOR)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_card_is_cut_evenly() {
+        let card = uv([400., 600.], [260., 146.]);
+        assert!((card.top() - (1. - card.bottom())).abs() < 1e-6);
     }
 
     #[test]
