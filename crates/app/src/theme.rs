@@ -1361,6 +1361,13 @@ pub mod over_video {
 
     pub const BRAND_HOVER: Color32 = Tokens::DARK.brand_hover;
 
+    /// The skip button: the mascot's pink, the one warm thing over the controls, with the
+    /// avatars' dark ink on it, and that ink at 20 % for the ring's open part.
+    pub const SKIP: Color32 = Tokens::DARK.avatars[2];
+    pub const SKIP_HOVER: Color32 = Color32::from_rgb(0xf4, 0xb3, 0xc5);
+    pub const SKIP_FOREGROUND: Color32 = Tokens::DARK.avatar_foreground;
+    pub const SKIP_TRACK: Color32 = Color32::from_rgba_premultiplied(6, 4, 10, 51);
+
     /// Text and icons on [`BRAND`].
     pub const BRAND_FOREGROUND: Color32 = Tokens::DARK.brand_foreground;
 

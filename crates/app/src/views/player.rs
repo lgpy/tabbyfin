@@ -33,12 +33,12 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_FAST_FORWARD, ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE,
-    ICON_PLAY_ARROW, ICON_RESTART_ALT, ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST,
-    ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CLOSED_CAPTION, ICON_FAST_FORWARD, ICON_FAST_REWIND, ICON_FULLSCREEN,
+    ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT, ICON_SETTINGS, ICON_SKIP_NEXT,
+    ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
-use jellyfin::models::{BaseItemKind, ImageType};
+use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
 
 use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
@@ -50,6 +50,7 @@ use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
 use crate::widgets::badge;
+use crate::widgets::countdown_pill;
 use crate::widgets::label;
 use crate::widgets::mascot;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
@@ -186,7 +187,7 @@ impl PlayerPage {
             prompt_in: None,
             hide_controls: task::Deadline::default(),
             menu_open: false,
-            settings_tab: SettingsTab::Audio,
+            settings_tab: SettingsTab::General,
             show_remaining: config.show_remaining_time.unwrap_or(false),
         };
         this.show_controls();
@@ -326,7 +327,7 @@ impl PlayerPage {
         self.auto_skipped = None;
         self.adjusting_volume = false;
         self.paused_before_click = false;
-        self.settings_tab = SettingsTab::Audio;
+        self.settings_tab = SettingsTab::General;
         egui::Popup::close_id(ctx, settings_id());
         egui::Popup::close_id(ctx, chapters_id());
         egui::Popup::close_id(ctx, versions_id());
@@ -708,6 +709,8 @@ impl PlayerPage {
         let mut chapters_button = None;
         let mut settings_button = None;
         let mut versions_button = None;
+        let mut pressed = None;
+        let mut reopen = false;
         ui.scope_builder(
             UiBuilder::new()
                 .max_rect(row)
@@ -729,11 +732,32 @@ impl PlayerPage {
                     toggle_fullscreen(ui.ctx());
                 }
                 let open = egui::Popup::is_id_open(ui.ctx(), settings_id());
-                let settings = sized_control(ui, ICON_SETTINGS, CONTROL, "Playback settings", open);
+                let lit = open.then(|| view.lit_button(self.settings_tab));
+                let is_lit = |button| lit == Some(button);
+                let settings = sized_control(
+                    ui,
+                    ICON_SETTINGS,
+                    CONTROL,
+                    "Playback settings",
+                    is_lit(SettingsTab::General),
+                );
                 if settings.clicked() {
-                    toggle_menu(ui.ctx(), settings_id());
+                    pressed = Some(SettingsTab::General);
                 }
                 settings_button = Some(settings);
+                let subtitles = SettingsTab::Subtitles;
+                if view.subtitles_button
+                    && sized_control(ui, ICON_CLOSED_CAPTION, CONTROL, "Subtitles", is_lit(subtitles)).clicked()
+                {
+                    pressed = Some(subtitles);
+                }
+                let audio = SettingsTab::Audio;
+                if view.audio_button && sized_control(ui, ICON_AUDIOTRACK, CONTROL, "Audio", is_lit(audio)).clicked() {
+                    pressed = Some(audio);
+                }
+                if let Some(button) = pressed {
+                    reopen = press_settings(ui.ctx(), &mut self.settings_tab, button, is_lit(button));
+                }
                 if view.chapter_count >= 2 {
                     let open = egui::Popup::is_id_open(ui.ctx(), chapters_id());
                     let chapters = sized_control(ui, ICON_VIEW_LIST, CONTROL, "Chapters", open);
@@ -770,6 +794,12 @@ impl PlayerPage {
         }
         if let Some(response) = &versions_button {
             self.versions_menu(response, view, cx);
+        }
+        // After the menus: a click on another settings button is a click outside the open menu,
+        // which closes it just above.
+        if reopen {
+            egui::Popup::open_id(ui.ctx(), settings_id());
+            ui.ctx().request_repaint();
         }
     }
 
@@ -951,7 +981,19 @@ impl PlayerPage {
                     ui.set_opacity(alpha);
                 }
                 if let Some(segment) = view.skippable {
-                    if prompt_button(ui, ButtonKind::Large, Some(ICON_SKIP_NEXT), segment.kind.skip_label()).clicked() {
+                    let fraction = countdown_pill::progress(
+                        view.position.as_secs_f64(),
+                        segment.start.as_secs_f64(),
+                        segment.end.as_secs_f64(),
+                    );
+                    let colours = countdown_pill::Colours {
+                        fill: over_video::SKIP,
+                        hover: over_video::SKIP_HOVER,
+                        ink: over_video::SKIP_FOREGROUND,
+                        track: over_video::SKIP_TRACK,
+                    };
+                    let label = segment.kind.skip_label();
+                    if countdown_pill::show(ui, label, ICON_SKIP_NEXT, fraction, colours).clicked() {
                         cx.services.control(UiCommand::SeekTo(segment.end));
                     }
                 } else if view.show_up_next {
@@ -1086,10 +1128,20 @@ impl PlayerPage {
     }
 
     /// The settings menu: audio, subtitle and general tabs, with the tracks, the delays, the
-    /// subtitle size and the speeds.
+    /// subtitle size and the speeds. It hangs from the gear whichever button opened it, so it
+    /// stays put when another shows its tab. Without subtitles there is no subtitle tab: a delay
+    /// and a size would do nothing.
     fn settings_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
         let Some(menu) = &view.settings else { return };
-        let mut tab = self.settings_tab;
+        let tabs: &[SettingsTab] = if menu.subtitle_choices.is_empty() {
+            &[SettingsTab::Audio, SettingsTab::General]
+        } else {
+            &SettingsTab::ALL
+        };
+        // A version without subtitles can take over while their tab is the one remembered.
+        let mut tab = Some(self.settings_tab)
+            .filter(|tab| tabs.contains(tab))
+            .unwrap_or(SettingsTab::General);
         let mut chosen_audio = None;
         let mut chosen_subtitle = None;
         let mut adjustments = menu.adjustments;
@@ -1105,7 +1157,7 @@ impl PlayerPage {
             .frame(menu_frame())
             .show(|ui| {
                 ui.set_width(SETTINGS_W);
-                if let Some(choice) = settings_tabs(ui, tab) {
+                if let Some(choice) = settings_tabs(ui, tabs, tab) {
                     tab = choice;
                 }
                 ui.add_space(8.);
@@ -1296,6 +1348,10 @@ struct View {
     resume: Option<Duration>,
     chapters: Option<ChaptersMenu>,
     settings: Option<SettingsMenu>,
+    /// More than one audio track to choose from.
+    audio_button: bool,
+    /// Any subtitles to choose from.
+    subtitles_button: bool,
 }
 
 struct ChaptersMenu {
@@ -1418,7 +1474,15 @@ impl View {
                     default_subtitle: state.source.default_subtitle_stream_index,
                 }
             }),
+            audio_button: tracks::count(&state.source, MediaStreamType::Audio) > 1,
+            subtitles_button: tracks::count(&state.source, MediaStreamType::Subtitle) > 0,
         }
+    }
+
+    /// Which button stays lit while the menu shows `tab`: the tab's own, or the gear for a tab
+    /// whose button this item doesn't have.
+    fn lit_button(&self, tab: SettingsTab) -> SettingsTab {
+        lit_button(tab, self.audio_button, self.subtitles_button)
     }
 
     /// The labels at the end of the top bar, in order.
@@ -1505,6 +1569,27 @@ fn prompt_id() -> Id {
     Id::unique("player_prompt")
 }
 
+/// See [`View::lit_button`].
+fn lit_button(tab: SettingsTab, audio_button: bool, subtitles_button: bool) -> SettingsTab {
+    match tab {
+        SettingsTab::Audio if audio_button => tab,
+        SettingsTab::Subtitles if subtitles_button => tab,
+        _ => SettingsTab::General,
+    }
+}
+
+/// One of the settings menu's buttons, standing for `button`'s tab, was pressed: the lit one
+/// closes the menu, and any other shows its tab. Returns whether the menu has to be open after
+/// this frame (see `controls`).
+fn press_settings(ctx: &egui::Context, tab: &mut SettingsTab, button: SettingsTab, lit: bool) -> bool {
+    if lit {
+        egui::Popup::close_id(ctx, settings_id());
+        return false;
+    }
+    *tab = button;
+    true
+}
+
 /// `egui::Popup` with a fixed id: clicking the button opens it, or closes it when it's open.
 fn toggle_menu(ctx: &egui::Context, id: Id) {
     if egui::Popup::is_id_open(ctx, id) {
@@ -1571,33 +1656,21 @@ fn control_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str) -> Respo
     sized_control(ui, icon, CONTROL, tooltip, false)
 }
 
-/// How a prompt's button is painted, as `main`'s variants were: `main`'s large default button
-/// (Skip intro), a primary one in the player's lilac (Play now, Start over) and a ghost one
-/// (Cancel).
+/// How a prompt's button is painted, as `main`'s variants were: a primary one in the player's lilac
+/// (Play now, Start over) and a ghost one (Cancel).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ButtonKind {
-    Large,
     Primary,
     Ghost,
 }
 
 /// A button of the player's prompt, as `main` drew one: 32 points high with `main`'s padding,
-/// radius and icon size (24 in the large one, 16 otherwise). Drawn by the page rather than as an
+/// radius and 16-point icon. Drawn by the page rather than as an
 /// `egui::Button` for those measurements, and so it can't take the keyboard.
 fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>, label: &str) -> Response {
     let tokens = over_video::TOKENS;
-    let (padding, gap, text, icon_size) = match kind {
-        ButtonKind::Large => (12., 8., theme::text::font(ui, "base"), 24.),
-        _ => (10., 8., theme::text::font(ui, "sm"), 16.),
-    };
+    let (padding, gap, text, icon_size) = (10., 8., theme::text::font(ui, "sm"), 16.);
     let (fg, fill, stroke, hover, pressed) = match kind {
-        ButtonKind::Large => (
-            tokens.foreground,
-            tokens.button,
-            tokens.input,
-            tokens.button_hover,
-            tokens.button_active,
-        ),
         ButtonKind::Primary => (
             over_video::BRAND_FOREGROUND,
             over_video::BRAND,
@@ -1678,7 +1751,7 @@ fn menu_frame() -> egui::Frame {
 
 /// The settings menu's tabs: `main`'s segmented tab bar, a track with the selected tab in the
 /// popover's own colour on it. Returns the tab clicked.
-fn settings_tabs(ui: &mut egui::Ui, current: SettingsTab) -> Option<SettingsTab> {
+fn settings_tabs(ui: &mut egui::Ui, tabs: &[SettingsTab], current: SettingsTab) -> Option<SettingsTab> {
     let tokens = over_video::TOKENS;
     let mut chosen = None;
     egui::Frame::new()
@@ -1689,7 +1762,7 @@ fn settings_tabs(ui: &mut egui::Ui, current: SettingsTab) -> Option<SettingsTab>
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.x = 2.;
             ui.horizontal(|ui| {
-                for tab in SettingsTab::ALL {
+                for &tab in tabs {
                     if segmented_tab(ui, tab.label(), tab == current).clicked() {
                         chosen = Some(tab);
                     }
@@ -1939,10 +2012,84 @@ mod tests {
 
     use super::{
         CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, SETTINGS_W, SettingsTab,
-        VOLUME_STEP, delay_text, menu_frame, scroll_steps, settings_id, settings_tabs, sized_control, time_at,
-        toggle_menu, wheel_notches,
+        VOLUME_STEP, delay_text, lit_button, menu_frame, press_settings, scroll_steps, settings_id, settings_tabs,
+        sized_control, time_at, toggle_menu, wheel_notches,
     };
     use crate::widgets::popup::{self, Entry};
+
+    /// The gear stands in for a tab whose button this item doesn't have.
+    #[test]
+    fn the_gear_lights_up_for_a_tab_without_a_button() {
+        use SettingsTab::{Audio, General, Subtitles};
+        assert_eq!(lit_button(Audio, true, true), Audio);
+        assert_eq!(lit_button(Subtitles, true, true), Subtitles);
+        assert_eq!(lit_button(General, true, true), General);
+        assert_eq!(lit_button(Audio, false, true), General);
+        assert_eq!(lit_button(Subtitles, true, false), General);
+    }
+
+    /// Each settings button opens the menu on its own tab; the lit one closes it; and another
+    /// one moves to its tab rather than closing the menu, though a click on it is a click
+    /// outside the menu. The buttons and the menu are in the order `controls` has them.
+    #[test]
+    fn the_settings_buttons_open_switch_and_close() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable as _;
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(480., 320.))
+            .allow_missing_glyphs()
+            .with_accessibility_check(false)
+            .with_context_setup(|ctx| {
+                egui_material_icons::initialize(ctx);
+                crate::theme::apply(ctx, &crate::config::Config::default());
+            })
+            .build_ui_state(
+                |ui, tab: &mut SettingsTab| {
+                    ui.add_space(200.);
+                    let open = egui::Popup::is_id_open(ui.ctx(), settings_id());
+                    let mut pressed = None;
+                    let mut anchor = None;
+                    ui.horizontal(|ui| {
+                        for (button, name) in [(SettingsTab::Audio, "Audio button"), (SettingsTab::General, "Gear")] {
+                            let response = sized_control(ui, ICON_SETTINGS, CONTROL, name, false);
+                            if response.clicked() {
+                                pressed = Some(button);
+                            }
+                            anchor = Some(response);
+                        }
+                    });
+                    let reopen =
+                        pressed.is_some_and(|button| press_settings(ui.ctx(), tab, button, open && *tab == button));
+                    egui::Popup::menu(anchor.as_ref().unwrap())
+                        .id(settings_id())
+                        .open_memory(None::<egui::SetOpenCommand>)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| ui.label("Inside the menu"));
+                    if reopen {
+                        egui::Popup::open_id(ui.ctx(), settings_id());
+                    }
+                },
+                SettingsTab::General,
+            );
+        harness.run();
+        let open = |harness: &Harness<'_, SettingsTab>| harness.query_by_label("Inside the menu").is_some();
+        assert!(!open(&harness));
+
+        harness.get_by_label("Audio button").click();
+        harness.run();
+        assert!(open(&harness), "the button didn't open the menu");
+        assert_eq!(*harness.state(), SettingsTab::Audio);
+
+        harness.get_by_label("Gear").click();
+        harness.run();
+        assert!(open(&harness), "moving to another tab closed the menu");
+        assert_eq!(*harness.state(), SettingsTab::General);
+
+        harness.get_by_label("Gear").click();
+        harness.run();
+        assert!(!open(&harness), "the lit button didn't close the menu");
+    }
 
     /// The menu's painted widgets still say what they are to assistive technology: an open
     /// settings menu's tabs and track rows expose their labels and their selected state through
@@ -1983,7 +2130,7 @@ mod tests {
                         .frame(menu_frame())
                         .show(|ui| {
                             ui.set_width(SETTINGS_W);
-                            if let Some(choice) = settings_tabs(ui, menu.tab) {
+                            if let Some(choice) = settings_tabs(ui, &SettingsTab::ALL, menu.tab) {
                                 menu.tab = choice;
                             }
                             let entry = Entry::new("English - AAC - Mono - Default").checked(menu.track == 0);
