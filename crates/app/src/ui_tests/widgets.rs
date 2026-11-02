@@ -9,6 +9,7 @@ use crate::ui_tests::build_harness;
 use crate::widgets::avatar_row::{self, AvatarRow};
 use crate::widgets::badge;
 use crate::widgets::button::{self, Focus, State};
+use crate::widgets::countdown_pill;
 use crate::widgets::list_row::{Handle, Handles, Leading, ListRow};
 use crate::widgets::pill::{self, Mark};
 use crate::widgets::round_button::RoundButton;
@@ -279,4 +280,28 @@ fn pills_and_labels_name_themselves() {
     for name in ["dystopia", "Transcoding"] {
         assert!(ui.query_by_role_and_label(Role::Label, name).is_some(), "{name}");
     }
+}
+
+/// A countdown pill is a button named by its label, and its ring stays between empty and full
+/// whatever the position, including a span that has no length.
+#[test]
+fn a_countdown_pill_is_a_button_and_its_progress_stays_in_range() {
+    let colours = countdown_pill::Colours {
+        fill: egui::Color32::WHITE,
+        hover: egui::Color32::WHITE,
+        ink: egui::Color32::BLACK,
+        track: egui::Color32::GRAY,
+    };
+    let mut ui = build_harness(egui::vec2(400., 200.), 0, move |ui, clicks| {
+        let pill = countdown_pill::show(ui, "Skip intro", ICON_CLOSE, 0.35, colours);
+        *clicks += usize::from(pill.clicked());
+    });
+    ui.get_by_role_and_label(Role::Button, "Skip intro").click();
+    ui.run();
+    assert_eq!(*ui.state(), 1);
+
+    assert_eq!(countdown_pill::progress(5., 0., 10.), 0.5);
+    assert_eq!(countdown_pill::progress(-1., 0., 10.), 0.);
+    assert_eq!(countdown_pill::progress(11., 0., 10.), 1.);
+    assert_eq!(countdown_pill::progress(5., 5., 5.), 1.);
 }
