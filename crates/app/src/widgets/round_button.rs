@@ -198,6 +198,10 @@ impl<'a> RoundButton<'a> {
 pub fn glyph(ui: &Ui, center: Pos2, icon: MaterialIcon, size: f32, color: egui::Color32) {
     let font = FontId::new(size, icon.font_family());
     let galley = ui.painter().layout_no_wrap(icon.codepoint.to_owned(), font, color);
-    let bounds = galley.rows.first().map_or(galley.rect, |row| row.rect());
+    let bounds = if galley.mesh_bounds.is_positive() {
+        galley.mesh_bounds
+    } else {
+        galley.rect
+    };
     ui.painter().galley(center - bounds.center().to_vec2(), galley, color);
 }
