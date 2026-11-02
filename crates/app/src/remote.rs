@@ -143,7 +143,7 @@ impl Services {
             let mut items = match result {
                 Ok(items) => in_order(&placing.ids, items),
                 Err(err) => {
-                    // Only logged, as on `main`; an expired token still ends the session.
+                    // Only logged; an expired token still ends the session.
                     let message = self.handle_error(&err);
                     tracing::warn!("couldn't fetch the items to play remotely: {message}");
                     continue;
@@ -220,7 +220,7 @@ impl Services {
         let Some(state) = self.playback.now_playing() else {
             return;
         };
-        // mpv's last reported volume: two steps in one batch move once, as on `main`.
+        // mpv's last reported volume: two steps in one batch move once.
         let volume = state.volume;
         let set_volume = |volume: f64| UiCommand::SetVolume(volume.clamp(0., 100.));
         let command = match command {

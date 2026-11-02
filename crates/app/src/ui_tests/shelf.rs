@@ -1,5 +1,5 @@
-//! A shelf's scroll feel, without a window (R5): its arrows glide a page over, a drag follows
-//! the pointer and stops with it, and the wheel is the page's rather than the row's.
+//! A shelf's scroll feel, without a window: its arrows glide a page over, a drag follows the
+//! pointer and stops with it, and the wheel is the page's rather than the row's.
 //!
 //! egui_kittest turns animations off for its snapshots, which the glide follows: the first test
 //! turns them back on for its harness, as the app's default setting has them.

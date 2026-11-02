@@ -4,7 +4,7 @@
 //!
 //! Playing the item is the one `brand` button (`button::brand_icon`); every other action is a
 //! `button::quiet_icon` square, Watched and Favorite among them as toggles that turn `brand`
-//! when on. Picked over round icon buttons by C11's mockup.
+//! when on.
 
 use egui::text::LayoutJob;
 use egui::{Align, FontId, Label, Layout, Rect, Response, RichText, Sense, TextFormat, Ui, UiBuilder, pos2, vec2};
@@ -50,9 +50,9 @@ pub(super) fn header(
     let top = ui.cursor().min;
     let backdrop = item.backdrop_image();
     if let Some(backdrop) = &backdrop {
-        // Full width, past the page's padding: `main`'s backdrop ran edge to edge. Behind the
-        // bar it starts the bar's height higher, so at rest it fills the bar too; the page's
-        // content keeps its place under the bar.
+        // Full width, past the page's padding. Behind the bar it starts the bar's height
+        // higher, so at rest it fills the bar too; the page's content keeps its place under the
+        // bar.
         let lift = under_bar.map_or(0., |under| under.bar.height());
         let band = Rect::from_min_max(
             pos2(ui.clip_rect().left(), top.y - lift),
@@ -76,7 +76,7 @@ pub(super) fn header(
         image::show(ui, images, poster, request.as_ref(), Some(item), image::RADIUS);
         ui.vertical(|ui| {
             if backdrop.is_some() {
-                // Lines the text up beside the poster, as on `main`.
+                // Lines the text up beside the poster.
                 ui.add_space(120.);
             }
             info_column(ui, data, actions, selected, fills, asked);
@@ -123,7 +123,7 @@ fn info_column(
     if matches!(item.kind, BaseItemKind::Episode | BaseItemKind::Season)
         && let Some(series) = &item.series_name
     {
-        // `main`'s series line took the body size; the lines under the title are `text_sm`. It
+        // The series line takes the body size; the lines under the title are `text_sm`. It
         // opens the series.
         match &item.series_id {
             Some(id) => {
@@ -146,7 +146,7 @@ fn info_column(
         .map(episode_label)
         .filter(|label| !label.is_empty());
     let actions_width = actions_width(ui, data, actions, episode.as_deref());
-    // `main`'s 40-point title: a fixed size, so the text size setting doesn't move the header.
+    // A fixed 40-point title, so the text size setting doesn't move the header.
     let title_font = FontId::new(TITLE_SIZE, text::font(ui, "base").family);
     let available = ui.available_width();
     let gap = 16.;
@@ -208,7 +208,7 @@ fn info_column(
         ui.add_space(8.);
         ui.scope(|ui| {
             ui.set_max_width(ui.available_width().min(TEXT_MAX_W));
-            // The synopsis is `main`'s `text_base`, a step above the meta lines.
+            // The synopsis is `text_base`, a step above the meta lines.
             let synopsis = RichText::new(overview.clone()).font(text::font(ui, "base")).color(ink);
             ui.add(Label::new(synopsis).wrap());
         });
@@ -445,9 +445,8 @@ pub(super) fn version_label(source: &MediaSourceInfo, index: usize) -> String {
     source.name.clone().unwrap_or_else(|| format!("Version {}", index + 1))
 }
 
-/// Fades the backdrop image into the page at its bottom, as `main`'s gradient did: into the
-/// window's backdrop at that height, so the picture melts into the gradient rather than ending
-/// on a flat band of colour.
+/// Fades the backdrop image into the page at its bottom: into the window's backdrop at that
+/// height, so the picture melts into the gradient rather than ending on a flat band of colour.
 /// A soft wash of the window's colour over the picture behind the top bar, so the bar's thin
 /// icons and title read on any backdrop, bright or dark: strong at the window's top, still
 /// [`WASH_UNDER_BAR`] at the bar's bottom, then gone [`WASH_TAIL`] points lower. It stays with
@@ -470,7 +469,7 @@ const WASH_UNDER_BAR: f32 = 0.6;
 const WASH_TAIL: f32 = 64.;
 
 fn fade_to_background(ui: &Ui, band: Rect) -> egui::Shape {
-    // `main`'s first stop: the background at 30 %, so the image shows through at the top.
+    // The first stop: the background at 30 %, so the image shows through at the top.
     let window = ui.ctx().content_rect();
     backdrop::fade_into(band, window, 77. / 255., theme::tokens_of(ui))
 }

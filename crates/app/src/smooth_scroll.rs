@@ -1,22 +1,20 @@
-//! The scroll feel: `main`'s `smooth_scroll.rs`, as much of it as egui doesn't already have.
+//! The scroll feel: what egui's scrolling doesn't already give.
 //!
 //! egui eases a mouse wheel's whole step over a few frames itself (`WheelState`: an exponential
-//! approach, about 63 % of what's left every 43 ms) and leaves a trackpad's pixel deltas alone.
-//! That is what `main`'s `smooth_wheel` did — it took the toolkit's jump back and glided to the same
-//! place, 63 % every 70 ms — so the pages' scroll areas keep egui's smoothing. The animations
-//! setting is where the two differ: egui smooths a wheel whatever the setting says, where
-//! `main`'s reduced motion scrolled the step at once. [`instant_wheel`] gives the step to the
-//! frame it arrived in while the setting is off.
+//! approach, about 63 % of what's left every 43 ms) and leaves a trackpad's pixel deltas alone,
+//! so the pages' scroll areas keep egui's smoothing. The animations setting is where the two
+//! differ: egui smooths a wheel whatever the setting says, so [`instant_wheel`] gives the step to
+//! the frame it arrived in while the setting is off.
 //!
-//! What egui has no counterpart for is the shelves' glide (`main`'s `glide_by`): their arrows
-//! jumped a page of cards. [`Glide`] is that glide's maths, used by `widgets/shelf.rs`: an
-//! exponential approach to a target that a second click while it moves aims further.
+//! What egui has no counterpart for is the shelves' glide: their arrows glide a page of cards.
+//! [`Glide`] is that glide's maths, used by `widgets/shelf.rs`: an exponential approach to a
+//! target that a second click while it moves aims further.
 
 use egui::{Event, InputOptions, MouseWheelSource, MouseWheelUnit, RawInput, TouchPhase, Vec2};
 
-/// How quickly a glide closes the distance: about 63 % of what's left every `TAU`, as on `main`.
+/// How quickly a glide closes the distance: about 63 % of what's left every `TAU`.
 pub const TAU: f32 = 0.07;
-/// Close enough to the target to stop, as on `main`.
+/// Close enough to the target to stop.
 pub const SETTLE: f32 = 0.5;
 /// The most points one of [`instant_wheel`]'s events carries: egui counts a point delta shorter
 /// than 8 as already smooth, and adds it to the frame's scroll in one go.
@@ -60,10 +58,10 @@ fn wheel_lines() -> f32 {
     3.
 }
 
-/// A glide in progress: an exponential approach to `target`, as `main`'s `Glide` did.
+/// A glide in progress: an exponential approach to `target`.
 ///
-/// egui's offsets grow as the content scrolls down or right, where `main`'s went negative; the
-/// maths is the same otherwise.
+/// egui's offsets grow as the content scrolls down or right, so a glide's target is never
+/// negative.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Glide {
     /// Where the glide is heading.
@@ -85,14 +83,14 @@ impl Glide {
         }
     }
 
-    /// Aims `distance` further from where the glide is heading, as `main`'s `start` did for a
-    /// second click while one was under way.
+    /// Aims `distance` further from where the glide is heading, for a second click while one is
+    /// under way.
     pub fn aim(&mut self, distance: f32, max: f32) {
         self.target = (self.target + distance).clamp(0., max.max(0.));
     }
 
-    /// The offset this frame, and whether it reached the target (which it snaps to, as `main`
-    /// snapped within [`SETTLE`]). Meant to be called once a frame until it says it's done.
+    /// The offset this frame, and whether it reached the target (which it snaps to within
+    /// [`SETTLE`]). Meant to be called once a frame until it says it's done.
     pub fn step(&mut self, now: f64) -> (f32, bool) {
         let dt = (now - self.last_tick).max(0.) as f32;
         let t = 1. - (-dt / TAU).exp();
@@ -107,10 +105,10 @@ impl Glide {
     }
 }
 
-/// Hands a wheel step to the frame it arrives in, as `main` scrolled with animations off (its
-/// reduced motion). egui smooths a wheel over frames whatever the setting says, but an event it
-/// counts as already smooth — a trackpad's, or a point delta shorter than 8 — joins the frame's
-/// scroll as it is, so a step is split into those. A step's total distance is unchanged.
+/// Hands a wheel step to the frame it arrives in, for when animations are off. egui smooths a
+/// wheel over frames whatever the setting says, but an event it counts as already smooth — a
+/// trackpad's, or a point delta shorter than 8 — joins the frame's scroll as it is, so a step is
+/// split into those. A step's total distance is unchanged.
 pub fn instant_wheel(input: &mut RawInput, options: &InputOptions, viewport_height: f32) {
     let mut events = Vec::with_capacity(input.events.len());
     for event in input.events.drain(..) {

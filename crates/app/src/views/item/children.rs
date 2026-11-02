@@ -7,7 +7,7 @@
 //! episode_columns`), so a long season isn't a long scroll. A playlist keeps full rows, one per
 //! line, which also move and remove their entry,
 //! their handles showing on the row under the pointer or the cursor. A collection keeps its
-//! poster cards. Picked by C11's mockup over posters with the episodes in an inset panel.
+//! poster cards.
 
 use egui::{Layout, Rect, Ui, pos2, vec2};
 use jellyfin::models::{BaseItemDto, BaseItemKind};
@@ -30,7 +30,7 @@ use crate::{motion, theme};
 pub(super) const HEADING_GAP: f32 = 12.;
 
 /// The heading over the item's children: a series' seasons, a collection's items, a season's
-/// episodes or a playlist's entries, as on `main`. Nothing when there are none.
+/// episodes or a playlist's entries. Nothing when there are none.
 pub(super) fn children_heading(data: &ItemData) -> Option<&'static str> {
     if data.children.is_empty() {
         return None;
@@ -49,7 +49,7 @@ pub(super) fn heading(ui: &mut Ui, title: &str) -> Rect {
 }
 
 /// How many children a row of `available` points holds: a series' season rows, or a
-/// collection's poster cards at [`BIG_CARD_SCALE`], [`BIG_CARD_GAP`] apart (`main`'s count).
+/// collection's poster cards at [`BIG_CARD_SCALE`], [`BIG_CARD_GAP`] apart.
 pub(super) fn grid_columns(kind: BaseItemKind, available: f32) -> usize {
     if kind == BaseItemKind::Series {
         return media_row::season_columns(available);
@@ -76,7 +76,7 @@ pub(super) fn band_reveal(row: Option<Rect>, band: Rect, visible: f32) -> Rect {
 }
 
 /// A series' seasons as inset rows in rows of `columns`, the open one marked. A row opens or
-/// closes its episodes under the seasons; right-clicking one gives the item menu, as on `main`.
+/// closes its episodes under the seasons; right-clicking one gives the item menu.
 /// Returns the row holding the cursor, for the page to scroll into view with its heading.
 pub(super) fn seasons(
     ui: &mut Ui,
@@ -183,7 +183,7 @@ pub(super) fn posters(
 
 /// `items` as inset rows, the cursor's `section`: a season's episodes as compact rows in rows of
 /// `columns`, or a playlist's entries as full rows one per line, with their handles. A click (or
-/// Enter) opens the item; the toggle and the handles don't, as on `main`. Returns the rows of the
+/// Enter) opens the item; the toggle and the handles don't. Returns the rows of the
 /// first item and of the cursor's, for the page to scroll into view.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn rows(
@@ -373,7 +373,7 @@ pub(super) fn episodes_band(
 }
 
 /// A note where the episodes go, at least a row's height: the page's loader (the mascot in its
-/// glow) while they load, or a message (C8's `widgets::state`).
+/// glow) while they load, or a message (`widgets::state`).
 fn band_note(ui: &mut Ui, message: &str, loading: bool) -> Rect {
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), LANDSCAPE_H),

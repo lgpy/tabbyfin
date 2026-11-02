@@ -2,14 +2,14 @@
 //! for the term the top bar's search box holds.
 //!
 //! The box is the shell's: typing in it opens this page, and clearing it closes the page again.
-//! The page searches the term it was given 300 ms after the last change (`main`'s debounce), so a
-//! word typed at speed costs one request; a spinner stands in while the search is out. Enter or
+//! The page searches the term it was given 300 ms after the last change, so a word typed at
+//! speed costs one request; a spinner stands in while the search is out. Enter or
 //! Down in the box moves the cursor into the first result (the shell asks with
 //! [`Page::enter_results`]); Up or Shift+Tab from the first row leaves the key unused, and the
 //! shell puts the keyboard back in the box.
 //!
 //! Results aren't reloaded when watch data changes elsewhere: they're what the user asked for at
-//! the time, and a new search is a keystroke away (`main` didn't reload them either).
+//! the time, and a new search is a keystroke away.
 
 use std::time::Duration;
 
@@ -26,7 +26,7 @@ use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::{CARD_GAP, LANDSCAPE_W, Load, POSTER_W};
 use crate::widgets::{backdrop, card, label, state};
 
-/// How long the box has to be still before the search goes out (`main`'s debounce).
+/// How long the box has to be still before the search goes out.
 const DEBOUNCE: Duration = Duration::from_millis(300);
 /// How many results to ask for, all kinds together.
 const LIMIT: u32 = 60;
@@ -119,7 +119,7 @@ impl Page for SearchPage {
 
     /// A new term: the old results go, the search waits for the box to be still, and the cursor
     /// goes with them (the box has the keyboard). An unchanged term is only Enter reporting a
-    /// change, as on `main`: searching again would drop the cursor for nothing.
+    /// change: searching again would drop the cursor for nothing.
     fn set_search_term(&mut self, term: &str, cx: &mut PageCx) {
         if term == self.term {
             return;

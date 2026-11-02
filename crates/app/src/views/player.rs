@@ -1,10 +1,10 @@
 //! The player page: the video, the bars over it, the seek bar, the settings and chapters menus,
 //! the skip button, and the up-next and resume cards.
 //!
-//! On `main` this was `views/player.rs`, and the session state and commands it draws are P1's
-//! (`playback.rs`): pause, seek and stop go through [`Services::control`], so a SyncPlay group
-//! gets them as group requests, and tracks, speed and delays through [`Services::change_audio`],
-//! [`Services::change_subtitle`] and [`Services::adjust`].
+//! The session state and commands it draws are `playback.rs`'s: pause, seek and stop go through
+//! [`Services::control`], so a SyncPlay group gets them as group requests, and tracks, speed and
+//! delays through [`Services::change_audio`], [`Services::change_subtitle`] and
+//! [`Services::adjust`].
 //!
 //! The shell makes the page on `AppEvent::PlaybackStarted` and drops it on `PlaybackEnded`, so it
 //! lives through autoplay and reconnects; what belongs to one item (the trickplay sheets, the
@@ -12,10 +12,10 @@
 //! widget is keyed by `NowPlaying::session`, and the last frame stays up while the next session
 //! loads.
 //!
-//! The page is not on the shell's page stack: playback opens it and closes it, as on `main`. Its
+//! The page is not on the shell's page stack: playback opens it and closes it. Its
 //! keys are `keys::Scope::Player`, routed by the shell; the shell's Back stops playback. The
 //! menus are pointer-only (egui's popups take no keys), and every widget here is non-focusable
-//! (`Sense::CLICK` without `FOCUSABLE`, U8's rule for its dialogs): a Tab that gave egui the
+//! (`Sense::CLICK` without `FOCUSABLE`, like the dialogs): a Tab that gave egui the
 //! focus would take every key from the player (`keys.rs`). So none of them draws a focus ring:
 //! the player's widgets are clicked, not tabbed to, and Tab stays the app's. They do register
 //! AccessKit info (`Response::widget_info`), so a screen reader — and the headless tests that
@@ -69,15 +69,15 @@ use crate::widgets::video::Video;
 pub const SEEK_STEP: f64 = 10.;
 /// Volume percent per key press, wheel notch or remote volume step.
 pub const VOLUME_STEP: f64 = 5.;
-/// Trackpad points per wheel notch, for platforms that send pixel deltas (macOS): `main`'s
-/// three lines of 30. egui's line deltas are notches already (X11, Windows and Wayland report
-/// one per notch, where `main` got three lines), so only the pixel deltas are divided.
+/// Trackpad points per wheel notch, for platforms that send pixel deltas (macOS): three lines of
+/// 30. egui's line deltas are notches already (X11, Windows and Wayland report one per notch),
+/// so only the pixel deltas are divided.
 pub const PIXELS_PER_NOTCH: f32 = 90.;
 /// The most volume steps one wheel event makes, so a fast flick on a free-spinning wheel or a
 /// trackpad's burst of pixels can't jump the volume from silent to full.
 pub const MAX_STEPS_PER_SCROLL: f32 = 4.;
 
-/// The mascot's size over the video, as on `main`.
+/// The mascot's size over the video.
 const LOADER_SIZE: f32 = 128.;
 
 /// How long the controls stay up without the mouse moving (and while nothing is paused).
@@ -85,9 +85,9 @@ const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
 /// The top bar's height: its padding and a control button.
 const TOP_BAR_H: f32 = 2. * PADDING + CONTROL;
 const PADDING: f32 = 16.;
-/// The gap between a bar's controls, `main`'s `gap_3`.
+/// The gap between a bar's controls.
 const GAP: f32 = theme::SPACE.md;
-/// The seek bar's row: `main`'s slider track is 24 points high around its track.
+/// The seek bar's row: 24 points high around its track.
 const SEEK_H: f32 = 24.;
 /// The slider track inside that row, and its thumb: a 16-point circle with a 1-point ring.
 const TRACK_H: f32 = 6.;
@@ -103,7 +103,7 @@ const CONTROL_ICON: f32 = 0.55;
 /// The volume slider's width, and the row it sits in (a slider's 24-point track).
 const VOLUME_W: f32 = 96.;
 const VOLUME_H: f32 = 24.;
-/// The version picker: a small select, 140 points wide as `main`'s was.
+/// The version picker: a small select, 140 points wide.
 const VERSION_W: f32 = 140.;
 const VERSION_H: f32 = 24.;
 /// The chapter marks' height, and the width of the seek-bar preview thumbnail.
@@ -126,7 +126,7 @@ const SETTINGS_W: f32 = 340.;
 /// How many rows of a settings tab's track list show before it scrolls.
 const TRACK_ROWS: f32 = 5.;
 
-/// What the player's one prompt shows. Each kind slides in when it appears, as `main`'s ids did.
+/// What the player's one prompt shows. Each kind slides in when it appears.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PromptKind {
     Skip,
@@ -160,12 +160,11 @@ pub struct PlayerPage {
     /// Seek-bar previews, once the session knows the server has tiles for this version.
     trickplay: Option<Trickplay>,
     controls_visible: bool,
-    /// The controls appeared since the last frame drawn, so they fade in (as `main`'s did each
-    /// time they showed), and when they did.
+    /// The controls appeared since the last frame drawn, so they fade in each time they show,
+    /// and when they did.
     controls_appeared: bool,
     controls_since: Option<f64>,
-    /// The prompt showing, and when it appeared: each kind slides in when it appears, as
-    /// `main`'s did.
+    /// The prompt showing, and when it appeared: each kind slides in when it appears.
     prompt_in: Option<(PromptKind, f64)>,
     hide_controls: task::Deadline,
     /// A menu is open, which keeps the controls up.
@@ -205,7 +204,7 @@ impl PlayerPage {
 
     /// Draws the player into the whole window and handles its mouse and wheel input.
     pub fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
-        // Dark over the video in either theme, as `main` had it.
+        // Dark over the video in either theme.
         ui.style_mut().visuals = egui::Visuals::dark();
         ui.style_mut().visuals.override_text_color = Some(over_video::FOREGROUND);
         // Any mouse movement brings the controls (and the cursor) back.
@@ -290,8 +289,8 @@ impl PlayerPage {
         (Some(response), video.has_frame(), video.import_failed())
     }
 
-    /// The controls' opacity at `now`: they fade in over [`motion::FADE`] after they show, as
-    /// `main`'s did. Asks for the frames while they fade.
+    /// The controls' opacity at `now`: they fade in over [`motion::FADE`] after they show. Asks
+    /// for the frames while they fade.
     fn controls_alpha(&self, ctx: &egui::Context, now: f64) -> f32 {
         if !theme::animations(ctx) {
             return 1.;
@@ -324,8 +323,7 @@ impl PlayerPage {
         );
     }
 
-    /// The session changed: what belongs to one item starts over, and the menus close, as they
-    /// did when `main` made a new page for each session.
+    /// The session changed: what belongs to one item starts over, and the menus close.
     fn follow_session(&mut self, ctx: &egui::Context, session: u64) {
         if self.session == Some(session) {
             return;
@@ -341,13 +339,13 @@ impl PlayerPage {
         egui::Popup::close_id(ctx, chapters_id());
         egui::Popup::close_id(ctx, versions_id());
         self.menu_open = false;
-        // The settings belong to the player, not to one item: read them again as `main` did
-        // when it made a new page for each.
+        // The settings belong to the player, not to one item: read them again for a new
+        // session.
         let config = crate::config::Config::load();
         self.auto_skip = config.auto_skip_intro.unwrap_or(false);
         self.show_remaining = config.show_remaining_time.unwrap_or(false);
         self.show_controls();
-        // A new item's prompt slides in again, as it did under `main`'s page per session.
+        // A new item's prompt slides in again.
         self.prompt_in = None;
     }
 
@@ -451,7 +449,7 @@ impl PlayerPage {
             toggle_fullscreen(cx.ctx);
             self.show_controls();
         } else if !over_bar && response.triple_clicked() {
-            // A third click does nothing, as on `main`.
+            // A third click does nothing.
         } else if !over_bar && response.clicked() {
             self.paused_before_click = view.paused;
             cx.services.control(UiCommand::TogglePause);
@@ -632,8 +630,8 @@ impl PlayerPage {
     fn top_bar(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx, rect: Rect) {
         let painter = ui.painter();
         gradient(painter, rect, over_video::SCRIM, over_video::CLEAR);
-        // The bar takes clicks meant for the video below it (`main`'s `occlude`), while its
-        // buttons, drawn after it, still get theirs.
+        // The bar takes clicks meant for the video below it, while its buttons, drawn after
+        // it, still get theirs.
         ui.interact(rect, Id::unique("player_top_bar"), Sense::CLICK);
         let badges = view.badges();
         let badge_w: f32 = badges.iter().map(|text| badge::label_width(ui, text) + GAP).sum();
@@ -715,7 +713,7 @@ impl PlayerPage {
                     self.show_controls();
                 }
                 self.volume_slider(ui, view, cx);
-                // `main`'s `ml_2` on the clock, on top of the bar's gap.
+                // The clock's own 8 points, on top of the bar's gap.
                 ui.add_space(8.);
                 let clock = ui.add(
                     egui::Label::new(RichText::new(&view.time).font(theme::text::font(ui, "sm")))
@@ -876,8 +874,7 @@ impl PlayerPage {
         let max = (rect.width() - half).max(half);
         let center_x = rect.left() + offset.clamp(half, max);
         let painter = ui.painter();
-        // `main`'s v_flex sat 18 points above the seek row's bottom, i.e. the time just over the
-        // track and the thumbnail above the time.
+        // The time sits just over the track, and the thumbnail above the time.
         let galley = painter.layout_no_wrap(timestamp(time), theme::text::font(ui, "xs"), over_video::FOREGROUND);
         let time_h = galley.size().y;
         let label = Rect::from_min_size(
@@ -907,8 +904,8 @@ impl PlayerPage {
         painter.galley(label.center() - galley.size() / 2., galley, over_video::FOREGROUND);
     }
 
-    /// The volume slider: a drag bar from 0 to 100, as `main`'s slider was. egui's `Slider` is
-    /// focusable, which would let Tab take the player's keys from it.
+    /// The volume slider: a drag bar from 0 to 100. egui's `Slider` is focusable, which would
+    /// let Tab take the player's keys from it.
     fn volume_slider(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
         let (rect, response) = ui.allocate_exact_size(vec2(VOLUME_W, VOLUME_H), Sense::CLICK | Sense::DRAG);
         let volume = if self.adjusting_volume {
@@ -932,7 +929,7 @@ impl PlayerPage {
             self.volume = view.volume;
         }
         // Applied while dragging, so the change is audible right away, but only when the value
-        // moved (as `main`'s slider did on `Change`), and once more on release.
+        // moved, and once more on release.
         if let Some(pos) = response.interact_pointer_pos()
             && (pressed || released)
         {
@@ -952,7 +949,7 @@ impl PlayerPage {
     }
 
     /// The skip button or the up-next card, bottom right, above the controls when they show.
-    /// Each kind slides in when it appears, as `main`'s did.
+    /// Each kind slides in when it appears.
     fn prompt(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
         let kind = if view.skippable.is_some() {
             PromptKind::Skip
@@ -970,7 +967,7 @@ impl PlayerPage {
             _ => now,
         };
         self.prompt_in = Some((kind, started));
-        // Sliding in from the right while it fades, as `main`'s `motion::slide_in` did.
+        // Sliding in from the right while it fades.
         let (slide, alpha) = if theme::animations(ui.ctx()) {
             let t = motion::progress(started, now, 0., motion::ENTER);
             if t < 1. {
@@ -1628,15 +1625,15 @@ fn menu_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str, open: bool)
     control(icon, CONTROL, tooltip).on(open).show(ui)
 }
 
-/// `main`'s ghost button under the pointer: the menu inset at half strength, which the settings
+/// The ghost button under the pointer: the menu inset at half strength, which the settings
 /// menu's tabs hover with.
 fn ghost_hover() -> Color32 {
     let [r, g, b, _] = over_video::MENU_INSET.to_srgba_unmultiplied();
     Color32::from_rgba_unmultiplied(r, g, b, 128)
 }
 
-/// The volume slider's thumb, as `main` drew one: a 16-point circle whose 1-point ring is the
-/// bar's colour at half strength around a dark middle. The seek bar's is a white dot.
+/// The volume slider's thumb: a 16-point circle whose 1-point ring is the bar's colour at half
+/// strength around a dark middle. The seek bar's is a white dot.
 fn slider_thumb(painter: &egui::Painter, center: egui::Pos2) {
     painter.circle_filled(center, THUMB_R, over_video::THUMB_RING);
     painter.circle_filled(center, THUMB_R - THUMB_RING, over_video::THUMB);
@@ -1734,9 +1731,9 @@ fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
     select::button(ui, vec2(VERSION_W, VERSION_H), name, "Version", false).on_hover_text("Version")
 }
 
-/// A settings tab's list of tracks to pick from, the selected one ticked in the player's lilac. A plain list rather
-/// than a select: a select's menu would count as a click outside the settings popup and close
-/// it (as on `main`).
+/// A settings tab's list of tracks to pick from, the selected one ticked in the player's lilac.
+/// A plain list rather than a select: a select's menu would count as a click outside the
+/// settings popup and close it.
 fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], selected: Option<i32>) -> Option<i32> {
     if choices.is_empty() {
         ui.label(RichText::new(empty).small().color(over_video::MUTED_FOREGROUND));
@@ -1797,7 +1794,7 @@ fn time_at(rect: Rect, duration: Duration, x: f32) -> Duration {
 }
 
 /// egui's wheel delta in wheel notches, positive upwards. One `Line` is one notch: X11,
-/// Windows and Wayland all normalise a notch to it (where `main` got three lines).
+/// Windows and Wayland all normalise a notch to it.
 /// Pixel deltas are a trackpad's, at `PIXELS_PER_NOTCH` points per notch; a page counts as one.
 fn wheel_notches(unit: egui::MouseWheelUnit, delta: f32) -> f32 {
     match unit {
@@ -1807,8 +1804,8 @@ fn wheel_notches(unit: egui::MouseWheelUnit, delta: f32) -> f32 {
     }
 }
 
-/// Turns wheel notches (positive is scrolling up) into whole volume steps, one notch per step
-/// as `main` had it, keeping the leftover notches for the next event. One event makes at most
+/// Turns wheel notches (positive is scrolling up) into whole volume steps, one notch per step,
+/// keeping the leftover notches for the next event. One event makes at most
 /// `MAX_STEPS_PER_SCROLL`.
 pub fn scroll_steps(pending: f32, notches: f32) -> (f32, i32) {
     let total = (pending + notches).clamp(-MAX_STEPS_PER_SCROLL, MAX_STEPS_PER_SCROLL);
@@ -2101,8 +2098,7 @@ mod tests {
         );
     }
 
-    // `main`'s input gave three lines per notch and its tests counted those lines; egui gives
-    // one line per notch, so the same tests count notches.
+    // egui gives one line per notch, so these tests count notches.
 
     #[test]
     fn a_wheel_notch_is_one_volume_step() {

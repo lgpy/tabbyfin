@@ -1,6 +1,6 @@
 //! The item page's seasons through the keyboard: Enter on a season row opens its episodes under
 //! the seasons, which at the app's window sizes start below the fold, so the page scrolls them
-//! into view (X5). An episode's series line, which opens the series. And C11's cozy pieces: the
+//! into view. An episode's series line, which opens the series. And the cozy pieces: the
 //! actions' names and toggles, season rows, and a playlist's handles on the active row.
 
 use egui::Key;
@@ -149,7 +149,7 @@ fn many_tags_wrap_inside_the_window() {
 }
 
 /// A movie's actions: playing it is one button, Watched and Favorite are toggles, and More is a
-/// plain button (C11's quiet icon buttons name themselves to AccessKit).
+/// plain button (quiet icon buttons name themselves to AccessKit).
 #[test]
 fn the_actions_name_themselves_and_the_toggles_say_their_state() {
     let _config = ConfigDir::new("item-actions");

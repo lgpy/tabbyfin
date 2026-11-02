@@ -55,7 +55,7 @@ struct Size {
     overview_rows: usize,
 }
 
-/// A row on a line of its own, as `main`'s (its overview `line_clamp(3)`).
+/// A row on a line of its own (its overview clamped to 3 lines).
 const FULL: Size = Size {
     image_w: LANDSCAPE_W,
     image_h: LANDSCAPE_H,
@@ -241,7 +241,7 @@ impl<'a> MediaRow<'a> {
             .focus(Focus::Skip)
             .show_at(&mut content, watched_center, id.with("watched"));
 
-        // Up, Down and Remove, against the toggle, as on `main`.
+        // Up, Down and Remove, against the toggle.
         let handle = self.handles.filter(|_| active).and_then(|moves| {
             let right = inner.right() - size.watched;
             let remove = "Remove from playlist (Delete)";
