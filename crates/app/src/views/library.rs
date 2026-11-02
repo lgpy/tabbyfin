@@ -1195,6 +1195,9 @@ impl LibraryPage {
                                     match slot {
                                         Some(item) => {
                                             let response = card::poster(ui, &mut cx.services.images, item, selected);
+                                            if response.hovered() {
+                                                cx.services.prefetch.hover(Route::for_item(item));
+                                            }
                                             if response.clicked() {
                                                 opened = Some(Route::for_item(item));
                                             }

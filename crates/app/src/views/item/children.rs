@@ -159,6 +159,9 @@ pub(super) fn posters(
             for (column, child) in children.iter().enumerate() {
                 let selected = cursor.is_selected(CHILDREN, row * columns + column);
                 let response = card::poster_scaled(ui, images, child, BIG_CARD_SCALE, selected);
+                if response.hovered() {
+                    asked.hovered = Some(Route::for_item(child));
+                }
                 if response.clicked() {
                     asked.open = Some(Route::for_item(child));
                 }
@@ -212,6 +215,9 @@ pub(super) fn rows(
         }
         if selected {
             drawn.selected = Some(response.row.rect);
+        }
+        if response.row.hovered() {
+            asked.hovered = Some(Route::for_item(item));
         }
         if let Some(handle) = response.handle {
             let action = match handle {

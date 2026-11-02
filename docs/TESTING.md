@@ -552,3 +552,9 @@ Accepted on Linux: a launch with `theme = "system"` draws its first frames light
 
 - ⬜ **In the real app**, dark and light, on the hidden display: the restoring screen's backdrop and glow running into the form without a flash; the glow's edge invisible on the light backdrop; the 150 % text tall form.
 - ⬜ **With a mouse and a real keyboard**: a row's hover and focus ring, Tab from a row to its ✕, Enter on a focused row continuing as that account; *Use another server*; the brand button's hover.
+
+## Loading an item's page ahead of the click
+
+✅ `ui_tests/item.rs` and `views/item/prefetch.rs`: resting on a card starts the load, crossing one doesn't, the page takes the load over without a second request, and asks again if it failed.
+
+- ⬜ **With a real mouse on a real server**: rest on a card and click: the page opens without the spinner. Sweep across a shelf: the server's log shows no item requests.
