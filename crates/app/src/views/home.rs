@@ -359,6 +359,7 @@ impl Page for HomePage {
 #[derive(Default)]
 struct Asked {
     open: Option<Route>,
+    hovered: Option<Route>,
     menu: Option<(MenuAction, BaseItemDto)>,
 }
 
@@ -437,6 +438,9 @@ fn show_shelves(
             });
     });
     backdrop::scroll_edge(ui, &area);
+    if let Some(route) = asked.hovered {
+        cx.services.prefetch.hover(route);
+    }
     if let Some(route) = asked.open {
         cx.nav.push(NavRequest::Push(route));
     }
@@ -477,6 +481,9 @@ fn cards(
         };
         if selected && moved {
             response.scroll_to_me(None);
+        }
+        if response.hovered() {
+            asked.hovered = Some(Route::for_item(item));
         }
         if let Some(action) = play_action(item)
             && card::play_button(ui, &response)

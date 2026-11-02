@@ -220,6 +220,16 @@ impl FixtureServer {
             .collect()
     }
 
+    /// How many `http_method` requests to `route` were served.
+    pub fn requests(&self, http_method: &str, route: &str) -> usize {
+        let mock = self.mock.clone();
+        let requests = block_on(async move { mock.received_requests().await.unwrap_or_default() });
+        requests
+            .iter()
+            .filter(|request| request.method.as_str() == http_method && request.url.path() == route)
+            .count()
+    }
+
     /// The `sortBy` of every `/Items` request served, in order.
     pub fn sorts_requested(&self) -> Vec<String> {
         let mock = self.mock.clone();

@@ -258,3 +258,122 @@ fn a_playlists_handles_show_on_the_active_row() {
     let up = ui.harness().get_by_label("Move up (Alt+Up)");
     assert!(!up.accesskit_node().is_disabled());
 }
+
+/// A second movie, opened from the first's "More like this".
+const SIMILAR: &str = "18ddcc3c7d2f6d5ba8a24b0e8a0e5c11";
+const SIMILAR_ROUTE: &str = "/Items/18ddcc3c7d2f6d5ba8a24b0e8a0e5c11";
+
+/// A mocked server with a movie, one similar movie and that movie's own page.
+fn similar_server() -> FixtureServer {
+    let server = FixtureServer::start();
+    let movie: serde_json::Value = fixture_json("item_movie");
+    let mut similar = movie.clone();
+    similar["Id"] = SIMILAR.into();
+    similar["Name"] = "The Similar One".into();
+    server.json_value("GET", "/Items/d265861eae31cee1d44b13adac305eac", &movie);
+    server.json_value(
+        "GET",
+        "/Items/d265861eae31cee1d44b13adac305eac/Similar",
+        &serde_json::json!({ "Items": [similar], "TotalRecordCount": 1, "StartIndex": 0 }),
+    );
+    server.json_value("GET", SIMILAR_ROUTE, &similar);
+    server
+}
+
+/// The movie's page with its similar card in view, the keyboard's cursor having scrolled it there
+/// (the shelf starts below the fold), and where that card is.
+fn page_with_similar_card(server: &FixtureServer) -> (PageHarness, egui::Pos2) {
+    let mut ui = PageHarness::new(session(server), |cx| {
+        crate::views::open(
+            Route::Item {
+                id: MOVIE.to_owned(),
+                name: "Movie".to_owned(),
+            },
+            cx,
+        )
+    });
+    ui.step_until("the similar card", |harness| {
+        harness.query_by_label_contains("The Similar One").is_some()
+    });
+    for _ in 0..16 {
+        ui.press(Key::Tab);
+    }
+    for _ in 0..60 {
+        ui.step();
+    }
+    let window = ui.harness().ctx.input(|input| input.viewport_rect());
+    let card = ui.harness().get_by_label_contains("The Similar One").rect();
+    assert!(window.contains_rect(card), "{card:?} is outside {window:?}");
+    (ui, card.center())
+}
+
+/// A page for [`SIMILAR`], whose load was already started from its card.
+fn page_after_hover(server: &FixtureServer) -> PageHarness {
+    PageHarness::new(session(server), |cx| {
+        let client = cx.services.session.client.clone();
+        let user_data = cx.services.user_data;
+        cx.services.prefetch.start_now(SIMILAR, cx.ctx, &client, user_data);
+        crate::views::open(
+            Route::Item {
+                id: SIMILAR.to_owned(),
+                name: "The Similar One".to_owned(),
+            },
+            cx,
+        )
+    })
+}
+
+/// Resting on a card loads its page ahead of the click.
+#[test]
+fn resting_on_a_card_loads_its_page() {
+    let _config = ConfigDir::new("item-hover-load");
+    let server = similar_server();
+    let (mut ui, card) = page_with_similar_card(&server);
+    ui.harness_mut().hover_at(card);
+    ui.step_until("the card's page to start loading", |_| {
+        server.requests("GET", SIMILAR_ROUTE) == 1
+    });
+}
+
+/// A pointer that only crosses a card costs the server nothing.
+#[test]
+fn crossing_a_card_loads_nothing() {
+    let _config = ConfigDir::new("item-hover-cross");
+    let server = similar_server();
+    let (mut ui, card) = page_with_similar_card(&server);
+    ui.harness_mut().hover_at(card);
+    ui.step();
+    ui.harness_mut().hover_at(egui::pos2(1., 1.));
+    ui.step();
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_millis(300) {
+        ui.step();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(server.requests("GET", SIMILAR_ROUTE), 0);
+}
+
+/// A page opened while its load is held takes it over rather than asking again.
+#[test]
+fn a_page_takes_over_the_load_its_card_started() {
+    let _config = ConfigDir::new("item-hover-open");
+    let server = similar_server();
+    let mut ui = page_after_hover(&server);
+    ui.step_until("the page", |harness| {
+        harness.query_by_label_contains("The Similar One").is_some()
+    });
+    assert_eq!(server.requests("GET", SIMILAR_ROUTE), 1);
+}
+
+/// A held load that failed isn't the page's answer: it asks once more before showing the error.
+#[test]
+fn a_failed_load_is_asked_again_by_the_page() {
+    let _config = ConfigDir::new("item-hover-failed");
+    let server = FixtureServer::start();
+    server.status("GET", SIMILAR_ROUTE, 500);
+    let mut ui = page_after_hover(&server);
+    ui.step_until("the failure shown", |harness| {
+        harness.query_by_label_contains("Retry").is_some()
+    });
+    assert_eq!(server.requests("GET", SIMILAR_ROUTE), 2);
+}

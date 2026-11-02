@@ -18,6 +18,7 @@ use crate::session::{Session, describe_error};
 use crate::syncplay::SyncPlay;
 use crate::task;
 use crate::toasts::Toast;
+use crate::views::item::prefetch::Prefetch;
 use crate::widgets::menu::RefusedMarks;
 
 pub struct Services {
@@ -27,6 +28,8 @@ pub struct Services {
     /// Bumped when the user's watch data changed elsewhere (played state, resume points,
     /// favorites). Pages remember the value they loaded at and load again when it differs.
     pub user_data: u64,
+    /// Item pages loading ahead of a click, for the card under the pointer.
+    pub prefetch: Prefetch,
     /// What happened since the app last looked, for the app and the shell to act on. Drained
     /// every frame.
     pub events: Vec<AppEvent>,
@@ -118,6 +121,7 @@ impl Services {
             playlist_edits: PlaylistEdits::new(ctx),
             session,
             user_data: 0,
+            prefetch: Prefetch::default(),
             events: Vec::new(),
             marked,
             marking,
@@ -133,8 +137,9 @@ impl Services {
     /// deadlines, uploading the images that finished loading. Runs from `App::logic` before each
     /// frame, and also while the window is hidden, so playback keeps reporting, the websocket
     /// keeps refreshing pages and remote control keeps working when it's minimised.
-    pub fn tick(&mut self, _ctx: &egui::Context) {
+    pub fn tick(&mut self, ctx: &egui::Context) {
         self.images.tick();
+        self.prefetch.tick(ctx, &self.session.client, self.user_data);
         self.apply_menu_requests();
         self.tick_playlist_edits();
         self.tick_playback();
