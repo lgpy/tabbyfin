@@ -1,9 +1,10 @@
 //! The Settings page by keyboard and pointer: Tab goes through the search box and the menu,
 //! then puts egui's focus on a picker, and Left and Right step it, saving the same value a click
 //! gives. A picker only steps towards a choice it has, so an arrow at either end of its list
-//! does nothing. The page shows one section at a time, the one a menu entry picks. A device
-//! setting off its default has an undo button that puts it back. The server's settings load
-//! from the user's configuration and save back to it.
+//! does nothing. Every section is on the page; a menu entry scrolls to one. A device
+//! setting off its default has an undo button that puts it back. The top bar's search box
+//! filters the page. The server's settings load from the user's configuration and save back to
+//! it.
 
 use egui::Key;
 use egui::accesskit::{Role, Toggled};
@@ -28,8 +29,9 @@ fn serve_the_users_settings(server: &FixtureServer) {
     server.status("POST", "/Users/Configuration", 204);
 }
 
-/// Tabs from the search box, past every menu entry, to the first control of what's shown.
-fn tab_from_the_search_box(ui: &mut PageHarness) {
+/// Tabs past every menu entry to the first control of what's shown, from nothing focused (the
+/// search box is the top bar's, outside the page).
+fn tab_past_the_menu(ui: &mut PageHarness) {
     for _ in 0..Section::ALL.len() + 1 {
         ui.press(Key::Tab);
     }
@@ -51,11 +53,10 @@ fn tab_and_the_arrows_step_the_appearance_pickers() {
     assert_eq!(Config::load().theme, ThemePreference::Dark);
     assert_eq!(Config::load().text_size, None);
 
-    // The first Tab is the search box, and the first control after the menu is the theme
-    // picker. It shows the default (dark), the last of the three, so Right has nowhere to go;
-    // Left steps to light, and again to the system's scheme.
-    ui.press(Key::Tab);
-    tab_from_the_search_box(&mut ui);
+    // The first control after the menu is the theme picker. It shows the default (dark), the
+    // last of the three, so Right has nowhere to go; Left steps to light, and again to the
+    // system's scheme.
+    tab_past_the_menu(&mut ui);
     ui.press(Key::ArrowRight);
     assert_eq!(
         Config::load().theme,
@@ -84,19 +85,19 @@ fn tab_and_the_arrows_step_the_appearance_pickers() {
     assert_eq!(Config::load().text_size, None);
 }
 
-/// Whether `title`'s menu entry is the one marked.
-fn marked(harness: &Harness<'static, PageRun>, title: &str) -> bool {
-    harness
-        .query_all_by_label(title)
+/// Where a section's title is, and whether its menu entry is the one marked.
+fn section_state(harness: &Harness<'static, PageRun>, title: &str) -> (f32, bool) {
+    let nodes = || harness.query_all_by_label(title);
+    let heading = nodes()
+        .find(|node| node.accesskit_node().role() == Role::Label)
+        .unwrap_or_else(|| panic!("{title}'s heading"));
+    let entry = nodes()
         .find(|node| node.accesskit_node().role() == Role::Button)
-        .unwrap_or_else(|| panic!("{title}'s menu entry"))
-        .accesskit_node()
-        .toggled()
-        == Some(Toggled::True)
-}
-
-fn shows(harness: &Harness<'static, PageRun>, label: &str) -> bool {
-    harness.query_all_by_label(label).next().is_some()
+        .unwrap_or_else(|| panic!("{title}'s menu entry"));
+    (
+        heading.rect().top(),
+        entry.accesskit_node().toggled() == Some(Toggled::True),
+    )
 }
 
 fn click_menu_entry(ui: &mut PageHarness, title: &str) {
@@ -105,40 +106,58 @@ fn click_menu_entry(ui: &mut PageHarness, title: &str) {
         .find(|node| node.accesskit_node().role() == Role::Button)
         .unwrap_or_else(|| panic!("{title}'s menu entry"))
         .click();
-    // The frame that takes the click draws the menu before it, so the next one marks it.
-    ui.step();
     ui.step();
 }
 
-/// The page opens on Appearance, and a menu entry shows its section, the device's or the
-/// server's, in place of the one before.
+/// Every section is on the page, the device's and the server's, in one scrolling column. A
+/// menu entry scrolls its section to the top, and the menu marks it once it's there.
 #[test]
-fn the_menu_shows_one_section_at_a_time() {
+fn the_menu_scrolls_to_a_section() {
     let _config = ConfigDir::new("settings-menu");
     let server = FixtureServer::start();
     serve_the_users_settings(&server);
     let mut ui = settings_harness(&server);
-    ui.step();
-    assert!(shows(ui.harness(), "Theme"));
-    assert!(marked(ui.harness(), "Appearance"), "Appearance is marked at the start");
+    ui.step_until("the user's languages", |harness| {
+        harness.query_all_by_label("Audio language").next().is_some()
+    });
+    // The first section is at the top and marked; the server's are further down, loaded.
+    assert!(ui.harness().query_all_by_label("Theme").next().is_some());
     assert!(
-        !shows(ui.harness(), "Audio language"),
-        "the server's sections aren't shown"
+        ui.harness()
+            .query_all_by_label("Leave watched items out of Latest")
+            .next()
+            .is_some()
+    );
+    let (appearance_top, marked) = section_state(ui.harness(), "Appearance");
+    assert!(marked, "Appearance is marked at the start");
+    let (languages_top, marked) = section_state(ui.harness(), "Languages");
+    assert!(!marked);
+    assert!(
+        languages_top > 700.,
+        "Languages starts below the window: {languages_top}"
     );
 
     click_menu_entry(&mut ui, "Languages");
-    ui.step_until("the user's languages", |harness| shows(harness, "Audio language"));
-    assert!(marked(ui.harness(), "Languages"));
-    assert!(!marked(ui.harness(), "Appearance"), "only the section shown is marked");
-    assert!(!shows(ui.harness(), "Theme"));
-    assert!(
-        shows(ui.harness(), "Jellyfin server"),
-        "the tag says where they're kept"
-    );
+    ui.step_until("Languages at the top", |harness| {
+        let (top, marked) = section_state(harness, "Languages");
+        top < 80. && marked
+    });
+    let (_, marked) = section_state(ui.harness(), "Appearance");
+    assert!(!marked, "only the section at the top is marked");
 
+    // Home, the last section, is short, but the page has room for it to reach the top too.
     click_menu_entry(&mut ui, "Home");
-    ui.step_until("Home", |harness| shows(harness, "Leave watched items out of Latest"));
-    assert!(!shows(ui.harness(), "Audio language"));
+    ui.step_until("Home at the top", |harness| {
+        let (top, marked) = section_state(harness, "Home");
+        top < 80. && marked
+    });
+
+    // And back up to the first section, where it was at the start.
+    click_menu_entry(&mut ui, "Appearance");
+    ui.step_until("Appearance at the top", |harness| {
+        let (top, marked) = section_state(harness, "Appearance");
+        (top - appearance_top).abs() < 1. && marked
+    });
 }
 
 /// A setting off its default has an undo button, and the button leaves its key out of the file
@@ -216,9 +235,7 @@ fn a_searched_server_setting_saves_to_the_server() {
     ui.step();
 
     // "subtitle" is on both sides: the device's look of subtitles, the server's choice of them.
-    ui.harness().get_by_role(Role::TextInput).focus();
-    ui.step();
-    ui.harness().get_by_role(Role::TextInput).type_text("subtitle");
+    ui.search("subtitle");
     ui.step_until("the server's subtitle rows", |harness| {
         harness.query_all_by_label("Subtitle mode").next().is_some()
             && harness.query_all_by_label("Theme").next().is_none()
@@ -229,22 +246,19 @@ fn a_searched_server_setting_saves_to_the_server() {
     );
     assert!(ui.harness().query_all_by_label("Theme").next().is_none(), "not a match");
 
-    // Esc in the box clears the search, and the section shown before it is back alone.
-    ui.press(Key::Escape);
-    ui.step();
+    // Clearing the box shows every section again.
+    ui.search("");
     assert!(ui.harness().query_all_by_label("Theme").next().is_some());
-    assert!(ui.harness().query_all_by_label("Subtitle mode").next().is_none());
+    assert!(ui.harness().query_all_by_label("Subtitle mode").next().is_some());
 
     // Only the subtitle mode's description says "smart", so it's the one control after the
     // menu. It's on Default; Right steps it to Smart.
-    ui.harness().get_by_role(Role::TextInput).focus();
-    ui.step();
-    ui.harness().get_by_role(Role::TextInput).type_text("smart");
+    ui.search("smart");
     ui.step_until("the subtitle mode", |harness| {
         harness.query_all_by_label("Subtitle mode").next().is_some()
             && harness.query_all_by_label("Theme").next().is_none()
     });
-    tab_from_the_search_box(&mut ui);
+    tab_past_the_menu(&mut ui);
     ui.press(Key::ArrowRight);
     ui.step_until("the saved configuration", |_| {
         !server.bodies("POST", "/Users/Configuration").is_empty()
@@ -268,8 +282,7 @@ fn enter_opens_a_pickers_list_and_the_keyboard_picks_from_it() {
     let mut ui = settings_harness(&server);
     ui.step();
 
-    ui.press(Key::Tab);
-    tab_from_the_search_box(&mut ui);
+    tab_past_the_menu(&mut ui);
     ui.press(Key::Enter);
     ui.step();
     // The list is the theme's choices, the default (dark) checked.
