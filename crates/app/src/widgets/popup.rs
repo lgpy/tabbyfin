@@ -344,7 +344,7 @@ impl PopupMenu {
 }
 
 /// A menu's panel hung from `anchor` while popup `id` is open, with contents of the caller's own
-/// laid out like a small surface (headings, inset rows, cozy buttons): for a popup that is more
+/// laid out like a small surface (headings, inset rows, buttons): for a popup that is more
 /// than a list of rows (the SyncPlay panel). It has the menu's frame, placement and opening
 /// motion, with [`PANEL_PAD`] of room inside, closes on Esc or a click outside, and `content`
 /// gets a `Ui` of the panel's inner width with no room between rows. Opening, closing and keys
@@ -475,13 +475,12 @@ pub fn frame(tokens: &theme::Tokens) -> egui::Frame {
 }
 
 /// A popup's frame over the video, `margin` inside: the player's menus and its up-next card. It
-/// keeps the classic dark set (`theme::over_video`) so it stays neutral over the picture, with a
+/// draws in the player's own greys (`theme::over_video`) so it stays neutral over the picture, with a
 /// popup's radius and a shadow dark enough to lift it off a dark frame.
 pub fn over_video_frame(margin: i8) -> egui::Frame {
-    let tokens = theme::over_video::TOKENS;
     egui::Frame::new()
-        .fill(tokens.popover)
-        .stroke(Stroke::new(1., tokens.border))
+        .fill(theme::over_video::MENU)
+        .stroke(Stroke::new(1., theme::over_video::MENU_BORDER))
         .corner_radius(CornerRadius::same(RADIUS))
         .inner_margin(egui::Margin::same(margin))
         .shadow(egui::epaint::Shadow {

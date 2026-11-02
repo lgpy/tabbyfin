@@ -29,7 +29,7 @@ pub fn show<R>(
 ) -> ModalResponse<R> {
     let tokens = theme::tokens(&ctx.style_of(ctx.theme()).visuals);
     egui::Modal::new(id)
-        .backdrop_color(tokens.overlay)
+        .backdrop_color(tokens.scrim)
         .frame(surface::frame_of(tokens))
         .show(ctx, |ui| {
             ui.set_width(width - 2. * f32::from(surface::PADDING));

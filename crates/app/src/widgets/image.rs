@@ -73,9 +73,13 @@ fn shapes(
     anchor: f32,
 ) -> Vec<Shape> {
     let radius = CornerRadius::same(radius);
-    // What shows before the blurhash arrives, or when there's no image at all: `main`'s `muted`
-    // grey under a card.
-    let mut shapes = vec![Shape::from(RectShape::filled(rect, radius, theme::tokens_of(ui).muted))];
+    // What shows before the blurhash arrives, or when there's no image at all: the grey
+    // under a card.
+    let mut shapes = vec![Shape::from(RectShape::filled(
+        rect,
+        radius,
+        theme::tokens_of(ui).inset_hover,
+    ))];
     let Some(request) = request else { return shapes };
     // Twice the drawn width, so it stays sharp on a high-DPI screen (the server doesn't
     // upscale), or the width the caller fixed.
@@ -112,7 +116,7 @@ fn shapes(
 /// page's background at 20 % over the picture, so a card dims on a light theme as well as a dark
 /// one instead of only darkening.
 pub fn dim(ui: &Ui, rect: Rect, radius: u8) {
-    let background = theme::tokens_of(ui).background;
+    let background = theme::tokens_of(ui).backdrop_top;
     let fill = egui::Color32::from_rgba_unmultiplied(background.r(), background.g(), background.b(), 51);
     ui.painter().rect_filled(rect, CornerRadius::same(radius), fill);
 }

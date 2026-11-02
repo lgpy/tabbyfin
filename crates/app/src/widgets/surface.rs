@@ -1,7 +1,6 @@
-//! The cozy look's raised panel: a [`theme::Tokens::surface`] lifted off the backdrop by a soft
-//! shadow, with the larger radius. The sign-in form and the dialogs sit in one; settings groups
-//! can take it as they move to the look. Also what goes on one: its heading, a waiting line, a
-//! notice, and the gaps between them.
+//! The raised panel: a [`theme::Tokens::surface`] lifted off the backdrop by a soft shadow, with
+//! the larger radius. The sign-in form, the dialogs and Settings' sections sit in one. Also what
+//! goes on one: its heading, a waiting line, a notice, and the gaps between them.
 
 use egui::accesskit::Role;
 use egui::{

@@ -1,4 +1,4 @@
-//! The cozy look's text fields: a muted label above a roomy single-line field, sunk into the
+//! The app's text fields: a muted label above a roomy single-line field, sunk into the
 //! surface (the fill and outline come from the theme's visuals, `theme::visuals`).
 
 use egui::{Id, Margin, Pos2, Response, RichText, TextBuffer, TextEdit, Ui, pos2};

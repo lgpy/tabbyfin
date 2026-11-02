@@ -1148,7 +1148,7 @@ impl PlayerPage {
                             &menu.audio_choices,
                             menu.audio.or(menu.default_audio),
                         );
-                        popup::separator_in(ui, over_video::TOKENS.border);
+                        popup::separator_in(ui, over_video::MENU_BORDER);
                         let delay = adjustments.audio_delay;
                         if let Some(step) = delay_stepper(ui, None, delay) {
                             adjustments.audio_delay = stepped_delay(delay, step);
@@ -1172,7 +1172,7 @@ impl PlayerPage {
                             SUBTITLES_OFF => SubtitleChoice::Off,
                             index => SubtitleChoice::Stream(index),
                         });
-                        popup::separator_in(ui, over_video::TOKENS.border);
+                        popup::separator_in(ui, over_video::MENU_BORDER);
                         let delay = adjustments.subtitle_delay;
                         if let Some(step) = delay_stepper(ui, Some("z  x"), delay) {
                             adjustments.subtitle_delay = stepped_delay(delay, step);
@@ -1197,7 +1197,7 @@ impl PlayerPage {
                             Align2::LEFT_CENTER,
                             "Speed",
                             theme::text::font(ui, "sm"),
-                            over_video::TOKENS.foreground,
+                            over_video::MENU_INK,
                         );
                         if !menu.in_group {
                             ui.painter().text(
@@ -1628,10 +1628,10 @@ fn menu_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str, open: bool)
     control(icon, CONTROL, tooltip).on(open).show(ui)
 }
 
-/// `main`'s ghost button under the pointer: the classic accent at half strength in the dark
-/// theme, which the settings menu's tabs hover with.
+/// `main`'s ghost button under the pointer: the menu inset at half strength, which the settings
+/// menu's tabs hover with.
 fn ghost_hover() -> Color32 {
-    let [r, g, b, _] = over_video::TOKENS.accent.to_srgba_unmultiplied();
+    let [r, g, b, _] = over_video::MENU_INSET.to_srgba_unmultiplied();
     Color32::from_rgba_unmultiplied(r, g, b, 128)
 }
 
@@ -1670,7 +1670,6 @@ fn label_badge(ui: &mut egui::Ui, text: &str) {
 
 /// The settings menu's tabs. Returns the tab clicked.
 fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab) -> Option<SettingsTab> {
-    let tokens = over_video::TOKENS;
     let shown: Vec<_> = shown
         .iter()
         .map(|&tab| tabs::Tab {
@@ -1680,10 +1679,10 @@ fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab)
         })
         .collect();
     let colours = tabs::Colours {
-        track: tokens.tab_bar,
-        selected: tokens.input,
+        track: over_video::TAB_TRACK,
+        selected: over_video::MENU_INSET_HOVER,
         hover: ghost_hover(),
-        ink: tokens.foreground,
+        ink: over_video::MENU_INK,
         ink_muted: over_video::MUTED_FOREGROUND,
     };
     tabs::bar(ui, &shown, current, colours)
@@ -1691,15 +1690,14 @@ fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab)
 
 /// The speed choices, the chosen one in the player's lilac. Returns the speed clicked.
 fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
-    let tokens = over_video::TOKENS;
     let labels = Adjustments::SPEEDS.map(|speed| format!("{speed}×"));
     let chosen = Adjustments::SPEEDS
         .iter()
         .position(|speed| (speed - current).abs() < 1e-6);
     let colours = segmented::Colours {
-        track: tokens.muted,
-        hover: tokens.input,
-        ink: tokens.foreground,
+        track: over_video::MENU_INSET,
+        hover: over_video::MENU_INSET_HOVER,
+        ink: over_video::MENU_INK,
         chosen: over_video::BRAND,
         chosen_ink: over_video::BRAND_FOREGROUND,
     };
@@ -1707,11 +1705,10 @@ fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
 }
 
 fn stepper_colours() -> stepper::Colours {
-    let tokens = over_video::TOKENS;
     stepper::Colours {
-        fill: tokens.muted,
-        hover: tokens.input,
-        ink: tokens.foreground,
+        fill: over_video::MENU_INSET,
+        hover: over_video::MENU_INSET_HOVER,
+        ink: over_video::MENU_INK,
         ink_muted: over_video::MUTED_FOREGROUND,
     }
 }

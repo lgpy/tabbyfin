@@ -144,7 +144,7 @@ pub fn chapter_without_image(ui: &mut Ui, index: usize, chapter: &ChapterInfo, s
     let size = vec2(LANDSCAPE_W, PADDING + lines_height(&heights) - GAP + PADDING);
     let (tile, response) = ui.allocate_exact_size(size, Sense::click());
     let tokens = theme::tokens_of(ui);
-    ui.painter().rect_filled(tile, image::RADIUS, tokens.muted);
+    ui.painter().rect_filled(tile, image::RADIUS, tokens.inset_hover);
     if response.hovered() {
         image::dim(ui, tile, image::RADIUS);
     }
@@ -152,7 +152,7 @@ pub fn chapter_without_image(ui: &mut Ui, index: usize, chapter: &ChapterInfo, s
     let number_font = text::font(ui, "2xl");
     let number_width = ui.fonts_mut(|fonts| {
         fonts
-            .layout_no_wrap("00".into(), number_font.clone(), tokens.muted_foreground)
+            .layout_no_wrap("00".into(), number_font.clone(), tokens.ink_muted)
             .size()
             .x
     });
@@ -161,7 +161,7 @@ pub fn chapter_without_image(ui: &mut Ui, index: usize, chapter: &ChapterInfo, s
         Align2::LEFT_CENTER,
         (index + 1).to_string(),
         number_font,
-        tokens.muted_foreground,
+        tokens.ink_muted,
     );
     let left = tile.left() + PADDING + number_width + PADDING;
     let width = (tile.right() - PADDING - left).max(0.);
@@ -186,14 +186,14 @@ fn chapter_name(index: usize, chapter: &ChapterInfo) -> String {
 fn missing_image(ui: &Ui, card: &Response, image: Rect) {
     let tokens = theme::tokens_of(ui);
     // Over the grey box, under the dimming, so the icon dims with the card.
-    ui.painter().rect_filled(image, image::RADIUS, tokens.muted);
+    ui.painter().rect_filled(image, image::RADIUS, tokens.inset_hover);
     let size = (image.height() * 0.3).clamp(20., 40.);
     ui.painter().text(
         image.center(),
         Align2::CENTER_CENTER,
         ICON_HIDE_IMAGE.codepoint,
         FontId::new(size, egui::FontFamily::Name(FONT_FAMILY.into())),
-        tokens.muted_foreground,
+        tokens.ink_muted,
     );
     if card.hovered() && ui.rect_contains_pointer(image) {
         image::dim(ui, image, image::RADIUS);
@@ -251,7 +251,7 @@ pub fn placeholder(ui: &mut Ui) {
     ui.painter().rect_filled(
         Rect::from_min_size(rect.min, vec2(POSTER_W, POSTER_H)),
         image::RADIUS,
-        theme::tokens_of(ui).muted,
+        theme::tokens_of(ui).inset_hover,
     );
 }
 
@@ -474,7 +474,7 @@ fn line_heights(ui: &Ui, title: &str, subtitle: &str) -> LineHeights {
 fn line(ui: &Ui, text: &str, style: &str, muted: bool) -> WidgetText {
     let mut label = egui::RichText::new(text).font(self::text::font(ui, style));
     if muted {
-        label = label.color(theme::tokens_of(ui).muted_foreground);
+        label = label.color(theme::tokens_of(ui).ink_muted);
     }
     label.into()
 }

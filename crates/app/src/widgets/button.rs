@@ -1,5 +1,5 @@
 //! A button's contents with a material icon before the label, as `main`'s buttons had them: the
-//! SyncPlay panel's toggles. And the cozy look's buttons: [`brand`] for a screen's main action (or
+//! SyncPlay panel's toggles. And the app's own buttons: [`brand`] for a screen's main action (or
 //! [`danger`] when it deletes something), [`quiet`] for the ones beside it, [`text`] for a small
 //! written-out action in a row of controls, and [`brand_icon`] and [`quiet_icon`] for a page's row
 //! of actions (the item page's).
@@ -288,7 +288,7 @@ pub fn text(ui: &mut Ui, label: &str, enabled: bool) -> Response {
     ui.add_enabled(enabled, Button::new(label).frame(false).sense(egui::Sense::CLICK))
 }
 
-/// The cozy look's rounder, taller button, with its own radius so a `Ui` that changed the
+/// The app's rounder, taller button, with its own radius so a `Ui` that changed the
 /// widgets' radius doesn't change it.
 fn cozy(label: RichText, width: f32, radius: u8, focus: Focus) -> Button<'static> {
     let button = Button::new(label)

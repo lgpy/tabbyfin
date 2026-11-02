@@ -124,7 +124,7 @@ fn shelf_inner(
                     2.,
                     centred(
                         egui::FontId::new(heading.size * 0.9, ICON_CHEVRON_RIGHT.outlined().font_family()),
-                        tokens.muted_foreground,
+                        tokens.ink_muted,
                     ),
                 );
                 let response = ui
