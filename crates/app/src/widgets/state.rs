@@ -84,18 +84,34 @@ fn line(ui: &Ui, message: String) -> RichText {
 fn glowing(ui: &mut Ui, draw: impl FnOnce(&mut Ui)) {
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), mascot::PAGE), Sense::hover());
     let square = Rect::from_center_size(row.center(), Vec2::splat(mascot::PAGE));
-    backdrop::glow(
-        ui.painter(),
-        square.center() + vec2(0., GLOW_DROP),
-        GLOW_RADIUS,
-        theme::tokens_of(ui),
-    );
+    let tokens = theme::tokens_of(ui);
+    let glow_center = square.center() + vec2(0., GLOW_DROP);
+    backdrop::glow(ui.painter(), glow_center, GLOW_RADIUS, tokens);
     let mut mascot = ui.new_child(
         UiBuilder::new()
             .max_rect(square)
             .layout(Layout::top_down(Align::Center)),
     );
+    // In a fade (a page coming in), the mascot is drawn whole and a veil of what's under it fades
+    // it as one piece: faded part by part, its overlapping parts would stack up brighter. The glow
+    // is one mesh with nothing overlapping, so it fades as it is.
+    let fade = ui.painter().opacity();
+    let veiled = fade > 0. && fade < 1.;
+    if veiled {
+        mascot.set_opacity(1.);
+    }
     draw(&mut mascot);
+    if veiled {
+        let mut painter = ui.painter().clone();
+        painter.set_opacity(1.);
+        painter.add(backdrop::veil(
+            square,
+            ui.ctx().content_rect(),
+            (glow_center, GLOW_RADIUS, fade),
+            1. - fade,
+            tokens,
+        ));
+    }
 }
 
 /// Draws `contents` as one block in the space the `ui` has left, centred across it. Without a
