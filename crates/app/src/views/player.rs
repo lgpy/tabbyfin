@@ -787,7 +787,7 @@ impl PlayerPage {
         let painter = ui.painter();
         painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
-        painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::FOREGROUND);
+        painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::BRAND);
         for mark in &view.chapter_marks {
             let x = track.left() + track.width() * mark;
             let half = CHAPTER_MARK_H / 2.;
@@ -796,7 +796,8 @@ impl PlayerPage {
                 Stroke::new(2., over_video::MARK),
             );
         }
-        slider_thumb(painter, pos2(filled.right(), track.center().y));
+        // A white dot on the lilac fill, which stands out on bright pictures as well as dark ones.
+        painter.circle_filled(pos2(filled.right(), track.center().y), THUMB_R, over_video::FOREGROUND);
 
         // Dragging: the bar follows the pointer. The seek goes out when the button comes up, so
         // playback doesn't fight the bar.
@@ -1043,8 +1044,13 @@ impl PlayerPage {
                         row.widget_info(|| {
                             WidgetInfo::selected(Role::Button, ui.is_enabled(), current, format!("{name}, {start}"))
                         });
+                        // The current chapter is tinted with the player's lilac, its name in it.
                         if current {
-                            ui.painter().rect_filled(rect, CornerRadius::same(8), tokens.accent);
+                            ui.painter().rect_filled(
+                                rect,
+                                CornerRadius::same(8),
+                                over_video::BRAND.gamma_multiply(0.16),
+                            );
                         } else if row.hovered() {
                             // `main`'s chapter row hovered with the muted fill.
                             ui.painter().rect_filled(rect, CornerRadius::same(8), tokens.muted);
@@ -1057,7 +1063,7 @@ impl PlayerPage {
                             Align2::LEFT_TOP,
                             name,
                             theme::text::font(ui, "sm"),
-                            tokens.foreground,
+                            if current { over_video::BRAND } else { tokens.foreground },
                         );
                         ui.painter().text(
                             pos2(image.right() + 12., image.top() + 24.),
@@ -1553,8 +1559,8 @@ fn ghost_hover() -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, 128)
 }
 
-/// A slider's thumb, as `main` drew one: a 16-point circle whose 1-point ring is the bar's
-/// colour at half strength around a dark middle.
+/// The volume slider's thumb, as `main` drew one: a 16-point circle whose 1-point ring is the
+/// bar's colour at half strength around a dark middle. The seek bar's is a white dot.
 fn slider_thumb(painter: &egui::Painter, center: egui::Pos2) {
     painter.circle_filled(center, THUMB_R, over_video::THUMB_RING);
     painter.circle_filled(center, THUMB_R - THUMB_RING, over_video::THUMB);
@@ -1565,7 +1571,8 @@ fn control_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str) -> Respo
 }
 
 /// How a prompt's button is painted, as `main`'s variants were: `main`'s large default button
-/// (Skip intro), a primary one (Play now, Start over) and a ghost one (Cancel).
+/// (Skip intro), a primary one in the player's lilac (Play now, Start over) and a ghost one
+/// (Cancel).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ButtonKind {
     Large,
@@ -1591,11 +1598,11 @@ fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>
             tokens.button_active,
         ),
         ButtonKind::Primary => (
-            tokens.primary_foreground,
-            tokens.primary,
-            tokens.primary,
-            tokens.primary_hover,
-            tokens.primary_hover,
+            over_video::BRAND_FOREGROUND,
+            over_video::BRAND,
+            over_video::BRAND,
+            over_video::BRAND_HOVER,
+            over_video::BRAND_HOVER,
         ),
         ButtonKind::Ghost => (
             tokens.foreground,
@@ -1722,7 +1729,7 @@ fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
 }
 
 /// The speed choices, as `main`'s segmented outline toggle group: 24-point segments joined into
-/// one outlined control, the chosen one filled with the accent. Returns the speed clicked. Each
+/// one outlined control, the chosen one filled with the player's lilac. Returns the speed clicked. Each
 /// segment is a radio button to AccessKit with its selected state; the group's own rect only
 /// senses hover, so it can't take a click or focus meant for a segment.
 fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
@@ -1748,7 +1755,7 @@ fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
         let selected = (speed - current).abs() < 1e-6;
         response.widget_info(|| WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected, &labels[index]));
         let fill = if selected {
-            tokens.accent
+            over_video::BRAND
         } else if response.hovered() {
             ghost_hover()
         } else {
@@ -1766,7 +1773,7 @@ fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
             fill,
         );
         let color = if selected {
-            tokens.accent_foreground
+            over_video::BRAND_FOREGROUND
         } else {
             tokens.foreground
         };
@@ -1849,7 +1856,7 @@ fn stepper(ui: &mut egui::Ui, label: &str, value: String, down: &str, up: &str) 
     step
 }
 
-/// A settings tab's list of tracks to pick from, the selected one checked. A plain list rather
+/// A settings tab's list of tracks to pick from, the selected one ticked in the player's lilac. A plain list rather
 /// than a select: a select's menu would count as a click outside the settings popup and close
 /// it (as on `main`).
 fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], selected: Option<i32>) -> Option<i32> {
@@ -1868,8 +1875,10 @@ fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], sele
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
             for choice in choices {
-                let entry = Entry::new(choice.label.as_str()).checked(choice.value == selected);
-                if popup::row(ui, &entry, true, false).clicked() {
+                let entry = Entry::new(choice.label.as_str())
+                    .checked(choice.value == selected)
+                    .tint(over_video::BRAND);
+                if popup::row(ui, &entry, true, false, over_video::ROW_HOVER).clicked() {
                     chosen = Some(choice.value);
                 }
             }
@@ -1992,11 +2001,11 @@ mod tests {
                                 menu.tab = choice;
                             }
                             let entry = Entry::new("English - AAC - Mono - Default").checked(menu.track == 0);
-                            if popup::row(ui, &entry, true, false).clicked() {
+                            if popup::row(ui, &entry, true, false, crate::theme::over_video::ROW_HOVER).clicked() {
                                 menu.track = 0;
                             }
                             let entry = Entry::new("Japanese - AAC - Mono").checked(menu.track == 1);
-                            if popup::row(ui, &entry, true, false).clicked() {
+                            if popup::row(ui, &entry, true, false, crate::theme::over_video::ROW_HOVER).clicked() {
                                 menu.track = 1;
                             }
                         });
