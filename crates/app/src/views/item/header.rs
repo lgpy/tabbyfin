@@ -25,12 +25,17 @@ use crate::images::ImageCache;
 use crate::item_menu::{is_favorite, is_played};
 use crate::nav::Route;
 use crate::theme::{self, text};
+use crate::views::UnderBar;
 use crate::widgets::focus;
 use crate::widgets::text::{episode_label, poster_image, timestamp};
 use crate::widgets::{backdrop, button, image, pill, select};
 
 /// The header: the backdrop with its fade, the poster, and the item's title, actions and text.
 /// Returns its rectangle, for the cursor scrolling back to the actions.
+///
+/// In the shell the backdrop runs up behind the top bar (`under_bar`), scrolling with the page;
+/// without one (the UI tests) it starts at the page's top.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn header(
     ui: &mut Ui,
     data: &ItemData,
@@ -38,19 +43,30 @@ pub(super) fn header(
     selected: Option<Position>,
     fills: &Fills,
     images: &mut ImageCache,
+    under_bar: Option<&UnderBar>,
     asked: &mut Asked,
 ) -> Rect {
     let item = &data.item;
     let top = ui.cursor().min;
     let backdrop = item.backdrop_image();
     if let Some(backdrop) = &backdrop {
-        // Full width, past the page's padding: `main`'s backdrop ran edge to edge.
+        // Full width, past the page's padding: `main`'s backdrop ran edge to edge. Behind the
+        // bar it starts the bar's height higher, so at rest it fills the bar too; the page's
+        // content keeps its place under the bar.
+        let lift = under_bar.map_or(0., |under| under.bar.height());
         let band = Rect::from_min_max(
-            pos2(ui.clip_rect().left(), top.y),
+            pos2(ui.clip_rect().left(), top.y - lift),
             pos2(ui.clip_rect().right(), top.y + BACKDROP_H),
         );
-        image::show_at_width(ui, images, band, Some(backdrop), Some(item), 0, BACKDROP_FILL_W);
-        fade_to_background(ui, band);
+        let mut shapes = image::banner(ui, images, band, Some(backdrop), Some(item), BACKDROP_FILL_W);
+        shapes.push(fade_to_background(ui, band));
+        match under_bar {
+            Some(under) => {
+                shapes.extend(bar_wash(ui, under.bar));
+                under.paint(ui, shapes);
+            }
+            None => ui.painter().extend(shapes),
+        }
     }
     ui.add_space(if backdrop.is_some() { BACKDROP_H - 160. } else { 24. });
     ui.horizontal_top(|ui| {
@@ -441,8 +457,29 @@ pub(super) fn version_label(source: &MediaSourceInfo, index: usize) -> String {
 /// Fades the backdrop image into the page at its bottom, as `main`'s gradient did: into the
 /// window's backdrop at that height, so the picture melts into the gradient rather than ending
 /// on a flat band of colour.
-fn fade_to_background(ui: &Ui, band: Rect) {
+/// A soft wash of the window's colour over the picture behind the top bar, so the bar's thin
+/// icons and title read on any backdrop, bright or dark: strong at the window's top, still
+/// [`WASH_UNDER_BAR`] at the bar's bottom, then gone [`WASH_TAIL`] points lower. It stays with
+/// the bar as the page scrolls, and over the plain backdrop it's the backdrop's own colour, so
+/// it only shows on the picture.
+fn bar_wash(ui: &Ui, bar: Rect) -> [egui::Shape; 2] {
+    let (window, tokens) = (ui.ctx().content_rect(), theme::tokens_of(ui));
+    let tail = Rect::from_min_size(bar.left_bottom(), vec2(bar.width(), WASH_TAIL));
+    [
+        backdrop::wash(bar, window, WASH_TOP, WASH_UNDER_BAR, tokens),
+        backdrop::wash(tail, window, WASH_UNDER_BAR, 0., tokens),
+    ]
+}
+
+/// [`bar_wash`]'s opacity at the window's top edge.
+const WASH_TOP: f32 = 0.85;
+/// [`bar_wash`]'s opacity at the bar's bottom edge.
+const WASH_UNDER_BAR: f32 = 0.6;
+/// How far below the bar [`bar_wash`] fades out.
+const WASH_TAIL: f32 = 64.;
+
+fn fade_to_background(ui: &Ui, band: Rect) -> egui::Shape {
     // `main`'s first stop: the background at 30 %, so the image shows through at the top.
     let window = ui.ctx().content_rect();
-    backdrop::fade_into(ui.painter(), band, window, 77. / 255., theme::tokens_of(ui));
+    backdrop::fade_into(band, window, 77. / 255., theme::tokens_of(ui))
 }
