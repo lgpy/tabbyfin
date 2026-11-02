@@ -123,7 +123,7 @@ pub const BINDINGS: &[Binding] = {
         bind(Browse, NONE, Key::Tab, Move(Move::NextSection)),
         bind(Browse, Modifiers::SHIFT, Key::Tab, Move(Move::PrevSection)),
         bind(Browse, NONE, Key::Enter, Activate),
-        // The item page's rows (`views/item.rs`); other pages leave these unused.
+        // The item page's rows (`views/item/`); other pages leave these unused.
         bind(Browse, NONE, Key::W, ToggleWatched),
         bind(Browse, Modifiers::ALT, Key::ArrowUp, MoveEntryUp),
         bind(Browse, Modifiers::ALT, Key::ArrowDown, MoveEntryDown),

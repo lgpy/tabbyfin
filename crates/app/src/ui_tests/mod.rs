@@ -44,6 +44,7 @@ pub mod menus;
 pub mod mockups;
 pub mod settings;
 pub mod shelf;
+pub mod states;
 pub mod theme;
 pub mod toasts;
 pub mod widgets;
