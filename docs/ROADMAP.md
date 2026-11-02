@@ -68,6 +68,7 @@ Done: an Inno Setup installer for Windows, an AppImage and a Flatpak bundle besi
 | 5.2 | **Windows code signing** | P2 | M | Avoids SmartScreen warnings on the installer and the exe. |
 | 5.3 | **Flathub** | P2 | M | The Flatpak builds and plays from a local bundle; it isn't published. |
 | 5.4 | **ARM builds** | P3 | M | Windows on ARM and Linux aarch64 aren't built. The libmpv and ANGLE pins are x86_64 only. |
+| 5.5 | **Android (phones and tablets)** | P3 | L | Not started. The same egui app through eframe's Android backend, touch-first; the player (libmpv or Media3) is chosen by a spike. Plan in [`android.md`](android.md). |
 
 ## 6. Quality and engineering
 
@@ -87,3 +88,4 @@ Done: an integration job in CI against 12.2 and 10.11 (not yet run on GitHub Act
 2. **Hardware testing (2.6, 2.7):** borrow or rent an NVIDIA/Intel machine; ask testers with Linux desktops.
 3. **Signing and Flathub (5.1–5.3).**
 4. **macOS (2.3, 2.4, 5.1)** once a Mac is available.
+5. **Android (5.5)**, following the milestones in `android.md`.
