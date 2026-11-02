@@ -7,7 +7,7 @@
 use egui::accesskit::Role;
 use egui::text::LayoutJob;
 use egui::{
-    Align, Button, Color32, FontId, Rect, Response, RichText, Spinner, Stroke, TextFormat, Ui, Vec2, WidgetInfo,
+    Align, Button, Color32, FontId, Rect, Response, RichText, Sense, Spinner, Stroke, TextFormat, Ui, Vec2, WidgetInfo,
     WidgetText, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
@@ -257,6 +257,25 @@ pub fn subtle(ui: &mut Ui, label: &str) -> Response {
         .color(tokens.ink_muted)
         .underline();
     ui.add(Button::new(label).frame(false))
+}
+
+/// A link in the text it sits in: `label` then a ›, and under the pointer an underline
+/// across it, so it reads as a link without a colour of its own. `size` is a key of the text
+/// table; named to AccessKit by `label`, without the ›.
+pub fn link(ui: &mut Ui, label: &str, size: &str) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let font = text::font(ui, size);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(format!("{label} ›"), font, tokens.ink_muted);
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Link, true, label));
+    if response.hovered() {
+        let stroke = Stroke::new(1., tokens.ink_muted);
+        ui.painter().hline(rect.x_range(), rect.bottom() - 1., stroke);
+    }
+    ui.painter().galley(rect.min, galley, tokens.ink_muted);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A small action written out in [`theme::Tokens::brand`], with no frame, for a row of

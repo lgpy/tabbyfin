@@ -24,7 +24,7 @@ use crate::views::dialogs::AddToPlaylist;
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::{CARD_GAP, LANDSCAPE_W, Load, POSTER_W};
-use crate::widgets::{backdrop, card, state};
+use crate::widgets::{backdrop, card, label, state};
 
 /// How long the box has to be still before the search goes out (`main`'s debounce).
 const DEBOUNCE: Duration = Duration::from_millis(300);
@@ -291,7 +291,7 @@ fn show_results(
             }
             ui.horizontal(|ui| {
                 ui.add_space(PADDING);
-                ui.label(egui::RichText::new(group.title).heading().strong());
+                ui.label(label::heading(ui, group.title));
             });
             ui.add_space(TITLE_GAP);
             for (row, cards) in group.items.chunks(group.columns).enumerate() {

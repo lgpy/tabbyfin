@@ -35,6 +35,8 @@ use egui_material_icons::icons::ICON_CHECK;
 use crate::keys;
 use crate::motion;
 use crate::theme::{self, text};
+use crate::widgets::focus;
+use crate::widgets::{badge, label};
 
 /// A menu's width unless the caller sets one.
 pub const WIDTH: f32 = 220.;
@@ -372,6 +374,50 @@ pub fn panel<R>(
 
 /// The room inside a [`panel`]: a surface's padding scaled down to a popup.
 pub const PANEL_PAD: f32 = 16.;
+
+/// A [`panel`]'s top: its title, with `status` at the right end as a dot and a note, over a
+/// muted line saying what the panel is for.
+pub fn panel_heading(ui: &mut Ui, title: &str, status: Option<(&str, Color32)>, line: &str) {
+    // A row is wrapped in `ui.horizontal` so that it measures only itself: a `with_layout`
+    // directly in a vertical `Ui` would take the height left in the panel.
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 6.;
+            if let Some((note, dot)) = status {
+                ui.label(label::note(ui, note));
+                badge::dot(ui, dot);
+            }
+            // The title takes what's left, so a long one truncates rather than pushing the
+            // state out of the panel.
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                let title = label::title(ui, title).font(text::font(ui, "lg"));
+                ui.add(egui::Label::new(title).truncate());
+            });
+        });
+    });
+    ui.add_space(theme::SPACE.xs);
+    // Left aligned: in the panel's justified layout a wrapped line would be stretched to both
+    // edges.
+    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+        ui.label(label::muted(ui, line));
+    });
+}
+
+/// A [`panel`]'s section: its overline `height` tall, with `right` (its controls) at the other
+/// end.
+pub fn panel_section(ui: &mut Ui, title: &str, height: f32, right: impl FnOnce(&mut Ui)) {
+    ui.horizontal(|ui| {
+        ui.set_height(height);
+        ui.label(label::overline(ui, title));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.;
+            // Room for the keyboard's ring inside the panel's edge.
+            ui.add_space(focus::GAP + focus::WIDTH);
+            right(ui);
+        });
+    });
+    ui.add_space(theme::SPACE.xs);
+}
 
 #[expect(clippy::too_many_arguments, reason = "one caller each for menus and panels")]
 fn show_panel<R>(

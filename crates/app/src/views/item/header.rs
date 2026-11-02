@@ -7,7 +7,7 @@
 //! when on. Picked over round icon buttons by C11's mockup.
 
 use egui::text::LayoutJob;
-use egui::{Align, Align2, FontId, Label, Rect, Response, RichText, Sense, TextFormat, Ui, pos2, vec2};
+use egui::{Align, FontId, Label, Layout, Rect, Response, RichText, Sense, TextFormat, Ui, UiBuilder, pos2, vec2};
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_CHECK, ICON_CHECK_CIRCLE, ICON_FAVORITE, ICON_MORE_HORIZ, ICON_MOVIE, ICON_OPEN_IN_NEW, ICON_PLAY_ARROW,
@@ -28,7 +28,7 @@ use crate::theme::{self, text};
 use crate::views::UnderBar;
 use crate::widgets::focus;
 use crate::widgets::text::{episode_label, poster_image, timestamp};
-use crate::widgets::{backdrop, button, image, pill, select};
+use crate::widgets::{backdrop, button, image, label, pill, select};
 
 /// The header: the backdrop with its fade, the poster, and the item's title, actions and text.
 /// Returns its rectangle, for the cursor scrolling back to the actions.
@@ -124,19 +124,10 @@ fn info_column(
         && let Some(series) = &item.series_name
     {
         // `main`'s series line took the body size; the lines under the title are `text_sm`. It
-        // opens the series, underlined under the pointer like a link.
-        let label = Label::new(RichText::new(series).font(text::font(ui, "base")).color(weak));
+        // opens the series.
         match &item.series_id {
             Some(id) => {
-                let response = ui
-                    .add(label.sense(Sense::click()))
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
-                if response.hovered() {
-                    let rect = response.rect;
-                    ui.painter()
-                        .hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1., weak));
-                }
-                if response.clicked() {
+                if button::link(ui, series, "base").clicked() {
                     asked.open = Some(Route::Item {
                         id: id.clone(),
                         name: series.clone(),
@@ -144,7 +135,7 @@ fn info_column(
                 }
             }
             None => {
-                ui.add(label);
+                ui.label(RichText::new(series).font(text::font(ui, "base")).color(weak));
             }
         }
     }
@@ -420,14 +411,14 @@ pub(super) fn pickers_row(
     let current = version.min(sources.len() - 1);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 16.;
-        let (label, _) = ui.allocate_exact_size(vec2(PICKER_LABEL_W, PICKER_H), Sense::hover());
-        ui.painter().text(
-            label.left_center(),
-            Align2::LEFT_CENTER,
-            "Version",
-            text::font(ui, "sm"),
-            theme::tokens_of(ui).muted_foreground,
+        let (cell, _) = ui.allocate_exact_size(vec2(PICKER_LABEL_W, PICKER_H), Sense::hover());
+        let mut cell = ui.new_child(
+            UiBuilder::new()
+                .max_rect(cell)
+                .layout(Layout::left_to_right(Align::Center)),
         );
+        let version_text = label::muted(&cell, "Version");
+        cell.label(version_text);
         let ringed = selected
             == Some(Position {
                 section: PICKERS,

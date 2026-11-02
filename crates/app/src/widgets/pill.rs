@@ -1,17 +1,21 @@
-//! A fully round pill, sunk like an inset: a tag on the item page ([`tag`], small and static) and
-//! a value in the library's filters ([`filter`], regular and clickable).
+//! A fully round pill, sunk like an inset: a tag on the item page ([`tag`] and [`icon_tag`], small
+//! and static) and a value in the library's filters ([`filter`], regular and clickable).
 
 use egui::accesskit::Role;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{Align2, Color32, CornerRadius, Rect, Response, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{ICON_CHECK, ICON_REMOVE};
 
 use crate::theme::{self, text};
 use crate::widgets::focus::{self, Place};
+use crate::widgets::round_button;
 
 /// A tag's room either side of its text, and above and below it, 1 point of each its outline.
 const TAG_PAD_X: f32 = 11.;
 const TAG_PAD_Y: f32 = 4.;
+/// Between a tag's icon and its text.
+const TAG_ICON_GAP: f32 = 4.;
 /// A filter's room left and right of its contents, and between its icon and text.
 const FILTER_INSET: f32 = 12.;
 const ICON_GAP: f32 = 4.;
@@ -36,16 +40,21 @@ fn shape(ui: &Ui, rect: Rect, fill: Color32, stroke: Stroke) {
 /// How wide [`tag`] draws `name`, so a wrapping row can start a new line before a pill that
 /// wouldn't fit.
 pub fn tag_width(ui: &Ui, name: &str) -> f32 {
-    let galley = ui
-        .painter()
-        .layout_no_wrap(name.to_owned(), text::font(ui, "xs"), Color32::WHITE);
-    galley.size().x + 2. * TAG_PAD_X
+    text_width(ui, name) + 2. * TAG_PAD_X
 }
 
 /// How tall [`tag`] draws, so a wrapping row of tags can be made just that tall.
 pub fn tag_height(ui: &Ui) -> f32 {
     let font = text::font(ui, "xs");
     ui.fonts_mut(|fonts| fonts.row_height(&font)) + 2. * TAG_PAD_Y
+}
+
+/// How wide `name` lays out in a tag's `xs`.
+fn text_width(ui: &Ui, name: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(name.to_owned(), text::font(ui, "xs"), Color32::WHITE)
+        .size()
+        .x
 }
 
 /// A tag: `inset`, a 1 pt `surface_border` outline, its text `xs` in `ink_muted`.
@@ -56,6 +65,29 @@ pub fn tag(ui: &mut Ui, name: &str) -> Response {
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, name));
     shape(ui, rect, tokens.inset, Stroke::new(1., tokens.surface_border));
     let at = pos2(rect.left() + TAG_PAD_X, rect.center().y);
+    ui.painter().text(at, Align2::LEFT_CENTER, name, font, tokens.ink_muted);
+    response
+}
+
+/// [`tag`] with an icon before its name, for a tag that says what kind of thing it names (where
+/// a Settings section's settings are kept).
+pub fn icon_tag(ui: &mut Ui, icon: MaterialIcon, name: &str) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let font = text::font(ui, "xs");
+    let icon_size = font.size + 2.;
+    let width = text_width(ui, name) + icon_size + TAG_ICON_GAP + 2. * TAG_PAD_X;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, tag_height(ui)), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, name));
+    shape(ui, rect, tokens.inset, Stroke::new(1., tokens.surface_border));
+    let left = rect.left() + TAG_PAD_X;
+    round_button::glyph(
+        ui,
+        pos2(left + icon_size / 2., rect.center().y),
+        icon,
+        icon_size,
+        tokens.ink_muted,
+    );
+    let at = pos2(left + icon_size + TAG_ICON_GAP, rect.center().y);
     ui.painter().text(at, Align2::LEFT_CENTER, name, font, tokens.ink_muted);
     response
 }
