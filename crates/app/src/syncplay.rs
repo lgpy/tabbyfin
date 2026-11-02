@@ -5,7 +5,7 @@
 //! member loads it paused and reports `Ready`; the server then sends scheduled commands
 //! (unpause, pause, seek, stop) with a `When` in server time, which [`ServerClock`] turns into
 //! local time. Local pause, seek and stop become requests ([`GroupRequest`]) instead of acting
-//! directly. See `docs/ROADMAP.md` §2.4.
+//! directly. See `docs/PLAN.md` §5.4.
 //!
 //! [`SyncPlay`] (`services.syncplay`) is the part that needs nothing else: the group, the
 //! server's groups, the queue and the requests the SyncPlay panel makes. What involves playback
