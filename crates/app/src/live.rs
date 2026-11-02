@@ -2,8 +2,7 @@
 //! pages when watch data changes elsewhere (another device, the web dashboard), hands SyncPlay
 //! its updates and commands, and remote control its commands.
 //!
-//! `main`'s `changes.rs` is gone: a watch-data refresh is a bump of [`Services::user_data`],
-//! which pages watch.
+//! A watch-data refresh is a bump of [`Services::user_data`], which pages watch.
 
 use std::time::Duration;
 

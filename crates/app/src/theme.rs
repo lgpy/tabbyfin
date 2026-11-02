@@ -7,15 +7,14 @@
 //! of literals. The player is the exception: it stays dark whatever the theme, and draws with
 //! [`over_video`].
 //!
-//! The text-style table ([`text`]) is `main`'s scale (`text_xs` … `text_2xl`) rather than
+//! The text-style table ([`text`]) is the app's own scale (`text_xs` … `text_2xl`) rather than
 //! egui's: it's what [`apply_text_size`] scales, and what widgets name instead of adding steps to
 //! egui's body size.
 //!
-//! On `main` this was `theme.rs`, `zoom.rs` and `motion.rs`. The zoom keys live here now, with
-//! egui in charge of the theme it draws in: on Windows and macOS `ctx.set_theme` with
-//! [`egui::ThemePreference::System`] follows the system's light or dark appearance as it changes.
-//! On Linux egui gets no system theme from winit, so [`SystemTheme`] reads the desktop's from the
-//! XDG portal and follows the portal's changes (as `main` did).
+//! The zoom keys live here, with egui in charge of the theme it draws in: on Windows and macOS
+//! `ctx.set_theme` with [`egui::ThemePreference::System`] follows the system's light or dark
+//! appearance as it changes. On Linux egui gets no system theme from winit, so [`SystemTheme`]
+//! reads the desktop's from the XDG portal and follows the portal's changes.
 
 use std::sync::Mutex;
 
@@ -28,14 +27,14 @@ use crate::task::Task;
 pub const TEXT_SIZES: [u16; 5] = [90, 100, 115, 130, 150];
 
 /// What "the system's theme" is: egui's own support where winit reports the system theme, and
-/// on Linux light, which is what `main` showed when the desktop said nothing, until the
-/// [`SystemTheme`] the app keeps alongside sets the desktop's.
+/// on Linux a light default until the [`SystemTheme`] the app keeps alongside sets the
+/// desktop's.
 #[cfg(not(target_os = "linux"))]
 const SYSTEM_PREFERENCE: egui::ThemePreference = egui::ThemePreference::System;
 #[cfg(target_os = "linux")]
 const SYSTEM_PREFERENCE: egui::ThemePreference = egui::ThemePreference::Light;
 
-/// The zoom levels the zoom keys step through, as on `main`, 1.0 being 100 %.
+/// The zoom levels the zoom keys step through, 1.0 being 100 %.
 const ZOOM_LEVELS: [f32; 10] = [0.67, 0.75, 0.8, 0.9, 1., 1.1, 1.25, 1.5, 1.75, 2.];
 
 /// Applies the config's appearance: theme, zoom, text size and animations. Called through
@@ -56,14 +55,15 @@ pub fn apply(ctx: &egui::Context, config: &Config) {
     ctx.options_mut(|options| options.zoom_with_keyboard = false);
     ctx.set_zoom_factor(config.ui_zoom.map_or(1., snap));
     let spacing = spacing();
-    // No selectable text: `main` had none, and a card's title sits over the card's own click
-    // target, where a selectable label would take its clicks, right-clicks and drags (and show
-    // an I-beam). A truncated label still shows its full text on hover.
+    // No selectable text: a card's title sits over the card's own click target, where a
+    // selectable label would take its clicks, right-clicks and drags (and show an I-beam). A
+    // truncated label still shows its full text on hover.
     ctx.all_styles_mut(|style| {
         style.interaction.selectable_labels = false;
         style.spacing = spacing.clone();
     });
-    // A press that moves further than this is a drag, not a click: `main`'s shelves used 4 px.
+    // A press that moves further than this is a drag, not a click: a shelf's rail drag uses
+    // 4 px.
     // (A shelf still scrolls along from the first pixel; only the click is withheld.)
     // A wheel notch scrolls as far as in other apps (`smooth_scroll.rs`).
     ctx.options_mut(|options| {
@@ -126,7 +126,7 @@ pub fn text_scale(setting: Option<u16>) -> f32 {
     scale.clamp(0.75, 2.)
 }
 
-/// The app's text styles, `main`'s scale in points at 100 %: `text_xs` (12), `text_sm`
+/// The app's text styles, in points at 100 %: `text_xs` (12), `text_sm`
 /// (14), `text_base` (16), `text_lg` (18), `text_xl` (20) and `text_2xl` (24). They're installed
 /// into [`egui::Style::text_styles`] as the named styles [`NAMED`] (`"xs"` … `"2xl"`), alongside
 /// egui's own (`Small` is `xs`, `Body` and `Button` are `sm`, `Heading` is `lg`), so a widget
@@ -134,10 +134,10 @@ pub fn text_scale(setting: Option<u16>) -> f32 {
 /// every one of them.
 ///
 /// The families are egui's bundled ones (proportional and monospace) and the material-icons
-/// font: `main` drew with the system UI font, which egui doesn't have without bundling a copy.
+/// font: egui doesn't have the system UI font without bundling a copy.
 ///
-/// Text that `main` drew at a fixed `dp` size stays fixed: the item page's 40-point title, the
-/// letter bar's 11, the action icons' 24. The setting makes text bigger, not the layout.
+/// Text drawn at a fixed `dp` size stays fixed: the item page's 40-point title, the letter bar's
+/// 11, the action icons' 24. The setting makes text bigger, not the layout.
 pub mod text {
     use egui::{FontFamily, FontId, TextStyle, Ui};
 
@@ -188,8 +188,8 @@ pub mod text {
             .unwrap_or_else(|| TextStyle::Body.resolve(style))
     }
 
-    /// An icon in a line of text, in `family` (the material-icons font): at `text_base`, as
-    /// `main`'s inline icons took the text size they sat in.
+    /// An icon in a line of text, in `family` (the material-icons font): at `text_base`, the
+    /// size of the text it sits in.
     pub fn icon(ui: &Ui, family: FontFamily) -> FontId {
         let mut font = font(ui, "base");
         font.family = family;
@@ -198,8 +198,7 @@ pub mod text {
 }
 
 /// Scales the app's text-style table ([`text`]), which sizes text and the controls drawn around
-/// it. Fixed layout sizes don't follow, as on `main`: the setting makes text bigger, not the
-/// window's chrome.
+/// it. Fixed layout sizes don't follow: the setting makes text bigger, not the window's chrome.
 fn apply_text_size(ctx: &egui::Context, setting: Option<u16>) {
     let scale = text_scale(setting);
     ctx.all_styles_mut(|style| {
@@ -238,7 +237,7 @@ pub struct Tokens {
     /// The base red, which is the favorite heart (`danger` is the error red).
     pub red: Color32,
 
-    /// The radius of cards, dialogs and popups (`main`'s override of 8).
+    /// The radius of cards, dialogs and popups.
     pub radius_lg: u8,
 
     /// The window's background, a gradient from the top colour to the bottom one.
@@ -377,8 +376,7 @@ pub fn tokens_of(ui: &egui::Ui) -> &'static Tokens {
     tokens(ui.visuals())
 }
 
-/// The spacing scale (`main`'s `gap_1`, `p_2`, `px_6`, …), in points. It's the same in
-/// both themes.
+/// The spacing scale, in points. It's the same in both themes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Space {
     pub xxs: f32,
@@ -506,7 +504,7 @@ fn visuals(tokens: &Tokens) -> egui::Visuals {
 }
 
 /// egui's [`egui::Spacing`] from [`SPACE`] and the tokens' radii: the room egui's own widgets
-/// leave around themselves, in `main`'s sizes (a 32-point button, 10 points beside its label).
+/// leave around themselves, in the app's sizes (a 32-point button, 10 points beside its label).
 fn spacing() -> egui::Spacing {
     let mut spacing = egui::Spacing {
         item_spacing: egui::vec2(SPACE.sm, SPACE.xs),
@@ -514,7 +512,7 @@ fn spacing() -> egui::Spacing {
         // A tooltip's room round its text.
         menu_margin: egui::Margin::symmetric(10, 6),
         window_margin: egui::Margin::same(SPACE.sm as i8),
-        // `main`'s buttons and text fields are 32 points tall.
+        // Buttons and text fields are 32 points tall.
         interact_size: egui::vec2(40., 32.),
         icon_width: 16.,
         icon_width_inner: 8.,
@@ -525,15 +523,14 @@ fn spacing() -> egui::Spacing {
         tooltip_width: 400.,
         ..Default::default()
     };
-    // `main`'s scrollbar: 6 points, just inside the edge.
+    // The scrollbar: 6 points, just inside the edge.
     spacing.scroll.bar_width = 6.;
     spacing.scroll.bar_inner_margin = 2.;
     spacing.scroll.bar_outer_margin = 0.;
     spacing
 }
 
-/// Off makes every widget change instant, scrolling included, as `main`'s reduce-motion flag
-/// did.
+/// Off makes every widget change instant, scrolling included.
 fn apply_animations(ctx: &egui::Context, on: bool) {
     let animation_time = if on { egui::Style::default().animation_time } else { 0. };
     let scroll = if on {
@@ -556,7 +553,7 @@ pub fn animations(ctx: &egui::Context) -> bool {
 
 /// The desktop's colour scheme, from the XDG desktop portal's settings: what "follow the
 /// system" means on Linux, where winit reports no system theme (its X11 backend has none, its
-/// Wayland one only knows what the app set). The same source `main` used.
+/// Wayland one only knows what the app set).
 #[cfg(target_os = "linux")]
 pub struct SystemTheme {
     /// The watch. Dropping it stops the listening, which is what happens when the preference
@@ -642,7 +639,7 @@ const APPEARANCE: &str = "org.freedesktop.appearance";
 const COLOR_SCHEME: &str = "color-scheme";
 
 /// The theme a portal colour scheme asks for: 1 is dark, 2 is light. 0 (no preference), a
-/// missing portal and anything else are light, as `main` showed without a signal.
+/// missing portal and anything else are light.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn scheme_theme(scheme: u32) -> egui::Theme {
     match scheme {
@@ -977,7 +974,7 @@ mod tests {
         let spacing = super::spacing();
         assert_eq!(spacing.item_spacing, egui::vec2(SPACE.sm, SPACE.xs));
         assert_eq!(spacing.button_padding, egui::vec2(10., SPACE.xs));
-        // `main`'s medium buttons and inputs are 32 points tall.
+        // Medium buttons and inputs are 32 points tall.
         assert_eq!(spacing.interact_size.y, 32.);
     }
 

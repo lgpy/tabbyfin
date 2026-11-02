@@ -1,5 +1,5 @@
-//! A button's contents with a material icon before the label, as `main`'s buttons had them: the
-//! SyncPlay panel's toggles. And the app's own buttons: [`brand`] for a screen's main action (or
+//! A button's contents with a material icon before the label: the SyncPlay panel's toggles. And
+//! the app's own buttons: [`brand`] for a screen's main action (or
 //! [`danger`] when it deletes something), [`quiet`] for the ones beside it, [`text`] for a small
 //! written-out action in a row of controls, and [`brand_icon`] and [`quiet_icon`] for a page's row
 //! of actions (the item page's).

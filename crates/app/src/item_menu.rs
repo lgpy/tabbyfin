@@ -1,11 +1,10 @@
 //! What an item's menu and actions offer: played and favorite state, resume points, what can be
 //! played, marked or added to a playlist. The menu itself is `widgets/menu.rs` and the item
-//! page's own buttons are U6's.
+//! page's own buttons are `views/item/header.rs`'s.
 //!
 //! It also carries the item page's playlist edits to the server: the page changes its rows at
 //! once and queues the change here, and [`Services`] sends them one at a time in the order they
-//! were made, whatever page is on top (they used to be the page's own tasks, which stopped when
-//! the page was left and only ran while it was drawn).
+//! were made, whatever page is on top.
 
 use std::collections::VecDeque;
 

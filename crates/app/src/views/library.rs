@@ -20,7 +20,7 @@
 //! - Watch data changing elsewhere reloads the pages already loaded, keeping the items on
 //!   screen until the new ones arrive.
 //! - A page that fails is retried when its rows leave the screen and come back, rather than
-//!   every frame while they stay there (`main` asked every frame).
+//!   every frame while they stay there.
 //!
 //! The popover is `views/value_filters.rs`; the cards and the item menu are `widgets/`.
 
@@ -50,7 +50,7 @@ use crate::widgets::{backdrop, button, card, label, select, state, surface};
 
 /// Items per request: rows show placeholders until the page holding them arrives.
 const PAGE_SIZE: usize = 100;
-/// `main`'s `px_6` around the toolbar and the grid.
+/// The padding around the toolbar and the grid.
 const GRID_PADDING: f32 = 24.;
 /// The order button's diameter: the selects' height.
 const ORDER_BUTTON: f32 = 32.;
@@ -1039,8 +1039,8 @@ impl LibraryPage {
                 (response, index.map(ToolAction::Resolution))
             }
             Tool::Order => {
-                // The icon shows the direction even for Random, as on `main`; only what a click
-                // does changes there.
+                // The icon shows the direction even for Random; only what a click does changes
+                // there.
                 let icon = if view.descending {
                     ICON_ARROW_DOWNWARD
                 } else {
@@ -1081,7 +1081,7 @@ impl LibraryPage {
     /// The jump bar: the letters in `ink_muted`, `current` (the first row's) in `brand`, and an
     /// `inset_hover` pill in `ink` under the pointer.
     fn letters(&mut self, ui: &mut Ui, current: Option<char>, cx: &mut PageCx) {
-        // The letters spread down the whole grid, as `main`'s did, at 12 px each.
+        // The letters spread down the whole grid, at 12 px each.
         let count = LETTERS.chars().count() as f32;
         let line = 12.;
         let gap = ((ui.available_height() - line * count) / (count - 1.)).clamp(0., 16.);
@@ -1141,7 +1141,7 @@ impl LibraryPage {
         let rows = total.div_ceil(columns);
         let card_height = POSTER_H + card::text_height(ui);
         let pitch = card_height + CARD_GAP;
-        // The grid sits `main`'s `pt_4` under the toolbar, so it has that much less room.
+        // The grid sits 16 points under the toolbar, so it has that much less room.
         let viewport = (ui.available_height() - 16.).max(0.);
         // `show_rows` leaves out the last row's gap below it.
         let max_offset = (rows as f32 * pitch - CARD_GAP - viewport).max(0.);
@@ -1168,7 +1168,7 @@ impl LibraryPage {
         let mut missing = Vec::new();
         let mut opened = None;
         let mut chosen = None;
-        // `main`'s `pt_4` between the toolbar and the grid.
+        // 16 points between the toolbar and the grid.
         ui.add_space(16.);
         ui.horizontal_top(|ui| {
             let size = vec2(grid_width, viewport);
@@ -1280,8 +1280,8 @@ impl Page for LibraryPage {
         if !letter.is_ascii_alphabetic() || !self.letters_shown() {
             return false;
         }
-        // Plain letters only, as on `main`: Ctrl, Alt or Shift with a letter is something else
-        // (the zoom and the shortcuts take theirs first).
+        // Plain letters only: Ctrl, Alt or Shift with a letter is something else (the zoom and
+        // the shortcuts take theirs first).
         if !cx
             .ctx
             .input(|input| input.modifiers.matches_exact(egui::Modifiers::NONE))
@@ -1303,7 +1303,7 @@ impl Page for LibraryPage {
             self.refresh(cx);
         }
         browse::hide_on_click(&mut self.cursor, ui);
-        // `main`'s `pt_4` over the toolbar.
+        // 16 points over the toolbar.
         ui.add_space(16.);
         self.toolbar(ui, cx);
 
@@ -1524,7 +1524,7 @@ mod tests {
         // No room at all is still one column.
         assert_eq!(columns(0.), 1);
         assert_eq!(columns(150.), 1);
-        // Two posters and the gap between them, plus `main`'s padding on both sides.
+        // Two posters and the gap between them, plus the grid's padding on both sides.
         assert_eq!(columns(2. * 150. + 16. + 2. * GRID_PADDING), 2);
         assert_eq!(columns(3. * 150. + 2. * 16. + 2. * GRID_PADDING), 3);
         // A poster and a bit doesn't fit a second.

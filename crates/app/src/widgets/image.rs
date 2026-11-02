@@ -1,6 +1,6 @@
-//! A server image filling its space, from I1's cache: cover fit (cropped to the space, never
-//! stretched), rounded corners, and its blurhash underneath while it loads. An image fades in
-//! over its blurhash when it shows, as `main`'s did ([`crate::motion`]).
+//! A server image filling its space, from the image cache: cover fit (cropped to the space,
+//! never stretched), rounded corners, and its blurhash underneath while it loads. An image fades
+//! in over its blurhash when it shows ([`crate::motion`]).
 //!
 //! The caller owns the space (a card allocates its own rectangle) and the request, so the widget
 //! only draws. Every request carries the size it's drawn at ([`ImageRequest::fill_width`] in
@@ -16,7 +16,7 @@ use jellyfin::models::BaseItemDto;
 use crate::images::ImageCache;
 use crate::{motion, theme};
 
-/// The cards' rounded corners, `main`'s `rounded_xl`.
+/// The cards' rounded corners.
 pub const RADIUS: u8 = 12;
 
 /// Draws `request` filling `rect`: cover-cropped, with `radius` rounded corners (0 for square),
@@ -40,8 +40,7 @@ pub fn show(
 /// How far down a banner taller than its band is cut, as a share of what doesn't fit: 0 keeps
 /// its top edge, 0.5 cuts evenly. Backdrops mostly have their subject in the top third, and on a
 /// wide window a 16:9 one is about twice the band's height, so an even cut loses the faces;
-/// keeping the very top shows sky above them. Picked from the user's own library by a mockup
-/// (IT: Welcome to Derry, Frieren, Amélie, The Usual Suspects), 2026-11-02.
+/// keeping the very top shows sky above them.
 const BANNER_ANCHOR: f32 = 0.15;
 
 /// A banner's shapes, for the caller to paint where it wants them (the item page's backdrop,
@@ -112,9 +111,8 @@ fn shapes(
     shapes
 }
 
-/// Dims what's drawn in `rect` while the pointer is on it, as `main`'s `opacity(0.8)` did: the
-/// page's background at 20 % over the picture, so a card dims on a light theme as well as a dark
-/// one instead of only darkening.
+/// Dims what's drawn in `rect` while the pointer is on it: the page's background at 20 % over
+/// the picture, so a card dims on a light theme as well as a dark one instead of only darkening.
 pub fn dim(ui: &Ui, rect: Rect, radius: u8) {
     let background = theme::tokens_of(ui).backdrop_top;
     let fill = egui::Color32::from_rgba_unmultiplied(background.r(), background.g(), background.b(), 51);

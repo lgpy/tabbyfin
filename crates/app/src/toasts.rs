@@ -1,9 +1,9 @@
 //! Notifications in the window's bottom-right corner: info, success and error, each a small
 //! surface in the popups' frame. Each goes away by itself after a few seconds (not while the
 //! pointer is on it), or with its close button, and can carry one action button at its right
-//! end (the update notice's Download). Its buttons are
-//! `Sense::CLICK` widgets, not focusable (U8's rule for its dialogs'): a Tab with a toast over
-//! the player mustn't give egui the focus, or egui would keep the player's keys (`keys.rs`).
+//! end (the update notice's Download). Its buttons are `Sense::CLICK` widgets, not focusable,
+//! like the dialogs': a Tab with a toast over the player mustn't give egui the focus, or egui
+//! would keep the player's keys (`keys.rs`).
 //!
 //! Anything can raise one: signed-in code pushes `AppEvent::Toast` into `Services::events`, and
 //! the app, which owns [`Toasts`], shows them.

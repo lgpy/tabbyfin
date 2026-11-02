@@ -2,10 +2,10 @@
 //! shell. Owns what lives longer than a session (toasts, the keys taken from egui) and, while
 //! signed in, the session's [`Services`].
 //!
-//! Ported from `main`'s `app_view.rs`: the sign-in screen, waiting for an unreachable server,
-//! adding and switching accounts, signing out and an expired session. Adding an account keeps
-//! the signed-in screen (and its session, playback included) alive in [`App::parked`], so
-//! *Back to your account* returns to it untouched.
+//! The sign-in screen, waiting for an unreachable server, adding and switching accounts, signing
+//! out and an expired session. Adding an account keeps the signed-in screen (and its session,
+//! playback included) alive in [`App::parked`], so *Back to your account* returns to it
+//! untouched.
 
 use jellyfin::Client;
 
@@ -21,7 +21,7 @@ use crate::views::shell::Shell;
 use crate::widgets::{self, video};
 use crate::{credentials, runtime, smooth_scroll, theme, window};
 
-/// The mascot's size while the saved session is restored, as on `main`.
+/// The mascot's size while the saved session is restored.
 const RESTORING_MASCOT: f32 = 160.;
 /// How far the glow behind the restoring screen's mascot reaches, as the sign-in form's does.
 const RESTORING_GLOW: f32 = 360.;
@@ -68,7 +68,7 @@ pub struct App {
     /// stops following.
     system_theme: Option<theme::SystemTheme>,
     /// Whether the window had the focus last frame: the system text size is read again when it
-    /// gets the focus back, since no desktop tells the app it changed (`main` did the same).
+    /// gets the focus back, since no desktop tells the app it changed.
     focused: bool,
     /// That read, while it runs.
     text_size_check: Option<Task<f32>>,
@@ -550,8 +550,8 @@ fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Si
 
 impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        // egui eases a wheel step over frames whatever the animations setting says; `main`'s
-        // reduced motion scrolled it at once (`smooth_scroll.rs`).
+        // egui eases a wheel step over frames whatever the animations setting says, so with
+        // animations off the step is handed to its frame at once (`smooth_scroll.rs`).
         if !theme::animations(ctx) {
             let options = ctx.options(|options| options.input_options);
             let height = raw_input
@@ -675,8 +675,8 @@ impl eframe::App for App {
                     .show(ui, |ui| login.show(ui, &ctx));
             }
             Some(Screen::Restoring { .. }) | None => {
-                // The mascot, as `main`'s restoring screen had it, in the sign-in screen's
-                // backdrop and glow, so a launch that does need the form doesn't flash.
+                // The mascot in the sign-in screen's backdrop and glow, so a launch that does
+                // need the form doesn't flash.
                 egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
                     let tokens = theme::tokens_of(ui);
                     widgets::backdrop::fill(ui.painter(), ui.max_rect(), tokens);

@@ -1,5 +1,5 @@
-//! Home's *My Media* row: the libraries are tiles (C9), each a button named by the library,
-//! which a click or the cursor's Enter opens.
+//! Home's *My Media* row: the libraries are tiles, each a button named by the library, which a
+//! click or the cursor's Enter opens.
 
 use egui::Key;
 use egui::accesskit::Role;

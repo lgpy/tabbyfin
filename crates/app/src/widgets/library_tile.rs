@@ -1,6 +1,6 @@
 //! A library as a small surface: its picture as a thumbnail (or its kind's icon when it has
 //! none) and its name. Home's *My Media* row is these rather than image cards, so the libraries
-//! read as places to go rather than things to watch (C9, picked by a mockup).
+//! read as places to go rather than things to watch.
 
 use egui::accesskit::Role;
 use egui::text::{LayoutJob, TextWrapping};
