@@ -51,10 +51,12 @@ use crate::trickplay::Trickplay;
 use crate::views::PageCx;
 use crate::widgets::badge;
 use crate::widgets::countdown_pill;
-use crate::widgets::label;
 use crate::widgets::mascot;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
+use crate::widgets::segmented;
 use crate::widgets::select;
+use crate::widgets::stepper::{self, Step};
+use crate::widgets::tabs;
 use crate::widgets::text::{card_text, timestamp};
 use crate::widgets::video::Video;
 
@@ -113,7 +115,7 @@ const CHAPTER_THUMB_W: f32 = 128.;
 const CHAPTER_THUMB_H: f32 = 72.;
 const CHAPTERS_W: f32 = 340.;
 const CHAPTERS_MAX_H: f32 = 420.;
-const SETTINGS_W: f32 = 380.;
+const SETTINGS_W: f32 = 340.;
 /// How many rows of a settings tab's track list show before it scrolls.
 const TRACK_ROWS: f32 = 5.;
 
@@ -1128,7 +1130,7 @@ impl PlayerPage {
     }
 
     /// The settings menu: audio, subtitle and general tabs, with the tracks, the delays, the
-    /// subtitle size and the speeds. It hangs from the gear whichever button opened it, so it
+    /// subtitle size and the speeds. It has no header over a track list, since the tab names it. It hangs from the gear whichever button opened it, so it
     /// stays put when another shows its tab. Without subtitles there is no subtitle tab: a delay
     /// and a size would do nothing.
     fn settings_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
@@ -1161,10 +1163,9 @@ impl PlayerPage {
                     tab = choice;
                 }
                 ui.add_space(8.);
-                ui.spacing_mut().item_spacing.y = 8.;
+                ui.spacing_mut().item_spacing.y = 0.;
                 match tab {
                     SettingsTab::Audio => {
-                        ui.label(label::overline(ui, "Track").color(over_video::MUTED_FOREGROUND));
                         chosen_audio = track_list(
                             ui,
                             "player-audio",
@@ -1172,19 +1173,14 @@ impl PlayerPage {
                             &menu.audio_choices,
                             menu.audio.or(menu.default_audio),
                         );
-                        if let Some(step) =
-                            stepper(ui, "Audio delay", delay_text(adjustments.audio_delay), "−0.1", "+0.1")
-                        {
-                            match step {
-                                Step::Down => adjustments.audio_delay -= Adjustments::DELAY_STEP,
-                                Step::Up => adjustments.audio_delay += Adjustments::DELAY_STEP,
-                                Step::Reset => adjustments.audio_delay = 0.,
-                            }
+                        popup::separator_in(ui, over_video::TOKENS.border);
+                        let delay = adjustments.audio_delay;
+                        if let Some(step) = delay_stepper(ui, None, delay) {
+                            adjustments.audio_delay = stepped_delay(delay, step);
                             adjusted = true;
                         }
                     }
                     SettingsTab::Subtitles => {
-                        ui.label(label::overline(ui, "Track").color(over_video::MUTED_FOREGROUND));
                         let selected = match menu.subtitle {
                             SubtitleChoice::Stream(index) => index,
                             SubtitleChoice::Off => SUBTITLES_OFF,
@@ -1201,22 +1197,16 @@ impl PlayerPage {
                             SUBTITLES_OFF => SubtitleChoice::Off,
                             index => SubtitleChoice::Stream(index),
                         });
-                        if let Some(step) = stepper(
-                            ui,
-                            "Subtitle delay",
-                            delay_text(adjustments.subtitle_delay),
-                            "−0.1",
-                            "+0.1",
-                        ) {
-                            match step {
-                                Step::Down => adjustments.subtitle_delay -= Adjustments::DELAY_STEP,
-                                Step::Up => adjustments.subtitle_delay += Adjustments::DELAY_STEP,
-                                Step::Reset => adjustments.subtitle_delay = 0.,
-                            }
+                        popup::separator_in(ui, over_video::TOKENS.border);
+                        let delay = adjustments.subtitle_delay;
+                        if let Some(step) = delay_stepper(ui, Some("z  x"), delay) {
+                            adjustments.subtitle_delay = stepped_delay(delay, step);
                             adjusted = true;
                         }
-                        let size = format!("{:.0}%", adjustments.subtitle_scale * 100.);
-                        if let Some(step) = stepper(ui, "Subtitle size", size, "−", "+") {
+                        let scale = adjustments.subtitle_scale;
+                        let size = format!("{:.0}%", scale * 100.);
+                        let moved = (scale - 1.).abs() >= 0.005;
+                        if let Some(step) = stepper::row(ui, "Size", None, &size, moved, stepper_colours()) {
                             match step {
                                 Step::Down => adjustments.subtitle_scale -= Adjustments::SCALE_STEP,
                                 Step::Up => adjustments.subtitle_scale += Adjustments::SCALE_STEP,
@@ -1226,36 +1216,37 @@ impl PlayerPage {
                         }
                     }
                     SettingsTab::General => {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.;
-                            ui.add_sized(
-                                vec2(110., 24.),
-                                egui::Label::new(RichText::new("Speed").font(theme::text::font(ui, "sm"))),
+                        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
+                        let name = ui.painter().text(
+                            pos2(rect.left() + 8., rect.center().y),
+                            Align2::LEFT_CENTER,
+                            "Speed",
+                            theme::text::font(ui, "sm"),
+                            over_video::TOKENS.foreground,
+                        );
+                        if !menu.in_group {
+                            ui.painter().text(
+                                pos2(name.right() + 8., rect.center().y),
+                                Align2::LEFT_CENTER,
+                                "[  ]",
+                                theme::text::font(ui, "xs"),
+                                over_video::MUTED_FOREGROUND,
                             );
-                            if menu.in_group {
+                        }
+                        if menu.in_group {
+                            ui.horizontal(|ui| {
+                                ui.add_space(8.);
                                 ui.label(
                                     RichText::new("Normal in SyncPlay")
-                                        .small()
+                                        .font(theme::text::font(ui, "sm"))
                                         .color(over_video::MUTED_FOREGROUND),
                                 );
-                            } else if let Some(speed) = speed_group(ui, adjustments.speed) {
-                                adjustments.speed = speed;
-                                adjusted = true;
-                            }
-                        });
+                            });
+                        } else if let Some(speed) = speed_group(ui, adjustments.speed) {
+                            adjustments.speed = speed;
+                            adjusted = true;
+                        }
                     }
-                }
-                let hint = match tab {
-                    SettingsTab::Audio => None,
-                    SettingsTab::Subtitles => Some("Keys: z and x change the subtitle delay."),
-                    SettingsTab::General => Some("Keys: [ and ] change the speed."),
-                };
-                if let Some(hint) = hint {
-                    ui.label(
-                        RichText::new(hint)
-                            .font(theme::text::font(ui, "xs"))
-                            .color(over_video::MUTED_FOREGROUND),
-                    );
                 }
             });
         self.settings_tab = tab;
@@ -1521,14 +1512,14 @@ impl SettingsTab {
             Self::General => "General",
         }
     }
-}
 
-/// Which button of a stepper was pressed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Step {
-    Down,
-    Up,
-    Reset,
+    fn icon(self) -> MaterialIcon {
+        match self {
+            Self::Audio => ICON_AUDIOTRACK,
+            Self::Subtitles => ICON_CLOSED_CAPTION,
+            Self::General => ICON_SETTINGS,
+        }
+    }
 }
 
 /// "episode " or "movie " for a button's tooltip, or nothing for other kinds.
@@ -1540,9 +1531,12 @@ fn kind_word(item: &jellyfin::models::BaseItemDto) -> &'static str {
     }
 }
 
+/// Under this many seconds a delay reads as zero.
+const DELAY_ZERO: f64 = 0.05;
+
 /// A settings value's step: "0.0 s" at zero, "+0.3 s" and "−0.1 s" otherwise.
 fn delay_text(seconds: f64) -> String {
-    if seconds.abs() < 0.05 {
+    if seconds.abs() < DELAY_ZERO {
         "0.0 s".to_owned()
     } else {
         format!("{seconds:+.1} s")
@@ -1739,189 +1733,83 @@ fn menu_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(tokens.popover)
         .stroke(Stroke::new(1., tokens.border))
-        .corner_radius(CornerRadius::same(tokens.radius))
+        .corner_radius(CornerRadius::same(popup::RADIUS))
         .inner_margin(Margin::same(12))
         .shadow(egui::epaint::Shadow {
-            offset: [0, 4],
-            blur: 4,
+            offset: [0, 6],
+            blur: 20,
             spread: 0,
-            color: Color32::from_black_alpha(26),
+            color: Color32::from_black_alpha(110),
         })
 }
 
-/// The settings menu's tabs: `main`'s segmented tab bar, a track with the selected tab in the
-/// popover's own colour on it. Returns the tab clicked.
-fn settings_tabs(ui: &mut egui::Ui, tabs: &[SettingsTab], current: SettingsTab) -> Option<SettingsTab> {
+/// The settings menu's tabs. Returns the tab clicked.
+fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab) -> Option<SettingsTab> {
     let tokens = over_video::TOKENS;
-    let mut chosen = None;
-    egui::Frame::new()
-        .fill(tokens.tab_bar)
-        .corner_radius(CornerRadius::same(tokens.radius))
-        .inner_margin(Margin::symmetric(3, 0))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.x = 2.;
-            ui.horizontal(|ui| {
-                for &tab in tabs {
-                    if segmented_tab(ui, tab.label(), tab == current).clicked() {
-                        chosen = Some(tab);
-                    }
-                }
-            });
-        });
-    chosen
-}
-
-/// One tab of [`settings_tabs`]: 24 points high, its label at `text_sm` with 10 points either
-/// side, and an 18-point pill in the background colour behind the selected one. A selectable tab
-/// to AccessKit, with its selected state, though not keyboard-focusable like the rest of the
-/// player's widgets.
-fn segmented_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
-    let tokens = over_video::TOKENS;
-    let color = if selected {
-        tokens.foreground
-    } else {
-        tokens.tab_foreground
-    };
-    let font = theme::text::font(ui, "sm");
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
-    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 20., 24.), Sense::CLICK);
-    response.widget_info(|| WidgetInfo::selected(Role::Tab, ui.is_enabled(), selected, text));
-    let painter = ui.painter();
-    if selected {
-        let pill = Rect::from_center_size(rect.center(), vec2(rect.width(), 18.));
-        painter.rect_filled(pill, CornerRadius::same(tokens.radius - 2), tokens.background);
-    }
-    painter.galley(rect.center() - galley.size() / 2., galley, color);
-    response
-}
-
-/// The speed choices, as `main`'s segmented outline toggle group: 24-point segments joined into
-/// one outlined control, the chosen one filled with the player's lilac. Returns the speed clicked. Each
-/// segment is a radio button to AccessKit with its selected state; the group's own rect only
-/// senses hover, so it can't take a click or focus meant for a segment.
-fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
-    let tokens = over_video::TOKENS;
-    let font = theme::text::font(ui, "sm");
-    let labels: Vec<String> = Adjustments::SPEEDS.iter().map(|speed| format!("{speed}×")).collect();
-    let widths: Vec<f32> = labels
+    let shown: Vec<_> = shown
         .iter()
-        .map(|label| {
-            let galley = ui
-                .painter()
-                .layout_no_wrap(label.clone(), font.clone(), tokens.foreground);
-            (galley.size().x + 8.).max(24.)
+        .map(|&tab| tabs::Tab {
+            value: tab,
+            icon: tab.icon(),
+            label: tab.label(),
         })
         .collect();
-    let total: f32 = widths.iter().sum();
-    let (rect, _) = ui.allocate_exact_size(vec2(total, 24.), Sense::hover());
-    let mut chosen = None;
-    let mut left = rect.left();
-    for (index, &speed) in Adjustments::SPEEDS.iter().enumerate() {
-        let segment = Rect::from_min_size(pos2(left, rect.top()), vec2(widths[index], rect.height()));
-        let response = ui.interact(segment, ui.scope_id().with(("player_speed", index)), Sense::CLICK);
-        let selected = (speed - current).abs() < 1e-6;
-        response.widget_info(|| WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected, &labels[index]));
-        let fill = if selected {
-            over_video::BRAND
-        } else if response.hovered() {
-            ghost_hover()
-        } else {
-            tokens.background
-        };
-        let last = index + 1 == widths.len();
-        ui.painter().rect_filled(
-            segment,
-            CornerRadius {
-                nw: if index == 0 { tokens.radius } else { 0 },
-                sw: if index == 0 { tokens.radius } else { 0 },
-                ne: if last { tokens.radius } else { 0 },
-                se: if last { tokens.radius } else { 0 },
-            },
-            fill,
-        );
-        let color = if selected {
-            over_video::BRAND_FOREGROUND
-        } else {
-            tokens.foreground
-        };
-        let galley = ui.painter().layout_no_wrap(labels[index].clone(), font.clone(), color);
-        ui.painter()
-            .galley(segment.center() - galley.size() / 2., galley, color);
-        if response.clicked() {
-            chosen = Some(speed);
-        }
-        left += widths[index];
-    }
-    // One outline around the joined segments, with a divider between them.
-    ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(tokens.radius),
-        Stroke::new(1., tokens.border),
-        StrokeKind::Inside,
-    );
-    let mut x = rect.left();
-    for width in widths.iter().take(widths.len().saturating_sub(1)) {
-        x += width;
-        ui.painter().line_segment(
-            [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(1., tokens.border),
-        );
-    }
-    chosen
+    let colours = tabs::Colours {
+        track: tokens.tab_bar,
+        selected: tokens.input,
+        hover: ghost_hover(),
+        ink: tokens.foreground,
+        ink_muted: over_video::MUTED_FOREGROUND,
+    };
+    tabs::bar(ui, &shown, current, colours)
 }
 
-/// A small ghost button, as `main`'s settings steppers used: 24 points high, 8 either side of
-/// its label, the accent under the pointer.
-fn small_button(ui: &mut egui::Ui, text: &str) -> Response {
+/// The speed choices, the chosen one in the player's lilac. Returns the speed clicked.
+fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
     let tokens = over_video::TOKENS;
-    let font = theme::text::font(ui, "sm");
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, tokens.foreground);
-    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 16., 24.), Sense::CLICK);
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), text));
-    let fill = if response.is_pointer_button_down_on() {
-        tokens.accent
-    } else if response.hovered() {
-        ghost_hover()
-    } else {
-        Color32::TRANSPARENT
+    let labels = Adjustments::SPEEDS.map(|speed| format!("{speed}×"));
+    let chosen = Adjustments::SPEEDS
+        .iter()
+        .position(|speed| (speed - current).abs() < 1e-6);
+    let colours = segmented::Colours {
+        track: tokens.muted,
+        hover: tokens.input,
+        ink: tokens.foreground,
+        chosen: over_video::BRAND,
+        chosen_ink: over_video::BRAND_FOREGROUND,
     };
-    let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::same(tokens.radius), fill);
-    painter.galley(rect.center() - galley.size() / 2., galley, tokens.foreground);
-    response
+    segmented::show(ui, &labels, chosen, colours).map(|index| Adjustments::SPEEDS[index])
+}
+
+fn stepper_colours() -> stepper::Colours {
+    let tokens = over_video::TOKENS;
+    stepper::Colours {
+        fill: tokens.muted,
+        hover: tokens.input,
+        ink: tokens.foreground,
+        ink_muted: over_video::MUTED_FOREGROUND,
+    }
+}
+
+/// A delay's stepper, with the keys that do the same, if it has any. A delay is "moved" past what
+/// its text rounds to zero.
+fn delay_stepper(ui: &mut egui::Ui, keys: Option<&str>, delay: f64) -> Option<Step> {
+    let moved = delay.abs() >= DELAY_ZERO;
+    stepper::row(ui, "Delay", keys, &delay_text(delay), moved, stepper_colours())
+}
+
+fn stepped_delay(delay: f64, step: Step) -> f64 {
+    match step {
+        Step::Down => delay - Adjustments::DELAY_STEP,
+        Step::Up => delay + Adjustments::DELAY_STEP,
+        Step::Reset => 0.,
+    }
 }
 
 /// The version picker's button: the app's select (`widgets::select`), small to fit the control
 /// bar. It takes no focus: the player's keys are `keys.rs`'s.
 fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
     select::button(ui, vec2(VERSION_W, VERSION_H), name, "Version", false).on_hover_text("Version")
-}
-
-/// A settings value with its step buttons; `None` unless one was pressed.
-fn stepper(ui: &mut egui::Ui, label: &str, value: String, down: &str, up: &str) -> Option<Step> {
-    let mut step = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.;
-        ui.add_sized(
-            vec2(110., 24.),
-            egui::Label::new(RichText::new(label).font(theme::text::font(ui, "sm"))),
-        );
-        if small_button(ui, down).clicked() {
-            step = Some(Step::Down);
-        }
-        ui.add_sized(
-            vec2(56., 24.),
-            egui::Label::new(RichText::new(value).font(theme::text::font(ui, "sm"))),
-        );
-        if small_button(ui, up).clicked() {
-            step = Some(Step::Up);
-        }
-        if small_button(ui, "Reset").clicked() {
-            step = Some(Step::Reset);
-        }
-    });
-    step
 }
 
 /// A settings tab's list of tracks to pick from, the selected one ticked in the player's lilac. A plain list rather
@@ -2012,8 +1900,8 @@ mod tests {
 
     use super::{
         CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, SETTINGS_W, SettingsTab,
-        VOLUME_STEP, delay_text, lit_button, menu_frame, press_settings, scroll_steps, settings_id, settings_tabs,
-        sized_control, time_at, toggle_menu, wheel_notches,
+        VOLUME_STEP, delay_stepper, delay_text, lit_button, menu_frame, press_settings, scroll_steps, settings_id,
+        settings_tabs, sized_control, speed_group, stepped_delay, time_at, toggle_menu, wheel_notches,
     };
     use crate::widgets::popup::{self, Entry};
 
@@ -2204,6 +2092,76 @@ mod tests {
             harness.get_by_label("Japanese - AAC - Mono").accesskit_node().toggled(),
             Some(Toggled::True)
         );
+    }
+
+    #[test]
+    fn a_stepper_offers_its_reset_only_away_from_the_default() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable as _;
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(340., 60.))
+            .allow_missing_glyphs()
+            .with_accessibility_check(false)
+            .with_context_setup(egui_material_icons::initialize)
+            .build_ui_state(
+                |ui, delay: &mut f64| {
+                    if let Some(step) = delay_stepper(ui, None, *delay) {
+                        *delay = stepped_delay(*delay, step);
+                    }
+                },
+                0.,
+            );
+        harness.step();
+        assert!(harness.query_by_label("Reset delay").is_none());
+
+        harness.get_by_label("Increase delay").click();
+        harness.step();
+        harness.step();
+        assert!((*harness.state() - 0.1).abs() < 1e-9);
+
+        // A step back lands a float's error off zero, which still counts as zero.
+        harness.get_by_label("Decrease delay").click();
+        harness.step();
+        harness.step();
+        assert!(harness.query_by_label("Reset delay").is_none());
+
+        harness.get_by_label("Increase delay").click();
+        harness.step();
+        harness.step();
+        harness.get_by_label("Reset delay").click();
+        harness.step();
+        harness.step();
+        assert_eq!(*harness.state(), 0.);
+    }
+
+    #[test]
+    fn the_speeds_are_one_choice() {
+        use egui::accesskit::{Role, Toggled};
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::{NodeT as _, Queryable as _};
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(340., 60.))
+            .allow_missing_glyphs()
+            .with_accessibility_check(false)
+            .build_ui_state(
+                |ui, speed: &mut f64| {
+                    if let Some(chosen) = speed_group(ui, *speed) {
+                        *speed = chosen;
+                    }
+                },
+                1.,
+            );
+        harness.step();
+        let normal = harness.get_by_label("1×");
+        assert_eq!(normal.accesskit_node().role(), Role::RadioButton);
+        assert_eq!(normal.accesskit_node().toggled(), Some(Toggled::True));
+
+        harness.get_by_label("1.5×").click();
+        harness.step();
+        harness.step();
+        assert_eq!(*harness.state(), 1.5);
     }
 
     #[test]

@@ -59,6 +59,7 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ## 4. Skip intro, up-next card, chapters (2.1.1–2.1.3)
 
+- ⬜ **The player's redesigned settings menu with a real pointer**: the steppers' − and + repeat cleanly, ↺ appears once a value moves and clears it, the speeds change with a click, and hover shows on tabs, buttons and speeds. So far covered by headless tests and screenshots of each tab in the real player (dev server, opened by temporary code).
 - ⬜ **The player's Audio and Subtitles buttons with a real pointer**: each opens the menu on its tab, the lit one closes it and another switches tab without a flicker. So far covered by a headless test and a screenshot of the bar, since the harness can't click the player's menus.
 
 - ⬜ **Real media segments** from a plugin: install [Intro Skipper](https://github.com/intro-skipper/intro-skipper) on a server, let it analyse a series, and check "Skip intro" and the up-next card at the credits.

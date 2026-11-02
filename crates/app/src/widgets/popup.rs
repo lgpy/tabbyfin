@@ -479,13 +479,15 @@ fn cancel_focus(ctx: &egui::Context) {
 
 /// A line across the panel, edge to edge, with room above and below.
 pub fn separator(ui: &mut Ui) {
+    separator_in(ui, theme::tokens_of(ui).surface_border);
+}
+
+/// [`separator`] in the caller's colour, for a panel over the video.
+pub fn separator_in(ui: &mut Ui, colour: Color32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 2. * PAD + 1.), Sense::hover());
     let y = rect.center().y;
-    ui.painter().hline(
-        (rect.left() - PAD)..=(rect.right() + PAD),
-        y,
-        Stroke::new(1., theme::tokens_of(ui).surface_border),
-    );
+    ui.painter()
+        .hline((rect.left() - PAD)..=(rect.right() + PAD), y, Stroke::new(1., colour));
 }
 
 /// `highlight` is the row's fill while it's highlighted (a danger row has its own).
