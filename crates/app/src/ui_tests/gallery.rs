@@ -83,7 +83,7 @@ fn mockup_text_styles() {
 }
 
 // ## Buttons
-// The cozy look's buttons in every state they have, the small actions that aren't boxes, the
+// The app's buttons in every state they have, the small actions that aren't boxes, the
 // round icon buttons of the top bar, and a dialog's buttons.
 
 /// `button::brand`, `quiet`, `quiet_danger` and `danger`
@@ -442,7 +442,7 @@ fn mockup_pills_badges() {
                         shown(ui, "success", |ui| badge::dot(ui, theme::tokens_of(ui).success));
                         shown(ui, "warning", |ui| badge::dot(ui, theme::tokens_of(ui).warning));
                         shown(ui, "muted", |ui| {
-                            badge::dot(ui, theme::tokens_of(ui).muted_foreground);
+                            badge::dot(ui, theme::tokens_of(ui).ink_muted);
                         });
                     });
                     states(ui, "badge::label", |ui| {
@@ -960,7 +960,6 @@ fn mockup_player_controls() {
             over_video_page(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 36.;
-                    let tokens = over_video::TOKENS;
                     column(ui, 440., |ui| {
                         named(ui, "tabs::bar", |ui| {
                             let tabs = [
@@ -985,10 +984,10 @@ fn mockup_player_controls() {
                                 &tabs,
                                 Tab::Audio,
                                 tabs::Colours {
-                                    track: tokens.tab_bar,
-                                    selected: tokens.input,
+                                    track: over_video::TAB_TRACK,
+                                    selected: over_video::MENU_INSET_HOVER,
                                     hover: ghost_hover(),
-                                    ink: tokens.foreground,
+                                    ink: over_video::MENU_INK,
                                     ink_muted: over_video::MUTED_FOREGROUND,
                                 },
                             );
@@ -1000,9 +999,9 @@ fn mockup_player_controls() {
                                 &labels,
                                 Some(2),
                                 segmented::Colours {
-                                    track: tokens.muted,
-                                    hover: tokens.input,
-                                    ink: tokens.foreground,
+                                    track: over_video::MENU_INSET,
+                                    hover: over_video::MENU_INSET_HOVER,
+                                    ink: over_video::MENU_INK,
                                     chosen: over_video::BRAND,
                                     chosen_ink: over_video::BRAND_FOREGROUND,
                                 },
@@ -1214,7 +1213,7 @@ fn ring_sample(ui: &mut Ui, place: focus::Place) {
 fn check_sample(ui: &mut Ui) {
     let tokens = theme::tokens_of(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(150., 100.), Sense::hover());
-    ui.painter().rect_filled(rect, image::RADIUS, tokens.muted);
+    ui.painter().rect_filled(rect, image::RADIUS, tokens.inset_hover);
     badge::check(ui, rect);
 }
 
@@ -1435,17 +1434,16 @@ fn chapter_colours() -> media_row::ChapterColours {
 
 /// A delay's stepper colours over the video.
 fn stepper_colours() -> stepper::Colours {
-    let tokens = over_video::TOKENS;
     stepper::Colours {
-        fill: tokens.muted,
-        hover: tokens.input,
-        ink: tokens.foreground,
+        fill: over_video::MENU_INSET,
+        hover: over_video::MENU_INSET_HOVER,
+        ink: over_video::MENU_INK,
         ink_muted: over_video::MUTED_FOREGROUND,
     }
 }
 
-/// The settings menu's tab hover: the classic accent at half strength.
+/// The settings menu's tab hover: the menu inset at half strength.
 fn ghost_hover() -> Color32 {
-    let [r, g, b, _] = over_video::TOKENS.accent.to_srgba_unmultiplied();
+    let [r, g, b, _] = over_video::MENU_INSET.to_srgba_unmultiplied();
     Color32::from_rgba_unmultiplied(r, g, b, 128)
 }

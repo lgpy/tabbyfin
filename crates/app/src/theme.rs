@@ -1,11 +1,11 @@
 //! The app's look: the theme tokens, dark, light or the system's theme, text size, zoom,
 //! animations, and the colours over video (`over_video`).
 //!
-//! The tokens ([`Tokens`]) are the cozy look's palette (`docs/DESIGN.md`), one set per theme.
-//! The classic token names (`background`, `primary`, …), which `main` drew with, are kept as
-//! aliases of the cozy ones. They're the one place colours, radii and spacing come from; [`apply`] builds egui's [`egui::Visuals`] and [`egui::Spacing`] out of them, and
-//! widgets that paint themselves read [`tokens`] instead of literals. The player is the
-//! exception: it stays dark whatever the theme, and draws with [`over_video`].
+//! The tokens ([`Tokens`]) are the app's palette (`docs/DESIGN.md`), one set per theme: the
+//! colours, radii and spacing come from them alone. [`apply`] builds egui's [`egui::Visuals`]
+//! and [`egui::Spacing`] out of them, and widgets that paint themselves read [`tokens`] instead
+//! of literals. The player is the exception: it stays dark whatever the theme, and draws with
+//! [`over_video`].
 //!
 //! The text-style table ([`text`]) is `main`'s scale (`text_xs` … `text_2xl`) rather than
 //! egui's: it's what [`apply_text_size`] scales, and what widgets name instead of adding steps to
@@ -219,44 +219,12 @@ fn apply_text_size(ctx: &egui::Context, setting: Option<u16>) {
     });
 }
 
-/// The app's colours, radii and spacing: the cozy palette, with `main`'s classic names. One set per theme; [`apply`]
-/// turns them into egui's [`egui::Visuals`], and widgets that paint themselves ask [`tokens`]
-/// for the rest (the success green of a watched tick, the accent of a highlighted row).
+/// The app's colours, radii and spacing (`docs/DESIGN.md`). One set per theme; [`apply`] turns
+/// them into egui's [`egui::Visuals`], and widgets that paint themselves ask [`tokens`] for the
+/// rest (the success green of a watched tick, the brand of a progress bar).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
     pub dark: bool,
-
-    /// The page and top bar's background.
-    pub background: Color32,
-    /// Normal text.
-    pub foreground: Color32,
-    /// A box or chip a little apart from the background.
-    pub muted: Color32,
-    /// Secondary text: card subtitles, hints, a row's description.
-    pub muted_foreground: Color32,
-    /// Separators and outlines.
-    pub border: Color32,
-    /// The border of an input.
-    pub input: Color32,
-
-    /// A button at rest, and under the pointer and pressed.
-    pub button: Color32,
-    pub button_hover: Color32,
-    pub button_active: Color32,
-
-    /// The app's main colour: primary buttons and a card's progress fill (egui's own checked
-    /// checkboxes draw their box from [`Self::secondary`] and their tick from the foreground).
-    pub primary: Color32,
-    pub primary_foreground: Color32,
-    pub primary_hover: Color32,
-
-    /// The second colour: egui's checkbox boxes and slider rails, and them pressed.
-    pub secondary: Color32,
-    pub secondary_active: Color32,
-
-    /// A row's highlight: menus, toggles, lists.
-    pub accent: Color32,
-    pub accent_foreground: Color32,
 
     /// Text selected with the pointer, in a field.
     pub selection: Color32,
@@ -270,24 +238,9 @@ pub struct Tokens {
     /// The base red, which is the favorite heart (`danger` is the error red).
     pub red: Color32,
 
-    /// Menus, popups and dialogs.
-    pub popover: Color32,
-    /// A segmented tab bar's track (the classic `tab_bar.segmented.background`), with the selected
-    /// tab drawn in [`Self::background`] on top of it.
-    pub tab_bar: Color32,
-    /// A tab's label while it isn't selected (the classic `tab.foreground`).
-    pub tab_foreground: Color32,
-    /// A dialog's scrim, which `main`'s dialogs and sheets drew the page under (the cozy
-    /// [`Self::scrim`] since C5).
-    pub overlay: Color32,
-
-    /// The radius of controls (`main`'s override of the classic 6).
-    pub radius: u8,
     /// The radius of cards, dialogs and popups (`main`'s override of 8).
     pub radius_lg: u8,
 
-    // The cozy look: the mascot's lavender in place of the classic greys. The fields above are
-    // aliases of these ([`Tokens::cozy_aliases`]).
     /// The window's background, a gradient from the top colour to the bottom one.
     pub backdrop_top: Color32,
     pub backdrop_bottom: Color32,
@@ -300,7 +253,7 @@ pub struct Tokens {
     /// Sunk into a surface: text fields and list rows.
     pub inset: Color32,
     pub inset_hover: Color32,
-    /// Text on the cozy surfaces, and the quieter lines under it.
+    /// Text on the surfaces, and the quieter lines under it.
     pub ink: Color32,
     pub ink_muted: Color32,
     /// The mascot's lavender as the main action's colour, and the text on it.
@@ -319,7 +272,7 @@ pub struct Tokens {
     /// colour.
     pub avatars: [Color32; 5],
     pub avatar_foreground: Color32,
-    /// The radius of a cozy panel, and of the controls on it.
+    /// The radius of a panel, and of the controls on it.
     pub radius_surface: u8,
     pub radius_control: u8,
 }
@@ -335,47 +288,15 @@ const AVATARS: [Color32; 5] = [
 ];
 
 impl Tokens {
-    /// The light theme ("a pale lilac morning"): the cozy palette, with the classic names
-    /// pointing into it ([`Self::cozy_aliases`]).
-    pub const LIGHT: Self = Self::CLASSIC_LIGHT.cozy_aliases();
-
-    /// The dark theme ("a nightlight"): the cozy palette, with the classic names pointing into it.
-    pub const DARK: Self = Self::CLASSIC_DARK.cozy_aliases();
-
-    /// The classic light theme with `main`'s overrides, and the cozy look's own values. Its
-    /// classic values are overridden by [`Self::cozy_aliases`]; only its cozy fields reach the app.
-    const CLASSIC_LIGHT: Self = Self {
+    /// The light theme ("a pale lilac morning").
+    pub const LIGHT: Self = Self {
         dark: false,
-        background: Color32::from_rgb(0xff, 0xff, 0xff),
-        foreground: Color32::from_rgb(0x0a, 0x0a, 0x0a),
-        muted: Color32::from_rgb(0xf5, 0xf5, 0xf5),
-        // The classic neutral-500 is under the 4.5:1 WCAG AA asks of small text on its grey
-        // fills; one step darker (neutral-600) passes, as `main` had it.
-        muted_foreground: Color32::from_rgb(0x52, 0x52, 0x52),
-        border: Color32::from_rgb(0xe5, 0xe5, 0xe5),
-        input: Color32::from_rgb(0xe5, 0xe5, 0xe5),
-        button: Color32::from_rgb(0xff, 0xff, 0xff),
-        button_hover: Color32::from_rgb(0xf2, 0xf2, 0xf2),
-        button_active: Color32::from_rgb(0xec, 0xec, 0xec),
-        primary: Color32::from_rgb(0x17, 0x17, 0x17),
-        primary_foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
-        // `background.blend(primary)` at 90 %.
-        primary_hover: Color32::from_rgb(0x2e, 0x2e, 0x2e),
-        secondary: Color32::from_rgb(0xe5, 0xe5, 0xe5),
-        secondary_active: Color32::from_rgb(0xd4, 0xd4, 0xd4),
-        accent: Color32::from_rgb(0xf5, 0xf5, 0xf5),
-        accent_foreground: Color32::from_rgb(0x17, 0x17, 0x17),
         selection: Color32::from_rgb(0x55, 0xa0, 0xfc),
         danger: Color32::from_rgb(0xef, 0x44, 0x44),
         success: Color32::from_rgb(0x22, 0xc5, 0x5e),
         warning: Color32::from_rgb(0xea, 0xb3, 0x08),
         info: Color32::from_rgb(0x06, 0xb6, 0xd4),
         red: Color32::from_rgb(0xdc, 0x26, 0x26),
-        popover: Color32::from_rgb(0xff, 0xff, 0xff),
-        tab_bar: Color32::from_rgb(0xf5, 0xf5, 0xf5),
-        tab_foreground: Color32::from_rgb(0x40, 0x40, 0x40),
-        overlay: Color32::from_rgba_premultiplied(0, 0, 0, 13),
-        radius: 10,
         radius_lg: 12,
         // A pale lilac morning.
         backdrop_top: Color32::from_rgb(0xfc, 0xfa, 0xff),
@@ -404,39 +325,15 @@ impl Tokens {
         radius_control: 12,
     };
 
-    /// The classic dark theme with `main`'s overrides, and the cozy look's own values. The
-    /// player still draws with its classic values over the video ([`over_video::TOKENS`]).
-    const CLASSIC_DARK: Self = Self {
+    /// The dark theme ("a nightlight").
+    pub const DARK: Self = Self {
         dark: true,
-        background: Color32::from_rgb(0x0a, 0x0a, 0x0a),
-        foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
-        muted: Color32::from_rgb(0x26, 0x26, 0x26),
-        muted_foreground: Color32::from_rgb(0xa3, 0xa3, 0xa3),
-        border: Color32::from_rgb(0x26, 0x26, 0x26),
-        input: Color32::from_rgb(0x2f, 0x2f, 0x2f),
-        // The classic theme blends the input's colour (`#2f2f2f`) into the background at 30, 50 and
-        // 70 %; these are the results over `background`.
-        button: Color32::from_rgb(0x15, 0x15, 0x15),
-        button_hover: Color32::from_rgb(0x1d, 0x1d, 0x1d),
-        button_active: Color32::from_rgb(0x24, 0x24, 0x24),
-        primary: Color32::from_rgb(0xfa, 0xfa, 0xfa),
-        primary_foreground: Color32::from_rgb(0x17, 0x17, 0x17),
-        primary_hover: Color32::from_rgb(0xe2, 0xe2, 0xe2),
-        secondary: Color32::from_rgb(0x26, 0x26, 0x26),
-        secondary_active: Color32::from_rgb(0x21, 0x21, 0x21),
-        accent: Color32::from_rgb(0x26, 0x26, 0x26),
-        accent_foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
         selection: Color32::from_rgb(0x1d, 0x4e, 0xd8),
         danger: Color32::from_rgb(0xf8, 0x71, 0x71),
         success: Color32::from_rgb(0x4a, 0xde, 0x80),
         warning: Color32::from_rgb(0xfa, 0xcc, 0x15),
         info: Color32::from_rgb(0x22, 0xd3, 0xee),
         red: Color32::from_rgb(0xf8, 0x71, 0x71),
-        popover: Color32::from_rgb(0x0a, 0x0a, 0x0a),
-        tab_bar: Color32::from_rgb(0x17, 0x17, 0x17),
-        tab_foreground: Color32::from_rgb(0xd4, 0xd4, 0xd4),
-        overlay: Color32::from_rgba_premultiplied(0, 0, 0, 51),
-        radius: 10,
         radius_lg: 12,
         // A nightlight: deep plum, lit from behind the mascot.
         backdrop_top: Color32::from_rgb(0x0e, 0x0b, 0x16),
@@ -463,38 +360,6 @@ impl Tokens {
         radius_surface: 22,
         radius_control: 12,
     };
-
-    /// The classic names as aliases of the cozy tokens, so code that reads `background` or
-    /// `primary` draws in the cozy palette without changing. The text selection, the status colours, `radius_lg` (cards and popups) and the tab bar's
-    /// foreground keep their own values.
-    const fn cozy_aliases(self) -> Self {
-        Self {
-            // The gradient's top end, which the surfaces and insets were picked against: the
-            // bottom end is as dark as a dark surface, so a raised panel would look sunk.
-            background: self.backdrop_top,
-            foreground: self.ink,
-            muted: self.inset_hover,
-            muted_foreground: self.ink_muted,
-            border: self.surface_border,
-            input: self.surface_border,
-            button: self.surface,
-            button_hover: self.inset_hover,
-            button_active: self.inset_hover,
-            primary: self.brand,
-            primary_foreground: self.brand_foreground,
-            primary_hover: self.brand_hover,
-            secondary: self.inset,
-            secondary_active: self.inset_hover,
-            accent: self.inset_hover,
-            accent_foreground: self.ink,
-            popover: self.surface,
-            tab_bar: self.inset,
-            tab_foreground: self.ink_muted,
-            overlay: self.scrim,
-            radius: self.radius_control,
-            ..self
-        }
-    }
 }
 
 /// The tokens the theme `visuals` draws in: the light or dark set, by its `dark_mode`. The player
@@ -558,30 +423,30 @@ fn visuals(tokens: &Tokens) -> egui::Visuals {
     } else {
         egui::Visuals::light()
     };
-    let corner_radius = egui::CornerRadius::same(tokens.radius);
+    let corner_radius = egui::CornerRadius::same(tokens.radius_control);
     visuals.dark_mode = tokens.dark;
     // Unhinted glyphs: hinting snaps stems to whole pixels, which at a scale of 1 reads as jagged,
     // unantialiased text.
     visuals.text_options.font_hinting = false;
 
     visuals.override_text_color = None;
-    // A hint or a card's subtitle: `main`'s muted_foreground, not a dimmed body colour.
-    visuals.weak_text_color = Some(tokens.muted_foreground);
-    visuals.panel_fill = tokens.background;
-    visuals.window_fill = tokens.popover;
-    visuals.window_stroke = Stroke::new(1., tokens.border);
+    // A hint or a card's subtitle: the muted ink, not a dimmed body colour.
+    visuals.weak_text_color = Some(tokens.ink_muted);
+    visuals.panel_fill = tokens.backdrop_top;
+    visuals.window_fill = tokens.surface;
+    visuals.window_stroke = Stroke::new(1., tokens.surface_border);
     visuals.window_corner_radius = egui::CornerRadius::same(tokens.radius_lg);
     // egui's `Frame::popup`, which is what a tooltip draws in: the popup menu's surface and
     // shadow (`widgets::popup`), at a smaller radius. Dialogs keep their own frame
     // (`widgets::dialog`).
     visuals.menu_corner_radius = egui::CornerRadius::same(TOOLTIP_RADIUS);
     visuals.popup_shadow = popup_shadow(tokens);
-    // A text field is sunk in `inset`, with an `input` outline.
+    // A text field is sunk in `inset`, with a `surface_border` outline.
     visuals.extreme_bg_color = tokens.inset;
     visuals.text_edit_bg_color = Some(tokens.inset);
-    visuals.faint_bg_color = tokens.muted;
-    visuals.code_bg_color = tokens.muted;
-    visuals.hyperlink_color = tokens.foreground;
+    visuals.faint_bg_color = tokens.inset_hover;
+    visuals.code_bg_color = tokens.inset_hover;
+    visuals.hyperlink_color = tokens.ink;
     visuals.warn_fg_color = tokens.warning;
     visuals.error_fg_color = tokens.danger;
     visuals.selection.bg_fill = tokens.selection;
@@ -592,48 +457,48 @@ fn visuals(tokens: &Tokens) -> egui::Visuals {
     visuals.interact_cursor = None;
 
     visuals.widgets.noninteractive = egui::style::WidgetVisuals {
-        bg_fill: tokens.background,
-        weak_bg_fill: tokens.background,
-        bg_stroke: Stroke::new(1., tokens.border),
-        fg_stroke: Stroke::new(1., tokens.foreground),
+        bg_fill: tokens.backdrop_top,
+        weak_bg_fill: tokens.backdrop_top,
+        bg_stroke: Stroke::new(1., tokens.surface_border),
+        fg_stroke: Stroke::new(1., tokens.ink),
         corner_radius,
         expansion: 0.,
     };
     visuals.widgets.inactive = egui::style::WidgetVisuals {
         // Checked boxes and sliders' rails.
-        bg_fill: tokens.secondary,
+        bg_fill: tokens.inset,
         // A button or a menu row at rest.
-        weak_bg_fill: tokens.button,
-        bg_stroke: Stroke::new(1., tokens.input),
-        fg_stroke: Stroke::new(1., tokens.foreground),
+        weak_bg_fill: tokens.surface,
+        bg_stroke: Stroke::new(1., tokens.surface_border),
+        fg_stroke: Stroke::new(1., tokens.ink),
         corner_radius,
         expansion: 0.,
     };
     visuals.widgets.hovered = egui::style::WidgetVisuals {
-        bg_fill: tokens.secondary,
-        weak_bg_fill: tokens.button_hover,
+        bg_fill: tokens.inset,
+        weak_bg_fill: tokens.inset_hover,
         // A control under the pointer darkens its outline to the muted ink.
         bg_stroke: Stroke::new(1., tokens.ink_muted),
-        fg_stroke: Stroke::new(1., tokens.foreground),
+        fg_stroke: Stroke::new(1., tokens.ink),
         corner_radius,
         expansion: 0.,
     };
     visuals.widgets.active = egui::style::WidgetVisuals {
         // A checkbox or slider held down.
-        bg_fill: tokens.secondary_active,
-        weak_bg_fill: tokens.button_active,
-        bg_stroke: Stroke::new(1., tokens.border),
+        bg_fill: tokens.inset_hover,
+        weak_bg_fill: tokens.inset_hover,
+        bg_stroke: Stroke::new(1., tokens.surface_border),
         // What `strong_text_color` returns: the cursor's ring and a played badge used it for the
-        // foreground.
-        fg_stroke: Stroke::new(1., tokens.foreground),
+        // ink.
+        fg_stroke: Stroke::new(1., tokens.ink),
         corner_radius,
         expansion: 0.,
     };
     visuals.widgets.open = egui::style::WidgetVisuals {
-        bg_fill: tokens.accent,
-        weak_bg_fill: tokens.accent,
-        bg_stroke: Stroke::new(1., tokens.border),
-        fg_stroke: Stroke::new(1., tokens.foreground),
+        bg_fill: tokens.inset_hover,
+        weak_bg_fill: tokens.inset_hover,
+        bg_stroke: Stroke::new(1., tokens.surface_border),
+        fg_stroke: Stroke::new(1., tokens.ink),
         corner_radius,
         expansion: 0.,
     };
@@ -1039,54 +904,35 @@ mod tests {
         assert_eq!(style.scroll_animation, egui::style::ScrollAnimation::default());
     }
 
+    /// The palette itself, in both themes (`docs/DESIGN.md`).
     #[test]
-    fn the_classic_names_are_aliases_of_the_cozy_tokens() {
-        for tokens in [Tokens::LIGHT, Tokens::DARK] {
-            assert_eq!(tokens.background, tokens.backdrop_top);
-            assert_eq!(tokens.foreground, tokens.ink);
-            assert_eq!(tokens.muted_foreground, tokens.ink_muted);
-            assert_eq!(tokens.primary, tokens.brand);
-            assert_eq!(tokens.primary_foreground, tokens.brand_foreground);
-            assert_eq!(tokens.primary_hover, tokens.brand_hover);
-            assert_eq!(tokens.overlay, tokens.scrim, "a dialog dims the page in plum");
-            assert_eq!(tokens.popover, tokens.surface);
-            assert_eq!(tokens.button, tokens.surface);
-            assert_eq!(tokens.border, tokens.surface_border);
-            assert_eq!(tokens.input, tokens.surface_border);
-            assert_eq!(tokens.accent, tokens.inset_hover);
-            assert_eq!(tokens.muted, tokens.inset_hover);
-            assert_eq!(tokens.radius, tokens.radius_control);
-            // Cards and popups keep the classic larger radius; a panel's 22 is too round for a
-            // poster.
-            assert_eq!(tokens.radius_lg, 12);
-        }
-        // The cozy palette itself (`docs/DESIGN.md`).
-        assert_eq!(Tokens::LIGHT.background, egui::Color32::from_rgb(0xfc, 0xfa, 0xff));
-        assert_eq!(Tokens::DARK.background, egui::Color32::from_rgb(0x0e, 0x0b, 0x16));
-        assert_eq!(Tokens::LIGHT.primary, egui::Color32::from_rgb(0x7b, 0x4f, 0xb0));
-        assert_eq!(Tokens::DARK.primary, egui::Color32::from_rgb(0xc3, 0x96, 0xe7));
+    fn the_tokens_are_the_apps_palette() {
+        assert_eq!(Tokens::LIGHT.backdrop_top, egui::Color32::from_rgb(0xfc, 0xfa, 0xff));
+        assert_eq!(Tokens::DARK.backdrop_top, egui::Color32::from_rgb(0x0e, 0x0b, 0x16));
+        assert_eq!(Tokens::LIGHT.brand, egui::Color32::from_rgb(0x7b, 0x4f, 0xb0));
+        assert_eq!(Tokens::DARK.brand, egui::Color32::from_rgb(0xc3, 0x96, 0xe7));
+        // Cards and popups keep their own radius: a panel's 22 is too round for a poster.
+        assert_eq!(Tokens::LIGHT.radius_lg, 12);
+        assert_eq!(Tokens::DARK.radius_lg, 12);
         assert_eq!(tokens(&egui::Visuals::dark()), &Tokens::DARK);
         assert_eq!(tokens(&egui::Visuals::light()), &Tokens::LIGHT);
     }
 
-    /// The player draws over the picture with the classic dark theme, as before the retint.
+    /// The player's menus stay neutral greys over the picture, whatever the theme.
     #[test]
-    fn the_player_keeps_the_classic_dark_tokens() {
-        let tokens = super::over_video::TOKENS;
-        assert!(tokens.dark);
-        assert_eq!(tokens.background, egui::Color32::from_rgb(0x0a, 0x0a, 0x0a));
-        assert_eq!(tokens.foreground, egui::Color32::from_rgb(0xfa, 0xfa, 0xfa));
-        assert_eq!(tokens.muted_foreground, egui::Color32::from_rgb(0xa3, 0xa3, 0xa3));
-        assert_eq!(tokens.primary, egui::Color32::from_rgb(0xfa, 0xfa, 0xfa));
-        assert_eq!(tokens.popover, egui::Color32::from_rgb(0x0a, 0x0a, 0x0a));
-        assert_eq!(tokens.radius, 10);
-        // The player's menu reads these: the segmented tab bar.
-        assert_eq!(tokens.tab_bar, egui::Color32::from_rgb(0x17, 0x17, 0x17));
-        assert_eq!(tokens.tab_foreground, egui::Color32::from_rgb(0xd4, 0xd4, 0xd4));
+    fn the_player_has_its_own_greys() {
+        use super::over_video;
+        assert_eq!(over_video::MENU, egui::Color32::from_rgb(0x0a, 0x0a, 0x0a));
+        assert_eq!(over_video::MENU_BORDER, egui::Color32::from_rgb(0x26, 0x26, 0x26));
+        assert_eq!(over_video::MENU_INK, egui::Color32::from_rgb(0xfa, 0xfa, 0xfa));
+        assert_eq!(over_video::MENU_INSET, egui::Color32::from_rgb(0x26, 0x26, 0x26));
+        assert_eq!(over_video::MENU_INSET_HOVER, egui::Color32::from_rgb(0x2f, 0x2f, 0x2f));
+        assert_eq!(over_video::TAB_TRACK, egui::Color32::from_rgb(0x17, 0x17, 0x17));
+        assert_eq!(over_video::ROW_HOVER, over_video::MENU_INSET);
     }
 
     /// The player's accents are the dark theme's lilac in either theme, since it's always dark,
-    /// and its menu rows hover in the classic grey rather than the cozy purple-grey.
+    /// and its menu rows hover in a neutral grey rather than the theme's tinted one.
     #[test]
     fn the_player_borrows_the_dark_brand() {
         use super::over_video;
@@ -1101,10 +947,10 @@ mod tests {
         for (tokens, dark) in [(Tokens::LIGHT, false), (Tokens::DARK, true)] {
             let visuals = super::visuals(&tokens);
             assert_eq!(visuals.dark_mode, dark);
-            assert_eq!(visuals.panel_fill, tokens.background);
-            assert_eq!(visuals.window_fill, tokens.popover);
-            assert_eq!(visuals.weak_text_color, Some(tokens.muted_foreground));
-            assert_eq!(visuals.faint_bg_color, tokens.muted);
+            assert_eq!(visuals.panel_fill, tokens.backdrop_top);
+            assert_eq!(visuals.window_fill, tokens.surface);
+            assert_eq!(visuals.weak_text_color, Some(tokens.ink_muted));
+            assert_eq!(visuals.faint_bg_color, tokens.inset_hover);
             assert_eq!(visuals.error_fg_color, tokens.danger);
             assert_eq!(visuals.selection.bg_fill, tokens.selection);
             // The focus ring is the brand colour, 1 point like the resting outline.
@@ -1112,14 +958,14 @@ mod tests {
             // Text fields are sunk in the inset, as on the sign-in panel.
             assert_eq!(visuals.text_edit_bg_color, Some(tokens.inset));
             assert_eq!(visuals.widgets.hovered.bg_stroke.color, tokens.ink_muted);
-            assert_eq!(visuals.widgets.noninteractive.fg_stroke.color, tokens.foreground);
-            assert_eq!(visuals.widgets.inactive.weak_bg_fill, tokens.button);
-            assert_eq!(visuals.widgets.hovered.weak_bg_fill, tokens.button_hover);
-            assert_eq!(visuals.widgets.active.bg_fill, tokens.secondary_active);
+            assert_eq!(visuals.widgets.noninteractive.fg_stroke.color, tokens.ink);
+            assert_eq!(visuals.widgets.inactive.weak_bg_fill, tokens.surface);
+            assert_eq!(visuals.widgets.hovered.weak_bg_fill, tokens.inset_hover);
+            assert_eq!(visuals.widgets.active.bg_fill, tokens.inset_hover);
             // What `strong_text_color` returns, which the cursor rings and primary buttons
             // painted with before the tokens were read directly.
-            assert_eq!(visuals.strong_text_color(), tokens.foreground);
-            assert_eq!(visuals.widgets.inactive.corner_radius.nw, tokens.radius);
+            assert_eq!(visuals.strong_text_color(), tokens.ink);
+            assert_eq!(visuals.widgets.inactive.corner_radius.nw, tokens.radius_control);
             // Tooltips: the popups' shadow at a smaller radius.
             assert_eq!(visuals.menu_corner_radius.nw, super::TOOLTIP_RADIUS);
             assert_eq!(visuals.popup_shadow.color, tokens.surface_shadow);
@@ -1349,15 +1195,29 @@ mod tests {
 }
 
 /// Colours over the video. The player stays dark whatever the theme, since its controls sit on
-/// the picture; these are its tokens, so views don't scatter black and white literals.
+/// the picture; these are its colours, so views don't scatter black and white literals.
 pub mod over_video {
     use egui::Color32;
 
     use super::Tokens;
 
-    /// What the player paints its own controls with: the classic dark theme, as before the app
-    /// moved to the cozy palette, so its bars and menus stay neutral over the picture.
-    pub const TOKENS: &Tokens = &Tokens::CLASSIC_DARK;
+    /// A menu's surface over the video: the settings menu, the up-next card, a prompt.
+    pub const MENU: Color32 = Color32::from_rgb(0x0a, 0x0a, 0x0a);
+
+    /// A menu's outline.
+    pub const MENU_BORDER: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
+
+    /// Text and icons in the menus.
+    pub const MENU_INK: Color32 = Color32::from_rgb(0xfa, 0xfa, 0xfa);
+
+    /// A menu row's highlight, and the tracks of the speed and stepper controls.
+    pub const MENU_INSET: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
+
+    /// The chosen settings tab, and a speed or stepper track under the pointer.
+    pub const MENU_INSET_HOVER: Color32 = Color32::from_rgb(0x2f, 0x2f, 0x2f);
+
+    /// The settings menu's tab track, with the chosen tab in [`MENU_INSET_HOVER`] on it.
+    pub const TAB_TRACK: Color32 = Color32::from_rgb(0x17, 0x17, 0x17);
 
     /// The player's one accent, the dark theme's `brand` whichever theme is chosen: the seek
     /// bar's played part, the chosen track, speed and chapter, and a prompt's main button.
@@ -1371,9 +1231,8 @@ pub mod over_video {
     /// Text and icons on [`BRAND`].
     pub const BRAND_FOREGROUND: Color32 = Tokens::DARK.brand_foreground;
 
-    /// A menu row under the pointer: the classic grey rather than the cozy `inset_hover`, which
-    /// is tinted purple.
-    pub const ROW_HOVER: Color32 = TOKENS.muted;
+    /// A menu row under the pointer: a neutral grey rather than the theme's tinted one.
+    pub const ROW_HOVER: Color32 = MENU_INSET;
 
     /// A round button's circle over the video, under the pointer or while its menu is open, and
     /// a quiet pill's hover: white at 16 %, a lift on dark and bright pictures alike.
@@ -1417,7 +1276,6 @@ pub mod over_video {
     /// The ring around a slider's thumb: white at 50 %.
     pub const THUMB_RING: Color32 = Color32::from_rgba_premultiplied(128, 128, 128, 128);
 
-    /// A slider's thumb, inside its ring: the classic `slider.thumb.background` in the dark theme,
-    /// which is what `main`'s player drew whichever theme was chosen.
+    /// A slider's thumb, inside its ring: near-black, as the player has always drawn it.
     pub const THUMB: Color32 = Color32::from_rgb(0x0a, 0x0a, 0x0a);
 }
