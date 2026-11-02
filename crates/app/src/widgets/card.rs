@@ -9,12 +9,12 @@
 //! subtitles are cut short when they don't fit, and the sizes follow A1's text size.
 
 use egui::emath::GuiRounding as _;
+use egui::epaint::Shadow;
 use egui::{
-    Align, Align2, CornerRadius, FontId, Label, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetText, pos2,
-    vec2,
+    Align, Align2, Color32, CornerRadius, FontId, Label, Rect, Response, Sense, Ui, Vec2, WidgetText, pos2, vec2,
 };
 use egui_material_icons::FONT_FAMILY;
-use egui_material_icons::icons::ICON_PLAY_ARROW;
+use egui_material_icons::icons::{ICON_HIDE_IMAGE, ICON_PLAY_ARROW};
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemDto, BaseItemPerson, ChapterInfo, ImageType};
 
@@ -27,10 +27,29 @@ use crate::widgets::text::{
     CARD_TEXT_H, LANDSCAPE_H, LANDSCAPE_W, PERSON_H, PERSON_W, POSTER_H, POSTER_W, card_text, kind_label,
     landscape_image, poster_image, timestamp,
 };
-use crate::widgets::{avatar, badge, image};
+use crate::widgets::{avatar, badge, image, round_button};
 
 /// Between a card's image and its title, and between its lines (`main`'s `gap_1`).
 const GAP: f32 = 4.;
+
+/// How much bigger the play button gets under the pointer.
+const PLAY_GROWTH: f32 = 1.1;
+/// What lifts the play button off the picture.
+const PLAY_SHADOW: Shadow = Shadow {
+    offset: [0, 4],
+    blur: 16,
+    spread: 0,
+    color: Color32::from_black_alpha(90),
+};
+
+/// The progress bar's height and its distance from the image's sides and bottom.
+const BAR_H: f32 = 5.;
+const BAR_INSET: f32 = 10.;
+/// The bar's frosted track: white at about 27 % (premultiplied).
+const BAR_TRACK: Color32 = Color32::from_rgba_premultiplied(70, 70, 70, 70);
+/// The dark wash behind the bar: how far up the image it reaches, and its alpha at the edge.
+const SCRIM_H: f32 = 48.;
+const SCRIM_ALPHA: u8 = 110;
 
 /// A poster-shaped card.
 pub fn poster(ui: &mut Ui, cache: &mut ImageCache, item: &BaseItemDto, selected: bool) -> Response {
@@ -78,7 +97,9 @@ fn item_card(
     response
 }
 
-/// A chapter of `item_id`: its image when the server extracted one, its name and start.
+/// A chapter of `item_id`: its image when the server extracted one (a crossed-out picture when it
+/// didn't for this one), its name and start. A shelf none of whose chapters has an image uses
+/// [`chapter_without_image`] instead.
 pub fn chapter(
     ui: &mut Ui,
     cache: &mut ImageCache,
@@ -93,8 +114,11 @@ pub fn chapter(
     });
     let size = vec2(LANDSCAPE_W, LANDSCAPE_H);
     let (response, image) = picture(ui, cache, size, request.as_ref(), None);
+    if request.is_none() {
+        missing_image(ui, &response, image);
+    }
     cursor_ring(ui, image, selected);
-    let name = chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1));
+    let name = chapter_name(index, chapter);
     let lines = lines(ui, image, "sm", "xs", GAP);
     put(ui, lines.title, line(ui, &name, "sm", false));
     put(
@@ -103,6 +127,70 @@ pub fn chapter(
         line(ui, &timestamp(chapter.start_position_ticks.into()), "xs", true),
     );
     response
+}
+
+/// A chapter with no image to show, for a shelf none of whose chapters has one: a short tile
+/// with its number, name and start, rather than a row of empty pictures.
+pub fn chapter_without_image(ui: &mut Ui, index: usize, chapter: &ChapterInfo, selected: bool) -> Response {
+    const PADDING: f32 = 12.;
+    let heights = line_heights(ui, "sm", "xs");
+    let size = vec2(LANDSCAPE_W, PADDING + lines_height(&heights) - GAP + PADDING);
+    let (tile, response) = ui.allocate_exact_size(size, Sense::click());
+    let tokens = theme::tokens_of(ui);
+    ui.painter().rect_filled(tile, image::RADIUS, tokens.muted);
+    if response.hovered() {
+        image::dim(ui, tile, image::RADIUS);
+    }
+    // The number gets the room of two digits, so the names line up along the shelf.
+    let number_font = text::font(ui, "2xl");
+    let number_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap("00".into(), number_font.clone(), tokens.muted_foreground)
+            .size()
+            .x
+    });
+    ui.painter().text(
+        pos2(tile.left() + PADDING, tile.center().y),
+        Align2::LEFT_CENTER,
+        (index + 1).to_string(),
+        number_font,
+        tokens.muted_foreground,
+    );
+    let left = tile.left() + PADDING + number_width + PADDING;
+    let width = (tile.right() - PADDING - left).max(0.);
+    let title = Rect::from_min_size(pos2(left, tile.top() + PADDING), vec2(width, heights.title));
+    let subtitle = Rect::from_min_size(pos2(left, title.bottom() + GAP), vec2(width, heights.subtitle));
+    put(ui, title, line(ui, &chapter_name(index, chapter), "sm", false));
+    put(
+        ui,
+        subtitle,
+        line(ui, &timestamp(chapter.start_position_ticks.into()), "xs", true),
+    );
+    cursor_ring(ui, tile, selected);
+    response
+}
+
+/// A chapter's name, or its number when it has none.
+fn chapter_name(index: usize, chapter: &ChapterInfo) -> String {
+    chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1))
+}
+
+/// A crossed-out picture in the middle of an image that has nothing to show.
+fn missing_image(ui: &Ui, card: &Response, image: Rect) {
+    let tokens = theme::tokens_of(ui);
+    // Over the grey box, under the dimming, so the icon dims with the card.
+    ui.painter().rect_filled(image, image::RADIUS, tokens.muted);
+    let size = (image.height() * 0.3).clamp(20., 40.);
+    ui.painter().text(
+        image.center(),
+        Align2::CENTER_CENTER,
+        ICON_HIDE_IMAGE.codepoint,
+        FontId::new(size, egui::FontFamily::Name(FONT_FAMILY.into())),
+        tokens.muted_foreground,
+    );
+    if card.hovered() && ui.rect_contains_pointer(image) {
+        image::dim(ui, image, image::RADIUS);
+    }
 }
 
 /// A cast or crew member, `scale` times the base size: their photo, or their initials on their
@@ -218,25 +306,31 @@ pub fn play_button(ui: &Ui, card: &Response) -> bool {
     if !(card.hovered() && ui.rect_contains_pointer(image)) {
         return false;
     }
-    let radius = (image.width().min(image.height()) * 0.16).clamp(16., 28.);
+    let rest = (image.width().min(image.height()) * 0.16).clamp(16., 28.);
     let center = image.center();
-    let within = |pos: Option<egui::Pos2>| pos.is_some_and(|pos| pos.distance(center) <= radius);
+    let within = |pos: Option<egui::Pos2>| pos.is_some_and(|pos| pos.distance(center) <= rest);
     let on_it = within(card.hover_pos());
     let tokens = theme::tokens_of(ui);
-    // The circle goes see-through under the pointer, so it reads as the thing that will be
-    // clicked; the arrow stays solid.
-    let fill = if on_it {
-        tokens.primary.gamma_multiply(0.7)
+    // Under the pointer it grows a little and deepens, so it reads as the thing that will be
+    // clicked. The shadow lifts it off a picture of its own colour.
+    let (radius, fill) = if on_it {
+        (rest * PLAY_GROWTH, tokens.brand_hover)
     } else {
-        tokens.primary
+        (rest, tokens.brand)
     };
+    let disc = Rect::from_center_size(center, Vec2::splat(2. * radius));
+    ui.painter()
+        .add(PLAY_SHADOW.as_shape(disc, CornerRadius::same(radius.round() as u8)));
     ui.painter().circle_filled(center, radius, fill);
-    ui.painter().text(
-        center,
-        Align2::CENTER_CENTER,
-        ICON_PLAY_ARROW.codepoint,
-        FontId::new(radius * 1.3, egui::FontFamily::Name(FONT_FAMILY.into())),
-        tokens.primary_foreground,
+    // Centred by the glyph rather than the font's box, and nudged right: a triangle's weight
+    // sits left of its box's middle.
+    let size = radius * 1.25;
+    round_button::glyph(
+        ui,
+        center + vec2(size * 0.04, 0.),
+        ICON_PLAY_ARROW,
+        size,
+        tokens.brand_foreground,
     );
     if on_it {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -257,31 +351,64 @@ fn progress(item: &BaseItemDto) -> Option<f32> {
     (percentage > 0. && percentage < 100.).then_some((percentage / 100.) as f32)
 }
 
-/// A bar along the bottom of the image, inset clear of the rounded corners: dark with a light
-/// outline, so its full length shows on dark images too.
+/// A round bar along the bottom of the image, inset clear of the rounded corners, on a frosted
+/// track over a dark wash up from the edge, so its full length shows on bright pictures and
+/// dark ones alike. The fill is the player's lavender in both themes: it sits on the picture,
+/// where the light theme's deep `brand` would sink into a dark one.
 fn progress_bar(ui: &Ui, image: Rect, fraction: f32) {
+    scrim(ui, image);
     let bar = Rect::from_min_max(
-        pos2(image.left() + 8., image.bottom() - 14.),
-        pos2(image.right() - 8., image.bottom() - 8.),
+        pos2(image.left() + BAR_INSET, image.bottom() - BAR_INSET - BAR_H),
+        pos2(image.right() - BAR_INSET, image.bottom() - BAR_INSET),
     )
     .intersect(image);
     if bar.width() <= 0. {
         return;
     }
-    let radius = CornerRadius::same(3);
+    let radius = CornerRadius::same((BAR_H / 2.).ceil() as u8);
     let painter = ui.painter();
-    painter.rect_filled(bar, radius, theme::over_video::TRACK);
+    painter.rect_filled(bar, radius, BAR_TRACK);
     let filled = Rect::from_min_max(
         bar.min,
         pos2(bar.left() + bar.width() * fraction.clamp(0., 1.), bar.bottom()),
     );
-    painter.rect_filled(filled, radius, theme::tokens_of(ui).primary);
-    painter.rect_stroke(
-        bar,
-        radius,
-        Stroke::new(1., theme::over_video::TRACK_OUTLINE),
-        StrokeKind::Inside,
-    );
+    painter.rect_filled(filled, radius, theme::over_video::BRAND);
+}
+
+/// A black wash over the bottom [`SCRIM_H`] of `image`, clear at its top and darkest at the
+/// edge, following the image's rounded corners.
+fn scrim(ui: &Ui, image: Rect) {
+    let top = (image.bottom() - SCRIM_H).max(image.top());
+    let height = image.bottom() - top;
+    if height <= 0. {
+        return;
+    }
+    let colour = |y: f32| {
+        // Eased in, so the wash has no visible top edge.
+        let t = ((y - top) / height).clamp(0., 1.);
+        Color32::from_black_alpha((f32::from(SCRIM_ALPHA) * t * t) as u8)
+    };
+    let radius = f32::from(image::RADIUS).min(image.width() / 2.).min(height);
+    // The image's bottom edge at `x`: straight, except where its corners curve up.
+    let bottom = |x: f32| {
+        let into = (image.left() + radius - x).max(x - (image.right() - radius)).max(0.);
+        image.bottom() - radius + (radius * radius - into * into).max(0.).sqrt()
+    };
+    // Columns half a point apart, each from the wash's top down to the edge.
+    let mut mesh = egui::Mesh::default();
+    let columns = (image.width() * 2.).ceil() as u32;
+    for i in 0..=columns {
+        let x = image.left() + image.width() * i as f32 / columns as f32;
+        let lower = bottom(x).max(top);
+        mesh.colored_vertex(pos2(x, top), colour(top));
+        mesh.colored_vertex(pos2(x, lower), colour(lower));
+        if i > 0 {
+            let a = 2 * i;
+            mesh.add_triangle(a - 2, a - 1, a);
+            mesh.add_triangle(a - 1, a, a + 1);
+        }
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 /// Where a card's two text lines go under `image`.

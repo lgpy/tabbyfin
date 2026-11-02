@@ -228,6 +228,9 @@ fn info_column(
             ui.set_max_width(ui.available_width().min(TEXT_MAX_W));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6., 6.);
+                // egui starts the first row as tall as a button and the rest as tall as their
+                // pills, which would leave a wider gap under the first row.
+                ui.set_row_height(pill::tag_height(ui));
                 for name in &item.tags {
                     // A pill doesn't wrap as a unit, so its label would break per letter in the
                     // row's leftover space; start a new row when the whole pill doesn't fit.
