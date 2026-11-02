@@ -1,6 +1,7 @@
-//! Settings: a menu of sections on the left, split by where their settings are kept, and every
-//! section on the right, one after another in a scrolling column. A menu entry scrolls its
-//! section to the top, and the menu marks the section at the top as the column scrolls.
+//! Settings: a menu of sections on the left, split by where their settings are kept, and the
+//! section it marks on the right, one at a time. A section is its title, a tag naming where its
+//! settings are kept, and one card of rows split by hairlines: each row's label over what it
+//! does, its control at the right, and the key it saves in the label's tooltip.
 //!
 //! - **This device** (appearance, playback, subtitles, storage, about) is the config file: one
 //!   per computer, shared by every account signed in on it. Every option keeps `main`'s config
@@ -17,9 +18,12 @@
 //!   server applies the track preferences itself, when `PlaybackInfo` picks an item's default
 //!   streams, so they take effect from the next item on.
 //!
-//! Each store's sections are under its banner. The search box above the menu filters every row
-//! of both by its section, label, description and key, and leaves out the sections with nothing
-//! left; a menu entry leaves the search.
+//! A device setting that's off its default has an undo button left of its control, which leaves
+//! the key out of the file again; the server's have no default of the app's to go back to.
+//!
+//! The search box above the menu filters every row of both stores by its section, label,
+//! description and key, and shows every section with something left, one after another; a menu
+//! entry leaves the search.
 //!
 //! The page isn't on the browse cursor, as on `main`: [`Page::scope`] is `None`, so egui's own
 //! focus handles Tab (the search box, the menu, then the sections' controls, scrolling each into
@@ -32,7 +36,7 @@ use egui::{Align, Align2, Id, Rect, RichText, Role, Sense, Ui, UiBuilder, Widget
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ACCOUNT_CIRCLE, ICON_CLOSE, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_HOME, ICON_INFO, ICON_PALETTE,
-    ICON_PLAY_CIRCLE, ICON_SEARCH, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE,
+    ICON_PLAY_CIRCLE, ICON_SEARCH, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
@@ -92,25 +96,19 @@ const MENU_MAX_W: f32 = 250.;
 const MENU_BAR_W: f32 = 3.;
 /// The pickers' width beside their label (`main`'s 220 px).
 const PICKER_W: f32 = 220.;
-/// The gaps between a group's heading and its box, between the rows in it, and between groups.
+/// The gap under a menu heading, and between the sections a search shows.
 const HEADING_GAP: f32 = 4.;
-const ROW_GAP: f32 = 10.;
 const SECTION_GAP: f32 = 24.;
-/// The size of the icons beside the group headings, and of the banners' icons.
-const HEADING_ICON: f32 = 22.;
-/// The room inside a section's surface: less than a lone panel's [`surface::PADDING`], since a
-/// page stacks eight of them.
-const SECTION_PADDING: i8 = 24;
+/// The room inside a section's card, across and down: the rows bring their own above and below
+/// them ([`ROW_PAD`]), so the card's own is small.
+const CARD_PADDING: [i8; 2] = [20, 6];
+/// The room above and below a row's text, inside the hairlines.
+const ROW_PAD: f32 = 12.;
+/// The undo button left of a changed setting's control, and its icon.
+const RESET_W: f32 = 30.;
+const RESET_ICON: f32 = 18.;
 /// The storage rows' buttons.
 const ROW_BUTTON_W: f32 = 132.;
-const BANNER_ICON: f32 = 28.;
-
-/// How long the menu keeps marking the section an entry scrolled to before following the
-/// column again, should the scroll never get there (it was taken over by the wheel).
-const ARRIVAL_WAIT: f64 = 1.;
-/// How far below the column's top a section's start can be and still count as the one at the
-/// top: a scroll lands it there within rounding.
-const TOP_SLACK: f32 = 8.;
 
 /// The search box's id, which the tests find it by too.
 const SEARCH_ID: &str = "settings_search";
@@ -537,13 +535,8 @@ pub struct SettingsPage {
     job: Option<Task<Job>>,
     /// Left and Right on a focused picker.
     pickers: Pickers,
-    /// The section the menu marks: the one at the top of the column when it was last drawn.
+    /// The section shown, which the menu marks.
     section: Section,
-    /// A menu entry's section, scrolled to the top when the column draws next.
-    scroll_to: Option<Section>,
-    /// The section a menu entry scrolled to and when (`InputState::time`), marked until the
-    /// scroll gets there rather than each section it passes on the way.
-    arriving: Option<(Section, f64)>,
     search: Search,
     server: ServerSettings,
 }
@@ -563,8 +556,6 @@ impl SettingsPage {
             job: None,
             pickers: Pickers::default(),
             section: Section::Appearance,
-            scroll_to: None,
-            arriving: None,
             search: Search::default(),
             server: ServerSettings::default(),
         }
@@ -588,24 +579,10 @@ impl SettingsPage {
         cx.services.events.push(AppEvent::AppearanceChanged);
     }
 
-    /// Scrolls to `section`, from the menu or a note's link, leaving the search.
-    fn open(&mut self, ctx: &egui::Context, section: Section) {
+    /// Shows `section`, from the menu or a note's link, leaving the search.
+    fn open(&mut self, section: Section) {
         self.section = section;
-        self.scroll_to = Some(section);
-        self.arriving = Some((section, ctx.input(|input| input.time)));
         self.search.text.clear();
-    }
-
-    /// Marks the section at the top of the column, `top`, in the menu; after a menu entry, its
-    /// section until the scroll has brought it there (or stopped short of it for a while).
-    fn follow(&mut self, ctx: &egui::Context, top: Section) {
-        if let Some((section, since)) = self.arriving {
-            let now = ctx.input(|input| input.time);
-            if top == section || now - since > ARRIVAL_WAIT {
-                self.arriving = None;
-            }
-        }
-        self.section = self.arriving.map_or(top, |(section, _)| section);
     }
 
     /// Drops the image cache's memory now and deletes its folder, which a large cache with many
@@ -714,7 +691,7 @@ impl SettingsPage {
                                 let matches = searching.then(|| self.search.matches(section));
                                 let selected = !searching && self.section == section;
                                 if menu_entry(ui, section, selected, matches).clicked() {
-                                    self.open(ui.ctx(), section);
+                                    self.open(section);
                                 }
                             }
                         }
@@ -761,15 +738,15 @@ impl SettingsPage {
         }
     }
 
-    /// The column of sections, scrolling under the top bar. A search's results keep a scroll
-    /// position of their own, so leaving the search puts the column back where it was.
+    /// The section shown, or a search's results, scrolling under the top bar. Each section and
+    /// the search keep a scroll position of their own, so a section opens at its top and leaving
+    /// the search puts the section back where it was.
     fn content(&mut self, ui: &mut Ui, cx: &mut PageCx) {
-        let searching = self.search.active();
+        let shown = (!self.search.active()).then_some(self.section);
         let area = egui::ScrollArea::vertical()
-            .id_salt(("settings_content", searching))
+            .id_salt(("settings_content", shown))
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let viewport = ui.clip_rect();
                 let full = ui.available_width();
                 let column = (full - 2. * PAGE_PADDING).clamp(0., CONTENT_W);
                 let side = ((full - column) * 0.5).max(0.);
@@ -780,79 +757,60 @@ impl SettingsPage {
                     ui.vertical(|ui| {
                         ui.set_width(column);
                         ui.add_space(PAGE_PADDING);
-                        let starts = self.sections(ui, cx);
+                        self.sections(ui, cx);
                         ui.add_space(PAGE_PADDING);
-                        if searching {
-                            return;
-                        }
-                        // Room under the last section for it to scroll to the top too, so its
-                        // menu entry can bring it there and the menu then marks it.
-                        if let Some(&(_, last)) = starts.last() {
-                            let below = ui.cursor().top() - last;
-                            ui.add_space((viewport.height() - below).max(0.));
-                        }
-                        let top = starts
-                            .iter()
-                            .rev()
-                            .find(|(_, start)| *start <= viewport.top() + TOP_SLACK)
-                            .or(starts.first())
-                            .map(|&(section, _)| section);
-                        if let Some(top) = top {
-                            self.follow(ui.ctx(), top);
-                        }
                     });
                 });
             });
         backdrop::scroll_edge(ui, &area);
     }
 
-    /// Every section with a row the search finds (all of them without a search), each store's
-    /// under its banner, and the section a menu entry asked for scrolled to the top. Returns
-    /// where each section starts: the page's padding above its banner for a store's first
-    /// section, otherwise the gap above its heading.
-    fn sections(&mut self, ui: &mut Ui, cx: &mut PageCx) -> Vec<(Section, f32)> {
-        let found: Vec<Section> = Section::ALL
-            .into_iter()
-            .filter(|&section| self.search.matches(section) > 0)
-            .collect();
-        let mut starts = Vec::with_capacity(found.len());
-        if found.is_empty() {
+    /// The section the menu marks or, while searching, every section with a row the search
+    /// finds, one after another.
+    fn sections(&mut self, ui: &mut Ui, cx: &mut PageCx) {
+        let searching = self.search.active();
+        let shown: Vec<Section> = if searching {
+            Section::ALL
+                .into_iter()
+                .filter(|&section| self.search.matches(section) > 0)
+                .collect()
+        } else {
+            vec![self.section]
+        };
+        if shown.is_empty() {
             let message = format!("No settings match “{}”.", self.search.text.trim());
             ui.label(label::muted(ui, message));
-            return starts;
+            return;
         }
-        for store in Store::ALL {
-            let sections: Vec<Section> = found
-                .iter()
-                .copied()
-                .filter(|section| section.store() == store)
-                .collect();
-            if sections.is_empty() {
-                continue;
+        for (index, section) in shown.into_iter().enumerate() {
+            if index > 0 {
+                ui.add_space(SECTION_GAP);
             }
-            if !starts.is_empty() {
-                ui.add_space(PAGE_PADDING);
-            }
-            let banner = ui.cursor().top() - PAGE_PADDING;
-            self.banner(ui, cx, store);
-            for (index, section) in sections.into_iter().enumerate() {
-                let start = if index == 0 { banner } else { ui.cursor().top() };
-                self.section(ui, cx, section);
-                starts.push((section, start));
-                if self.scroll_to == Some(section) {
-                    self.scroll_to = None;
-                    let anchor = Rect::from_min_size(pos2(ui.min_rect().left(), start), vec2(1., 1.));
-                    ui.scroll_to_rect(anchor, Some(Align::TOP));
-                }
-            }
+            // A search's results are short of room, and the tag says where each is kept.
+            self.heading(ui, cx, section, !searching);
+            ui.add_space(SPACE.lg);
+            self.section(ui, cx, section);
         }
-        starts
     }
 
-    /// Where the settings under it are kept, so the two kinds can't be mistaken for each other:
-    /// the device's config, or the account on the server (with how its saving is going).
-    fn banner(&self, ui: &mut Ui, cx: &PageCx, store: Store) {
+    /// A section's title with a tag naming where its settings are kept, so the device's and the
+    /// server's can't be mistaken for each other, and, when `explain`, a line saying what that
+    /// means (with how saving to the server is going).
+    fn heading(&self, ui: &mut Ui, cx: &PageCx, section: Section, explain: bool) {
         let tokens = theme::tokens_of(ui);
+        let store = section.store();
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(section.title())
+                    .font(text::font(ui, "xl"))
+                    .color(tokens.ink),
+            );
+            ui.add_space(SPACE.xs);
+            store_tag(ui, store);
+        });
+        if !explain {
+            return;
+        }
         let description = match store {
             Store::Device => "Kept on this computer, for every account signed in here.".to_string(),
             Store::Server => {
@@ -864,32 +822,18 @@ impl SettingsPage {
                 )
             }
         };
-        // On the backdrop rather than boxed: the sections under it are the surfaces, and a third
-        // kind of box between them would read as another section.
-        ui.horizontal_top(|ui| {
-            ui.add_space(SPACE.xs);
-            ui.label(store.icon().rich_text().size(BANNER_ICON).color(tokens.ink_muted));
-            ui.add_space(SPACE.xs);
-            ui.vertical(|ui| {
-                ui.label(
-                    RichText::new(store.title())
-                        .font(text::font(ui, "lg"))
-                        .color(tokens.ink)
-                        .strong(),
-                );
-                ui.label(label::muted(ui, description));
-                if store == Store::Server
-                    && let Some(status) = self.server.status()
-                {
-                    ui.label(label::muted(ui, status));
-                }
-            });
-        });
+        ui.add_space(SPACE.xs);
+        ui.label(label::muted(ui, description));
+        if store == Store::Server
+            && let Some(status) = self.server.status()
+        {
+            ui.label(label::muted(ui, status));
+        }
     }
 
-    /// A section: a surface with its heading and its rows.
+    /// A section's card and its rows.
     fn section(&mut self, ui: &mut Ui, cx: &mut PageCx, section: Section) {
-        group(ui, section.icon(), section.title(), |ui| match section {
+        card(ui, |ui| match section {
             Section::Appearance => self.appearance(ui, cx),
             Section::Playback => self.playback(ui),
             Section::Subtitles => self.subtitles(ui, cx),
@@ -903,11 +847,12 @@ impl SettingsPage {
 
     fn appearance(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let current = self.config.theme;
+        let default = Some(ThemePreference::default());
         let picked = self
             .pickers
-            .choose(ui, &self.search, THEME, "settings_theme", &THEMES, current);
-        if let Some(theme) = picked {
-            self.save_appearance(cx, |config| config.theme = theme);
+            .choose(ui, &self.search, THEME, "settings_theme", &THEMES, current, default);
+        if let Some(edit) = picked {
+            self.save_appearance(cx, |config| config.theme = edit.or_unset().unwrap_or_default());
         }
 
         // `None` follows the system, whose size can differ from 100 %.
@@ -920,32 +865,38 @@ impl SettingsPage {
             )
             .collect();
         let current = self.config.text_size;
-        let picked = self
-            .pickers
-            .choose(ui, &self.search, TEXT_SIZE, "settings_text_size", &text_sizes, current);
-        if let Some(size) = picked {
-            self.save_appearance(cx, |config| config.text_size = size);
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            TEXT_SIZE,
+            "settings_text_size",
+            &text_sizes,
+            current,
+            Some(None),
+        );
+        if let Some(edit) = picked {
+            self.save_appearance(cx, |config| config.text_size = edit.or_unset().flatten());
         }
 
         let current = self.config.animations.unwrap_or(true);
-        if let Some(on) = toggle(ui, &self.search, ANIMATIONS, current) {
-            self.save_appearance(cx, |config| config.animations = Some(on));
+        if let Some(edit) = toggle(ui, &self.search, ANIMATIONS, current, Some(true)) {
+            self.save_appearance(cx, |config| config.animations = edit.or_unset());
         }
     }
 
     fn playback(&mut self, ui: &mut Ui) {
         if note(ui, &self.search, TRACKS_NOTE, Some("Languages")) {
-            self.open(ui.ctx(), Section::Languages);
+            self.open(Section::Languages);
         }
 
         let current = self.config.autoplay_next_episode.unwrap_or(true);
-        if let Some(on) = toggle(ui, &self.search, AUTOPLAY, current) {
-            self.save(|config| config.autoplay_next_episode = Some(on));
+        if let Some(edit) = toggle(ui, &self.search, AUTOPLAY, current, Some(true)) {
+            self.save(|config| config.autoplay_next_episode = edit.or_unset());
         }
 
         let current = self.config.auto_skip_intro.unwrap_or(false);
-        if let Some(on) = toggle(ui, &self.search, SKIP_INTRO, current) {
-            self.save(|config| config.auto_skip_intro = Some(on));
+        if let Some(edit) = toggle(ui, &self.search, SKIP_INTRO, current, Some(false)) {
+            self.save(|config| config.auto_skip_intro = edit.or_unset());
         }
 
         // `AUTOMATIC` measures the connection before playing instead.
@@ -956,23 +907,35 @@ impl SettingsPage {
             }))
             .collect();
         let current = bitrate_choice(&self.config);
-        let picked = self
-            .pickers
-            .choose(ui, &self.search, BITRATE, "settings_bitrate", &bitrates, current);
-        if let Some(mbps) = picked {
-            self.save(|config| apply_bitrate(config, mbps));
+        let default = Some(bitrate_choice(&Config::default()));
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            BITRATE,
+            "settings_bitrate",
+            &bitrates,
+            current,
+            default,
+        );
+        match picked {
+            Some(Edit::Set(mbps)) => self.save(|config| apply_bitrate(config, mbps)),
+            Some(Edit::Default) => self.save(|config| {
+                config.automatic_bitrate = None;
+                config.max_streaming_bitrate = None;
+            }),
+            None => {}
         }
 
         let current = self.config.prefer_hevc.unwrap_or(false);
-        if let Some(on) = toggle(ui, &self.search, HEVC, current) {
-            self.save(|config| config.prefer_hevc = Some(on));
+        if let Some(edit) = toggle(ui, &self.search, HEVC, current, Some(false)) {
+            self.save(|config| config.prefer_hevc = edit.or_unset());
         }
     }
 
     fn subtitles(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         note(ui, &self.search, SUBTITLES_NOTE, None);
         if note(ui, &self.search, SUBTITLE_TRACKS_NOTE, Some("Languages")) {
-            self.open(ui.ctx(), Section::Languages);
+            self.open(Section::Languages);
         }
 
         let current = self.config.subtitle_color.unwrap_or_default();
@@ -983,9 +946,10 @@ impl SettingsPage {
             "settings_subtitle_color",
             &SUBTITLE_COLORS,
             current,
+            Some(SubtitleColor::default()),
         );
-        if let Some(color) = picked {
-            self.save(|config| config.subtitle_color = Some(color));
+        if let Some(edit) = picked {
+            self.save(|config| config.subtitle_color = edit.or_unset());
         }
 
         let current = self.config.subtitle_style.unwrap_or_default();
@@ -996,9 +960,10 @@ impl SettingsPage {
             "settings_subtitle_style",
             &SUBTITLE_STYLES,
             current,
+            Some(SubtitleStyle::default()),
         );
-        if let Some(style) = picked {
-            self.save(|config| config.subtitle_style = Some(style));
+        if let Some(edit) = picked {
+            self.save(|config| config.subtitle_style = edit.or_unset());
         }
 
         // A size set in the player that isn't one of the steps here is listed too.
@@ -1014,30 +979,24 @@ impl SettingsPage {
             "settings_subtitle_size",
             &scales,
             current,
+            Some(1.),
         );
-        if let Some(scale) = picked {
+        if let Some(edit) = picked {
+            let scale = edit.or_unset().unwrap_or(1.);
             self.save(|config| config.subtitle_scale = Some(scale).filter(|&scale| scale != 1.));
             cx.services.playback.set_subtitle_scale(scale);
         }
     }
 
     fn storage(&mut self, ui: &mut Ui, cx: &mut PageCx) {
-        // Nothing to save for these two, so the row's smaller line shows the folder instead of
-        // a config key.
+        // Nothing to save for these two, so the row shows its folder instead of a default.
         let busy = self.job.is_some();
         if self.search.shows(&IMAGE_CACHE) {
             let images = config::cache_dir().join("images").display().to_string();
             let mut clear = false;
-            row(
-                ui,
-                Row {
-                    key: &images,
-                    ..IMAGE_CACHE
-                },
-                |ui| {
-                    clear = button::quiet(ui, "Clear", ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
-                },
-            );
+            row_with_folder(ui, IMAGE_CACHE, Some(&images), None, |ui| {
+                clear = button::quiet(ui, "Clear", ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
+            });
             if clear {
                 self.clear_image_cache(cx);
             }
@@ -1046,7 +1005,7 @@ impl SettingsPage {
         if self.search.shows(&LOGS) {
             let logs = config::log_dir().display().to_string();
             let mut open = false;
-            row(ui, Row { key: &logs, ..LOGS }, |ui| {
+            row_with_folder(ui, LOGS, Some(&logs), None, |ui| {
                 open = button::quiet(ui, "Open folder", ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
             });
             if open {
@@ -1059,8 +1018,8 @@ impl SettingsPage {
         info(ui, &self.search, VERSION, env!("CARGO_PKG_VERSION"));
 
         let current = self.config.check_for_updates.unwrap_or(true);
-        if let Some(on) = toggle(ui, &self.search, CHECK_FOR_UPDATES, current) {
-            self.save(|config| config.check_for_updates = Some(on));
+        if let Some(edit) = toggle(ui, &self.search, CHECK_FOR_UPDATES, current, Some(true)) {
+            self.save(|config| config.check_for_updates = edit.or_unset());
         }
     }
 
@@ -1074,8 +1033,9 @@ impl SettingsPage {
             let subtitle = format!("{server} · {address}");
             let label = format!("Signed in as {} on {subtitle}", session.user.name);
             let names = [session.user.name.as_str()];
+            ui.add_space(ROW_PAD);
             AvatarRow::new(&names, &session.user.name, &subtitle, &label).show(ui, false);
-            ui.add_space(surface::GAP_GROUP);
+            ui.add_space(ROW_PAD);
         }
         let version = session.server.version.clone().unwrap_or_else(|| "?".into());
         info(ui, &self.search, SERVER_VERSION, &version);
@@ -1096,8 +1056,9 @@ impl SettingsPage {
             "settings_audio_language",
             &languages,
             current,
+            None,
         );
-        if let Some(code) = picked {
+        if let Some(Edit::Set(code)) = picked {
             let changes = UserConfigurationChanges {
                 audio_language_preference: Some(code.to_string()),
                 ..Default::default()
@@ -1105,7 +1066,13 @@ impl SettingsPage {
             self.server.change(cx, changes);
         }
 
-        if let Some(on) = toggle(ui, &self.search, PLAY_DEFAULT_AUDIO, config.play_default_audio_track) {
+        if let Some(Edit::Set(on)) = toggle(
+            ui,
+            &self.search,
+            PLAY_DEFAULT_AUDIO,
+            config.play_default_audio_track,
+            None,
+        ) {
             let changes = UserConfigurationChanges {
                 play_default_audio_track: Some(on),
                 ..Default::default()
@@ -1113,7 +1080,7 @@ impl SettingsPage {
             self.server.change(cx, changes);
         }
 
-        if let Some(on) = toggle(ui, &self.search, REMEMBER_AUDIO, config.remember_audio_selections) {
+        if let Some(Edit::Set(on)) = toggle(ui, &self.search, REMEMBER_AUDIO, config.remember_audio_selections, None) {
             let changes = UserConfigurationChanges {
                 remember_audio_selections: Some(on),
                 ..Default::default()
@@ -1130,8 +1097,9 @@ impl SettingsPage {
             "settings_subtitle_language",
             &languages,
             current,
+            None,
         );
-        if let Some(code) = picked {
+        if let Some(Edit::Set(code)) = picked {
             let changes = UserConfigurationChanges {
                 subtitle_language_preference: Some(code.to_string()),
                 ..Default::default()
@@ -1146,8 +1114,9 @@ impl SettingsPage {
             "settings_subtitle_mode",
             &SUBTITLE_MODES,
             config.subtitle_mode,
+            None,
         );
-        if let Some(mode) = picked {
+        if let Some(Edit::Set(mode)) = picked {
             let changes = UserConfigurationChanges {
                 subtitle_mode: Some(mode),
                 ..Default::default()
@@ -1155,11 +1124,12 @@ impl SettingsPage {
             self.server.change(cx, changes);
         }
 
-        if let Some(on) = toggle(
+        if let Some(Edit::Set(on)) = toggle(
             ui,
             &self.search,
             REMEMBER_SUBTITLES,
             config.remember_subtitle_selections,
+            None,
         ) {
             let changes = UserConfigurationChanges {
                 remember_subtitle_selections: Some(on),
@@ -1171,7 +1141,13 @@ impl SettingsPage {
 
     fn home(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         if let Some(config) = self.server.loaded(ui)
-            && let Some(on) = toggle(ui, &self.search, HIDE_PLAYED_IN_LATEST, config.hide_played_in_latest)
+            && let Some(Edit::Set(on)) = toggle(
+                ui,
+                &self.search,
+                HIDE_PLAYED_IN_LATEST,
+                config.hide_played_in_latest,
+                None,
+            )
         {
             let changes = UserConfigurationChanges {
                 hide_played_in_latest: Some(on),
@@ -1293,6 +1269,7 @@ impl ServerSettings {
         if let Some(config) = &self.config {
             return Some(config.clone());
         }
+        ui.add_space(ROW_PAD);
         if self.failed {
             surface::notice(
                 ui,
@@ -1311,7 +1288,7 @@ impl ServerSettings {
                 ui.label(label::muted(ui, "Loading your settings from the server…"));
             });
         }
-        ui.add_space(ROW_GAP);
+        ui.add_space(ROW_PAD);
         None
     }
 
@@ -1355,16 +1332,8 @@ fn language_list(cultures: Vec<Culture>) -> Vec<(String, String)> {
 
 /// A store's name over its sections in the menu.
 fn menu_heading(ui: &mut Ui, store: Store) {
-    let tokens = theme::tokens_of(ui);
     ui.horizontal(|ui| {
         ui.add_space(8.);
-        ui.label(
-            store
-                .icon()
-                .rich_text()
-                .size(text::font(ui, "sm").size)
-                .color(tokens.muted_foreground),
-        );
         ui.label(label::overline(ui, store.title()));
     });
     ui.add_space(HEADING_GAP);
@@ -1429,63 +1398,172 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
     response
 }
 
-/// A group on the page: a surface with the section's icon and title at its top, left-aligned
-/// as a dialog's is (the column isn't a centred form), over its rows.
-fn group(ui: &mut Ui, icon: MaterialIcon, title: &str, contents: impl FnOnce(&mut Ui)) {
-    ui.add_space(SECTION_GAP);
+/// Where a section's settings are kept, by its title: the store's icon and name on an inset pill.
+fn store_tag(ui: &mut Ui, store: Store) {
     let tokens = theme::tokens_of(ui);
-    surface::frame(ui).inner_margin(SECTION_PADDING).show(ui, |ui| {
-        // The surface spans the column, not just its widest row.
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = SPACE.sm;
-            ui.label(icon.rich_text().size(HEADING_ICON).color(tokens.ink_muted));
-            ui.label(RichText::new(title).font(text::font(ui, "xl")).color(tokens.ink));
+    let font = text::font(ui, "sm");
+    egui::Frame::NONE
+        .fill(tokens.inset)
+        .corner_radius(egui::CornerRadius::same(u8::MAX))
+        .inner_margin(egui::Margin::symmetric(10, 3))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 6.;
+            ui.horizontal(|ui| {
+                ui.label(store.icon().rich_text().size(font.size).color(tokens.ink_muted));
+                ui.label(RichText::new(store.title()).font(font).color(tokens.ink_muted));
+            });
         });
-        ui.add_space(surface::GAP_GROUP);
-        contents(ui);
-    });
 }
 
-/// One setting: its label on the left and its control on the right, then what it does and the
-/// key it saves.
-fn row(ui: &mut Ui, row: Row, control: impl FnOnce(&mut Ui)) {
-    let tokens = theme::tokens_of(ui);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(row.label).font(text::font(ui, "base")).color(tokens.ink));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
-    });
-    // `main`'s setting descriptions were `text_sm` in the muted colour.
-    ui.label(label::muted(ui, row.description));
-    if !row.key.is_empty() {
-        let metadata = if row.unset.is_empty() {
-            row.key.to_string()
-        } else {
-            format!("{} · unset: {}", row.key, row.unset)
-        };
-        // The keys are monospace, as the file is: `RichText::monospace` would apply its family
-        // after the table's font, so the font id is built directly.
-        let mut font = text::font(ui, "xs");
-        font.family = egui::FontFamily::Monospace;
-        ui.label(RichText::new(metadata).font(font).color(tokens.ink_muted));
+/// A section's rows on one surface spanning the column. The rows space themselves and draw the
+/// hairlines between them ([`hairline`]), so the card adds no gap of its own between them.
+fn card(ui: &mut Ui, contents: impl FnOnce(&mut Ui)) {
+    surface::frame(ui)
+        .inner_margin(egui::Margin::symmetric(CARD_PADDING[0], CARD_PADDING[1]))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 0.;
+            contents(ui);
+        });
+}
+
+/// The line between two rows of a card, across its width: drawn above every row but the
+/// first, which is at the card's top with nothing yet above it.
+fn hairline(ui: &mut Ui) {
+    let y = ui.cursor().top();
+    if y <= ui.min_rect().top() + 0.5 {
+        return;
     }
-    ui.add_space(ROW_GAP);
+    let stroke = egui::Stroke::new(1., theme::tokens_of(ui).surface_border);
+    ui.painter().hline(ui.max_rect().x_range(), y, stroke);
 }
 
-/// A switch for a flag setting, when the search shows it: returns the value it was flipped to,
-/// if it was.
-fn toggle(ui: &mut Ui, search: &Search, row: Row, value: bool) -> Option<bool> {
+/// One setting: its label over what it does at the left, and its control at the right,
+/// centred on them. The label's tooltip names the key it saves and, for the device's, the
+/// value while the key is unset. `reset` is the default's name for a device setting that's off
+/// it: an undo button left of the control then puts it back. Returns whether that was clicked.
+fn row(ui: &mut Ui, row: Row, reset: Option<&str>, control: impl FnOnce(&mut Ui)) -> bool {
+    row_with_folder(ui, row, None, reset, control)
+}
+
+/// [`row`], with a folder under the description in monospace (the storage rows').
+fn row_with_folder(
+    ui: &mut Ui,
+    row: Row,
+    folder: Option<&str>,
+    reset: Option<&str>,
+    control: impl FnOnce(&mut Ui),
+) -> bool {
+    let tokens = theme::tokens_of(ui);
+    hairline(ui);
+    let full = ui.available_rect_before_wrap();
+    let top = full.top() + ROW_PAD;
+    // The text keeps clear of the widest control and its undo button, so every row of a card
+    // wraps at the same width.
+    let text_w = (full.width() - PICKER_W - RESET_W - 2. * SPACE.sm).max(120.);
+    let text_rect = Rect::from_min_size(pos2(full.left(), top), vec2(text_w, f32::INFINITY));
+    let text = ui
+        .scope_builder(UiBuilder::new().max_rect(text_rect), |ui| {
+            ui.spacing_mut().item_spacing.y = SPACE.xxs;
+            let name = ui.label(RichText::new(row.label).font(text::font(ui, "base")).color(tokens.ink));
+            if let Some(tip) = key_tooltip(&row) {
+                name.on_hover_text(tip);
+            }
+            if !row.description.is_empty() {
+                ui.label(label::muted(ui, row.description));
+            }
+            if let Some(folder) = folder {
+                // Monospace, as a path: `RichText::monospace` would apply its family after the
+                // table's font, so the font id is built directly.
+                let mut font = text::font(ui, "xs");
+                font.family = egui::FontFamily::Monospace;
+                ui.label(RichText::new(folder).font(font).color(tokens.ink_muted));
+            }
+        })
+        .response
+        .rect;
+    let controls = Rect::from_min_max(
+        pos2(text.right() + SPACE.sm, top),
+        pos2(full.right(), text.bottom().max(top + ui.spacing().interact_size.y)),
+    );
+    let mut reset_clicked = false;
+    let drawn = ui
+        .scope_builder(
+            UiBuilder::new()
+                .max_rect(controls)
+                .layout(egui::Layout::right_to_left(Align::Center)),
+            |ui| {
+                control(ui);
+                if let Some(default) = reset {
+                    reset_clicked = reset_button(ui, default).clicked();
+                }
+            },
+        )
+        .response
+        .rect;
+    let bottom = text.bottom().max(drawn.bottom()) + ROW_PAD;
+    ui.advance_cursor_after_rect(Rect::from_min_max(full.min, pos2(full.right(), bottom)));
+    reset_clicked
+}
+
+/// What a row's label says under the pointer: the key it saves and where, and for the device's
+/// the value that applies while the file leaves it out. `None` for a row that saves nothing.
+fn key_tooltip(row: &Row) -> Option<String> {
+    if row.key.is_empty() {
+        return None;
+    }
+    Some(match row.section.store() {
+        Store::Device if row.unset.is_empty() => format!("{} in the config file", row.key),
+        Store::Device => format!("{} in the config file · unset: {}", row.key, row.unset),
+        Store::Server => format!("{} in your Jellyfin profile", row.key),
+    })
+}
+
+/// The undo button of a setting that's off its default, naming the default in its tooltip.
+/// Tab stops on it after the setting's control.
+fn reset_button(ui: &mut Ui, default: &str) -> egui::Response {
+    let tooltip = format!("Back to the default: {default}");
+    RoundButton::icon(ICON_UNDO, "Back to the default")
+        .size(RESET_W, RESET_ICON)
+        .tooltip(&tooltip)
+        .show(ui)
+}
+
+/// A change from a device setting's control: a value picked, or back to the default.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Edit<T> {
+    Set(T),
+    Default,
+}
+
+impl<T> Edit<T> {
+    /// What the config keeps: the value, or `None` to leave the key out, so the default
+    /// applies.
+    fn or_unset(self) -> Option<T> {
+        match self {
+            Edit::Set(value) => Some(value),
+            Edit::Default => None,
+        }
+    }
+}
+
+/// A switch for a flag setting, when the search shows it: returns the edit, if there was one.
+/// `default` is the device setting's default, for its undo button; `None` for the server's.
+fn toggle(ui: &mut Ui, search: &Search, row: Row, value: bool, default: Option<bool>) -> Option<Edit<bool>> {
     if !search.shows(&row) {
         return None;
     }
+    let reset = default
+        .filter(|&default| default != value)
+        .map(|default| if default { "On" } else { "Off" });
     let mut flipped = None;
-    self::row(ui, row, |ui| {
+    let reset_clicked = self::row(ui, row, reset, |ui| {
         let mut on = value;
         if toggle::switch(ui, &mut on, row.label).changed() {
-            flipped = Some(on);
+            flipped = Some(Edit::Set(on));
         }
     });
-    flipped
+    if reset_clicked { Some(Edit::Default) } else { flipped }
 }
 
 /// The pickers' keys: egui's focus (Tab) puts it on a select (`widgets::select`), and Left and
@@ -1527,7 +1605,10 @@ impl Pickers {
     }
 
     /// A picker over `options`, with `current` selected, when the search shows it: returns the
-    /// choice when one was picked in the list or stepped to with Left or Right.
+    /// choice when one was picked in the list or stepped to with Left or Right, or
+    /// [`Edit::Default`] from the undo button. `default` is the device setting's default, for
+    /// that button; `None` for the server's.
+    #[allow(clippy::too_many_arguments)]
     fn choose<T: Copy + PartialEq, L: AsRef<str>>(
         &mut self,
         ui: &mut Ui,
@@ -1536,7 +1617,8 @@ impl Pickers {
         id: &'static str,
         options: &[(T, L)],
         current: T,
-    ) -> Option<T> {
+        default: Option<T>,
+    ) -> Option<Edit<T>> {
         if !search.shows(&row) {
             return None;
         }
@@ -1550,8 +1632,12 @@ impl Pickers {
             let values: Vec<T> = options.iter().map(|(value, _)| *value).collect();
             picked = stepped(&values, current, step);
         }
+        let reset = default
+            .filter(|default| *default != current)
+            .and_then(|default| options.iter().find(|(value, _)| *value == default))
+            .map(|(_, label)| label.as_ref());
         let mut focused = None;
-        self::row(ui, row, |ui| {
+        let reset_clicked = self::row(ui, row, reset, |ui| {
             // A value not among the choices (a bitrate set by hand) shows the first one.
             let menu = ui.make_persistent_id(id);
             let (response, chosen) = select::select(ui, menu, PICKER_W, row.label, &labels, index.unwrap_or(0), true);
@@ -1582,7 +1668,10 @@ impl Pickers {
         if let Some(focused_id) = focused {
             self.focused = Some((id, focused_id));
         }
-        picked
+        if reset_clicked {
+            return Some(Edit::Default);
+        }
+        picked.map(Edit::Set)
     }
 }
 
@@ -1601,14 +1690,9 @@ fn info(ui: &mut Ui, search: &Search, row: Row, value: &str) {
     if !search.shows(&row) {
         return;
     }
-    let tokens = theme::tokens_of(ui);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(row.label).font(text::font(ui, "base")).color(tokens.ink));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(value).color(tokens.ink_muted));
-        });
+    self::row(ui, row, None, |ui| {
+        ui.label(RichText::new(value).color(theme::tokens_of(ui).ink_muted));
     });
-    ui.add_space(ROW_GAP);
 }
 
 /// A paragraph in a group that isn't a setting, when the search shows it, with a link to the
@@ -1617,6 +1701,8 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
     if !search.shows(&row) {
         return false;
     }
+    hairline(ui);
+    ui.add_space(ROW_PAD);
     let font = text::font(ui, "sm");
     let description = label::muted(ui, row.description);
     let mut clicked = false;
@@ -1636,7 +1722,7 @@ fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
             ui.label(description);
         }
     }
-    ui.add_space(ROW_GAP);
+    ui.add_space(ROW_PAD);
     clicked
 }
 
