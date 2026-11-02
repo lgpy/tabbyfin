@@ -7,7 +7,7 @@
 
 use std::f32::consts::TAU;
 
-use egui::{Color32, Mesh, Painter, Pos2, Rect, Stroke, Ui, vec2};
+use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape, Stroke, Ui, vec2};
 
 use crate::theme::Tokens;
 
@@ -36,13 +36,20 @@ pub fn color_at(window: Rect, y: f32, tokens: &Tokens) -> Color32 {
     tokens.backdrop_top.lerp_to_gamma(tokens.backdrop_bottom, t)
 }
 
-/// Covers `rect` with the backdrop as it is at that height of `window`, at `top` opacity at
+/// A shape covering `rect` with the backdrop as it is at that height of `window`, at `top` opacity at
 /// its top edge and opaque at its bottom: a picture that melts into the page below it (an
 /// item's banner). The backdrop is a gradient, so a flat colour would leave a step.
-pub fn fade_into(painter: &Painter, rect: Rect, window: Rect, top: f32, tokens: &Tokens) {
+pub fn fade_into(rect: Rect, window: Rect, top: f32, tokens: &Tokens) -> Shape {
+    wash(rect, window, top, 1., tokens)
+}
+
+/// A shape covering `rect` with the backdrop as it is at that height of `window`, at `top`
+/// opacity at its top edge and `bottom` at its bottom: a veil of the window's colour over a
+/// picture, so what's drawn on it stays readable (the top bar over an item's banner).
+pub fn wash(rect: Rect, window: Rect, top: f32, bottom: f32, tokens: &Tokens) -> Shape {
     let upper = color_at(window, rect.top(), tokens).gamma_multiply(top);
-    let lower = color_at(window, rect.bottom(), tokens);
-    vertical(painter, rect, upper, lower);
+    let lower = color_at(window, rect.bottom(), tokens).gamma_multiply(bottom);
+    gradient(rect, upper, lower)
 }
 
 /// The hairline between the top bar (or anything fixed above a page) and content scrolled
@@ -68,6 +75,11 @@ fn edge_opacity(offset: f32) -> f32 {
 
 /// A vertical gradient over `rect`, `top` to `bottom`.
 fn vertical(painter: &Painter, rect: Rect, top: Color32, bottom: Color32) {
+    painter.add(gradient(rect, top, bottom));
+}
+
+/// [`vertical`]'s mesh.
+fn gradient(rect: Rect, top: Color32, bottom: Color32) -> Shape {
     let mut mesh = Mesh::default();
     mesh.colored_vertex(rect.left_top(), top);
     mesh.colored_vertex(rect.right_top(), top);
@@ -75,7 +87,7 @@ fn vertical(painter: &Painter, rect: Rect, top: Color32, bottom: Color32) {
     mesh.colored_vertex(rect.left_bottom(), bottom);
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
-    painter.add(mesh);
+    Shape::mesh(mesh)
 }
 
 /// The glow around `center`, fading out at `radius`.

@@ -48,7 +48,7 @@ use crate::task::Task;
 use crate::theme::{self, over_video, text};
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
-use crate::views::{self, Page, PageCx, player};
+use crate::views::{self, Page, PageCx, UnderBar, player};
 use crate::widgets::avatar_row::{self, AvatarRow};
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
@@ -316,12 +316,19 @@ impl Shell {
             // One backdrop under the bar and the page, as on sign-in: neither panel has a fill,
             // and a page that scrolls under the bar draws its own edge (`backdrop::scroll_edge`).
             backdrop::fill(ui.painter(), ui.max_rect(), theme::tokens_of(ui));
+            // Between the backdrop and the bar's contents: where a page paints what runs up
+            // behind the bar. The bar's rectangle is only known once it's laid out.
+            let mut under_bar = UnderBar::reserve(ui.painter());
             // `main`'s bar keeps its contents 24 points from the window's edges; the pages own
             // their own 24 (or less, for a grid's own padding), so the panel adds none.
-            egui::Panel::top("top_bar")
+            let bar = egui::Panel::top("top_bar")
                 .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(24, 0)))
                 .show_separator_line(false)
-                .show(ui, |ui| self.top_bar(ui, cx));
+                .show(ui, |ui| self.top_bar(ui, cx))
+                .response
+                .rect;
+            under_bar.bar = bar;
+            cx.under_bar = Some(under_bar);
             egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
                 // Each page's widgets and scroll areas live under its own id scope, so stacked
                 // pages can use the same names for theirs (two `"cast"` shelves, two
@@ -334,6 +341,7 @@ impl Shell {
                     motion::enter(ui, ("page", serial), 0.0, |ui| entry.page.show(ui, cx));
                 });
             });
+            cx.under_bar = None;
         }
         self.navigate(cx);
     }
