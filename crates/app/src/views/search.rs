@@ -308,6 +308,9 @@ fn show_results(
                         if selected && moved {
                             response.scroll_to_me(None);
                         }
+                        if response.hovered() {
+                            cx.services.prefetch.hover(Route::for_item(item));
+                        }
                         if response.clicked() {
                             asked.open = Some(Route::for_item(item));
                         }

@@ -27,6 +27,7 @@
 
 mod children;
 mod header;
+pub mod prefetch;
 mod shelves;
 
 use egui::{Align, Id, Margin, RectAlign, Response, Ui};
@@ -325,6 +326,9 @@ pub struct ItemPage {
     item_id: String,
     data: Load<ItemData>,
     loading: Option<Task<jellyfin::Result<ItemData>>>,
+    /// [`ItemPage::loading`] was taken over from [`prefetch::Prefetch`]. It may be a while old, so
+    /// if it failed the page asks again rather than show the error.
+    prefetched: bool,
     /// The `services.user_data` the data was loaded at; `None` before the first load or after
     /// Retry.
     loaded_at: Option<u64>,
@@ -367,6 +371,7 @@ impl ItemPage {
             item_id,
             data: Load::Loading,
             loading: None,
+            prefetched: false,
             loaded_at: None,
             fills: Fills::default(),
             version: 0,
@@ -392,9 +397,13 @@ impl ItemPage {
             return;
         }
         self.loaded_at = Some(cx.services.user_data);
-        let client = cx.services.session.client.clone();
-        let item_id = self.item_id.clone();
-        self.loading = Some(Task::spawn(cx.ctx, load(client, item_id)));
+        // Hovering its card may have started this already.
+        let started = cx.services.prefetch.take(&self.item_id, cx.services.user_data);
+        self.prefetched = started.is_some();
+        self.loading = Some(started.unwrap_or_else(|| {
+            let client = cx.services.session.client.clone();
+            Task::spawn(cx.ctx, load(client, self.item_id.clone()))
+        }));
     }
 
     /// Plays the item, a series' or season's next episode, or from `start` (a chapter) with the
@@ -906,6 +915,9 @@ impl ItemPage {
         {
             self.add_to_playlist = Some(AddToPlaylist::new(cx, &item));
         }
+        if let Some(route) = asked.hovered {
+            cx.services.prefetch.hover(route);
+        }
         if let Some(route) = asked.open {
             cx.nav.push(NavRequest::Push(route));
         }
@@ -960,6 +972,8 @@ struct Asked {
     extra: Option<BaseItemDto>,
     /// A card opens a page.
     open: Option<Route>,
+    /// Where the card under the pointer leads ([`prefetch::Prefetch`]).
+    hovered: Option<Route>,
     /// A card's context menu was used.
     menu: Option<(MenuAction, BaseItemDto)>,
     /// A season card was clicked: its episodes open under the seasons, or close.
@@ -1044,6 +1058,7 @@ impl Page for ItemPage {
                             self.load_episodes(cx);
                         }
                     }
+                    Err(_) if self.prefetched => self.reload(cx),
                     Err(err) => self.data = Load::Failed(cx.services.handle_error(&err)),
                 }
             }
