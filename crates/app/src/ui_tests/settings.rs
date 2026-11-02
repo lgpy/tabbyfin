@@ -50,25 +50,27 @@ fn tab_and_the_arrows_step_the_appearance_pickers() {
     // Nothing has the focus yet, so the arrows are not a picker's and write nothing.
     ui.press(Key::ArrowRight);
     ui.press(Key::ArrowLeft);
-    assert_eq!(Config::load().theme, ThemePreference::Dark);
+    assert_eq!(Config::load().theme, ThemePreference::System);
     assert_eq!(Config::load().text_size, None);
 
-    // The first control after the menu is the theme picker. It shows the default (dark), the
-    // last of the three, so Right has nowhere to go; Left steps to light, and again to the
-    // system's scheme.
+    // The first control after the menu is the theme picker. It shows the default (the system's
+    // scheme), the first of the three: Right steps to light and dark, then has nowhere to go;
+    // Left steps back to the system's scheme and stops there. A last Right leaves it on light.
     tab_past_the_menu(&mut ui);
     ui.press(Key::ArrowRight);
-    assert_eq!(
-        Config::load().theme,
-        ThemePreference::Dark,
-        "Right at the end of the list"
-    );
+    assert_eq!(Config::load().theme, ThemePreference::Light);
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().theme, ThemePreference::Dark);
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().theme, ThemePreference::Dark, "Right at the end");
     ui.press(Key::ArrowLeft);
     assert_eq!(Config::load().theme, ThemePreference::Light);
     ui.press(Key::ArrowLeft);
     assert_eq!(Config::load().theme, ThemePreference::System);
     ui.press(Key::ArrowLeft);
     assert_eq!(Config::load().theme, ThemePreference::System, "Left at the start");
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().theme, ThemePreference::Light);
 
     // The theme is off its default now, so the next Tab is its undo button, and the one after
     // the text size picker, on the system's size: Right steps to 90 % and Left back to following
@@ -178,7 +180,7 @@ fn the_undo_button_puts_a_setting_back_to_its_default() {
     // The button goes in the frame after the one that takes its click.
     ui.step();
     ui.step();
-    assert_eq!(Config::load().theme, ThemePreference::Dark);
+    assert_eq!(Config::load().theme, ThemePreference::System);
     assert!(ui.harness().query_by_label(undo()).is_none());
 
     // A flag too: off its default it's saved, and the undo button drops the key.
@@ -270,7 +272,7 @@ fn a_searched_server_setting_saves_to_the_server() {
     assert_eq!(saved[0]["CastReceiverId"], "F007D354");
     assert_eq!(saved[0]["HidePlayedInLatest"], true);
     // The device's config is untouched.
-    assert_eq!(Config::load().theme, ThemePreference::Dark);
+    assert_eq!(Config::load().theme, ThemePreference::System);
 }
 
 /// Enter on a picker egui's focus is on opens its list from the keyboard, on its first row; Down
@@ -285,7 +287,7 @@ fn enter_opens_a_pickers_list_and_the_keyboard_picks_from_it() {
     tab_past_the_menu(&mut ui);
     ui.press(Key::Enter);
     ui.step();
-    // The list is the theme's choices, the default (dark) checked.
+    // The list is the theme's choices, the default (the system's scheme) checked.
     let dark = ui.harness().get_by_label("Dark");
     assert_eq!(dark.accesskit_node().role(), Role::MenuItemRadio);
     ui.press(Key::ArrowDown);
