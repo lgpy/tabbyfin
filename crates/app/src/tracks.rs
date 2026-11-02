@@ -22,6 +22,11 @@ fn label(stream: &MediaStream) -> String {
         .unwrap_or_else(|| format!("Track {}", stream.index))
 }
 
+/// How many tracks of `kind` `source` has.
+pub fn count(source: &MediaSourceInfo, kind: MediaStreamType) -> usize {
+    source.media_streams.iter().filter(|s| s.kind == kind).count()
+}
+
 /// The audio and subtitle choices of a media source: its audio tracks, and "Off" followed by
 /// its subtitle tracks. Empty for a kind the source lacks.
 pub fn track_choices(source: &MediaSourceInfo) -> (Vec<Choice>, Vec<Choice>) {
