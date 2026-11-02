@@ -34,15 +34,16 @@ pub fn show(
     radius: u8,
 ) {
     ui.painter()
-        .extend(shapes(ui, cache, rect, request, blurhash_from, radius, None, false));
+        .extend(shapes(ui, cache, rect, request, blurhash_from, radius, None));
 }
 
 /// A banner's shapes, for the caller to paint where it wants them (the item page's backdrop,
 /// under the top bar: `views::UnderBar`). Square, and asking the server for a fixed `width`
 /// rather than twice the drawn width: a banner that fills the window would otherwise be fetched
 /// (and kept in the cache) again at every window size, maximised state or zoom level. It is
-/// still scaled to `rect`, and cropped from its top rather than its middle: a backdrop's faces
-/// are high in the picture, and the band's bottom fades into the page anyway.
+/// still scaled to `rect` and cropped around its middle, like a card: a picture taller than the
+/// band loses as much of its top as of its bottom, so the band shows its middle rather than
+/// its sky.
 pub fn banner(
     ui: &Ui,
     cache: &mut ImageCache,
@@ -51,7 +52,7 @@ pub fn banner(
     blurhash_from: Option<&BaseItemDto>,
     width: u32,
 ) -> Vec<Shape> {
-    shapes(ui, cache, rect, request, blurhash_from, 0, Some(width), true)
+    shapes(ui, cache, rect, request, blurhash_from, 0, Some(width))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -63,7 +64,6 @@ fn shapes(
     blurhash_from: Option<&BaseItemDto>,
     radius: u8,
     width: Option<u32>,
-    from_top: bool,
 ) -> Vec<Shape> {
     let radius = CornerRadius::same(radius);
     // What shows before the blurhash arrives, or when there's no image at all: `main`'s `muted`
@@ -85,7 +85,7 @@ fn shapes(
         Some(_) => None,
     };
     let picture = |texture: &egui::TextureHandle, tint: Color32| {
-        let uv = cover_uv(texture.size_vec2(), rect.size(), from_top);
+        let uv = cover_uv(texture.size_vec2(), rect.size());
         Shape::from(RectShape::filled(rect, radius, tint).with_texture(texture.id(), uv))
     };
     if let Some(texture) = &image {
@@ -111,18 +111,12 @@ pub fn dim(ui: &Ui, rect: Rect, radius: u8) {
 }
 
 /// The part of a texture to show so it fills `target` without stretching it: the widest or
-/// tallest band of the texture that has `target`'s aspect ratio, centred, or at the top when
-/// `from_top` (a band cut from a taller picture keeps its top edge).
-fn cover_uv(image: Vec2, target: Vec2, from_top: bool) -> Rect {
+/// tallest band of the texture that has `target`'s aspect ratio, centred.
+fn cover_uv(image: Vec2, target: Vec2) -> Rect {
     let scale = (target.x / image.x).max(target.y / image.y);
     let shown = target / scale;
     let size = Vec2::new((shown.x / image.x).clamp(0., 1.), (shown.y / image.y).clamp(0., 1.));
-    let centred = Rect::from_center_size(egui::pos2(0.5, 0.5), size);
-    if from_top {
-        centred.translate(Vec2::new(0., -centred.top()))
-    } else {
-        centred
-    }
+    Rect::from_center_size(egui::pos2(0.5, 0.5), size)
 }
 
 #[cfg(test)]
@@ -132,7 +126,7 @@ mod tests {
     use super::cover_uv;
 
     fn uv(size: [f32; 2], target: [f32; 2]) -> Rect {
-        cover_uv(Vec2::from(size), Vec2::from(target), false)
+        cover_uv(Vec2::from(size), Vec2::from(target))
     }
 
     #[test]
@@ -146,12 +140,14 @@ mod tests {
     }
 
     #[test]
-    fn a_banner_keeps_the_top_of_its_picture() {
-        // A 16:9 backdrop in a wide, short band: the full width, and the band from the top down.
-        let banner = cover_uv(Vec2::new(1280., 720.), Vec2::new(1280., 400.), true);
+    fn a_banner_shows_the_middle_of_a_taller_picture() {
+        // A 16:9 backdrop in a wide, short band: the full width, and as much cut off the top as
+        // off the bottom.
+        let banner = cover_uv(Vec2::new(1280., 720.), Vec2::new(1280., 400.));
         assert!((banner.width() - 1.).abs() < 1e-6);
-        assert!(banner.top().abs() < 1e-6);
         assert!((banner.height() - 400. / 720.).abs() < 1e-6);
+        assert!((banner.top() - (1. - banner.bottom())).abs() < 1e-6);
+        assert!(banner.top() > 0.);
     }
 
     #[test]
