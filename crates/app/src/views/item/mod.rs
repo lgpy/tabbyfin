@@ -41,7 +41,6 @@ use crate::item_menu::{
     resume_point,
 };
 use crate::keys::{Action, Scope};
-use crate::motion;
 use crate::nav::{NavRequest, Route};
 use crate::playback::PlayOptions;
 use crate::task::Task;
@@ -52,6 +51,7 @@ use crate::widgets::menu::{MenuAction, RefusedMarks};
 use crate::widgets::popup::{Entry, Opened, PopupMenu};
 use crate::widgets::text::{Load, episode_label, runtime_text};
 use crate::widgets::{backdrop, media_row, state};
+use crate::{motion, theme};
 use children::{band_reveal, with_gap_above};
 use header::version_label;
 
@@ -346,6 +346,8 @@ pub struct ItemPage {
     episode_columns: usize,
     /// A series' season whose episodes show in a band under the seasons.
     open_season: Option<OpenSeason>,
+    /// A season just closed, kept while its band folds away under the seasons.
+    closing_season: Option<OpenSeason>,
     /// A band the page still has to scroll into view, set by Enter on a season card: the band
     /// opens below the fold at the default window size, so without this the key looks like a
     /// no-op until the next one.
@@ -382,6 +384,7 @@ impl ItemPage {
             columns: 1,
             episode_columns: 1,
             open_season: None,
+            closing_season: None,
             reveal_band: None,
             episodes: None,
             more_requested: None,
@@ -480,8 +483,13 @@ impl ItemPage {
                 episodes: Load::Loading,
             });
             self.load_episodes(cx);
+            // The band unfolds again from where the closing one had folded to.
+            self.closing_season = None;
         } else {
-            self.open_season = None;
+            // Its band folds away rather than vanishing; with the animations off there's
+            // nothing to fold.
+            let open = self.open_season.take();
+            self.closing_season = open.filter(|_| theme::animations(cx.ctx));
             // Its episodes aren't shown any more, so their request goes with them.
             self.episodes = None;
             // A band that isn't drawn has nothing left to reveal.
@@ -788,6 +796,8 @@ impl ItemPage {
         // The page's own scroll target, set once every shelf is drawn: the next scroll area to
         // finish takes a target, and a shelf's row would be it (U3).
         let mut target = None;
+        // The closing band has folded away.
+        let mut folded = false;
 
         let area = egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Frame::NONE
@@ -828,6 +838,7 @@ impl ItemPage {
                                     CHILDREN,
                                     playlist,
                                     episode_columns,
+                                    None,
                                     cursor,
                                     images,
                                     &mut asked,
@@ -837,12 +848,33 @@ impl ItemPage {
                         };
                     }
                     let mut band = None;
-                    if let Some(open) = &self.open_season {
-                        ui.add_space(SECTION_GAP);
-                        // The episodes rise in each time a season opens, as `main`'s band did.
-                        band = Some(motion::enter(ui, ("season-episodes", open.id.as_str()), 0.0, |ui| {
-                            children::episodes_band(ui, open, episode_columns, cursor, images, &mut asked)
-                        }));
+                    let mut band_settled = true;
+                    let shown_band = match (&self.open_season, &self.closing_season) {
+                        (Some(open), _) => Some((open, true)),
+                        (None, Some(closing)) => Some((closing, false)),
+                        (None, None) => None,
+                    };
+                    if let Some((season, open)) = shown_band {
+                        // The episodes unfold under the seasons, and fold away when it closes.
+                        // The gap above is the band's, so it goes with it.
+                        let unfolded = motion::unfold(ui, "season-band", open, |ui| {
+                            ui.add_space(SECTION_GAP);
+                            if open {
+                                children::episodes_band(ui, season, episode_columns, cursor, images, &mut asked)
+                            } else {
+                                // A closing band is only drawn: it has no cursor and takes no
+                                // clicks.
+                                let mut cursor = Cursor::default();
+                                let mut asked = Asked::default();
+                                children::episodes_band(ui, season, episode_columns, &mut cursor, images, &mut asked)
+                            }
+                        });
+                        band_settled = unfolded.settled;
+                        if open {
+                            band = Some(unfolded.inner);
+                        } else if unfolded.settled {
+                            folded = true;
+                        }
                     }
                     let mut people_row = None;
                     if !data.item.people.is_empty() {
@@ -901,13 +933,22 @@ impl ItemPage {
                         // Enter opened a season: the least scroll that shows its row with the
                         // season's name and first episode, once as it opens and once more when
                         // its episodes arrive (a row is taller than the mascot's line).
+                        // Asked for again each pass while the band unfolds, since the page under
+                        // it isn't long enough yet for the scroll to get there.
                         target = Some((band_reveal(children_row, band.top, ui.clip_rect().height()), None));
                         // The loaded band gets a reveal of its own when its episodes arrive.
-                        self.reveal_band = if reveal == BandReveal::Opening {
-                            Some(BandReveal::Waiting)
-                        } else {
-                            None
-                        };
+                        // Episodes that arrived while it unfolded were part of this reveal.
+                        let loading = self
+                            .open_season
+                            .as_ref()
+                            .is_some_and(|open| matches!(open.episodes, Load::Loading));
+                        if band_settled {
+                            self.reveal_band = if reveal == BandReveal::Opening && loading {
+                                Some(BandReveal::Waiting)
+                            } else {
+                                None
+                            };
+                        }
                     }
                     if let Some((rect, align)) = target {
                         ui.scroll_to_rect(rect, align);
@@ -915,6 +956,9 @@ impl ItemPage {
                 });
         });
         backdrop::scroll_edge(ui, &area);
+        if folded {
+            self.closing_season = None;
+        }
 
         if let Some(action) = asked.action {
             // A second click on More closes its menu, as its trigger did on `main`.
