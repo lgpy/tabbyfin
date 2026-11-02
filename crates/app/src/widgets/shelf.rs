@@ -3,7 +3,8 @@
 //! `id` only has to be unique among the page's own rows and scroll areas: the shell scopes every
 //! page's ids, so two pages can both have a `"cast"` shelf and keep their scroll positions apart.
 //!
-//! The arrows show once there's more to see than fits and grey out at either end. They need the
+//! The title is `xl` in `ink`. The arrows are round buttons at the title row's right end; they
+//! show once there's more to see than fits and dim at either end. They need the
 //! row's content and viewport widths, which egui only knows after laying it out, so they come
 //! from the last frame (as they did on `main`) and the first frame shows none. An arrow glides
 //! the row a page over, as `main`'s `glide_by` did: a second click while it moves aims further,
@@ -20,19 +21,24 @@ use std::hash::Hash;
 
 use egui::containers::scroll_area::{DragScroll, ScrollBarVisibility, ScrollSource};
 use egui::style::KineticScrollStyle;
-use egui::{Align, Button, Layout, Rect, RichText, ScrollArea, Ui};
+use egui::{Align, Layout, Rect, RichText, ScrollArea, Ui};
 use egui_material_icons::icons::{ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT};
 
 use crate::smooth_scroll::Glide;
 use crate::theme;
+use crate::theme::text;
+use crate::widgets::round_button::RoundButton;
 
 /// A shelf's side padding, `main`'s `px_6`: the page adds none of its own, so the row can
 /// scroll a card to the window's edge. Item pages that already inset their content pass 0.
 pub const PADDING: f32 = 24.;
 /// Under the row, `main`'s `pb_2`, so the cards keep clear of the next shelf.
 const BOTTOM_PADDING: f32 = 8.;
-/// The title row's height, `main`'s `min_h_6`, so the shelf keeps it when the arrows hide.
-const TITLE_H: f32 = 24.;
+/// The title row's height, the arrows' size, so the shelf keeps it when they hide.
+const TITLE_H: f32 = ARROW;
+/// The page arrows' diameter and their icon's size.
+const ARROW: f32 = 32.;
+const ARROW_ICON: f32 = 20.;
 
 /// A titled row of cards, with the space between its cards and under its title given (Home's
 /// shelves are wider apart than the item pages'), inset `padding` from the page's edges. Returns
@@ -99,9 +105,8 @@ fn shelf_inner(
         }
         match opened {
             Some(opened) => {
-                let heading = egui::TextStyle::Heading.resolve(ui.style());
+                let heading = text::font(ui, "xl");
                 let tokens = theme::tokens_of(ui);
-                let strong = ui.visuals().strong_text_color();
                 // A chevron after the title says it leads somewhere. It's the icon font's
                 // outlined chevron, the row's own paging arrows' glyph, centred on the title's
                 // line and a little smaller, so its stroke stays as light as the heading's.
@@ -112,7 +117,7 @@ fn shelf_inner(
                     ..Default::default()
                 };
                 let mut job = egui::text::LayoutJob::default();
-                job.append(title, 0., centred(heading.clone(), strong));
+                job.append(title, 0., centred(heading.clone(), tokens.ink));
                 job.append(
                     ICON_CHEVRON_RIGHT.codepoint,
                     2.,
@@ -134,7 +139,11 @@ fn shelf_inner(
                 *opened |= response.clicked();
             }
             None => {
-                ui.label(RichText::new(title).heading().strong());
+                ui.label(
+                    RichText::new(title)
+                        .font(text::font(ui, "xl"))
+                        .color(theme::tokens_of(ui).ink),
+                );
             }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -144,19 +153,19 @@ fn shelf_inner(
             if padding > 0. {
                 ui.add_space(padding);
             }
-            let next = ui.add_enabled(!arrows.at_end, arrow(ICON_CHEVRON_RIGHT));
-            if next.clicked() {
+            ui.spacing_mut().item_spacing.x = 4.;
+            if arrow(ICON_CHEVRON_RIGHT, "Scroll right", !arrows.at_end)
+                .show(ui)
+                .clicked()
+            {
                 distance = page;
             }
-            next.on_hover_text("Scroll right")
-                .on_disabled_hover_text("Scroll right");
-            let previous = ui.add_enabled(!arrows.at_start, arrow(ICON_CHEVRON_LEFT));
-            if previous.clicked() {
+            if arrow(ICON_CHEVRON_LEFT, "Scroll left", !arrows.at_start)
+                .show(ui)
+                .clicked()
+            {
                 distance = -page;
             }
-            previous
-                .on_hover_text("Scroll left")
-                .on_disabled_hover_text("Scroll left");
         });
     });
     ui.add_space(title_gap);
@@ -259,12 +268,11 @@ fn shelf_inner(
     Rect::from_min_max(top, egui::pos2(ui.max_rect().right(), ui.min_rect().bottom()))
 }
 
-/// A page button, small and frameless.
-fn arrow(icon: egui_material_icons::MaterialIcon) -> Button<'static> {
-    Button::new(icon.outlined())
-        .small()
-        .frame(false)
-        .min_size(egui::vec2(24., 24.))
+/// A page button: a round button, dimmed at its end of the row.
+fn arrow(icon: egui_material_icons::MaterialIcon, label: &str, enabled: bool) -> RoundButton<'_> {
+    RoundButton::icon(icon.outlined(), label)
+        .size(ARROW, ARROW_ICON)
+        .enabled(enabled)
 }
 
 /// The row's scroll offset and widths, from the last frame it was drawn.
