@@ -12,20 +12,18 @@
 //! `services.user_data`, so the pages showing playlists load again. `main` had
 //! `views/add_to_playlist.rs`, `views/edit_playlist.rs` and `confirm_delete` in `views/item.rs`.
 
-use egui::accesskit::Role;
-use egui::text::{LayoutJob, TextWrapping};
-use egui::{FontId, Key, Modifiers, Response, Sense, Ui, Vec2, WidgetInfo, pos2, vec2};
+use egui::{Key, Modifiers, Response, Ui, Vec2, vec2};
 use egui_material_icons::icons::{ICON_ADD, ICON_PLAYLIST_PLAY};
 use jellyfin::ItemsQuery;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 
 use crate::nav::NavRequest;
 use crate::task::Task;
-use crate::theme::{self, text};
+use crate::theme;
 use crate::toasts::Toast;
 use crate::views::PageCx;
 use crate::widgets::button::{Focus, State};
-use crate::widgets::focus::{self, Place};
+use crate::widgets::list_row::{self, Leading, ListRow};
 use crate::widgets::popup;
 use crate::widgets::text::Load;
 use crate::widgets::{dialog, field, label, surface, toggle};
@@ -35,10 +33,6 @@ use crate::widgets::{dialog, field, label, surface, toggle};
 const WIDTH: f32 = 460.;
 /// The playlist list scrolls once it's this tall, as on `main`.
 const LIST_MAX_H: f32 = 320.;
-/// The room above and below a playlist row's text; the text size sets the rest of its height.
-const ROW_PAD: f32 = 12.;
-/// The room left of a row's icon, between it and the name, and right of the entry count.
-const ROW_INSET: f32 = 12.;
 /// The gap between playlist rows.
 const ROW_GAP: f32 = 6.;
 /// The edit dialog's sharing switch.
@@ -216,7 +210,7 @@ impl AddToPlaylist {
     /// height is worked out from the rows', since a `ScrollArea` given the modal's leftover
     /// height would keep it at the first frame's.
     fn list(&mut self, ui: &mut Ui, rows: &[Row], chosen: &mut Option<usize>) {
-        let row_height = row_height(ui);
+        let row_height = list_row::regular_height(ui);
         let height = (rows.len() as f32 * (row_height + ROW_GAP) - ROW_GAP)
             .min(LIST_MAX_H)
             .max(row_height);
@@ -620,69 +614,30 @@ fn rows(playlists: &[BaseItemDto], typed: &str) -> Vec<Row> {
     rows
 }
 
-/// A playlist row's height at the text size in use.
-fn row_height(ui: &Ui) -> f32 {
-    let line = ui.fonts_mut(|fonts| fonts.row_height(&text::font(ui, "base")));
-    line + 2. * ROW_PAD
-}
-
-/// One line of the playlist list, sunk into the dialog like an `AvatarRow`: the icon, the name,
-/// and the entry count at the right end. `inset_hover` while `highlighted`, and the focus ring
-/// as well when the keyboard put the highlight there (`ring`). Painted, and click-only, since
-/// the dialog keeps the keyboard.
+/// One line of the playlist list: the icon, the name, and the entry count at the right end. The
+/// dialog keeps the keyboard and moves `highlighted` with the pointer itself; `ring` says the
+/// keyboard put it there.
 fn playlist_row(ui: &mut Ui, row: &Row, highlighted: bool, ring: bool) -> Response {
     let tokens = theme::tokens_of(ui);
-    let (name, icon) = match row.playlist_id {
-        Some(_) => (row.name.clone(), ICON_PLAYLIST_PLAY),
-        None => (format!("New playlist “{}”", row.name), ICON_ADD),
+    let (name, icon, colour) = match row.playlist_id {
+        Some(_) => (row.name.clone(), ICON_PLAYLIST_PLAY, tokens.ink_muted),
+        None => (format!("New playlist “{}”", row.name), ICON_ADD, tokens.brand),
     };
     let detail = row.entries.map(entry_count);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), row_height(ui)), Sense::CLICK);
-    response.widget_info(|| {
-        let label = match &detail {
-            Some(detail) => format!("{name}, {detail}"),
-            None => name.clone(),
-        };
-        WidgetInfo::labeled(Role::Button, true, label)
-    });
-
-    let painter = ui.painter();
-    let fill = if highlighted { tokens.inset_hover } else { tokens.inset };
-    painter.rect_filled(rect, tokens.radius_control, fill);
-    if ring {
-        focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
-    }
-
-    let icon_font = FontId::new(text::font(ui, "lg").size, icon.font_family());
-    let icon_color = if row.playlist_id.is_some() {
-        tokens.ink_muted
-    } else {
-        tokens.brand
+    let label = match &detail {
+        Some(detail) => format!("{name}, {detail}"),
+        None => name.clone(),
     };
-    let glyph = painter.layout_no_wrap(icon.codepoint.to_owned(), icon_font, icon_color);
-    // The icon font's glyphs sit low in their line, so they're centred by their bounds.
-    let bounds = glyph.rows.first().map_or(glyph.rect, |row| row.rect());
-    let icon_center = pos2(rect.left() + ROW_INSET + bounds.width() / 2., rect.center().y);
-    let left = icon_center.x + bounds.width() / 2. + ROW_INSET;
-    painter.galley(icon_center - bounds.center().to_vec2(), glyph, icon_color);
-
-    let mut right = rect.right() - ROW_INSET;
-    if let Some(detail) = detail {
-        let galley = painter.layout_no_wrap(detail, text::font(ui, "sm"), tokens.ink_muted);
-        right -= galley.size().x;
-        painter.galley(
-            pos2(right, rect.center().y - galley.size().y / 2.),
-            galley,
-            tokens.ink_muted,
-        );
-        right -= ROW_INSET;
-    }
-
-    let mut job = LayoutJob::simple_singleline(name, text::font(ui, "base"), tokens.ink);
-    job.wrap = TextWrapping::truncate_at_width((right - left).max(0.));
-    let galley = painter.layout_job(job);
-    painter.galley(pos2(left, rect.center().y - galley.size().y / 2.), galley, tokens.ink);
-    response
+    ListRow::new(&name)
+        .sunk()
+        .leading(Leading::Icon(icon, colour))
+        .detail(detail.as_deref())
+        .highlighted(highlighted)
+        .ringed(ring)
+        .no_hover()
+        .label(&label)
+        .show(ui)
+        .row
 }
 
 /// The sharing switch takes no widget focus, so the name must let go of the keyboard on the way

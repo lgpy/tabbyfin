@@ -17,10 +17,7 @@ use egui::{
     Align, Align2, Galley, Label, Layout, Rect, Response, RichText, Sense, TextFormat, Ui, UiBuilder, WidgetInfo,
 };
 use egui::{pos2, vec2};
-use egui_material_icons::icons::{
-    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHECK, ICON_CHECK_CIRCLE, ICON_CLOSE, ICON_EXPAND_LESS,
-    ICON_EXPAND_MORE,
-};
+use egui_material_icons::icons::{ICON_CHECK, ICON_CHECK_CIRCLE, ICON_EXPAND_LESS, ICON_EXPAND_MORE};
 use jellyfin::ImageRequest;
 use jellyfin::models::BaseItemDto;
 
@@ -29,6 +26,7 @@ use crate::theme::{self, text};
 use crate::widgets::button::Focus;
 use crate::widgets::focus::{self, Place};
 use crate::widgets::image;
+use crate::widgets::list_row::{self, Handle, Handles};
 use crate::widgets::round_button::{self, RoundButton};
 use crate::widgets::surface;
 use crate::widgets::text::{LANDSCAPE_H, LANDSCAPE_W};
@@ -45,29 +43,12 @@ const LINE_GAP: f32 = 4.;
 const IMAGE_RADIUS: u8 = 6;
 const WATCHED_SIZE: f32 = 36.;
 const WATCHED_ICON: f32 = 20.;
-const HANDLE_SIZE: f32 = 30.;
-const HANDLE_ICON: f32 = 18.;
 /// How many lines of overview show, as `main`'s `line_clamp(3)`.
 const OVERVIEW_ROWS: usize = 3;
 
 /// A season row's height, and the narrowest one gets before the list takes fewer columns.
 const SEASON_H: f32 = 84.;
 pub const SEASON_MIN_W: f32 = 300.;
-
-/// A playlist entry's buttons.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Handle {
-    Up,
-    Down,
-    Remove,
-}
-
-/// Which of a playlist entry's moves are possible: none past either end of the list.
-#[derive(Clone, Copy, Debug)]
-pub struct Handles {
-    pub up: bool,
-    pub down: bool,
-}
 
 pub struct MediaRow<'a> {
     item: &'a BaseItemDto,
@@ -133,7 +114,7 @@ impl<'a> MediaRow<'a> {
         let width = ui.available_width();
         let inner_width = width - 2. * PAD;
         let handles_w = if self.handles.is_some() {
-            3. * HANDLE_SIZE + ROW_GAP
+            list_row::HANDLES_W + ROW_GAP
         } else {
             0.
         };
@@ -207,29 +188,12 @@ impl<'a> MediaRow<'a> {
             .focus(Focus::Skip)
             .show_at(&mut content, watched_center, id.with("watched"));
 
-        let mut handle = None;
-        if let Some(handles) = self.handles
-            && active
-        {
-            // Up, Down and Remove, left to right, as on `main`.
-            let buttons = [
-                (Handle::Up, ICON_ARROW_UPWARD, "Move up (Alt+Up)", handles.up),
-                (Handle::Down, ICON_ARROW_DOWNWARD, "Move down (Alt+Down)", handles.down),
-                (Handle::Remove, ICON_CLOSE, "Remove from playlist (Delete)", true),
-            ];
-            let mut x = inner.right() - WATCHED_SIZE - ROW_GAP - handles_w + ROW_GAP + HANDLE_SIZE / 2.;
-            for (which, icon, label, enabled) in buttons {
-                let response = RoundButton::icon(icon.outlined(), label)
-                    .size(HANDLE_SIZE, HANDLE_ICON)
-                    .enabled(enabled)
-                    .focus(Focus::Skip)
-                    .show_at(&mut content, pos2(x, watched_center.y), id.with(label));
-                if response.clicked() {
-                    handle = Some(which);
-                }
-                x += HANDLE_SIZE;
-            }
-        }
+        // Up, Down and Remove, against the toggle, as on `main`.
+        let handle = self.handles.filter(|_| active).and_then(|moves| {
+            let right = inner.right() - WATCHED_SIZE;
+            let remove = "Remove from playlist (Delete)";
+            list_row::handles(&mut content, right, watched_center.y, id, moves, remove)
+        });
         MediaRowResponse { row, watched, handle }
     }
 }

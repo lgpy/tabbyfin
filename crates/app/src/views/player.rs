@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use egui::{
     Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Id, Layout, Margin, Rect, RectAlign, Response, RichText,
-    Sense, Stroke, StrokeKind, TextStyle, Ui, UiBuilder, Vec2, WidgetInfo, accesskit::Role, pos2, vec2,
+    Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, accesskit::Role, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
@@ -49,6 +49,7 @@ use crate::theme::{self, over_video};
 use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
+use crate::widgets::badge;
 use crate::widgets::label;
 use crate::widgets::mascot;
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
@@ -625,7 +626,7 @@ impl PlayerPage {
         // buttons, drawn after it, still get theirs.
         ui.interact(rect, Id::unique("player_top_bar"), Sense::CLICK);
         let badges = view.badges();
-        let badge_w: f32 = badges.iter().map(|text| text_width(ui, text) + 16. + GAP).sum();
+        let badge_w: f32 = badges.iter().map(|text| badge::label_width(ui, text) + GAP).sum();
         let inner = rect.shrink2(vec2(PADDING, 0.));
         ui.scope_builder(
             UiBuilder::new()
@@ -640,8 +641,8 @@ impl PlayerPage {
                 ui.allocate_ui_with_layout(vec2(title_w, TOP_BAR_H), Layout::left_to_right(Align::Center), |ui| {
                     ui.add(egui::Label::new(RichText::new(&view.title).heading()).truncate());
                 });
-                for badge in badges {
-                    label_badge(ui, badge);
+                for name in &badges {
+                    label_badge(ui, name);
                 }
             },
         );
@@ -699,7 +700,7 @@ impl PlayerPage {
                     self.toggle_remaining();
                 }
                 if (view.speed - 1.).abs() > 1e-6 {
-                    label_badge(ui, format!("{}×", view.speed));
+                    label_badge(ui, &format!("{}×", view.speed));
                 }
             },
         );
@@ -1654,14 +1655,8 @@ fn prompt_button(ui: &mut egui::Ui, kind: ButtonKind, icon: Option<MaterialIcon>
 }
 
 /// A small label in the player's bars (SyncPlay, Transcoding, the speed).
-fn label_badge(ui: &mut egui::Ui, text: impl Into<String>) {
-    egui::Frame::new()
-        .fill(over_video::SURFACE_SUBTLE)
-        .corner_radius(CornerRadius::same(8))
-        .inner_margin(Margin::symmetric(8, 0))
-        .show(ui, |ui| {
-            ui.label(RichText::new(text.into()).small().color(over_video::MUTED_FOREGROUND));
-        });
+fn label_badge(ui: &mut egui::Ui, text: &str) {
+    badge::label(ui, text, over_video::SURFACE_SUBTLE, over_video::MUTED_FOREGROUND);
 }
 
 /// The frame a player menu draws in: `main`'s popover surface (its `popover_style`), with
@@ -1884,15 +1879,6 @@ fn track_list(ui: &mut egui::Ui, id: &str, empty: &str, choices: &[Choice], sele
             }
         });
     chosen
-}
-
-/// The text's width at the small style's size, for laying out the top bar.
-fn text_width(ui: &egui::Ui, text: &str) -> f32 {
-    let font = TextStyle::Small.resolve(ui.style());
-    ui.painter()
-        .layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-        .size()
-        .x
 }
 
 /// A vertical gradient behind a bar, from `top` at its top edge to `bottom` at its bottom.
