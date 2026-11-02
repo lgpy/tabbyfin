@@ -166,8 +166,12 @@ impl Page for SearchPage {
         } else {
             match &self.results {
                 Load::Loading => state::spinner(ui),
-                // `main` had no Retry here: the box is how a search is repeated.
-                Load::Failed(message) => state::message(ui, message.clone()),
+                Load::Failed(message) => {
+                    if state::error(ui, message.clone()) {
+                        self.results = Load::Loading;
+                        self.search_now(cx);
+                    }
+                }
                 Load::Loaded(items) if items.is_empty() => state::empty(ui, "No results."),
                 Load::Loaded(items) => {
                     show_results(ui, items, self.width, &mut self.cursor, &mut self.add_to_playlist, cx)
