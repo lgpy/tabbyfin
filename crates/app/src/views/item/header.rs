@@ -27,7 +27,7 @@ use crate::nav::Route;
 use crate::theme::{self, text};
 use crate::widgets::focus;
 use crate::widgets::text::{episode_label, poster_image, timestamp};
-use crate::widgets::{backdrop, button, image, select, tag};
+use crate::widgets::{backdrop, button, image, pill, select};
 
 /// The header: the backdrop with its fade, the poster, and the item's title, actions and text.
 /// Returns its rectangle, for the cursor scrolling back to the actions.
@@ -215,10 +215,10 @@ fn info_column(
                 for name in &item.tags {
                     // A pill doesn't wrap as a unit, so its label would break per letter in the
                     // row's leftover space; start a new row when the whole pill doesn't fit.
-                    if ui.available_size_before_wrap().x < tag::width(ui, name) {
+                    if ui.available_size_before_wrap().x < pill::tag_width(ui, name) {
                         ui.end_row();
                     }
-                    tag::show(ui, name);
+                    pill::tag(ui, name);
                 }
             });
         });

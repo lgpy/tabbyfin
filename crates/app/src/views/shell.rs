@@ -25,13 +25,11 @@
 
 use egui::accesskit::Role;
 use egui::{
-    Align, Align2, Color32, CornerRadius, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText, Sense, Ui,
-    UiBuilder, WidgetInfo, vec2,
+    Align, Color32, Id, Key, Layout, Modifiers, Rect, RectAlign, Response, RichText, Sense, Ui, UiBuilder, vec2,
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_GROUPS, ICON_PLAY_ARROW, ICON_REPEAT,
-    ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
+    ICON_ARROW_BACK, ICON_CLOSE, ICON_GROUPS, ICON_REPEAT, ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
 };
 use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 
@@ -52,9 +50,10 @@ use crate::views::{self, Page, PageCx, player};
 use crate::widgets::avatar_row::{self, AvatarRow};
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
+use crate::widgets::list_row::{self, Handle, Handles, Leading, ListRow, ListRowResponse};
 use crate::widgets::popup::{self, Entry, Opened, PopupMenu};
 use crate::widgets::round_button::{self, RoundButton};
-use crate::widgets::{backdrop, field, label, surface};
+use crate::widgets::{backdrop, badge, field, label, surface};
 
 /// The bar's height, inside the panel's own margin.
 /// `main`'s bar: 72 points tall, 40-point buttons with 24-point icons.
@@ -82,15 +81,9 @@ const SYNCPLAY_PANEL: &str = "syncplay_panel";
 /// How tall the group's queue may grow before it scrolls: the panel hangs from the bar, so a
 /// long queue would otherwise run off the bottom of the window.
 const SYNCPLAY_QUEUE_H: f32 = 320.;
-/// The queue's shuffle and repeat toggles, the buttons on a queue row, and their icons.
+/// The queue's shuffle and repeat toggles and their icons.
 const QUEUE_TOGGLE: f32 = 30.;
-const QUEUE_BUTTON: f32 = 26.;
-const QUEUE_ICON: f32 = 16.;
-/// A queue row's height at the default text size, the room its place number or play mark takes
-/// at its left end, and the room between the rows and the inset block round them.
-const QUEUE_ROW_H: f32 = 36.;
-const QUEUE_SLOT: f32 = 36.;
-const QUEUE_INSET: f32 = 4.;
+const QUEUE_ICON: f32 = 18.;
 
 /// A choice in the SyncPlay panel, in the order it lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1394,8 +1387,7 @@ fn panel_header(ui: &mut Ui, title: &str, status: Option<(&str, Color32)>, line:
             ui.spacing_mut().item_spacing.x = 6.;
             if let Some((note, dot)) = status {
                 ui.label(label::note(ui, note));
-                let (rect, _) = ui.allocate_exact_size(vec2(8., 8.), Sense::hover());
-                ui.painter().circle_filled(rect.center(), 4., dot);
+                badge::dot(ui, dot);
             }
             // The title takes what's left, so a long one truncates rather than pushing the
             // state out of the panel.
@@ -1499,44 +1491,36 @@ fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scr
             chosen = Some(MenuEntry::ToggleShuffle);
         }
     });
-    let tokens = theme::tokens_of(ui);
     let last = queue.playlist.len() - 1;
-    egui::Frame::new()
-        .fill(tokens.inset)
-        .stroke(egui::Stroke::new(1., tokens.surface_border))
-        .corner_radius(CornerRadius::same(tokens.radius_control))
-        .inner_margin(egui::Margin::same(QUEUE_INSET as i8))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .max_height(SYNCPLAY_QUEUE_H)
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.;
-                    for (index, entry) in queue.playlist.iter().enumerate() {
-                        let name = state.names.get(&entry.item_id).map_or("…", String::as_str);
-                        let id = &entry.playlist_item_id;
-                        let row = QueueRow {
-                            name,
-                            index,
-                            playing: queue.playing_item_index == index as i32,
-                            first: index == 0,
-                            last: index == last,
-                            highlighted: matches!(highlight, Some(MenuEntry::QueueEntry(on)) if on == id),
-                        };
-                        let (response, pressed) = queue_row(ui, &row);
-                        match pressed {
-                            Some(QueueButton::Up) => state.move_entry(id.clone(), -1),
-                            Some(QueueButton::Down) => state.move_entry(id.clone(), 1),
-                            Some(QueueButton::Remove) => state.remove_entry(id.clone()),
-                            None if response.clicked() => chosen = Some(MenuEntry::QueueEntry(id.clone())),
-                            None => {}
-                        }
-                        if row.highlighted && scroll {
-                            response.scroll_to_me(Some(Align::Center));
-                        }
+    list_row::block(ui, |ui| {
+        egui::ScrollArea::vertical()
+            .max_height(SYNCPLAY_QUEUE_H)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.;
+                for (index, entry) in queue.playlist.iter().enumerate() {
+                    let name = state.names.get(&entry.item_id).map_or("…", String::as_str);
+                    let id = &entry.playlist_item_id;
+                    let playing = queue.playing_item_index == index as i32;
+                    let highlighted = matches!(highlight, Some(MenuEntry::QueueEntry(on)) if on == id);
+                    let moves = Handles {
+                        up: index > 0,
+                        down: index < last,
+                    };
+                    let row = queue_row(ui, name, index, playing, moves, highlighted);
+                    match row.handle {
+                        Some(Handle::Up) => state.move_entry(id.clone(), -1),
+                        Some(Handle::Down) => state.move_entry(id.clone(), 1),
+                        Some(Handle::Remove) => state.remove_entry(id.clone()),
+                        None if row.row.clicked() => chosen = Some(MenuEntry::QueueEntry(id.clone())),
+                        None => {}
                     }
-                });
-        });
+                    if highlighted && scroll {
+                        row.row.scroll_to_me(Some(Align::Center));
+                    }
+                }
+            });
+    });
     chosen
 }
 
@@ -1544,109 +1528,42 @@ fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scr
 /// buttons are. Clicks only: the panel reads its own keys.
 fn queue_toggle(icon: MaterialIcon, tooltip: &str, on: bool, ringed: bool) -> RoundButton<'_> {
     RoundButton::icon(icon, tooltip)
-        .size(QUEUE_TOGGLE, QUEUE_ICON + 2.)
+        .size(QUEUE_TOGGLE, QUEUE_ICON)
         .on(on)
         .ringed(ringed)
         .focus(Focus::Skip)
 }
 
-/// A queue entry as [`queue_row`] draws it.
-struct QueueRow<'a> {
-    name: &'a str,
-    index: usize,
-    playing: bool,
-    first: bool,
-    last: bool,
-    highlighted: bool,
-}
-
-#[derive(Clone, Copy)]
-enum QueueButton {
-    Up,
-    Down,
-    Remove,
-}
-
 /// One queue entry: a `brand` play mark on the playing one and the others' place in the queue,
 /// the name, and (on the row the keyboard or the pointer is on) round buttons to move and remove
-/// it. Clicking the row plays it for the group. Returns the row and the button pressed.
-fn queue_row(ui: &mut Ui, row: &QueueRow) -> (Response, Option<QueueButton>) {
-    let tokens = theme::tokens_of(ui);
-    let height = (text::font(ui, "sm").size + 22.).max(QUEUE_ROW_H);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::CLICK);
-    let label = if row.playing {
-        format!("{}, playing", row.name)
+/// it. Clicking the row plays it for the group; `highlighted` is the keyboard's, so it's ringed.
+fn queue_row(
+    ui: &mut Ui,
+    name: &str,
+    index: usize,
+    playing: bool,
+    moves: Handles,
+    highlighted: bool,
+) -> ListRowResponse {
+    let label = if playing {
+        format!("{name}, playing")
     } else {
-        row.name.to_owned()
+        name.to_owned()
     };
-    response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, true, &label));
-    // The pointer over one of its buttons is over the row too, so the row asks for the pointer
-    // rather than its response's hover (which the button takes).
-    let active = row.highlighted || ui.rect_contains_pointer(rect);
-    if active {
-        // Concentric with the inset block round the rows.
-        let radius = tokens.radius_control - QUEUE_INSET as u8;
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(radius), tokens.inset_hover);
-    }
-
-    let slot = egui::pos2(rect.left() + QUEUE_SLOT / 2., rect.center().y);
-    if row.playing {
-        round_button::glyph(ui, slot, ICON_PLAY_ARROW, QUEUE_ICON + 2., tokens.brand);
+    let leading = if playing {
+        Leading::Playing
     } else {
-        ui.painter().text(
-            slot,
-            Align2::CENTER_CENTER,
-            (row.index + 1).to_string(),
-            text::font(ui, "xs"),
-            tokens.ink_muted,
-        );
-    }
-
-    let mut pressed = None;
-    let mut right = rect.right() - 4.;
-    if active {
-        let buttons = [
-            (QueueButton::Remove, ICON_CLOSE, "Remove (Delete)", false),
-            (QueueButton::Down, ICON_ARROW_DOWNWARD, "Move down (Alt+Down)", row.last),
-            (QueueButton::Up, ICON_ARROW_UPWARD, "Move up (Alt+Up)", row.first),
-        ];
-        for (which, icon, tooltip, disabled) in buttons {
-            let center = egui::pos2(right - QUEUE_BUTTON / 2., rect.center().y);
-            right -= QUEUE_BUTTON + 2.;
-            let id = ui.scope_id().with(("queue_button", row.index, tooltip));
-            let button = RoundButton::icon(icon, tooltip)
-                .size(QUEUE_BUTTON, QUEUE_ICON)
-                .enabled(!disabled)
-                .focus(Focus::Skip)
-                .show_at(ui, center, id);
-            if button.clicked() {
-                pressed = Some(which);
-            }
-        }
-        right -= 4.;
-    } else {
-        right -= 8.;
-    }
-
-    let left = rect.left() + QUEUE_SLOT;
-    let font = text::font(ui, "sm");
-    let mut job = egui::text::LayoutJob::single_section(
-        row.name.to_owned(),
-        egui::TextFormat {
-            font_id: font,
-            color: tokens.ink,
-            ..Default::default()
-        },
-    );
-    job.wrap = egui::text::TextWrapping::truncate_at_width((right - left).max(0.));
-    let galley = ui.painter().layout_job(job);
-    ui.painter().galley(
-        egui::pos2(left, rect.center().y - galley.size().y / 2.),
-        galley,
-        tokens.ink,
-    );
-    (response, pressed)
+        Leading::Number(index + 1)
+    };
+    ListRow::new(name)
+        .compact()
+        .leading(leading)
+        .handles(moves, "Remove (Delete)")
+        .highlighted(highlighted)
+        .ringed(highlighted)
+        .role(Role::MenuItem)
+        .label(&label)
+        .show(ui)
 }
 
 /// Cancels the focus move egui queued for a key a menu reads itself, before a widget behind the

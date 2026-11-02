@@ -12,9 +12,9 @@ use egui::{Align2, Color32, CornerRadius, Response, Sense, Ui, WidgetInfo, pos2,
 use egui_material_icons::icons::ICON_CLOSE;
 
 use crate::theme::{self, text};
-use crate::widgets::avatar;
 use crate::widgets::button::Focus;
 use crate::widgets::focus::{self, Place};
+use crate::widgets::{avatar, badge};
 
 const HEIGHT: f32 = 56.;
 const AVATAR_RADIUS: f32 = 18.;
@@ -154,7 +154,7 @@ impl<'a> AvatarRow<'a> {
         );
         let mut subtitle_x = x;
         if let Some(color) = self.status {
-            painter.circle_filled(pos2(x + 3., rect.center().y + 10.), 3., color);
+            badge::dot_at(ui, pos2(x + 3., rect.center().y + 10.), badge::DOT_SMALL, color);
             subtitle_x += 10.;
         }
         painter.text(
