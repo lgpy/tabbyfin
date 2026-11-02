@@ -59,6 +59,8 @@ Everything below was built and run only as Linux debug builds. Use a CI package 
 
 ## 4. Skip intro, up-next card, chapters (2.1.1–2.1.3)
 
+- ⬜ **The player's Audio and Subtitles buttons with a real pointer**: each opens the menu on its tab, the lit one closes it and another switches tab without a flicker. So far covered by a headless test and a screenshot of the bar, since the harness can't click the player's menus.
+
 - ⬜ **Real media segments** from a plugin: install [Intro Skipper](https://github.com/intro-skipper/intro-skipper) on a server, let it analyse a series, and check "Skip intro" and the up-next card at the credits.
 - ⬜ **Real chapter names**: anime releases (OP/ED chapters), Blu-ray rips with plain "Chapter 1…" names (no skip button should appear).
 - ⬜ Autoplay off in Settings: the episode ends and the player closes.
