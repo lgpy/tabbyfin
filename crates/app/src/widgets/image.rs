@@ -5,10 +5,11 @@
 //! The caller owns the space (a card allocates its own rectangle) and the request, so the widget
 //! only draws. Every request carries the size it's drawn at ([`ImageRequest::fill_width`] in
 //! [`ImageCache::get`]'s key), which keeps the download small and the cache entry's own; a
-//! full-width banner asks a fixed width instead ([`show_at_width`]), so resizing doesn't fetch
+//! full-width banner asks a fixed width instead ([`banner`]), so resizing doesn't fetch
 //! it again.
 
-use egui::{Color32, CornerRadius, Rect, Ui, Vec2};
+use egui::epaint::RectShape;
+use egui::{Color32, CornerRadius, Rect, Shape, Ui, Vec2};
 use jellyfin::ImageRequest;
 use jellyfin::models::BaseItemDto;
 
@@ -32,28 +33,29 @@ pub fn show(
     blurhash_from: Option<&BaseItemDto>,
     radius: u8,
 ) {
-    show_with_width(ui, cache, rect, request, blurhash_from, radius, None, false);
+    ui.painter()
+        .extend(shapes(ui, cache, rect, request, blurhash_from, radius, None, false));
 }
 
-/// [`show`] asking the server for a fixed `width` rather than twice the drawn width: a banner
-/// that fills the window would otherwise be fetched (and kept in the cache) again at every
-/// window size, maximised state or zoom level. It is still scaled to `rect`, and cropped from its
-/// top rather than its middle: a backdrop's faces are high in the picture, and the band's
-/// bottom fades into the page anyway.
-pub fn show_at_width(
+/// A banner's shapes, for the caller to paint where it wants them (the item page's backdrop,
+/// under the top bar: `views::UnderBar`). Square, and asking the server for a fixed `width`
+/// rather than twice the drawn width: a banner that fills the window would otherwise be fetched
+/// (and kept in the cache) again at every window size, maximised state or zoom level. It is
+/// still scaled to `rect`, and cropped from its top rather than its middle: a backdrop's faces
+/// are high in the picture, and the band's bottom fades into the page anyway.
+pub fn banner(
     ui: &Ui,
     cache: &mut ImageCache,
     rect: Rect,
     request: Option<&ImageRequest>,
     blurhash_from: Option<&BaseItemDto>,
-    radius: u8,
     width: u32,
-) {
-    show_with_width(ui, cache, rect, request, blurhash_from, radius, Some(width), true);
+) -> Vec<Shape> {
+    shapes(ui, cache, rect, request, blurhash_from, 0, Some(width), true)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn show_with_width(
+fn shapes(
     ui: &Ui,
     cache: &mut ImageCache,
     rect: Rect,
@@ -62,12 +64,12 @@ fn show_with_width(
     radius: u8,
     width: Option<u32>,
     from_top: bool,
-) {
-    let painter = ui.painter();
+) -> Vec<Shape> {
+    let radius = CornerRadius::same(radius);
     // What shows before the blurhash arrives, or when there's no image at all: `main`'s `muted`
     // grey under a card.
-    painter.rect_filled(rect, radius, theme::tokens_of(ui).muted);
-    let Some(request) = request else { return };
+    let mut shapes = vec![Shape::from(RectShape::filled(rect, radius, theme::tokens_of(ui).muted))];
+    let Some(request) = request else { return shapes };
     // Twice the drawn width, so it stays sharp on a high-DPI screen (the server doesn't
     // upscale), or the width the caller fixed.
     let width = width.unwrap_or((rect.width() * 2.).ceil() as u32);
@@ -82,22 +84,21 @@ fn show_with_width(
             .and_then(|hash| cache.placeholder(hash)),
         Some(_) => None,
     };
+    let picture = |texture: &egui::TextureHandle, tint: Color32| {
+        let uv = cover_uv(texture.size_vec2(), rect.size(), from_top);
+        Shape::from(RectShape::filled(rect, radius, tint).with_texture(texture.id(), uv))
+    };
     if let Some(texture) = &image {
         // Fading in over the blurhash as it loads, and as its page opens.
         let alpha = motion::image_alpha(ui, &request);
-        let mut picture = egui::Image::from_texture(texture)
-            .uv(cover_uv(texture.size_vec2(), rect.size(), from_top))
-            .corner_radius(CornerRadius::same(radius));
-        if alpha < 1. {
-            picture = picture.tint(Color32::from_white_alpha((alpha * 255.).round() as u8));
-        }
-        picture.paint_at(ui, rect);
+        shapes.push(picture(
+            texture,
+            Color32::from_white_alpha((alpha * 255.).round() as u8),
+        ));
     } else if let Some(texture) = &preview {
-        egui::Image::from_texture(texture)
-            .uv(cover_uv(texture.size_vec2(), rect.size(), from_top))
-            .corner_radius(CornerRadius::same(radius))
-            .paint_at(ui, rect);
+        shapes.push(picture(texture, Color32::WHITE));
     }
+    shapes
 }
 
 /// Dims what's drawn in `rect` while the pointer is on it, as `main`'s `opacity(0.8)` did: the

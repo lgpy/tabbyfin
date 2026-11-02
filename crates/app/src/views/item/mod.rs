@@ -781,6 +781,7 @@ impl ItemPage {
         let moved = self.cursor.take_reveal();
         let selected = self.cursor.selected();
         let images = &mut cx.services.images;
+        let under_bar = cx.under_bar.as_ref();
         let cursor = &mut self.cursor;
         let fills = &self.fills;
         let mut asked = Asked::default();
@@ -797,7 +798,7 @@ impl ItemPage {
                     bottom: 0,
                 })
                 .show(ui, |ui| {
-                    let header = header::header(ui, data, &actions, selected, fills, images, &mut asked);
+                    let header = header::header(ui, data, &actions, selected, fills, images, under_bar, &mut asked);
                     let mut pickers = None;
                     if data.item.media_sources.len() > 1 {
                         ui.add_space(SECTION_GAP);

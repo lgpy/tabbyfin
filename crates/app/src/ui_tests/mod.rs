@@ -382,6 +382,7 @@ fn page_cx<'a>(ctx: &'a egui::Context, services: &'a mut Option<Services>, nav: 
         services: services.as_mut().expect("the services are made"),
         nav,
         render_state: None,
+        under_bar: None,
     }
 }
 
