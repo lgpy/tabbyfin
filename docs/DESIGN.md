@@ -107,7 +107,7 @@ Titles are `ink`; everything secondary is `ink_muted`. Get fonts with `text::fon
 
 ## Components
 
-All in `crates/app/src/widgets/`.
+All in `crates/app/src/widgets/`. The component gallery, `crates/app/src/ui_tests/gallery.rs`, draws every widget below in each of its states in both themes, one mockup per family: it's the catalogue to look at when changing one, and a new widget or a new state of one is added there. Render it with `python3 -I .agents/skills/ui-mockup/render.py crates/app/src/ui_tests/gallery.rs --no-open`, which builds it with the `mockup` feature, so a widget change that breaks it fails that build.
 
 - **`surface::frame(ui)`** — the panel (`frame_of(tokens)` where there's no `Ui` yet). **`surface::heading(ui, title, subtitle)`** — centred `2xl` title over a `base` muted line; every panel starts with one. The title names the step ("Sign in to *server*", "Approve this sign-in", "Welcome back"); the subtitle says what to do or where you are. **`surface::heading_left(ui, title, Option<subtitle>)`** — the same against the left edge, for a surface that isn't a centred form (a dialog), the subtitle only when there's something to explain.
 - **`surface::strip(ui)`** — a surface one row of controls tall for a page's toolbar: the surface's fill and outline at radius 16 (`STRIP_RADIUS`), 8 × 6 inside (`STRIP_PAD`), and the popup's closer shadow, since a panel's would be as tall as the strip.
