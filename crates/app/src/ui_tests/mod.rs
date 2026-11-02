@@ -447,6 +447,15 @@ impl PageHarness {
         self.harness.step();
     }
 
+    /// Types `text` into the top bar's search box over a page that searches itself
+    /// (`Page::own_search`), as the shell hands it on, and draws a frame.
+    pub fn search(&mut self, text: &str) {
+        let page = self.harness.state_mut().page.as_mut().expect("the page is open");
+        assert!(page.own_search().is_some(), "the page searches itself");
+        page.set_own_search(text);
+        self.harness.step();
+    }
+
     /// Steps frames until `done` holds, for a page or a request that's still on its way.
     #[track_caller]
     pub fn step_until(&mut self, what: &str, done: impl FnMut(&Harness<'static, PageRun>) -> bool) {

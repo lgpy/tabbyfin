@@ -57,6 +57,17 @@ pub trait Page {
     /// to search for. Only [`search::SearchPage`] uses it.
     fn set_search_term(&mut self, _term: &str, _cx: &mut PageCx) {}
 
+    /// For a page the top bar's search box filters instead of opening the results page
+    /// (Settings): what it's filtered by now, which the box shows while the page is on top.
+    /// `None`, the default, leaves the box to the results page.
+    fn own_search(&self) -> Option<&str> {
+        None
+    }
+
+    /// The top bar's search box changed over a page with [`Page::own_search`]: its text as
+    /// typed, empty once cleared.
+    fn set_own_search(&mut self, _text: &str) {}
+
     /// Enter or Down in the search box: the results page takes the keyboard. Returns whether
     /// it did, i.e. whether there is something to put the cursor on; otherwise the box keeps
     /// the keyboard, as a search still running or with no results does.

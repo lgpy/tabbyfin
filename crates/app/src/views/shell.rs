@@ -17,7 +17,9 @@
 //! The search box is the bar's only text field: typing opens the results page (or comes back
 //! to it from a page opened from them), clearing it closes them, and Enter or Down moves into
 //! the results, which hand Up and Shift+Tab back to the box; Esc gives the keyboard back to the
-//! page. It is always in the middle of the bar, with no button to open it first.
+//! page. It is always in the middle of the bar, with no button to open it first. Over a page
+//! that searches itself (`Page::own_search`, Settings) it filters that page instead, and the
+//! results' term comes back when the page goes.
 //!
 //! While a playback session shows, [`views::player::PlayerPage`] takes the window: no top bar,
 //! the video and its controls filling it, and the player's keys working. Going back stops
@@ -187,6 +189,9 @@ pub struct Shell {
     bar_key: Option<BarItem>,
     /// The search box's text.
     search_text: String,
+    /// The page on top that the box searches (`Page::own_search`), by its serial, with the
+    /// box's text from before it, put back when the page is no longer on top.
+    own_search: Option<(u64, String)>,
     /// The box takes the keyboard when it draws next (opened from the bar, Ctrl+F or a route).
     want_search_focus: bool,
     /// The box had the keyboard when the last frame ended: what this frame's key routing saw
@@ -229,6 +234,7 @@ impl Shell {
             accounts: Vec::new(),
             bar_key: None,
             search_text: String::new(),
+            own_search: None,
             want_search_focus: false,
             search_focused: false,
             syncplay_highlight: None,
@@ -663,9 +669,34 @@ impl Shell {
         self.search_page() == Some(self.stack.len() - 1)
     }
 
-    /// The box changed: the results open as soon as there's a term (or come back from a page
-    /// opened from them), and close when it's empty.
+    /// Hands the box to the page on top when it searches itself, showing its filter (which the
+    /// page can change too: a Settings menu entry clears it), and gives the box its text from
+    /// before back once that page isn't on top.
+    fn sync_own_search(&mut self) {
+        let entry = self.stack.last().expect("the page stack is never empty");
+        let owner = entry.page.own_search().map(|text| (entry.serial, text.to_owned()));
+        let same = owner.as_ref().map(|(serial, _)| *serial) == self.own_search.as_ref().map(|(serial, _)| *serial);
+        if !same && let Some((_, before)) = self.own_search.take() {
+            self.search_text = before;
+        }
+        if let Some((serial, text)) = owner {
+            let before = std::mem::replace(&mut self.search_text, text);
+            if !same {
+                self.own_search = Some((serial, before));
+            }
+        }
+    }
+
+    /// The box changed: over a page that searches itself, the page filters by it; otherwise the
+    /// results open as soon as there's a term (or come back from a page opened from them), and
+    /// close when it's empty.
     fn search_changed(&mut self, cx: &mut PageCx) {
+        if self.own_search.is_some() {
+            let text = self.search_text.clone();
+            self.top_mut().set_own_search(&text);
+            cx.ctx.request_repaint();
+            return;
+        }
         let term = self.search_text.trim().to_owned();
         if term.is_empty() {
             if let Some(index) = self.search_page() {
@@ -713,9 +744,14 @@ impl Shell {
     }
 
     /// Esc in the search box: over the results, closes them and clears the box, back to the
-    /// page they were opened from; over another page, back to that page, as on `main`.
+    /// page they were opened from; over a page that searches itself, clears its search too, as
+    /// its own box did; over another page, back to that page, as on `main`.
     fn escape_search(&mut self, cx: &mut PageCx) {
-        if self.top_is_search() {
+        if self.own_search.is_some() {
+            self.search_text.clear();
+            self.top_mut().set_own_search("");
+            self.leave_top_bar(cx);
+        } else if self.top_is_search() {
             self.stack.pop();
             self.search_text.clear();
             self.leave_search(cx.ctx);
@@ -744,6 +780,7 @@ impl Shell {
     /// Draws the bar, a fixed height of it: the icon, Back and the title on the left, the
     /// buttons on the right, and the search box between them, always there.
     fn top_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        self.sync_own_search();
         self.search_box_keys(cx);
         self.syncplay_panel_keys(cx);
         let can_go_back = self.can_go_back();
@@ -1010,6 +1047,11 @@ impl Shell {
         // `Memory::has_focus`, not `Response::has_focus`: the latter also wants the window to be
         // focused, which an Xvfb display without a window manager never is.
         let focused = ui.ctx().memory(|memory| memory.has_focus(Id::unique(SEARCH_ID)));
+        // Over a page that searches itself, the hint names it ("Search settings").
+        let hint = match self.own_search {
+            Some(_) => format!("Search {}", self.top().title().to_lowercase()),
+            None => "Search".to_owned(),
+        };
         let mut clear_clicked = false;
         let response = ui
             .scope_builder(
@@ -1045,7 +1087,7 @@ impl Shell {
                     // The hint only while the box doesn't have the keyboard, as on sign-in:
                     // egui keeps it beside the caret, where it reads as typed text.
                     if !focused {
-                        field = field.hint_text(egui::RichText::new("Search").color(tokens.ink_muted));
+                        field = field.hint_text(egui::RichText::new(hint.as_str()).color(tokens.ink_muted));
                     }
                     let response = ui.add(field);
                     // Drawn over the field, or the field's own background would cover it.

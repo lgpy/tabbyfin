@@ -1,7 +1,9 @@
-//! Settings: a menu of sections on the left, split by where their settings are kept, and the
-//! section it marks on the right, one at a time. A section is its title, a tag naming where its
-//! settings are kept, and one card of rows split by hairlines: each row's label over what it
-//! does, its control at the right, and the key it saves in the label's tooltip.
+//! Settings: a menu of sections on the left, split by where their settings are kept, and every
+//! section on the right, one after another in a scrolling column. A menu entry scrolls its
+//! section to the top, and the menu marks the section at the top as the column scrolls. A
+//! section is its title, a tag naming where its settings are kept, and one card of rows split
+//! by hairlines: each row's label over what it does, its control at the right, and the key it
+//! saves in the label's tooltip.
 //!
 //! - **This device** (appearance, playback, subtitles, storage, about) is the config file: one
 //!   per computer, shared by every account signed in on it. Every option keeps `main`'s config
@@ -21,22 +23,22 @@
 //! A device setting that's off its default has an undo button left of its control, which leaves
 //! the key out of the file again; the server's have no default of the app's to go back to.
 //!
-//! The search box above the menu filters every row of both stores by its section, label,
-//! description and key, and shows every section with something left, one after another; a menu
-//! entry leaves the search.
+//! The top bar's search box filters the page while it's on top (`Page::own_search`): every row
+//! of both stores by its section, label, description and key, leaving out the sections with
+//! nothing left; a menu entry leaves the search.
 //!
 //! The page isn't on the browse cursor, as on `main`: [`Page::scope`] is `None`, so egui's own
-//! focus handles Tab (the search box, the menu, then the sections' controls, scrolling each into
+//! focus handles Tab (the menu, then the sections' controls, scrolling each into
 //! view), Space or Enter on a menu entry, the arrows in a picker and Space on a switch, and Esc
 //! still goes back.
 
 use std::path::Path;
 
-use egui::{Align, Align2, Id, Rect, RichText, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
+use egui::{Align, Align2, Rect, RichText, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ACCOUNT_CIRCLE, ICON_CLOSE, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_HOME, ICON_INFO, ICON_PALETTE,
-    ICON_PLAY_CIRCLE, ICON_SEARCH, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
+    ICON_ACCOUNT_CIRCLE, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_HOME, ICON_INFO, ICON_PALETTE,
+    ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
@@ -53,7 +55,7 @@ use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
 use crate::widgets::label;
 use crate::widgets::round_button::RoundButton;
-use crate::widgets::{backdrop, field, select, surface, toggle};
+use crate::widgets::{backdrop, select, surface, toggle};
 
 /// The theme choices, in the order the picker lists them.
 const THEMES: [(ThemePreference, &str); 3] = [
@@ -96,9 +98,9 @@ const MENU_MAX_W: f32 = 250.;
 const MENU_BAR_W: f32 = 3.;
 /// The pickers' width beside their label (`main`'s 220 px).
 const PICKER_W: f32 = 220.;
-/// The gap under a menu heading, and between the sections a search shows.
+/// The gap under a menu heading, and between one section's card and the next one's title.
 const HEADING_GAP: f32 = 4.;
-const SECTION_GAP: f32 = 24.;
+const SECTION_GAP: f32 = 32.;
 /// The room inside a section's card, across and down: the rows bring their own above and below
 /// them ([`ROW_PAD`]), so the card's own is small.
 const CARD_PADDING: [i8; 2] = [20, 6];
@@ -110,8 +112,12 @@ const RESET_ICON: f32 = 18.;
 /// The storage rows' buttons.
 const ROW_BUTTON_W: f32 = 132.;
 
-/// The search box's id, which the tests find it by too.
-const SEARCH_ID: &str = "settings_search";
+/// How long the menu keeps marking the section an entry scrolled to before following the
+/// column again, should the scroll never get there (it was taken over by the wheel).
+const ARRIVAL_WAIT: f64 = 1.;
+/// How far below the column's top a section's start can be and still count as the one at the
+/// top: a scroll lands it there within rounding.
+const TOP_SLACK: f32 = 8.;
 
 /// Where a section's settings are kept, which is how the menu groups them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -535,8 +541,13 @@ pub struct SettingsPage {
     job: Option<Task<Job>>,
     /// Left and Right on a focused picker.
     pickers: Pickers,
-    /// The section shown, which the menu marks.
+    /// The section the menu marks: the one at the top of the column when it was last drawn.
     section: Section,
+    /// A menu entry's section, scrolled to the top when the column draws next.
+    scroll_to: Option<Section>,
+    /// The section a menu entry scrolled to and when (`InputState::time`), marked until the
+    /// scroll gets there rather than each section it passes on the way.
+    arriving: Option<(Section, f64)>,
     search: Search,
     server: ServerSettings,
 }
@@ -556,6 +567,8 @@ impl SettingsPage {
             job: None,
             pickers: Pickers::default(),
             section: Section::Appearance,
+            scroll_to: None,
+            arriving: None,
             search: Search::default(),
             server: ServerSettings::default(),
         }
@@ -579,10 +592,24 @@ impl SettingsPage {
         cx.services.events.push(AppEvent::AppearanceChanged);
     }
 
-    /// Shows `section`, from the menu or a note's link, leaving the search.
-    fn open(&mut self, section: Section) {
+    /// Scrolls to `section`, from the menu or a note's link, leaving the search.
+    fn open(&mut self, ctx: &egui::Context, section: Section) {
         self.section = section;
+        self.scroll_to = Some(section);
+        self.arriving = Some((section, ctx.input(|input| input.time)));
         self.search.text.clear();
+    }
+
+    /// Marks the section at the top of the column, `top`, in the menu; after a menu entry, its
+    /// section until the scroll has brought it there (or stopped short of it for a while).
+    fn follow(&mut self, ctx: &egui::Context, top: Section) {
+        if let Some((section, since)) = self.arriving {
+            let now = ctx.input(|input| input.time);
+            if top == section || now - since > ARRIVAL_WAIT {
+                self.arriving = None;
+            }
+        }
+        self.section = self.arriving.map_or(top, |(section, _)| section);
     }
 
     /// Drops the image cache's memory now and deletes its folder, which a large cache with many
@@ -653,6 +680,14 @@ impl Page for SettingsPage {
         "Settings"
     }
 
+    fn own_search(&self) -> Option<&str> {
+        Some(&self.search.text)
+    }
+
+    fn set_own_search(&mut self, text: &str) {
+        self.search.text = text.to_owned();
+    }
+
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         self.pickers.begin_frame(cx.ctx);
         self.report_job(cx);
@@ -660,7 +695,7 @@ impl Page for SettingsPage {
 
         // The menu and the sections side by side on the backdrop, with no line between them:
         // the sections' surfaces set the column apart. Drawn in that order, so Tab goes through
-        // the search box and the menu before the section's controls.
+        // the menu before the sections' controls.
         let rect = ui.available_rect_before_wrap();
         let menu_w = (rect.width() * 0.25).clamp(MENU_MIN_W, MENU_MAX_W);
         let menu = Rect::from_min_max(rect.min, pos2(rect.left() + menu_w, rect.bottom()));
@@ -672,7 +707,7 @@ impl Page for SettingsPage {
 }
 
 impl SettingsPage {
-    /// The search box over the two groups of sections.
+    /// The two groups of sections.
     fn menu(&mut self, ui: &mut Ui) {
         let area = egui::ScrollArea::vertical()
             .id_salt("settings_menu")
@@ -682,16 +717,17 @@ impl SettingsPage {
                     .inner_margin(egui::Margin::symmetric(12, PAGE_PADDING as i8))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        self.search_box(ui);
-                        for store in Store::ALL {
-                            ui.add_space(SECTION_GAP * 0.75);
+                        for (index, store) in Store::ALL.into_iter().enumerate() {
+                            if index > 0 {
+                                ui.add_space(SPACE.xl);
+                            }
                             menu_heading(ui, store);
                             for section in Section::ALL.into_iter().filter(|section| section.store() == store) {
                                 let searching = self.search.active();
                                 let matches = searching.then(|| self.search.matches(section));
                                 let selected = !searching && self.section == section;
                                 if menu_entry(ui, section, selected, matches).clicked() {
-                                    self.open(section);
+                                    self.open(ui.ctx(), section);
                                 }
                             }
                         }
@@ -700,53 +736,15 @@ impl SettingsPage {
         backdrop::scroll_edge(ui, &area);
     }
 
-    /// `main`'s settings search: the search icon inside the field's left padding and, while
-    /// it has text, a clear button at its right end. Esc in the field clears it as it lets go.
-    fn search_box(&mut self, ui: &mut Ui) {
-        let icon = text::icon(ui, ICON_SEARCH.font_family());
-        let inset = (12. + icon.size + 6.).round() as i8;
-        let clear = !self.search.text.is_empty();
-        let edit = field::single_line(ui, Id::unique(SEARCH_ID), &mut self.search.text, "Search settings");
-        let response = ui.add(edit.margin(egui::Margin {
-            left: inset,
-            right: if clear { inset } else { 12 },
-            top: 9,
-            bottom: 9,
-        }));
-        let tokens = theme::tokens_of(ui);
-        let rect = response.rect;
-        ui.painter().text(
-            pos2(rect.left() + 12. + icon.size / 2., rect.center().y),
-            Align2::CENTER_CENTER,
-            ICON_SEARCH.codepoint,
-            icon.clone(),
-            tokens.ink_muted,
-        );
-        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            self.search.text.clear();
-        }
-        if clear {
-            // Not focusable, as the top bar's isn't: Esc clears from the keyboard.
-            let center = pos2(rect.right() - 12. - icon.size / 2., rect.center().y);
-            let button = RoundButton::icon(ICON_CLOSE, "Clear search")
-                .size(icon.size + 8., icon.size)
-                .focus(Focus::Skip)
-                .show_at(ui, center, Id::unique("settings_search_clear"));
-            if button.clicked() {
-                self.search.text.clear();
-            }
-        }
-    }
-
-    /// The section shown, or a search's results, scrolling under the top bar. Each section and
-    /// the search keep a scroll position of their own, so a section opens at its top and leaving
-    /// the search puts the section back where it was.
+    /// The column of sections, scrolling under the top bar. A search's results keep a scroll
+    /// position of their own, so leaving the search puts the column back where it was.
     fn content(&mut self, ui: &mut Ui, cx: &mut PageCx) {
-        let shown = (!self.search.active()).then_some(self.section);
+        let searching = self.search.active();
         let area = egui::ScrollArea::vertical()
-            .id_salt(("settings_content", shown))
+            .id_salt(("settings_content", searching))
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let viewport = ui.clip_rect();
                 let full = ui.available_width();
                 let column = (full - 2. * PAGE_PADDING).clamp(0., CONTENT_W);
                 let side = ((full - column) * 0.5).max(0.);
@@ -757,40 +755,69 @@ impl SettingsPage {
                     ui.vertical(|ui| {
                         ui.set_width(column);
                         ui.add_space(PAGE_PADDING);
-                        self.sections(ui, cx);
+                        let starts = self.sections(ui, cx);
                         ui.add_space(PAGE_PADDING);
+                        if searching {
+                            return;
+                        }
+                        // Room under the last section for it to scroll to the top too, so its
+                        // menu entry can bring it there and the menu then marks it.
+                        if let Some(&(_, last)) = starts.last() {
+                            let below = ui.cursor().top() - last;
+                            ui.add_space((viewport.height() - below).max(0.));
+                        }
+                        let top = starts
+                            .iter()
+                            .rev()
+                            .find(|(_, start)| *start <= viewport.top() + TOP_SLACK)
+                            .or(starts.first())
+                            .map(|&(section, _)| section);
+                        if let Some(top) = top {
+                            self.follow(ui.ctx(), top);
+                        }
                     });
                 });
             });
         backdrop::scroll_edge(ui, &area);
     }
 
-    /// The section the menu marks or, while searching, every section with a row the search
-    /// finds, one after another.
-    fn sections(&mut self, ui: &mut Ui, cx: &mut PageCx) {
-        let searching = self.search.active();
-        let shown: Vec<Section> = if searching {
-            Section::ALL
-                .into_iter()
-                .filter(|&section| self.search.matches(section) > 0)
-                .collect()
-        } else {
-            vec![self.section]
-        };
-        if shown.is_empty() {
+    /// Every section with a row the search finds (all of them without a search), and the
+    /// section a menu entry asked for scrolled to the top. The first section of each store says
+    /// what keeping them there means. Returns where each section starts: the page's padding
+    /// above the first one, otherwise the gap above its title.
+    fn sections(&mut self, ui: &mut Ui, cx: &mut PageCx) -> Vec<(Section, f32)> {
+        let found: Vec<Section> = Section::ALL
+            .into_iter()
+            .filter(|&section| self.search.matches(section) > 0)
+            .collect();
+        let mut starts = Vec::with_capacity(found.len());
+        if found.is_empty() {
             let message = format!("No settings match “{}”.", self.search.text.trim());
             ui.label(label::muted(ui, message));
-            return;
+            return starts;
         }
-        for (index, section) in shown.into_iter().enumerate() {
-            if index > 0 {
+        let mut store = None;
+        for (index, section) in found.into_iter().enumerate() {
+            let start = if index == 0 {
+                ui.cursor().top() - PAGE_PADDING
+            } else {
+                let start = ui.cursor().top();
                 ui.add_space(SECTION_GAP);
-            }
-            // A search's results are short of room, and the tag says where each is kept.
-            self.heading(ui, cx, section, !searching);
+                start
+            };
+            let first_of_store = store != Some(section.store());
+            store = Some(section.store());
+            self.heading(ui, cx, section, first_of_store);
             ui.add_space(SPACE.lg);
             self.section(ui, cx, section);
+            starts.push((section, start));
+            if self.scroll_to == Some(section) {
+                self.scroll_to = None;
+                let anchor = Rect::from_min_size(pos2(ui.min_rect().left(), start), vec2(1., 1.));
+                ui.scroll_to_rect(anchor, Some(Align::TOP));
+            }
         }
+        starts
     }
 
     /// A section's title with a tag naming where its settings are kept, so the device's and the
@@ -886,7 +913,7 @@ impl SettingsPage {
 
     fn playback(&mut self, ui: &mut Ui) {
         if note(ui, &self.search, TRACKS_NOTE, Some("Languages")) {
-            self.open(Section::Languages);
+            self.open(ui.ctx(), Section::Languages);
         }
 
         let current = self.config.autoplay_next_episode.unwrap_or(true);
@@ -935,7 +962,7 @@ impl SettingsPage {
     fn subtitles(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         note(ui, &self.search, SUBTITLES_NOTE, None);
         if note(ui, &self.search, SUBTITLE_TRACKS_NOTE, Some("Languages")) {
-            self.open(Section::Languages);
+            self.open(ui.ctx(), Section::Languages);
         }
 
         let current = self.config.subtitle_color.unwrap_or_default();
