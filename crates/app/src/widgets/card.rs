@@ -23,11 +23,11 @@ use crate::item_menu::is_played;
 use crate::theme;
 use crate::theme::text;
 use crate::widgets::focus::{self, Place};
-use crate::widgets::image;
 use crate::widgets::text::{
     CARD_TEXT_H, LANDSCAPE_H, LANDSCAPE_W, PERSON_H, PERSON_W, POSTER_H, POSTER_W, card_text, kind_label,
     landscape_image, poster_image, timestamp,
 };
+use crate::widgets::{avatar, image};
 
 /// Between a card's image and its title, and between its lines (`main`'s `gap_1`).
 const GAP: f32 = 4.;
@@ -105,7 +105,8 @@ pub fn chapter(
     response
 }
 
-/// A cast or crew member, `scale` times the base size: their photo, or their initials.
+/// A cast or crew member, `scale` times the base size: their photo, or their initials on their
+/// avatar's pastel.
 pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scale: f32, selected: bool) -> Response {
     let size = vec2(PERSON_W * scale, PERSON_H * scale);
     let request = person
@@ -114,6 +115,13 @@ pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scal
         .map(|tag| ImageRequest::new(&person.id, ImageType::Primary, Some(tag)));
     let (response, image) = picture(ui, cache, size, request.as_ref(), None);
     if request.is_none() {
+        // The person's pastel, the colour their avatar has anywhere else, rather than a grey box.
+        let tokens = theme::tokens_of(ui);
+        ui.painter()
+            .rect_filled(image, image::RADIUS, avatar::colour(tokens, &person.name));
+        if response.hovered() && ui.rect_contains_pointer(image) {
+            image::dim(ui, image, image::RADIUS);
+        }
         let initials: String = person
             .name
             .split_whitespace()
@@ -126,7 +134,7 @@ pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scal
             Align2::CENTER_CENTER,
             initials,
             text::font(ui, "2xl"),
-            theme::tokens_of(ui).muted_foreground,
+            tokens.avatar_foreground,
         );
     }
     cursor_ring(ui, image, selected);

@@ -32,7 +32,7 @@ use crate::views::dialogs::AddToPlaylist;
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::text::Load;
-use crate::widgets::{backdrop, card, shelf, state};
+use crate::widgets::{backdrop, card, library_tile, shelf, state};
 
 /// How many items each shelf asks for.
 const SHELF_LIMIT: u32 = 24;
@@ -168,9 +168,18 @@ struct Shelf<'a> {
     id: ShelfId,
     title: String,
     items: &'a [BaseItemDto],
-    landscape: bool,
+    cards: Cards,
     /// Where the title leads: a Latest shelf's library.
     link: Option<Route>,
+}
+
+/// How a shelf draws its items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cards {
+    /// The libraries, as small surfaces ([`library_tile`]).
+    Tiles,
+    Landscape,
+    Poster,
 }
 
 /// A shelf's identity, so each row keeps its own scroll position.
@@ -188,19 +197,39 @@ enum ShelfId {
 /// for, comes just before the Latest shelves, or last without them. Empty shelves are left out,
 /// so the cursor never stops on a row with nothing in it.
 fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
-    let favorites = || row(ShelfId::Favorites, "Favorites".to_owned(), &data.favorites, false);
+    let favorites = || {
+        row(
+            ShelfId::Favorites,
+            "Favorites".to_owned(),
+            &data.favorites,
+            Cards::Poster,
+        )
+    };
     let mut shelves = Vec::new();
     for section in &data.sections {
         match section {
-            HomeSection::MyMedia => shelves.push(row(ShelfId::Views, "My Media".to_owned(), &data.views, true)),
-            HomeSection::Resume => {
-                shelves.push(row(ShelfId::Resume, "Continue Watching".to_owned(), &data.resume, true))
-            }
-            HomeSection::NextUp => shelves.push(row(ShelfId::NextUp, "Next Up".to_owned(), &data.next_up, true)),
+            HomeSection::MyMedia => shelves.push(row(ShelfId::Views, "My Media".to_owned(), &data.views, Cards::Tiles)),
+            HomeSection::Resume => shelves.push(row(
+                ShelfId::Resume,
+                "Continue Watching".to_owned(),
+                &data.resume,
+                Cards::Landscape,
+            )),
+            HomeSection::NextUp => shelves.push(row(
+                ShelfId::NextUp,
+                "Next Up".to_owned(),
+                &data.next_up,
+                Cards::Landscape,
+            )),
             HomeSection::Latest => {
                 shelves.push(favorites());
                 shelves.extend(data.latest.iter().enumerate().map(|(i, (view, items))| {
-                    let mut shelf = row(ShelfId::Latest(i), format!("Latest {}", view.name), items, false);
+                    let mut shelf = row(
+                        ShelfId::Latest(i),
+                        format!("Latest {}", view.name),
+                        items,
+                        Cards::Poster,
+                    );
                     shelf.link = Some(match Route::for_item(view) {
                         Route::Library {
                             id,
@@ -227,12 +256,12 @@ fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
     shelves
 }
 
-fn row<'a>(id: ShelfId, title: String, items: &'a [BaseItemDto], landscape: bool) -> Shelf<'a> {
+fn row<'a>(id: ShelfId, title: String, items: &'a [BaseItemDto], cards: Cards) -> Shelf<'a> {
     Shelf {
         id,
         title,
         items,
-        landscape,
+        cards,
         link: None,
     }
 }
@@ -373,7 +402,7 @@ fn show_shelves(
                                 ui,
                                 row.items,
                                 index,
-                                row.landscape,
+                                row.cards,
                                 moved,
                                 &mut *cursor,
                                 &mut *images,
@@ -424,7 +453,7 @@ fn act(action: MenuAction, item: &BaseItemDto, dialog: &mut Option<AddToPlaylist
     }
 }
 
-/// One shelf's cards, in the cursor's section: a click (or Enter) opens the item's page, the
+/// One shelf's cards (the libraries' tiles in *My Media*), in the cursor's section: a click (or Enter) opens the item's page, the
 /// play button in its middle plays it, and a right-click opens its menu. Home's cards are
 /// [`CARD_SCALE`] times the other pages' size. `moved` says a key moved the cursor this frame,
 /// so the selected card scrolls into view inside its shelf.
@@ -433,7 +462,7 @@ fn cards(
     ui: &mut egui::Ui,
     items: &[BaseItemDto],
     section: usize,
-    landscape: bool,
+    kind: Cards,
     moved: bool,
     cursor: &mut Cursor,
     images: &mut ImageCache,
@@ -441,10 +470,10 @@ fn cards(
 ) {
     for (index, item) in items.iter().enumerate() {
         let selected = cursor.is_selected(section, index);
-        let response = if landscape {
-            card::landscape_scaled(ui, images, item, CARD_SCALE, selected)
-        } else {
-            card::poster_scaled(ui, images, item, CARD_SCALE, selected)
+        let response = match kind {
+            Cards::Tiles => library_tile::show(ui, images, item, selected),
+            Cards::Landscape => card::landscape_scaled(ui, images, item, CARD_SCALE, selected),
+            Cards::Poster => card::poster_scaled(ui, images, item, CARD_SCALE, selected),
         };
         if selected && moved {
             response.scroll_to_me(None);

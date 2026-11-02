@@ -7,7 +7,7 @@
 use egui::accesskit::Role;
 use egui::{Event, Modifiers, MouseWheelSource, MouseWheelUnit, PointerButton, TouchPhase, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 
 use crate::widgets::shelf;
 
@@ -208,4 +208,22 @@ fn the_wheel_leaves_the_row_to_the_page() {
     ui.step();
     ui.step();
     assert_eq!(offset(&ui, start), 0., "the wheel moved the row");
+}
+
+/// The arrows are round buttons named by what they do, the one at the row's end disabled.
+#[test]
+fn the_arrows_are_named_and_dim_at_their_end() {
+    let mut ui = row(30);
+    let disabled = |ui: &Harness<'static>, label: &str| {
+        ui.get_by_role_and_label(Role::Button, label)
+            .accesskit_node()
+            .is_disabled()
+    };
+    assert!(disabled(&ui, "Scroll left"), "the row starts at its start");
+    assert!(!disabled(&ui, "Scroll right"));
+    ui.ctx.global_style_mut(|style| style.animation_time = 0.);
+    click_next(&mut ui);
+    ui.step();
+    ui.step();
+    assert!(!disabled(&ui, "Scroll left"), "a page on, the row can go back");
 }
