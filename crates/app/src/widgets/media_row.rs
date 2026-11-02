@@ -5,6 +5,8 @@
 //!
 //! An episode row has the item's wide image, its heading in `ink`, a muted line under it, up to
 //! three lines of overview in `ink_muted`, and at its right end a round Watched toggle. A
+//! [`MediaRow::compact`] row is smaller (a 160×90 image, two lines of overview) for lists laid
+//! out in columns ([`episode_columns`]), so a long season fits in about a window. A
 //! playlist's row also has round ↑ ↓ ✕ buttons before the toggle, shown only while the row is
 //! active (under the pointer or the cursor), as the SyncPlay queue's are: the list stays quiet,
 //! and the keys move and remove any entry anyway.
@@ -35,16 +37,45 @@ use crate::widgets::text::{LANDSCAPE_H, LANDSCAPE_W};
 pub const GAP: f32 = surface::GAP_ITEM;
 /// The room inside a row, round its image.
 const PAD: f32 = 10.;
-/// Between the image, the text and the buttons.
-const ROW_GAP: f32 = 16.;
 /// Between the heading, the line under it and the overview.
 const LINE_GAP: f32 = 4.;
 /// The image's corners, concentric enough with the row's inside its padding.
 const IMAGE_RADIUS: u8 = 6;
-const WATCHED_SIZE: f32 = 36.;
-const WATCHED_ICON: f32 = 20.;
-/// How many lines of overview show, as `main`'s `line_clamp(3)`.
-const OVERVIEW_ROWS: usize = 3;
+
+/// What changes between a full row and a compact one.
+struct Size {
+    image_w: f32,
+    image_h: f32,
+    /// Between the image, the text and the buttons.
+    gap: f32,
+    watched: f32,
+    watched_icon: f32,
+    /// How many lines of overview show.
+    overview_rows: usize,
+}
+
+/// A row on a line of its own, as `main`'s (its overview `line_clamp(3)`).
+const FULL: Size = Size {
+    image_w: LANDSCAPE_W,
+    image_h: LANDSCAPE_H,
+    gap: 16.,
+    watched: 36.,
+    watched_icon: 20.,
+    overview_rows: 3,
+};
+
+/// A row in a list of columns.
+const COMPACT: Size = Size {
+    image_w: 160.,
+    image_h: 90.,
+    gap: 14.,
+    watched: 32.,
+    watched_icon: 18.,
+    overview_rows: 2,
+};
+
+/// The narrowest a compact row gets before the list takes fewer columns.
+pub const EPISODE_MIN_W: f32 = 420.;
 
 /// A season row's height, and the narrowest one gets before the list takes fewer columns.
 const SEASON_H: f32 = 84.;
@@ -59,6 +90,7 @@ pub struct MediaRow<'a> {
     played: bool,
     handles: Option<Handles>,
     highlighted: bool,
+    compact: bool,
 }
 
 /// What a row's parts did this frame. `row` covers the whole row; the toggle and the handles
@@ -81,6 +113,7 @@ impl<'a> MediaRow<'a> {
             played: false,
             handles: None,
             highlighted: false,
+            compact: false,
         }
     }
 
@@ -106,27 +139,36 @@ impl<'a> MediaRow<'a> {
         self
     }
 
+    /// The smaller row, for a list in columns.
+    pub fn compact(mut self, compact: bool) -> Self {
+        self.compact = compact;
+        self
+    }
+
     /// Draws the row across `ui`'s width.
     pub fn show(self, ui: &mut Ui, images: &mut ImageCache) -> MediaRowResponse {
+        let size = if self.compact { &COMPACT } else { &FULL };
         let tokens = theme::tokens_of(ui);
         let small = text::font(ui, "sm");
         let heading_font = text::font(ui, "base");
         let width = ui.available_width();
         let inner_width = width - 2. * PAD;
         let handles_w = if self.handles.is_some() {
-            list_row::HANDLES_W + ROW_GAP
+            list_row::HANDLES_W + size.gap
         } else {
             0.
         };
-        let text_width = (inner_width - LANDSCAPE_W - 2. * ROW_GAP - handles_w - WATCHED_SIZE).max(1.);
-        let overview = self.overview.map(|text| overview_galley(ui, text, text_width));
+        let text_width = (inner_width - size.image_w - 2. * size.gap - handles_w - size.watched).max(1.);
+        let overview = self
+            .overview
+            .map(|text| overview_galley(ui, text, text_width, size.overview_rows));
         let heading_h = ui.fonts_mut(|fonts| fonts.row_height(&heading_font));
         let detail_h = ui.fonts_mut(|fonts| fonts.row_height(&small));
         let mut text_h = heading_h + LINE_GAP + detail_h;
         if let Some(galley) = &overview {
             text_h += LINE_GAP + galley.size().y;
         }
-        let height = LANDSCAPE_H.max(text_h) + 2. * PAD;
+        let height = size.image_h.max(text_h) + 2. * PAD;
         let (rect, row) = ui.allocate_exact_size(vec2(width, height), Sense::click());
         row.widget_info(|| WidgetInfo::labeled(Role::Button, true, self.heading));
         let active = self.highlighted || ui.rect_contains_pointer(rect);
@@ -141,7 +183,7 @@ impl<'a> MediaRow<'a> {
         // moves that Ui's cursor rather than the list's (the next row would overlap this one).
         let mut content = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
         let id = row.id;
-        let image_rect = Rect::from_min_size(inner.min, vec2(LANDSCAPE_W, LANDSCAPE_H));
+        let image_rect = Rect::from_min_size(inner.min, vec2(size.image_w, size.image_h));
         image::show(
             &content,
             images,
@@ -153,11 +195,11 @@ impl<'a> MediaRow<'a> {
 
         // A very narrow window (or a big zoom) can leave nothing beside the image; the column
         // keeps a point rather than turning the rect inside out.
-        let text_left = image_rect.right() + ROW_GAP;
+        let text_left = image_rect.right() + size.gap;
         let text_rect = Rect::from_min_max(
             pos2(text_left, inner.top()),
             pos2(
-                (inner.right() - handles_w - WATCHED_SIZE - ROW_GAP).max(text_left + 1.),
+                (inner.right() - handles_w - size.watched - size.gap).max(text_left + 1.),
                 inner.bottom(),
             ),
         );
@@ -176,21 +218,21 @@ impl<'a> MediaRow<'a> {
         }
 
         // The Watched toggle at the row's right end, level with the heading.
-        let watched_center = pos2(inner.right() - WATCHED_SIZE / 2., inner.top() + WATCHED_SIZE / 2.);
+        let watched_center = pos2(inner.right() - size.watched / 2., inner.top() + size.watched / 2.);
         let icon = if self.played {
             ICON_CHECK_CIRCLE
         } else {
             ICON_CHECK.outlined()
         };
         let watched = RoundButton::icon(icon, "Watched (W)")
-            .size(WATCHED_SIZE, WATCHED_ICON)
+            .size(size.watched, size.watched_icon)
             .on(self.played)
             .focus(Focus::Skip)
             .show_at(&mut content, watched_center, id.with("watched"));
 
         // Up, Down and Remove, against the toggle, as on `main`.
         let handle = self.handles.filter(|_| active).and_then(|moves| {
-            let right = inner.right() - WATCHED_SIZE;
+            let right = inner.right() - size.watched;
             let remove = "Remove from playlist (Delete)";
             list_row::handles(&mut content, right, watched_center.y, id, moves, remove)
         });
@@ -198,10 +240,9 @@ impl<'a> MediaRow<'a> {
     }
 }
 
-/// `text` wrapped to `width`, cut off after [`OVERVIEW_ROWS`] lines with an ellipsis. Laid out
-/// here rather than through a `Label`: a label replaces the job's wrapping, and with it the
-/// row limit.
-fn overview_galley(ui: &Ui, text: &str, width: f32) -> Arc<Galley> {
+/// `text` wrapped to `width`, cut off after `rows` lines with an ellipsis. Laid out here rather
+/// than through a `Label`: a label replaces the job's wrapping, and with it the row limit.
+fn overview_galley(ui: &Ui, text: &str, width: f32, rows: usize) -> Arc<Galley> {
     let mut job = LayoutJob::default();
     job.append(
         text,
@@ -213,8 +254,13 @@ fn overview_galley(ui: &Ui, text: &str, width: f32) -> Arc<Galley> {
         },
     );
     job.wrap.max_width = width;
-    job.wrap.max_rows = OVERVIEW_ROWS;
+    job.wrap.max_rows = rows;
     ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+/// How many compact rows fit across `width`, each at least [`EPISODE_MIN_W`] wide.
+pub fn episode_columns(width: f32) -> usize {
+    (((width + GAP) / (EPISODE_MIN_W + GAP)).floor() as usize).max(1)
 }
 
 /// How many season rows fit across `width`, each at least [`SEASON_MIN_W`] wide.
