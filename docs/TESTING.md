@@ -6,19 +6,17 @@ When a check has been done, delete it, noting the hardware, OS and server versio
 
 ## 1. Release builds and packages
 
-- **Windows release build** (no console): the player host starts without a window flashing up and its log reaches the app's log file; *Settings → Storage → Logs → Open folder* opens the folder, and today's `tabbyfin.*.log` has no colour codes; the autoplay switch and bitrate picker survive a restart.
-- **Windows installer from CI**: install, the Start-menu entry, the app running from it, upgrading from an older version while it runs, uninstall.
+- **Windows release build**: *Settings → Storage → Logs → Open folder* opens the folder; the autoplay switch and bitrate picker survive a restart.
 - **The `.deb`** on a real Ubuntu desktop (only tried in a container).
 - **The AppImage** on real Linux desktops (GNOME, KDE; Wayland and X11), from the file manager, on a distribution other than Ubuntu, and on a 2022-era one (Ubuntu 22.04, Debian 12) with a real GPU. In a 22.04 container the window was black (old software Vulkan).
 - **The Flatpak** on a real desktop with a GPU: GPU video and hardware decoding through `--device=dri`, sign-in kept in the keychain across restarts (Secret Service from the sandbox), audio through PulseAudio/PipeWire, the menu entry and icon.
 - **macOS** on Apple silicon and Intel: the app starts, signs in and plays with `brew install mpv` at a reasonable CPU use at 1080p (software video), and the Dock and Finder show the icon.
 - **Playback from the packaged builds**: the container checks only opened the sign-in screen.
 - **The CI jobs on GitHub Actions**, the `integration` job included (the same steps passed locally).
-- Quitting during playback leaves no `tabbyfin --player-host` process behind.
 
 ## 2. Video and GPUs (2.6, 2.7, 2.9)
 
-- **Windows on NVIDIA and Intel**: `video decoding:` says `d3d11va` and the 4K HEVC version of Test Movie plays smoothly; the log says `video output: GPU (ANGLE/D3D11)` and `video: GPU frames`; the picture is right (not black, colours not swapped), resizing and pausing work, no `couldn't import a GPU frame` or `skipped a GPU frame` lines beyond a resize, no tearing in fast motion. Then the same with ANGLE hidden (delete `libEGL.dll`: `OpenGL/D3D11 interop`).
+- **Windows on NVIDIA and Intel** (only AMD's RX 6600 is done): `video decoding:` says `d3d11va` and the 4K HEVC version of Test Movie plays smoothly; the log says `video output: GPU (ANGLE/D3D11)` and `video: GPU frames`; the picture is right (not black, colours not swapped), resizing and pausing work, no `couldn't import a GPU frame` or `skipped a GPU frame` lines beyond a resize, no tearing in fast motion. Then the same with ANGLE hidden (delete `libEGL.dll`: `OpenGL/D3D11 interop`).
 - **Linux on AMD, Intel and NVIDIA, each on X11 and Wayland** (six runs): the log says `video output: GPU (OpenGL/Vulkan interop)` and `video: GPU frames`; the picture is right (not black, garbled, swapped or upside down) through the host and with `TABBYFIN_PLAYER=embedded`; resizing and pausing; no `couldn't import a GPU frame` or `switching to software frames`; no tearing or flicker.
 - **Hybrid laptops**: on Windows, with the window on either GPU, the log's `OpenGL ES (ANGLE) context for mpv renderer=` names the window's adapter, and with ANGLE hidden WGL shows video or falls back to software frames rather than black. On Linux (Intel + AMD or NVIDIA), `OpenGL context for mpv renderer=` names the window's GPU, found through EGL's device list when the default display is the other GPU.
 - **The fallback to software frames** after a failed GPU import (only real drivers fail it).
@@ -54,7 +52,7 @@ The harness presses keys from inside the app and the UI tests click headless, so
 - **Collections and playlists** from a real library (TMDb collections, a long playlist): *Play all* and *Shuffle* run through the whole list, the up-next card names the next entry, and playing something else ends the queue; the up-next card offering a collection's next movie, a movie ending without starting the next (only Shift+N does), and a movie in several collections using the first the server lists.
 - **Series**: *Shuffle* on a big series; a series with specials placed between seasons; a season page's *Play* and *Shuffle*.
 - **Versions**: switching to an item's second version restarts at the same position; the seek bar then shows that version's trickplay tiles, and an item without tiles shows only the time.
-- **Subtitles and delays**: subtitle delay and size on a real subtitle track and audio delay with sound; on Windows (libmpv 0.38+, with `sub-border-style`) both the box and the outline look right; an ASS subtitle keeps its own style; the size set in Settings, during playback too, and in the player's menu agree afterwards.
+- **Subtitles and delays**: subtitle delay and size on a real subtitle track and audio delay with sound; an ASS subtitle keeps its own style; the size set in Settings, during playback too, and in the player's menu agree afterwards.
 - **A reconnect** over the last frame (Back while it shows).
 
 ## 5. SyncPlay (2.10)
@@ -69,8 +67,8 @@ The harness presses keys from inside the app and the UI tests click headless, so
 
 ## 6. Live connection and remote control
 
-- **Another device**: marking something watched or favorite in the web client or a phone app refreshes Tabbyfin's open page, and Home's Favorites shelf, within a second or so.
-- **Reconnecting**: restart the server or drop the network for a minute; the log shows "session websocket connected" again and refreshes still work.
+- **Another device**: marking something favorite in the web client or a phone app shows it in Home's Favorites shelf within a second or so.
+- **Reconnecting** after the network drops for a minute: the log shows "session websocket connected" again and refreshes still work.
 - Behind a **reverse proxy with HTTPS** (`wss://`), with a base path like `/jellyfin`.
 - **The web dashboard and a phone app**: the session shows under *Dashboard → Activity / Sessions* with a remote control; its buttons work; the volume, mute and tracks it shows follow the app (about a second later); a remote audio change during a transcode restarts at the same position; a remote *previous* restarts the item, or within 5 s goes to the previous one.
 
@@ -88,15 +86,15 @@ The harness presses keys from inside the app and the UI tests click headless, so
 - **Several accounts**: signing in to a new server while another account waits; signing out with no account left (the form prefilled); the Windows and macOS keychains with two accounts.
 - **Server settings seen elsewhere**: change the subtitle mode or audio language here and check the web client shows it and the next item starts with the track it implies; *Leave watched items out of Latest* drops watched items from Home once saved.
 - **Failures**: Settings' failed load or save (*Retry*, the toast, the configuration reloaded); the dialogs with the server down; marking watched while the server is down (the toast, the item put back); an expired token while browsing (6.5).
-- **Theme**: switching in Settings applies at once on every page; `theme = "system"` follows the system on Windows and macOS, and on real GNOME and KDE through the portal, Ubuntu 22.04's portal 1.14 (`Read` only) included, changes while running included.
-- **Text size** following the system on Windows (*Accessibility → Text size*), GNOME (Large Text) and KDE (*Fonts*), at launch and changed while running (applied on switching back to the app); the log folder through `explorer` and `open`.
+- **Theme**: switching in Settings applies at once on every page; `theme = "system"` follows the system on macOS, and on real GNOME and KDE through the portal, Ubuntu 22.04's portal 1.14 (`Read` only) included, changes while running included.
+- **Text size** following the system on GNOME (Large Text) and KDE (*Fonts*), at launch and changed while running (applied on switching back to the app); the log folder through `open`.
 - **Sizes**: the grid, shelves, card lines, Settings and the sign-in form at 90 % and 150 % text and 175 % zoom in an 800×500 window.
-- **Window placement on Windows**: one monitor at 100 % (move, resize, close within half a second, reopen; a maximized window reopening maximized with no flicker and no "moving the window to its saved spot" in the log); one monitor at 150 % (the config's `scale` is 1.5, `x`/`y` are physical pixels, no visible move); mixed DPI (a window saved on the other-scaled monitor reopens there after one jump, maximized too, and un-maximizes to its saved spot); monitors changing (a spot on an unplugged monitor opens centred, one on a second monitor reopens there, one between monitors of different heights opens centred); un-maximizing after a maximized launch at 150 % restores the saved size, not 1.5× it; fullscreen playback then quit reopens windowed at the last bounds.
+- **Window placement on Windows at 150 % and in mixed DPI** (the machine's monitors are both at 100 %): one monitor at 150 % (the config's `scale` is 1.5, `x`/`y` are physical pixels, no visible move); a window saved on the other-scaled monitor reopens there after one jump, maximized too, and un-maximizes to its saved spot; a spot between monitors of different heights opens centred; un-maximizing after a maximized launch at 150 % restores the saved size, not 1.5× it; a maximized window at 150 % reopening maximized with no flicker.
 - **Window placement on Linux** (a real window manager, X11 and Wayland, where only the size is kept) and **macOS**: a saved spot reopens as saved, a maximized window reopens maximized, and one saved on a missing monitor still opens on screen.
 
 ## 9. Jellyfin 10.11 (4.1)
 
-Against `mise run dev:min` (port 8097): sign-in with password and Quick Connect, Home, libraries (sort and filter on a bigger library, the HD and SD resolution choices), search, item pages, marking watched, Settings, playback with resume, reporting and trickplay tiles.
+Against `mise run dev:min` (port 8097): signing in with a password and with Quick Connect, libraries (sort and filter on a bigger library, the HD and SD resolution choices), marking watched, Settings, and the seek bar's trickplay tiles.
 
 ## 10. Memory and long sessions (6.4)
 
@@ -105,4 +103,4 @@ Against `mise run dev:min` (port 8097): sign-in with password and Quick Connect,
 
 ## 11. Update notice
 
-A release build checks at most once a day (debug builds with `TABBYFIN_UPDATE_URL` check every launch), and *Download* opens the release page in the browser.
+*Download* on the update notice opens the release page in the browser.
