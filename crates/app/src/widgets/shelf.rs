@@ -14,6 +14,11 @@
 //! drag doesn't open the card it ends on, and the row follows the pointer 1:1 and stops with it
 //! (no egui coasting after the release, no rubber band past the ends). The keyboard's
 //! `scroll_to_me` still brings a card into view, through egui's own scroll animation.
+//!
+//! A drag on the row is the row's or the page's, decided once it has moved [`DRAG_LOCK`] points:
+//! mostly sideways moves the row, mostly up or down scrolls the page while the row holds still.
+//! On a touch screen, where shelves fill most of Home, that's how the page scrolls at all, since
+//! the row takes every drag that starts on it.
 
 use std::hash::Hash;
 
@@ -38,6 +43,8 @@ const TITLE_H: f32 = ARROW;
 /// The page arrows' diameter and their icon's size.
 const ARROW: f32 = 32.;
 const ARROW_ICON: f32 = 20.;
+/// How far a drag on the row moves before it's the row's or the page's.
+const DRAG_LOCK: f32 = 8.;
 
 /// A titled row of cards, with the space between its cards and under its title given (Home's
 /// shelves are wider apart than the item pages'), inset `padding` from the page's edges. Returns
@@ -193,6 +200,48 @@ fn shelf_inner(
         }
     }
 
+    // A drag on the row: the row holds still until it's decided, and while it's the page's,
+    // which scrolls by the pointer's vertical movement instead. egui applies the drag after the
+    // offset set here, so the row is held at its offset plus this frame's sideways movement.
+    let dragged = state
+        .area
+        .is_some_and(|area| ui.ctx().is_being_dragged(area.with("area")));
+    state.drag = match (dragged, state.drag) {
+        (false, _) => None,
+        (true, None) => Some(Drag {
+            held_at: state.offset,
+            axis: None,
+        }),
+        (true, Some(mut drag)) => {
+            if drag.axis.is_none() {
+                let moved = ui.input(|input| {
+                    input
+                        .pointer
+                        .press_origin()
+                        .zip(input.pointer.latest_pos())
+                        .map_or(egui::Vec2::ZERO, |(from, to)| to - from)
+                });
+                if moved.length() > DRAG_LOCK {
+                    drag.axis = Some(if moved.y.abs() > moved.x.abs() {
+                        DragAxis::Page
+                    } else {
+                        DragAxis::Row
+                    });
+                }
+            }
+            Some(drag)
+        }
+    };
+    if let Some(drag) = state.drag
+        && drag.axis != Some(DragAxis::Row)
+    {
+        let delta = ui.input(|input| input.pointer.delta());
+        offset = Some(drag.held_at + delta.x);
+        if drag.axis == Some(DragAxis::Page) {
+            ui.scroll_with_delta_animation(egui::vec2(0., delta.y), egui::style::ScrollAnimation::none());
+        }
+    }
+
     let mut area = ScrollArea::horizontal()
         .id_salt(id)
         .auto_shrink([false, true])
@@ -238,6 +287,8 @@ fn shelf_inner(
         content: out.content_size.x,
         viewport: out.inner_rect.width(),
         glide: state.glide,
+        area: Some(out.id),
+        drag: state.drag,
     };
     if measured
         .glide
@@ -277,6 +328,24 @@ struct State {
     viewport: f32,
     /// The arrows' glide, while it runs.
     glide: Option<Glide>,
+    /// The row's scroll area, whose drags are watched.
+    area: Option<egui::Id>,
+    /// A drag on the row, while it lasts.
+    drag: Option<Drag>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct Drag {
+    /// The row's offset when the drag began, where it stays unless the drag is the row's.
+    held_at: f32,
+    /// Whose drag it is, once it has moved far enough to tell.
+    axis: Option<DragAxis>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum DragAxis {
+    Row,
+    Page,
 }
 
 /// Which page arrows to draw: none when the cards fit, and each one greyed out at its end.
