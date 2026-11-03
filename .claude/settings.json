@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -I \"$CLAUDE_PROJECT_DIR/.agents/skills/ui-mockup/link_guard.py\""
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.agents/skills/ui-mockup/link_guard.py\""
           }
         ]
       }

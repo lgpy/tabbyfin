@@ -1,5 +1,5 @@
 // A disposable mockup: copy this outside the repo, edit, and run
-//   python3 -I .agents/skills/ui-mockup/render.py <this file>
+//   python -I .agents/skills/ui-mockup/render.py <this file>
 // It is compiled inside the app crate (module `ui_tests::scratch`), so `crate::…` paths work.
 // Replace this header with the page's intro: what was asked, and what the proposal changes.
 

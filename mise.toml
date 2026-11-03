@@ -1,10 +1,15 @@
 # Dev environment and tasks. `mise install` sets up the tools; `mise tasks` lists the tasks.
-# System packages (GPU, windowing, mpv) still come from the OS; see docs/PLAN.md §8.
+# System packages (GPU, windowing, mpv, ffmpeg, Docker) still come from the OS; see docs/PLAN.md §7.
+#
+# Tasks are one command each, because mise runs them through cmd.exe on Windows: shell steps go
+# in a script under dev/ or packaging/, and the scripts run from Git Bash (or WSL/Linux).
 
 [tools]
 rust = { version = "1.99.0", components = "clippy,rustfmt" }
+# `python`, on every OS: Windows has no `python3` (its `python3.exe` is a Microsoft Store stub).
+python = "3.13"
 # Builds the Linux .deb (packaging/package.sh).
-"cargo:cargo-deb" = "3.8.0"
+"cargo:cargo-deb" = { version = "3.8.0", os = ["linux"] }
 # GitHub CLI, for the ci:* tasks.
 gh = "2.102.0"
 
@@ -49,7 +54,7 @@ run = "cargo run -p jellyfin --example smoke"
 
 [tasks."dev:media"]
 description = "Generate the synthetic test library (needs ffmpeg)"
-run = "dev/make-media.sh"
+run = "bash dev/make-media.sh"
 
 [tasks."dev:up"]
 description = "Start the Jellyfin dev server on http://localhost:8096"
@@ -59,18 +64,12 @@ run = "docker compose -f dev/compose.yaml up -d"
 [tasks."dev:setup"]
 description = "Start the dev server, run the startup wizard and scan libraries (idempotent)"
 depends = ["dev:up"]
-run = "python3 -I dev/setup-server.py"
+run = "python -I dev/setup-server.py"
 
 [tasks."dev:min"]
 description = "Start and set up the minimum-version (10.11) server on http://localhost:8097, then run the smoke test against it"
 depends = ["dev:media"]
-run = [
-  # Created as the user first; Docker would create missing bind mounts as root.
-  "mkdir -p dev/.data/min/config dev/.data/min/cache",
-  "docker compose -f dev/compose.yaml --profile min up -d jellyfin-min",
-  "JELLYFIN_URL=http://localhost:8097 python3 -I dev/setup-server.py",
-  "JELLYFIN_URL=localhost:8097 cargo run -q -p jellyfin --example smoke",
-]
+run = "bash dev/dev.sh min"
 
 [tasks."dev:down"]
 description = "Stop the dev servers"
@@ -78,44 +77,44 @@ run = "docker compose -f dev/compose.yaml --profile min down"
 
 [tasks."dev:reset"]
 description = "Delete the dev server's config and cache (keeps the media), then set it up again"
-run = [
-  "docker compose -f dev/compose.yaml down",
-  "rm -rf dev/.data/config dev/.data/cache",
-  "mkdir -p dev/.data/config dev/.data/cache",
-  "mise run dev:setup",
-]
+run = "bash dev/dev.sh reset"
+
+# Windows only: the app loads libmpv and ANGLE from next to its own exe.
+[tasks."dev:assets"]
+description = "Put libmpv and ANGLE beside the built exe in target/, so playback runs on Windows"
+run = "bash dev/win-assets.sh"
 
 # Packaging (packaging/package.sh)
 
 [tasks.package]
-description = "Release build and package for a target (default: this Linux machine)"
+description = "Release build and package for a target (default: x86_64-unknown-linux-gnu; use x86_64-pc-windows-msvc on Windows)"
 usage = 'arg "[target]" default="x86_64-unknown-linux-gnu"'
 run = [
   "cargo build --release --locked -p tabbyfin --target {{arg(name='target')}}",
-  "packaging/package.sh {{arg(name='target')}} dist",
+  "bash packaging/package.sh {{arg(name='target')}} dist",
 ]
 
 [tasks."package:appimage"]
 description = "Build the Linux AppImage in an Ubuntu 22.04 container, so it runs on older distributions too"
-run = "packaging/appimage-docker.sh dist"
+run = "bash packaging/appimage-docker.sh dist"
 
 [tasks."package:flatpak"]
-description = "Build the Flatpak bundle (needs flatpak and flatpak-builder)"
-run = "packaging/flatpak/build.sh dist"
+description = "Build the Flatpak bundle (needs flatpak and flatpak-builder; Linux only)"
+run = "bash packaging/flatpak/build.sh dist"
 
 [tasks."deps:mirror"]
 description = "Upload the pinned downloads (packaging/*.lock) to the repo's deps release, after changing a lock file"
-run = "packaging/mirror-deps.sh"
+run = "bash packaging/mirror-deps.sh"
 
 [tasks."flatpak:sources"]
 description = "Regenerate the Flatpak's cargo-sources.json after Cargo.lock changes"
-run = "packaging/flatpak/update-cargo-sources.sh"
+run = "bash packaging/flatpak/update-cargo-sources.sh"
 
 # CI (GitHub Actions)
 
 [tasks."ci:build"]
 description = "Build packages for every OS on GitHub Actions and download them into dist/"
-run = "packaging/ci-build.sh"
+run = "bash packaging/ci-build.sh"
 
 [tasks."ci:status"]
 description = "Show recent CI runs"

@@ -29,6 +29,9 @@ COUNT = int(sys.argv[3]) if len(sys.argv) > 3 else 10000
 DELAY = (int(sys.argv[4]) if len(sys.argv) > 4 else 60) / 1000
 FAKE = "f" * 32
 DATA = Path(__file__).resolve().parent / ".data" / "fake-library"
+# drawtext needs a font: fontconfig finds one on Linux and macOS, but Windows' ffmpeg builds ship
+# no fontconfig config, so name Windows' own (its colon escaped for the filter parser).
+DRAWTEXT_FONT = "fontfile='C\\:/Windows/Fonts/arial.ttf':" if sys.platform == "win32" else ""
 
 
 def make_posters():
@@ -41,7 +44,8 @@ def make_posters():
         color = f"0x{i * 37 % 256:02x}{i * 91 % 256:02x}{i * 53 % 256:02x}"
         subprocess.run(
             ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c={color}:size=400x600",
-             "-frames:v", "1", "-vf", f"drawtext=text='{i}':fontcolor=white:fontsize=120:x=(w-tw)/2:y=(h-th)/2",
+             "-frames:v", "1", "-vf",
+             f"drawtext={DRAWTEXT_FONT}text='{i}':fontcolor=white:fontsize=120:x=(w-tw)/2:y=(h-th)/2",
              "-q:v", "3", str(path)],
             check=True,
         )

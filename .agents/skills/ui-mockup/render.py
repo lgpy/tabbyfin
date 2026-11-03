@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Render a disposable UI mockup file and open the results as a page.
 
-    python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> [--only <group>[,<group>…]] [--baseline] [--open | --no-open]
-    python3 -I .agents/skills/ui-mockup/render.py <mockup.rs> --zoom <name>[.light]:x,y,w,h
+    python -I .agents/skills/ui-mockup/render.py <mockup.rs> [--only <group>[,<group>…]] [--baseline] [--open | --no-open]
+    python -I .agents/skills/ui-mockup/render.py <mockup.rs> --zoom <name>[.light]:x,y,w,h
 
 The file lives outside the repo (see `template.rs`); it is compiled into the app's UI tests under
 the `mockup` feature and its `mockup_*` tests run. Output goes to `target/mockups/<file stem>/`:
@@ -338,7 +338,7 @@ def parse(source):
     while i < len(lines) and lines[i].lstrip().startswith("//") and not lines[i].lstrip().startswith("///"):
         intro.append(re.sub(r"^\s*// ?", "", lines[i]))
         i += 1
-    if any("python3 -I .agents/skills/ui-mockup/render.py" in l for l in intro):
+    if any("python -I .agents/skills/ui-mockup/render.py" in l for l in intro):
         intro = []  # the template's own header, left in
 
     sections, captions = {}, {}
