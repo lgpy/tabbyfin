@@ -1,5 +1,6 @@
 //! A shelf's scroll feel, without a window: its arrows glide a page over, a drag follows the
-//! pointer and stops with it, and the wheel is the page's rather than the row's.
+//! pointer and stops with it, a drag up or down scrolls the page instead, and the wheel is the
+//! page's rather than the row's.
 //!
 //! egui_kittest turns animations off for its snapshots, which the glide follows: the first test
 //! turns them back on for its harness, as the app's default setting has them.
@@ -192,6 +193,52 @@ fn a_drag_follows_the_pointer_and_stops_with_it() {
     ui.drop_at(back + vec2(200., 0.));
     ui.step();
     assert!(offset(&ui, start).abs() < 0.01, "the row stayed inside its start");
+}
+
+#[test]
+fn a_drag_up_or_down_scrolls_the_page_and_holds_the_row() {
+    // The row at the top of a page that scrolls, as on Home.
+    let mut ui = Harness::builder()
+        .with_size(SIZE)
+        .with_step_dt(1. / 60.)
+        .allow_missing_glyphs()
+        .with_accessibility_check(false)
+        .with_context_setup(|ctx| {
+            egui_material_icons::initialize(ctx);
+            crate::theme::apply(ctx, &crate::config::Config::default());
+        })
+        .build_ui(|ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                shelf::shelf_with_gaps(ui, "row", "A shelf", 12., 8., shelf::PADDING, |ui| {
+                    for index in 0..30 {
+                        ui.label(format!("card {index}"));
+                    }
+                });
+                for line in 0..60 {
+                    ui.label(format!("line {line}"));
+                }
+            });
+        });
+    ui.step();
+    ui.step();
+    let card = |ui: &Harness<'static>| ui.get_by_label("card 0").rect().left_top();
+    let start = card(&ui);
+    let from = ui.get_by_label("card 1").rect().center();
+
+    // Press on the row, then drag 100 points up, a little sideways, in 20-point frames.
+    ui.hover_at(from);
+    ui.step();
+    ui.drag_at(from);
+    ui.step();
+    for step in 1..=5 {
+        ui.hover_at(from + vec2(-2. * step as f32, -20. * step as f32));
+        ui.step();
+    }
+    ui.drop_at(from + vec2(-10., -100.));
+    ui.step();
+    let moved = card(&ui) - start;
+    assert!(moved.y < -60., "the page scrolled up with the drag: {moved:?}");
+    assert!(moved.x.abs() < 0.5, "the row held still: {moved:?}");
 }
 
 #[test]
