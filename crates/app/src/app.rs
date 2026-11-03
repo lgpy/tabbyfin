@@ -550,6 +550,8 @@ fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Si
 
 impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        #[cfg(target_os = "android")]
+        crate::android::raw_input(ctx, raw_input);
         // egui eases a wheel step over frames whatever the animations setting says, so with
         // animations off the step is handed to its frame at once (`smooth_scroll.rs`).
         if !theme::animations(ctx) {
@@ -655,43 +657,55 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         let taken = std::mem::take(&mut self.keys);
         let keys = self.app_keys(&ctx, taken);
-        match self.screen.as_mut() {
-            Some(Screen::SignedIn(signed_in)) => {
-                let SignedIn { services, shell } = signed_in.as_mut();
-                let mut nav = Vec::new();
-                let mut cx = PageCx {
-                    ctx: &ctx,
-                    services,
-                    nav: &mut nav,
-                    render_state: frame.wgpu_render_state(),
-                    under_bar: None,
-                };
-                shell.show(ui, keys, &mut cx);
+        // Screens lay out in the safe area: on Android, clear of the system bars, cutouts and the
+        // soft keyboard; elsewhere the whole window. Backdrops still fill the window.
+        let safe = egui::UiBuilder::new().max_rect(ctx.content_rect());
+        ui.scope_builder(safe, |ui| {
+            match self.screen.as_mut() {
+                Some(Screen::SignedIn(signed_in)) => {
+                    let SignedIn { services, shell } = signed_in.as_mut();
+                    let mut nav = Vec::new();
+                    let mut cx = PageCx {
+                        ctx: &ctx,
+                        services,
+                        nav: &mut nav,
+                        render_state: frame.wgpu_render_state(),
+                        under_bar: None,
+                    };
+                    shell.show(ui, keys, &mut cx);
+                }
+                Some(Screen::SignIn(login)) => {
+                    // Frameless: the form paints the cozy backdrop over the whole window.
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| login.show(ui, &ctx));
+                }
+                Some(Screen::Restoring { .. }) | None => {
+                    // The mascot in the sign-in screen's backdrop and glow, so a launch that does
+                    // need the form doesn't flash.
+                    egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+                        let tokens = theme::tokens_of(ui);
+                        widgets::backdrop::fill_window(ui, tokens);
+                        widgets::backdrop::glow(ui.painter(), ui.max_rect().center(), RESTORING_GLOW, tokens);
+                        ui.scope_builder(
+                            egui::UiBuilder::new().layout(egui::Layout::top_down(egui::Align::Center)),
+                            |ui| {
+                                ui.add_space(((ui.available_height() - RESTORING_MASCOT) * 0.5).max(0.));
+                                widgets::mascot::loader(ui, RESTORING_MASCOT);
+                            },
+                        );
+                    });
+                }
             }
-            Some(Screen::SignIn(login)) => {
-                // Frameless: the form paints the cozy backdrop over the whole window.
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ui, |ui| login.show(ui, &ctx));
-            }
-            Some(Screen::Restoring { .. }) | None => {
-                // The mascot in the sign-in screen's backdrop and glow, so a launch that does
-                // need the form doesn't flash.
-                egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-                    let tokens = theme::tokens_of(ui);
-                    widgets::backdrop::fill(ui.painter(), ui.max_rect(), tokens);
-                    widgets::backdrop::glow(ui.painter(), ui.max_rect().center(), RESTORING_GLOW, tokens);
-                    ui.scope_builder(
-                        egui::UiBuilder::new().layout(egui::Layout::top_down(egui::Align::Center)),
-                        |ui| {
-                            ui.add_space(((ui.available_height() - RESTORING_MASCOT) * 0.5).max(0.));
-                            widgets::mascot::loader(ui, RESTORING_MASCOT);
-                        },
-                    );
-                });
-            }
+        });
+        #[cfg(target_os = "android")]
+        {
+            // Back closes what's open or goes back where there's somewhere to go; otherwise
+            // Android puts the app in the background.
+            let goes_back = keys::egui_wants_keys(&ctx)
+                || matches!(&self.screen, Some(Screen::SignedIn(signed_in)) if signed_in.shell.handles_back());
+            crate::android::after_frame(ctx.output(|output| output.ime), goes_back);
         }
-
         self.handle_events(&ctx);
         if let Some(action) = self.toasts.show(&ctx) {
             match action {

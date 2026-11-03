@@ -13,7 +13,8 @@
 //!
 //! The zoom keys live here, with egui in charge of the theme it draws in: on Windows and macOS
 //! `ctx.set_theme` with [`egui::ThemePreference::System`] follows the system's light or dark
-//! appearance as it changes. On Linux egui gets no system theme from winit, so [`SystemTheme`]
+//! appearance as it changes (on Android through `android.rs`, which reads the activity's night
+//! mode). On Linux egui gets no system theme from winit, so [`SystemTheme`]
 //! reads the desktop's from the XDG portal and follows the portal's changes.
 
 use std::sync::Mutex;

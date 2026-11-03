@@ -175,7 +175,13 @@ impl Login {
             username,
             password: String::new(),
             show_password: false,
-            focus: if has_url { None } else { Some(Field::Server) },
+            // Not on Android, where a focused field opens the soft keyboard over the form
+            // before it's been seen.
+            focus: if has_url || cfg!(target_os = "android") {
+                None
+            } else {
+                Some(Field::Server)
+            },
             last_focus: None,
             watch: Watch::default(),
             server: None,
@@ -252,7 +258,7 @@ impl Login {
     pub fn show(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         // The backdrop under everything; the theme's visuals give the panel's text, fields and
         // buttons their colours.
-        widgets::backdrop::fill(ui.painter(), ui.max_rect(), theme::tokens_of(ui));
+        widgets::backdrop::fill_window(ui, theme::tokens_of(ui));
         // The form sits in the middle of the window, not at the top of a page. The form's height
         // is only known after it has been laid out, so the spacer above it comes from the last
         // frame; a step that changes height asks for the frame that recentres it. A form taller

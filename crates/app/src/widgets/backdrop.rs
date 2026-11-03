@@ -28,6 +28,16 @@ pub fn fill(painter: &Painter, rect: Rect, tokens: &Tokens) {
     vertical(painter, rect, tokens.backdrop_top, tokens.backdrop_bottom);
 }
 
+/// Fills the whole window with the backdrop, under the system's bars and cutouts too, which
+/// egui's safe area (Android's insets) keeps the panels out of. The same as [`fill`] on
+/// `ui.max_rect()` where there's no safe area.
+pub fn fill_window(ui: &Ui, tokens: &Tokens) {
+    let window = ui.ctx().viewport_rect();
+    let mut painter = ui.painter().clone();
+    painter.set_clip_rect(window);
+    fill(&painter, window, tokens);
+}
+
 /// The backdrop's colour at height `y` of `window`, the rectangle [`fill`] painted: what
 /// lies under that point of the page, for something that fades into it. Vertex colours blend
 /// in gamma space, so this does too.

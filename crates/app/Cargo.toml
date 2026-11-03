@@ -7,6 +7,11 @@ publish.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# The app is a library run by `main.rs` on the desktop; for Android it's built as a shared library
+# (`cargo rustc --crate-type cdylib`, docs/android.md), so desktop builds don't link a second copy.
+[lib]
+name = "tabbyfin"
+
 [dependencies]
 jellyfin.workspace = true
 player.workspace = true
@@ -63,6 +68,17 @@ ash = "0.38"
 # theme on Linux, and this is where `main` read it. `tokio`: the read and the signal watch are
 # awaited on the app's runtime, never on the UI thread.
 zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Started by android-activity's GameActivity glue (`lib.rs`, `android_main`). GameActivity
+# rather than NativeActivity: it has soft keyboard input, and eframe's accessibility needs it.
+eframe = { workspace = true, features = ["android-game-activity"] }
+# `AndroidApp`, which `android_main` is handed. The version eframe uses.
+winit = "0.30"
+# Logs to logcat.
+paranoid-android = "0.2"
+# The phone's model, as the device name Jellyfin shows (`android.rs`).
+android_system_properties = "0.1"
 
 [features]
 # Compiles a disposable mockup file into the UI tests (`src/ui_tests/mod.rs`).

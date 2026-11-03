@@ -64,11 +64,12 @@ enum Backend {
 type Started = (Player, mpsc::UnboundedReceiver<PlayerEvent>, libmpv::VideoOutput);
 
 impl Player {
-    /// Starts mpv, in a player host process unless `TABBYFIN_PLAYER=embedded`, with a video
-    /// output whose frames the UI can draw (`import`). Fails with [`Error::LibmpvUnavailable`]
-    /// where libmpv can't be loaded.
+    /// Starts mpv, in a player host process unless `TABBYFIN_PLAYER=embedded` or on Android
+    /// (where an app can't start its own executable again), with a video output whose frames the
+    /// UI can draw (`import`). Fails with [`Error::LibmpvUnavailable`] where libmpv can't be
+    /// loaded.
     pub async fn spawn(import: libmpv::VideoImport) -> Result<Started> {
-        if std::env::var("TABBYFIN_PLAYER").as_deref() == Ok("embedded") {
+        if cfg!(target_os = "android") || std::env::var("TABBYFIN_PLAYER").as_deref() == Ok("embedded") {
             return Self::spawn_embedded(import).await;
         }
         let (player, events, video) = remote::RemotePlayer::spawn(import).await?;

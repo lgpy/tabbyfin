@@ -312,7 +312,7 @@ impl Shell {
         } else {
             // One backdrop under the bar and the page, as on sign-in: neither panel has a fill,
             // and a page that scrolls under the bar draws its own edge (`backdrop::scroll_edge`).
-            backdrop::fill(ui.painter(), ui.max_rect(), theme::tokens_of(ui));
+            backdrop::fill_window(ui, theme::tokens_of(ui));
             // Between the backdrop and the bar's contents: where a page paints what runs up
             // behind the bar. The bar's rectangle is only known once it's laid out.
             let mut under_bar = UnderBar::reserve(ui.painter());
@@ -659,6 +659,12 @@ impl Shell {
 
     fn can_go_back(&self) -> bool {
         self.stack.len() > 1
+    }
+
+    /// Whether Escape (Android's Back) has somewhere to go: out of the player, or back a page.
+    #[cfg(target_os = "android")]
+    pub fn handles_back(&self) -> bool {
+        self.player.is_some() || self.can_go_back()
     }
 
     /// The results page's place on the stack, if it's there.

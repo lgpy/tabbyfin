@@ -38,6 +38,39 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # The Android APK (docs/android.md): the app's library in release for arm64 and x86_64, in a
+  # debug-signed APK that installs on any phone or emulator until there's a release key.
+  android:
+    name: Android APK
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk@4.1.2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.8.2
+      - name: Install the NDK
+        # The runner has the SDK (ANDROID_HOME) but not necessarily this NDK.
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" > /dev/null
+      - run: bash packaging/android/build.sh --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tabbyfin-android
+          path: packaging/android/build/outputs/apk/debug/tabbyfin-debug.apk
+          if-no-files-found: error
+
   # The API client against real servers: the newest we develop against and the oldest we
   # support, set up like the dev servers (dev/README.md) with the same synthetic media.
   integration:

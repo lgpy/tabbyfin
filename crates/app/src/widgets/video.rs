@@ -364,7 +364,7 @@ pub fn import(render_state: Option<&RenderState>) -> VideoImport {
 }
 
 /// What the renderer's device could import: Vulkan memory where wgpu runs on Vulkan and the
-/// device has `VULKAN_EXTERNAL_MEMORY_FD` (`main.rs` asks for it), D3D11 textures on DX12 (not
+/// device has `VULKAN_EXTERNAL_MEMORY_FD` (`lib.rs` asks for it), D3D11 textures on DX12 (not
 /// on WARP, the CPU adapter, where the player's GPU path would cost more than pixels), and
 /// pixels otherwise (wgpu on GL; Metal for now).
 pub fn adapter_import(render_state: &RenderState) -> VideoImport {

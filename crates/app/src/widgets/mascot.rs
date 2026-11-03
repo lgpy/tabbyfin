@@ -18,7 +18,7 @@
 //! a pose moves those cached vertices — a scale and a bob for the head and everything on it, each
 //! ear's own flick for its vertices, a travelling wave for the tentacles' — then maps them into
 //! the space the mascot was given. Nothing is tessellated again. epaint feathers only the shapes it
-//! tessellates itself, so the meshes' edges are smoothed by the window's multisampling (`main.rs`).
+//! tessellates itself, so the meshes' edges are smoothed by the window's multisampling (`lib.rs`).
 //!
 //! Every mascot, a loader or the confused one over an empty page, animates and asks for a repaint
 //! once per animation step ([`ANIMATION_STEP`]) for as long as it's up; with the animations
