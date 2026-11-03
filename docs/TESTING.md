@@ -105,4 +105,4 @@ Against `mise run dev:min` (port 8097): sign-in with password and Quick Connect,
 
 ## 11. Update notice
 
-After the first published release: an older build shows the notice at most once a day, the current one doesn't, *Download* opens the release page, and the setting turns it off.
+A release build checks at most once a day (debug builds with `TABBYFIN_UPDATE_URL` check every launch), and *Download* opens the release page in the browser.
