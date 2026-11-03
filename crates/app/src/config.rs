@@ -45,6 +45,9 @@ pub struct Config {
     /// means 1.0.
     #[serde(default)]
     pub subtitle_scale: Option<f64>,
+    /// The player on Android: Media3 or mpv. `None` means Media3. mpv everywhere else.
+    #[serde(default)]
+    pub android_player: Option<AndroidPlayer>,
     /// Bits per second; the server transcodes anything above it. `None` means no limit.
     #[serde(default)]
     pub max_streaming_bitrate: Option<u64>,
@@ -110,6 +113,26 @@ pub enum SubtitleStyle {
     Outline,
     /// A translucent dark box behind the text.
     Box,
+}
+
+/// The player on Android (docs/android.md, *Decision*).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AndroidPlayer {
+    /// Media3's ExoPlayer: Android's own decoders, HDR, the least power at 4K.
+    #[default]
+    Media3,
+    /// mpv: ASS subtitles with their styling, and what Android's decoders can't play.
+    Mpv,
+}
+
+impl AndroidPlayer {
+    pub fn engine(self) -> player::Engine {
+        match self {
+            AndroidPlayer::Media3 => player::Engine::Media3,
+            AndroidPlayer::Mpv => player::Engine::Mpv,
+        }
+    }
 }
 
 /// The main window's last placement: the frame's top-left in physical pixels (or in points in

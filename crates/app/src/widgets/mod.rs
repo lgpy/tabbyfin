@@ -27,6 +27,7 @@ pub mod select;
 pub mod shelf;
 pub mod state;
 pub mod stepper;
+pub mod subtitles;
 pub mod surface;
 pub mod tabs;
 pub mod text;

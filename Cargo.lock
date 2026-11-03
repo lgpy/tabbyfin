@@ -3402,6 +3402,7 @@ name = "player"
 version = "0.2.0"
 dependencies = [
  "ash",
+ "jni-sys 0.4.1",
  "khronos-egl",
  "libloading",
  "rustix 1.1.5",

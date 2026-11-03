@@ -1,6 +1,7 @@
 package io.github.lgpy.tabbyfin;
 
 import android.content.Context;
+import android.graphics.PixelFormat;
 import android.os.Bundle;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
@@ -37,6 +38,11 @@ public class MainActivity extends GameActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // The app's surface is translucent and over the video's (VideoSurface): the video shows
+        // wherever the app draws nothing. A media overlay sits above other SurfaceViews and
+        // below the window. Set before the view is attached, which is after onCreate.
+        mSurfaceView.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+        mSurfaceView.setZOrderMediaOverlay(true);
         // Back goes back in the app while there's somewhere to go, then puts the app in the
         // background instead of closing it (see onDestroy).
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
