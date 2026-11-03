@@ -1,0 +1,8 @@
+# libmpv for Android, with its ffmpeg: mpv-android's release APKs, from which build.sh takes the
+# native libraries (all but libplayer.so, mpv-android's own JNI glue). Video spike (docs/android.md).
+# Each line: ABI, APK file, its SHA256. Update the tag and the checksums together.
+MPV_ANDROID_BASE_URL=https://github.com/mpv-android/mpv-android/releases/download/2026-09-17
+MPV_ANDROID_APKS=(
+  "arm64-v8a app-default-arm64-v8a-release.apk 0b0e0a534dd6b8d2b117f06952e0600064ad97702e48bff02543e3e32107803d"
+  "x86_64 app-default-x86_64-release.apk 347cef5d0c2fe76ec95e19685597ad5d208e5309cc0642d51ae656b125ce1d07"
+)

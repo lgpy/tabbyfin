@@ -549,6 +549,13 @@ fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Si
 }
 
 impl eframe::App for App {
+    /// Clear on Android, where the video plays in a surface under the window's (docs/android.md);
+    /// every screen paints its own backdrop over the rest.
+    #[cfg(target_os = "android")]
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.; 4]
+    }
+
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         #[cfg(target_os = "android")]
         crate::android::raw_input(ctx, raw_input);

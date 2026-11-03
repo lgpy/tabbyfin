@@ -129,6 +129,10 @@ enum Target {
     Local(Arc<RenderControl>),
     /// A player host process (see `crate::remote`).
     Remote(Arc<dyn Fn(u32, u32) + Send + Sync>),
+    /// The player draws into a surface of its own, under the UI's (Android: `crate::android`).
+    /// No frames come; the UI places the surface and leaves its own transparent over it.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    External,
 }
 
 /// State shared between the render thread, the player and the UI.
@@ -236,6 +240,34 @@ impl VideoOutput {
         }
     }
 
+    /// Video the player draws into a surface of its own ([`VideoOutput::draws_itself`]).
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) fn external() -> Self {
+        let (_, frames) = watch::channel(None);
+        Self {
+            target: Target::External,
+            frames,
+        }
+    }
+
+    /// Whether the player draws the video itself, into a surface under the UI's, rather than
+    /// handing frames over. The UI then places it ([`VideoOutput::place`]) and draws nothing
+    /// opaque over that rectangle.
+    pub fn draws_itself(&self) -> bool {
+        matches!(self.target, Target::External)
+    }
+
+    /// Where the video goes, in window pixels, when the player draws it itself.
+    pub fn place(&self, left: i32, top: i32, width: i32, height: i32) {
+        if !self.draws_itself() {
+            return;
+        }
+        #[cfg(target_os = "android")]
+        crate::android::place_surface(left, top, width, height);
+        #[cfg(not(target_os = "android"))]
+        let _ = (left, top, width, height);
+    }
+
     /// Latest frame, updated as mpv renders.
     pub fn frames(&self) -> watch::Receiver<Option<Frame>> {
         self.frames.clone()
@@ -253,6 +285,7 @@ impl VideoOutput {
                 }
             }
             Target::Remote(set_target) => set_target(width, height),
+            Target::External => {}
         }
     }
 }

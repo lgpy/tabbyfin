@@ -42,6 +42,9 @@ pub struct Video {
     shown: Option<(egui::TextureId, [u32; 2])>,
     /// A GPU frame couldn't be imported; see [`Video::import_failed`].
     import_failed: bool,
+    /// Where the player's own surface was last put, in window pixels, when it draws the video
+    /// itself ([`VideoOutput::draws_itself`]).
+    placed: Option<[i32; 4]>,
     /// GPU frames in a row whose image was already gone ([`ImportError::Gone`]).
     #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
     gone: u32,
@@ -113,6 +116,7 @@ impl Video {
             imported: Vec::new(),
             shown: None,
             import_failed: false,
+            placed: None,
             gone: 0,
             _wake: wake,
         }
@@ -120,7 +124,13 @@ impl Video {
 
     /// Whether a frame has arrived to draw.
     pub fn has_frame(&self) -> bool {
-        self.shown.is_some()
+        self.shown.is_some() || self.output.draws_itself()
+    }
+
+    /// Whether the player draws the video into a surface of its own, under the window: the
+    /// page then paints nothing opaque over the video's rectangle.
+    pub fn draws_itself(&self) -> bool {
+        self.output.draws_itself()
     }
 
     /// Whether a GPU frame failed to import, so nothing new will show: the session has to be
@@ -138,6 +148,16 @@ impl Video {
     pub fn show(&mut self, ui: &mut egui::Ui) -> egui::Response {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::CLICK);
         let pixels_per_point = ui.ctx().pixels_per_point();
+        if self.output.draws_itself() {
+            // The player's surface goes under this rectangle, and the window stays clear over it.
+            let px = (rect * pixels_per_point).round();
+            let place = [px.left(), px.top(), px.width(), px.height()].map(|v| v as i32);
+            if self.placed != Some(place) {
+                self.placed = Some(place);
+                self.output.place(place[0], place[1], place[2], place[3]);
+            }
+            return response;
+        }
         let target = rect.size() * pixels_per_point;
         self.output
             .set_target_size(target.x.round() as u32, target.y.round() as u32);
