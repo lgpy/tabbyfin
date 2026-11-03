@@ -1,6 +1,6 @@
 # Manual testing checklist
 
-What works in development but hasn't been tried where it matters: on real hardware, real servers, release builds, with a real mouse and keyboard, or with a second person. Development happens in WSL2 without a GPU, against the local dev servers in `dev/` (see [`dev/README.md`](../dev/README.md)), with keys pressed from inside the app (`TABBYFIN_KEYS`) and the headless UI tests in `crates/app/src/ui_tests/`.
+What works in development but hasn't been tried where it matters: on real hardware, real servers, release builds, with a real mouse and keyboard, or with a second person. Development happens on Windows, against the local dev servers in `dev/` (see [`dev/README.md`](../dev/README.md)), with keys pressed from inside the app (`TABBYFIN_KEYS`) and the headless UI tests in `crates/app/src/ui_tests/`.
 
 When a check has been done, delete it, noting the hardware, OS and server version in the commit message, and file anything that fails. Roadmap numbers refer to [`ROADMAP.md`](ROADMAP.md).
 
@@ -77,7 +77,7 @@ The harness presses keys from inside the app and the UI tests click headless, so
 ## 7. Real libraries
 
 - **Real metadata** (TMDb): sorting by rating, release date and runtime gives sensible orders; cast photos and the Cast & crew shelf show (the dev items have no people); a person page for someone in many movies and shows, and a person card without a picture.
-- **A large library** (hundreds to 10,000 items, `dev/fake-library.py`): the grid keeps the selection visible, rows still loading included; letters land on the first item with that letter, ascending and descending, with a filter, and names with articles, accents and digits land where the server sorts them; excluding genres or tags (the id listing's time, the letter bar, scrolling); a page request failing mid-library and retried after its rows scroll out and back; window resize and zoom with the cursor in the grid.
+- **A large library** (hundreds to 10,000 items, `python dev/fake-library.py`): the grid keeps the selection visible, rows still loading included; letters land on the first item with that letter, ascending and descending, with a filter, and names with articles, accents and digits land where the server sorts them; excluding genres or tags (the id listing's time, the letter bar, scrolling); a page request failing mid-library and retried after its rows scroll out and back; window resize and zoom with the cursor in the grid.
 - **Home settings** changed in the web client, then Home reloaded here; the Latest shelves and `LatestItemsExcludes` against 12.2 (the dev server's `/Items/Latest` answers `[]`); a Latest title opening its library sorted by date added, newest first, while *My Media* keeps the remembered sort.
 - An account with **no libraries**, and one with **no playlists** ("No playlists yet. Type a name to make one.").
 - **Remote trailers**, and a series' extras.

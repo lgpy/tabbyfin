@@ -1,0 +1,11 @@
+# LF in the working tree on every OS. Git for Windows would otherwise check the shell scripts,
+# the Python tools and everything Docker and CI read out with CRLF, which bash can't run and
+# which makes the same commit differ per platform.
+* text=auto eol=lf
+
+# Binaries: never converted, never diffed as text.
+*.png binary
+*.ico binary
+*.jpg binary
+*.7z binary
+*.flatpak binary

@@ -79,8 +79,8 @@ mise tasks        # everything else
 Plain `cargo run` works too, with the Rust version pinned in `mise.toml` (1.99).
 
 **System libraries:**
-- **Linux:** a C toolchain and `pkg-config`; the Vulkan, Wayland/X11 and xkbcommon libraries and libmpv are loaded at runtime, so building needs no `-dev` packages for them. The full `apt` line is in [`docs/PLAN.md`](docs/PLAN.md) §8. Install `libmpv2` to play video.
-- **Windows:** the MSVC toolchain. For playback, put `libmpv-2.dll` next to the exe (`packaging/fetch-libmpv.sh`), and optionally ANGLE (`packaging/fetch-angle.sh`).
+- **Linux:** a C toolchain and `pkg-config`; the Vulkan, Wayland/X11 and xkbcommon libraries and libmpv are loaded at runtime, so building needs no `-dev` packages for them. The full `apt` line is in [`docs/PLAN.md`](docs/PLAN.md) §7. Install `libmpv2` to play video.
+- **Windows:** the MSVC toolchain, and Git for Windows for the bash scripts behind `mise` (mise runs its tasks through cmd.exe). For playback, `mise run dev:assets` puts `libmpv-2.dll` and ANGLE next to the exe.
 - **macOS:** Xcode command line tools, and `brew install mpv`.
 
 **Test server:** `mise run dev:setup` starts a local Jellyfin 12.2 in Docker with a small generated library (login `dev` / `dev`). `mise run dev:min` starts Jellyfin 10.11, the minimum supported version, on port 8097 and runs the API smoke test against it. See [`dev/README.md`](dev/README.md).

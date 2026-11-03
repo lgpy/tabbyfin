@@ -4,14 +4,16 @@
 #
 #   packaging/fetch-angle.sh <dest>
 #
-# The packages are .tar.zst: extracted with zstd, a libarchive tar (bsdtar, Windows' tar.exe
-# from WSL when <dest> is on a Windows drive), or Python's zstandard module.
+# The packages are .tar.zst: extracted with zstd, a libarchive tar (bsdtar, which on Windows is
+# System32's tar.exe), or Python's zstandard module.
 set -euo pipefail
 
 dest="$1"
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=angle.lock
 source "$here/angle.lock"
+# shellcheck source=libarchive.sh
+source "$here/libarchive.sh"
 
 mkdir -p "$dest/licenses"
 dest="$(cd "$dest" && pwd)"
@@ -21,16 +23,14 @@ trap 'rm -rf "$work"' EXIT
 cd "$work"
 
 extract() { # <archive> <member>...
-  local archive="$1"
+  local archive="$1" bsd
   shift
   if command -v zstd >/dev/null; then
     zstd -dcq "$archive" | tar -x "$@"
-  elif command -v bsdtar >/dev/null; then
-    bsdtar -xf "$archive" "$@"
-  elif command -v tar.exe >/dev/null; then
-    tar.exe -xf "$archive" "$@"
+  elif bsd="$(bsdtar_bin)"; then
+    "$bsd" -xf "$archive" "$@"
   else
-    python3 -I -c 'import sys, tarfile, zstandard
+    python -I -c 'import sys, tarfile, zstandard
 with zstandard.open(sys.argv[1], "rb") as f, tarfile.open(fileobj=f, mode="r|") as t:
     t.extractall(members=(m for m in t if m.name in sys.argv[2:]), filter="data")' "$archive" "$@"
   fi

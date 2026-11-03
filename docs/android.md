@@ -78,8 +78,8 @@ After that: Android TV, picture-in-picture, background audio, downloads.
 
 ## Testing
 
-- **Emulator, in WSL:** KVM is available (the user needs to be in the `kvm` group), so an x86_64 emulator runs at full speed. It runs headless (`-no-window`, nothing opens on the desktop) and draws in software (SwiftShader, which still offers Vulkan and GLES). Drive it with `adb shell input` (taps, swipes, text) and take screenshots with `adb exec-out screencap -p`. It's good for the app starting, sign-in and the touch layout, not for judging video. It takes 2–3 GB, so don't run it during a big cargo build.
-- **Real phone, over Wi-Fi:** the phone's *Wireless debugging* (Developer options), paired from WSL with `adb pair` and `adb connect`; WSL's mirrored networking puts it on the phone's network. This is where playback, the video spike, battery, rotation and the real soft keyboard get tested.
+- **Emulator, on Windows:** the Android Studio emulator runs an x86_64 image on Hyper-V or WHPX at full speed. It runs headless (`-no-window`, nothing opens on the desktop) and draws in software (SwiftShader, which still offers Vulkan and GLES). Drive it with `adb shell input` (taps, swipes, text) and take screenshots with `adb exec-out screencap -p`. It's good for the app starting, sign-in and the touch layout, not for judging video. It takes 2–3 GB, so don't run it during a big cargo build. (On Linux, KVM plays the same part, and the user needs to be in the `kvm` group.)
+- **Real phone, over Wi-Fi:** the phone's *Wireless debugging* (Developer options), paired from the same machine with `adb pair` and `adb connect`. This is where playback, the video spike, battery, rotation and the real soft keyboard get tested.
 - The `egui_kittest` UI tests keep running on the desktop; a compact-width variant of the page tests covers the phone layout.
 - `TESTING.md` gets an Android section for what only a device can show: rotation, going to the background during playback, the soft keyboard, the back gesture.
 
@@ -87,4 +87,4 @@ After that: Android TV, picture-in-picture, background audio, downloads.
 
 - **Text input:** egui's soft-keyboard and IME support on Android is the least mature part of the port. If NativeActivity can't do it, GameActivity or a JNI call to `InputMethodManager` can.
 - **The touch layout touches nearly every page.** It's the largest part of the work.
-- **Build memory:** Android builds are extra cargo builds in an 11 GB WSL; run one at a time.
+- **Build memory:** Android builds are extra cargo builds on a machine that's already building the desktop app; run one at a time.

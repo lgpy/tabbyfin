@@ -41,7 +41,7 @@ const MARGIN: i8 = 24;
 // Rendering it, from the repository root: the skill's script, this file, and `--no-open` so it
 // only writes the pictures.
 //
-//     python3 -I .agents/skills/ui-mockup/render.py crates/app/src/ui_tests/gallery.rs --no-open
+//     python -I .agents/skills/ui-mockup/render.py crates/app/src/ui_tests/gallery.rs --no-open
 
 // ## Text
 // The text styles beyond plain body text, and the label a form puts above its field.

@@ -8,6 +8,14 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")" && pwd)/.data/media"
 dur="${DURATION:-60}"
 
+# drawtext needs a font. Linux and macOS find one through fontconfig; the Windows ffmpeg builds
+# ship no fontconfig config and print "Cannot load default config file" for every label, so name
+# Windows' own font in the filter there (the colon in the path is escaped for the filter parser).
+drawtext_font=""
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) drawtext_font="fontfile='C\:/Windows/Fonts/arial.ttf':" ;;
+esac
+
 srt() {
   local title="$1"
   printf '1\n00:00:01,000 --> 00:00:05,000\n%s\n\n2\n00:00:10,000 --> 00:00:15,000\nTen seconds in.\n\n3\n00:00:30,000 --> 00:00:35,000\nHalfway there.\n' "$title"
@@ -49,7 +57,7 @@ video() {
     -f lavfi -i "sine=frequency=660:duration=${dur}" \
     -i "$sub" \
     -map 0:v -map 1:a -map 2:a -map 3:s \
-    -vf "drawtext=text='${title}':fontcolor=white:fontsize=36:box=1:boxcolor=black@0.6:x=(w-tw)/2:y=h-80" \
+    -vf "drawtext=${drawtext_font}text='${title}':fontcolor=white:fontsize=36:box=1:boxcolor=black@0.6:x=(w-tw)/2:y=h-80" \
     "${codec[@]}" \
     -c:a aac -b:a 64k -c:s srt \
     -metadata title="$title" \
@@ -69,7 +77,7 @@ image() {
   [[ -f "$out" ]] && return
   mkdir -p "$(dirname "$out")"
   ffmpeg -loglevel error -y -f lavfi -i "color=c=${color}:size=${size}" -frames:v 1 \
-    -vf "drawtext=text='${label}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2" "$out"
+    -vf "drawtext=${drawtext_font}text='${label}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2" "$out"
 }
 
 movie="$root/Movies/Test Movie (2024)"

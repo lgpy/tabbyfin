@@ -116,6 +116,7 @@ Every path ends here when no import can be used; it's also what macOS shows for 
 
 ## Test loop for Windows
 
-- Build a cross-build from WSL with mingw (`dev/win-run.sh`, release; `--debug` for a debug build). wgpu's DX12 backend compiles its shaders at runtime, so it doesn't need `fxc.exe`.
-- Copy it to `C:\Temp`, launch it through WSL interop, and read its log file.
+- Build and run natively: `mise run run` (or `cargo run -p tabbyfin`), after `mise run dev:assets` has put libmpv and ANGLE beside the exe. wgpu's DX12 backend compiles its shaders at runtime, so it doesn't need `fxc.exe`.
+- The log goes to the terminal that started it and to a daily file (*Settings → Logs → Open log folder*); `TABBYFIN_MPV_LOG=info` adds mpv's own.
+- `TABBYFIN_VIDEO=software|gpu` forces either video path, and `TABBYFIN_PLAYER=embedded` keeps libmpv in the app's process.
 - CI produces the MSVC release builds.
