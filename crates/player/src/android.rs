@@ -101,18 +101,66 @@ pub(crate) unsafe fn load_class(env: *mut JNIEnv, activity: jobject, name: &CStr
     }
 }
 
-/// Calls a static `void` method of `VideoSurface` with int arguments.
-fn call_video_surface(method: &CStr, signature: &CStr, args: &[jvalue]) -> Result<()> {
+/// Runs `f` with `VideoSurface`'s class (its natives registered) and the activity.
+fn with_video_surface<T>(f: impl FnOnce(*mut JNIEnv, jclass, jobject) -> Result<T>) -> Result<T> {
     with_env(|env, activity| unsafe {
-        let f = &**env;
         let class = load_class(env, activity, c"io.github.lgpy.tabbyfin.VideoSurface")?;
-        register_natives(env, class)?;
+        let result = register_natives(env, class).and_then(|()| f(env, class, activity));
+        ((**env).v1_1.DeleteLocalRef)(env, class);
+        result
+    })
+}
+
+/// Calls a static `void` method of `VideoSurface`.
+fn call_video_surface(method: &CStr, signature: &CStr, args: &[jvalue]) -> Result<()> {
+    with_video_surface(|env, class, _| unsafe {
+        let f = &**env;
         let id = (f.v1_1.GetStaticMethodID)(env, class, method.as_ptr(), signature.as_ptr());
         (f.v1_1.CallStaticVoidMethodA)(env, class, id, args.as_ptr());
-        check(env, "VideoSurface")?;
-        (f.v1_1.DeleteLocalRef)(env, class);
-        Ok(())
+        check(env, "VideoSurface")
     })
+}
+
+/// The window while the player page is open (`on`): the screen kept on, landscape and the
+/// system bars hidden. Closing it undoes that and gives the brightness back to the system.
+pub fn watching(on: bool) {
+    let result = context().and_then(|(_, activity)| {
+        let args = [jvalue { l: activity }, jvalue { z: on }];
+        call_video_surface(c"watching", c"(Landroid/app/Activity;Z)V", &args)
+    });
+    if let Err(err) = result {
+        tracing::warn!("couldn't set up the window for the player: {err}");
+    }
+}
+
+/// The screen's brightness from 0 to 1: the window's own, or the system's.
+pub fn brightness() -> Option<f32> {
+    let result = with_video_surface(|env, class, activity| unsafe {
+        let f = &**env;
+        let id = (f.v1_1.GetStaticMethodID)(
+            env,
+            class,
+            c"brightness".as_ptr(),
+            c"(Landroid/app/Activity;)F".as_ptr(),
+        );
+        let value = (f.v1_1.CallStaticFloatMethodA)(env, class, id, [jvalue { l: activity }].as_ptr());
+        check(env, "VideoSurface.brightness")?;
+        Ok(value)
+    });
+    result
+        .inspect_err(|err| tracing::warn!("couldn't read the brightness: {err}"))
+        .ok()
+}
+
+/// Sets the window's brightness, from 0 to 1, until the player closes ([`watching`]).
+pub fn set_brightness(value: f32) {
+    let result = context().and_then(|(_, activity)| {
+        let args = [jvalue { l: activity }, jvalue { f: value.clamp(0., 1.) }];
+        call_video_surface(c"setBrightness", c"(Landroid/app/Activity;F)V", &args)
+    });
+    if let Err(err) = result {
+        tracing::warn!("couldn't set the brightness: {err}");
+    }
 }
 
 /// A JNI global reference to an `android.view.Surface`, as an address: what mpv takes as `wid`.

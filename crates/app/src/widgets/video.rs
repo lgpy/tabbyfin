@@ -142,11 +142,11 @@ impl Video {
 
     /// Fills the space left in `ui` with the latest frame, letterboxed on black (contain). The
     /// player renders frames at this size in physical pixels (never larger than the video), so
-    /// they're drawn one to one unless the video is smaller. The response senses clicks for the
-    /// player's controls, and isn't focusable: a Tab that gave egui the focus would take the
-    /// player's keys from it (as the dialogs are).
-    pub fn show(&mut self, ui: &mut egui::Ui) -> egui::Response {
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::CLICK);
+    /// they're drawn one to one unless the video is smaller. The response senses what the
+    /// player asks for (clicks, and drags for touch gestures), and isn't focusable: a Tab that
+    /// gave egui the focus would take the player's keys from it (as the dialogs are).
+    pub fn show(&mut self, ui: &mut egui::Ui, sense: egui::Sense) -> egui::Response {
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), sense);
         let pixels_per_point = ui.ctx().pixels_per_point();
         if self.output.draws_itself() {
             // The player's surface goes under this rectangle, and the window stays clear over it.

@@ -2,7 +2,7 @@
 
 **Goal:** Tabbyfin on Android phones and tablets, driven by touch. It's the same Rust and egui app as on the desktop, started through eframe's Android backend, so the API client, the pages, the cozy look (`DESIGN.md`), SyncPlay and remote control come along. There's no separate Kotlin UI.
 
-**Status:** the app runs in the desktop layout: sign-in by touch and the soft keyboard, Home, libraries and item pages, the system Back, and the session kept across restarts (A0 and A1 below), on the emulator and a Honor phone. Playback works on the phone with both players (A3, below): Media3 by default and mpv as a setting, drawing into a SurfaceView under the app's surface. Not done: the touch player page and the touch layout.
+**Status:** the app runs in the desktop layout: sign-in by touch and the soft keyboard, Home, libraries and item pages, the system Back, and the session kept across restarts (A0 and A1 below), on the emulator and a Honor phone. Playback works on the phone with both players (A3, below): Media3 by default and mpv as a setting, drawing into a SurfaceView under the app's surface, with a touch player page. Not done: the touch layout outside the player.
 
 - **Phones and tablets first.** Android TV comes later; the keyboard cursor (`browse::Browse`, `keys.rs`) already suits a D-pad, so most of TV is a launcher entry and a 10-foot layout.
 - **Devices:** Android 8 (API 26) and newer, where AHardwareBuffer and Vulkan 1.0 are available. arm64-v8a first, x86_64 for the emulator.
@@ -63,7 +63,7 @@ The cozy look stays. What changes is everything that assumes a mouse, a keyboard
 - **Text input:** done for the platform (above); left: the keyboard's kind per field (URL for the server address, no suggestions for user names) and a form taller than what the keyboard leaves scrolling its focused field into view.
 - **Back:** done (above); left: predictive Back's animation.
 - **Safe areas:** the insets are applied (above); left: dark or light status bar icons to match the theme (they're white on the light backdrop now), and the player drawing under the bars.
-- **Player page** (`views/player.rs`): tap to show and hide the controls, double-tap left or right to skip, drag sideways to seek with trickplay thumbnails, drag up and down for volume (right side) and brightness (left side), and landscape while playing. The screen is kept on while a video shows (`VideoSurface.java`).
+- **Player page:** done (`views/player/touch.rs`). A tap shows or hides the controls; a double tap on the left or right third skips 10 s, and further taps there in quick succession skip again; a sideways drag seeks, with the time and the trickplay thumbnail in the middle; an up and down drag sets the brightness (left half) or the volume (right half). The volume slider and the fullscreen button are left out. While the player is open the window stays on, in landscape, with the system bars hidden (`VideoSurface.watching`), and the brightness goes back to the system's when it closes. Left: picture-in-picture, a `MediaSession`, and the player drawing under a display cutout.
 
 ## Video spike
 
@@ -171,7 +171,7 @@ Three runs each, alternating the players. A fourth round stalled on Wi-Fi (Media
 | A0 | **Hello Android** | S–M | An eframe window with the cozy backdrop runs on a phone; `android:build` and the CI APK work. Runs on the emulator; a phone and the first CI run are left. |
 | A1 | **Platform gaps** | M | The table above is handled; sign-in and Home work by touch, in the desktop layout. Done on the emulator. |
 | A2 | **Video spike** | M | The decision is written down. Done (above). |
-| A3 | **Playback** | L | Media3 (default) and libmpv (a setting) play on a SurfaceView under egui, with reporting, resume, tracks and subtitles, and the touch player page. Both play on the phone, with tracks, subtitles, seeking and the screen kept on; left: the touch player page. |
+| A3 | **Playback** | L | Media3 (default) and libmpv (a setting) play on a SurfaceView under egui, with reporting, resume, tracks and subtitles, and the touch player page. Done on the phone. |
 | A4 | **Touch layout** | L | Layout sizes, the bottom bar, touch targets, long-press menus, insets and the soft keyboard. |
 | A5 | **Release** | M | A signed APK on F-Droid (and maybe the Play Store). |
 
