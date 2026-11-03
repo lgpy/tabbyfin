@@ -35,7 +35,7 @@ pub async fn check() -> Option<Update> {
     let override_url = cfg!(debug_assertions)
         .then(|| std::env::var("TABBYFIN_UPDATE_URL").ok())
         .flatten();
-    let mut config = Config::load();
+    let config = Config::load();
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
     if !config.check_for_updates.unwrap_or(true) {
         return None;
@@ -46,19 +46,22 @@ pub async fn check() -> Option<Update> {
     if !due && override_url.is_none() {
         return None;
     }
-    config.update_checked_at = Some(now);
-    if let Err(err) = config.save() {
-        tracing::warn!("failed to save config: {err:#}");
-    }
 
     let url = override_url.as_deref().unwrap_or(LATEST_RELEASE_URL);
     let release = match fetch(url).await {
         Ok(release) => release,
         Err(err) => {
+            // Not recorded as a check, so the next launch tries again.
             tracing::info!("update check failed: {err:#}");
             return None;
         }
     };
+    // Reloaded: the user may have changed settings while the request was out.
+    let mut config = Config::load();
+    config.update_checked_at = Some(now);
+    if let Err(err) = config.save() {
+        tracing::warn!("failed to save config: {err:#}");
+    }
     let current = env!("CARGO_PKG_VERSION");
     tracing::info!(latest = %release.tag_name, current, "checked for updates");
     (!release.draft && !release.prerelease && is_newer(&release.tag_name, current)).then(|| Update {
@@ -69,7 +72,8 @@ pub async fn check() -> Option<Update> {
 
 async fn fetch(url: &str) -> anyhow::Result<Release> {
     let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        // Generous: some networks take 15 s or more to resolve api.github.com.
+        .timeout(Duration::from_secs(30))
         // GitHub's API refuses requests without one.
         .user_agent(concat!("tabbyfin/", env!("CARGO_PKG_VERSION")))
         .build()?;
