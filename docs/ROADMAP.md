@@ -68,7 +68,7 @@ Done: an Inno Setup installer for Windows, an AppImage and a Flatpak bundle besi
 | 5.2 | **Windows code signing** | P2 | M | Avoids SmartScreen warnings on the installer and the exe. |
 | 5.3 | **Flathub** | P2 | M | The Flatpak builds and plays from a local bundle; it isn't published. |
 | 5.4 | **ARM builds** | P3 | M | Windows on ARM and Linux aarch64 aren't built. The libmpv and ANGLE pins are x86_64 only. |
-| 5.5 | **Android (phones and tablets)** | P3 | L | Not started. The same egui app through eframe's Android backend, touch-first; the player (libmpv or Media3) is chosen by a spike. Plan in [`android.md`](android.md). |
+| 5.5 | **Android (phones and tablets)** | P3 | L | Signs in and browses by touch in the desktop layout; Media3 (default) and libmpv (a setting) play on a phone, with a touch player page. Left: the touch layout and the release. Plan in [`android.md`](android.md). |
 
 ## 6. Quality and engineering
 

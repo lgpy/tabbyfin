@@ -61,6 +61,7 @@ use crate::widgets::round_button::{self, RoundButton};
 use crate::widgets::segmented;
 use crate::widgets::select;
 use crate::widgets::stepper::{self, Step};
+use crate::widgets::subtitles::Subtitles;
 use crate::widgets::tabs;
 use crate::widgets::text::{card_text, episode_label, timestamp};
 use crate::widgets::video::Video;
@@ -173,6 +174,8 @@ pub struct PlayerPage {
     settings_tab: SettingsTab,
     /// Show the time left instead of the time played (a setting, toggled by clicking the clock).
     show_remaining: bool,
+    /// Subtitle cues, from a player that leaves drawing them to the UI (Media3).
+    subtitles: Subtitles,
 }
 
 impl PlayerPage {
@@ -197,6 +200,10 @@ impl PlayerPage {
             menu_open: false,
             settings_tab: SettingsTab::General,
             show_remaining: config.show_remaining_time.unwrap_or(false),
+            subtitles: Subtitles::new(
+                config.subtitle_color.unwrap_or_default(),
+                config.subtitle_style.unwrap_or_default(),
+            ),
         };
         this.show_controls();
         this
@@ -242,6 +249,12 @@ impl PlayerPage {
         if import_failed {
             cx.services.fall_back_to_pixels();
         }
+        if let Some(state) = cx.services.playback.now_playing()
+            && !state.cues.cues.is_empty()
+        {
+            let scale = state.adjustments.subtitle_scale as f32;
+            self.subtitles.show(ui, rect, &state.cues, state.cues_changed, scale);
+        }
         let Some(view) = view else {
             // Between sessions (a reconnect, or the next item still loading): the last frame
             // stays, with the loader over it and a bar to leave by.
@@ -266,6 +279,12 @@ impl PlayerPage {
             self.video_input(&response, ui, &view, cx, bars);
         }
         self.settle(ui, view.paused);
+    }
+
+    /// Whether the player draws the video itself, under the window: the page's backdrop is
+    /// then clear (see `Video::draws_itself`).
+    pub fn video_draws_itself(&self) -> bool {
+        self.video.as_ref().is_some_and(|(_, video)| video.draws_itself())
     }
 
     /// The video widget for the playing session, made when the session changes.

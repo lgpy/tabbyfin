@@ -4,6 +4,10 @@
 //! libmpv is loaded with `dlopen` at runtime, so builds don't need it; without it the app shows
 //! an error when playback starts.
 
+// On Android mpv draws into its own surface (`crate::android`), so the render API, which hands
+// frames to the UI elsewhere, goes unused there.
+#![cfg_attr(target_os = "android", allow(dead_code))]
+
 #[cfg(windows)]
 mod angle;
 #[cfg(windows)]
@@ -111,8 +115,33 @@ const EXTRA_DIRS: &[&str] = if cfg!(target_os = "macos") {
     &[]
 };
 
+#[cfg(target_os = "android")]
+fn pass_java_vm() -> Result<(), Error> {
+    let vm = crate::android::vm().ok_or_else(|| Error::LibmpvUnavailable("the JavaVM wasn't set".into()))?;
+    // SAFETY: libavcodec is already loaded as libmpv's dependency; this takes another reference.
+    let avcodec = unsafe { Library::new("libavcodec.so") }.map_err(|e| Error::LibmpvUnavailable(e.to_string()))?;
+    // SAFETY: `int av_jni_set_java_vm(void *vm, void *log_ctx)`.
+    let set: libloading::Symbol<unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int> =
+        unsafe { avcodec.get(b"av_jni_set_java_vm\0") }.map_err(|e| Error::LibmpvUnavailable(e.to_string()))?;
+    // SAFETY: a valid JavaVM; ffmpeg keeps the first one it's given.
+    let code = unsafe { set(vm as *mut c_void, std::ptr::null_mut()) };
+    if code < 0 {
+        tracing::warn!(code, "av_jni_set_java_vm failed");
+    }
+    // ffmpeg keeps the pointer, not the library handle, and libmpv keeps libavcodec loaded.
+    std::mem::forget(avcodec);
+    Ok(())
+}
+
 impl Api {
     pub fn load() -> Result<Self, Error> {
+        let api = Self::load_library()?;
+        #[cfg(target_os = "android")]
+        pass_java_vm()?;
+        Ok(api)
+    }
+
+    fn load_library() -> Result<Self, Error> {
         // Bundled first, any version: next to the executable (Windows), or in ../lib (the
         // Linux AppImage's usr/bin and usr/lib, which may carry libmpv.so.1 where the system
         // has libmpv.so.2). Then the system search path, then the extra folders.

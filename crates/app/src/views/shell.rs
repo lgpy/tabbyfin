@@ -306,8 +306,14 @@ impl Shell {
         #[cfg(debug_assertions)]
         self.debug_play(cx);
         if let Some(player) = &mut self.player {
+            // Clear where the player draws the video itself, under the window.
+            let fill = if player.video_draws_itself() {
+                egui::Color32::TRANSPARENT
+            } else {
+                over_video::BACKDROP
+            };
             egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(over_video::BACKDROP))
+                .frame(egui::Frame::NONE.fill(fill))
                 .show(ui, |ui| player.show(ui, cx));
         } else {
             // One backdrop under the bar and the page, as on sign-in: neither panel has a fill,

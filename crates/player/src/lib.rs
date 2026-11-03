@@ -7,10 +7,17 @@
 //! `TABBYFIN_PLAYER=embedded` runs it inside the app instead. Commands are async; player
 //! state arrives as [`PlayerEvent`]s on a channel. Dropping the [`Player`] stops playback. Must
 //! be used from within a tokio runtime.
+//!
+//! On Android there's a second engine, Media3's ExoPlayer ([`Engine::Media3`], the default
+//! there), behind the same API: it takes the app's mpv commands and properties too.
 
+#[cfg(target_os = "android")]
+pub mod android;
 mod events;
 pub mod host;
 pub mod libmpv;
+#[cfg(target_os = "android")]
+mod media3;
 mod remote;
 mod wire;
 
@@ -20,7 +27,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-pub use events::{EndReason, PlayerEvent};
+pub use events::{Cue, CueImage, Cues, EndReason, PlayerEvent};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -51,7 +58,16 @@ pub struct LoadRequest {
     pub http_headers: Vec<String>,
 }
 
-/// An mpv instance.
+/// Which player plays.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Engine {
+    #[default]
+    Mpv,
+    /// Media3's ExoPlayer, on Android (docs/android.md, *Decision*); mpv elsewhere.
+    Media3,
+}
+
+/// A player: mpv, or on Android possibly Media3 ([`Engine`]).
 pub struct Player(Backend);
 
 enum Backend {
@@ -59,16 +75,29 @@ enum Backend {
     Embedded(Arc<libmpv::EmbeddedPlayer>),
     /// libmpv in a player host process. Boxed: it's much larger than the embedded handle.
     Remote(Box<remote::RemotePlayer>),
+    /// Media3 (ExoPlayer) through `Media3Bridge.java`. Its calls go over JNI and only post to
+    /// ExoPlayer's thread, but attaching a thread can block, so they run on the blocking pool.
+    #[cfg(target_os = "android")]
+    Media3(Arc<media3::Media3Player>),
 }
 
 type Started = (Player, mpsc::UnboundedReceiver<PlayerEvent>, libmpv::VideoOutput);
 
 impl Player {
-    /// Starts mpv, in a player host process unless `TABBYFIN_PLAYER=embedded` or on Android
-    /// (where an app can't start its own executable again), with a video output whose frames the
-    /// UI can draw (`import`). Fails with [`Error::LibmpvUnavailable`] where libmpv can't be
-    /// loaded.
-    pub async fn spawn(import: libmpv::VideoImport) -> Result<Started> {
+    /// Starts a player: Media3 if asked for on Android, else mpv, in a player host process unless
+    /// `TABBYFIN_PLAYER=embedded` or on Android (where an app can't start its own executable
+    /// again), with a video output whose frames the UI can draw (`import`). Fails with
+    /// [`Error::LibmpvUnavailable`] where libmpv can't be loaded.
+    pub async fn spawn(import: libmpv::VideoImport, engine: Engine) -> Result<Started> {
+        #[cfg(target_os = "android")]
+        if engine == Engine::Media3 {
+            let (player, events, video) = tokio::task::spawn_blocking(media3::Media3Player::spawn)
+                .await
+                .map_err(|_| Error::Closed)??;
+            return Ok((Player(Backend::Media3(Arc::new(player))), events, video));
+        }
+        #[cfg(not(target_os = "android"))]
+        let _ = engine;
         if cfg!(target_os = "android") || std::env::var("TABBYFIN_PLAYER").as_deref() == Ok("embedded") {
             return Self::spawn_embedded(import).await;
         }
@@ -97,6 +126,11 @@ impl Player {
                 blocking(move || player.command(&args)).await
             }
             Backend::Remote(player) => player.command(args).await,
+            #[cfg(target_os = "android")]
+            Backend::Media3(player) => {
+                let player = player.clone();
+                blocking(move || player.command(&args)).await
+            }
         }
     }
 
@@ -108,6 +142,11 @@ impl Player {
                 blocking(move || player.set_property(&name, &value)).await
             }
             Backend::Remote(player) => player.set_property(name, value).await,
+            #[cfg(target_os = "android")]
+            Backend::Media3(player) => {
+                let (player, name) = (player.clone(), name.to_owned());
+                blocking(move || player.set_property(&name, &value)).await
+            }
         }
     }
 

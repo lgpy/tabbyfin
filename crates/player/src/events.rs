@@ -20,8 +20,39 @@ pub enum PlayerEvent {
     /// Playback (re)started after loading or a seek: frames are ready at the new position.
     Restarted,
     EndFile(EndReason),
+    /// The subtitle cues to show now, replacing the last ones. Only from players that leave
+    /// drawing subtitles to the UI (Media3); mpv draws its own.
+    Cues(Cues),
     /// mpv exited or closed the connection. Always the last event.
     Exited,
+}
+
+/// Subtitle cues for the UI to draw over the video ([`PlayerEvent::Cues`]).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Cues {
+    pub cues: Vec<Cue>,
+    /// The video's width over its height (0 when unknown): image cues are placed in the video's
+    /// rectangle, which is letterboxed in the view.
+    pub aspect: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Cue {
+    /// Text, its lines separated by newlines, shown at the bottom.
+    Text(String),
+    /// A picture (PGS, DVB and VobSub subtitles).
+    Image(CueImage),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CueImage {
+    pub width: u32,
+    pub height: u32,
+    /// Unpremultiplied RGBA, `width * height * 4` bytes.
+    pub rgba: Vec<u8>,
+    /// Left, top, width and height in fractions of the video's rectangle. A height of 0 keeps
+    /// the picture's own aspect ratio.
+    pub rect: [f32; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -32,4 +32,10 @@ dependencies {
     // The version android-activity's GameActivity glue is written against (its README).
     implementation("androidx.games:games-activity:4.4.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
+    // Media3, the default player (Media3Bridge.java), with HLS for the server's transcodes.
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
+    // Jellyfin's ffmpeg audio decoders for Media3 (DTS, TrueHD…), as Findroid uses; the version
+    // matches Media3's.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1")
 }

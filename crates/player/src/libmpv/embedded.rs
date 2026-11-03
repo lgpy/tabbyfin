@@ -70,9 +70,28 @@ impl EmbeddedPlayer {
                 set_option(name.trim(), value.trim());
             }
         }
-        // The software renderer reads frames back from the CPU.
-        set_option("hwdec", "auto-copy-safe");
-        set_option("vo", "libmpv");
+        // Android: mpv draws into the video surface itself (`crate::android`), and MediaCodec's
+        // frames are never copied back; `vo` is set when the surface exists. Findroid's settings
+        // (docs/android.md).
+        #[cfg(target_os = "android")]
+        for (name, value) in [
+            ("profile", "fast"),
+            ("hwdec", "mediacodec"),
+            ("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1"),
+            ("gpu-context", "android"),
+            ("opengl-es", "yes"),
+            ("ao", "aaudio"),
+            ("vo", "null"),
+            ("force-window", "no"),
+        ] {
+            set_option(name, value);
+        }
+        // Elsewhere the UI draws mpv's frames; the software renderer reads them back from the CPU.
+        #[cfg(not(target_os = "android"))]
+        {
+            set_option("hwdec", "auto-copy-safe");
+            set_option("vo", "libmpv");
+        }
         // SAFETY: valid handle, options set.
         core.api
             .check("mpv_initialize", unsafe { (core.api.initialize)(core.mpv) })?;
@@ -90,7 +109,17 @@ impl EmbeddedPlayer {
         }
 
         // The render context must exist before a file with video starts.
-        let (video, render_thread) = VideoOutput::new(core.clone(), import)?;
+        #[cfg(target_os = "android")]
+        let (video, render_thread) = {
+            let _ = import;
+            show_on_surface(&core)?;
+            (VideoOutput::external(), None)
+        };
+        #[cfg(not(target_os = "android"))]
+        let (video, render_thread) = {
+            let (video, thread) = VideoOutput::new(core.clone(), import)?;
+            (video, Some(thread))
+        };
 
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let stop = Arc::new(AtomicBool::new(false));
@@ -106,7 +135,7 @@ impl EmbeddedPlayer {
             Self {
                 core,
                 video,
-                render_thread: Some(render_thread),
+                render_thread,
                 stop,
                 events: Some(events),
             },
@@ -155,7 +184,32 @@ impl Drop for EmbeddedPlayer {
         // Stop rendering; the render context itself is freed with the last `VideoOutput`,
         // before the core (see `Renderer::drop`).
         self.render_thread.take();
+        #[cfg(target_os = "android")]
+        crate::android::hide_surface();
     }
+}
+
+/// Points mpv at the video surface whenever it exists: the surface as `wid` and `vo=gpu-next`,
+/// then `vo=null` before it goes (mpv must stop drawing into it before the callback returns).
+#[cfg(target_os = "android")]
+fn show_on_surface(core: &Arc<Core>) -> Result<()> {
+    let core = Arc::downgrade(core);
+    crate::android::show_surface(move |surface| {
+        let Some(core) = core.upgrade() else { return };
+        let result = match surface {
+            Some(surface) => core
+                .set_property("wid", &surface.to_string())
+                .and_then(|()| core.set_property("force-window", "yes"))
+                .and_then(|()| core.set_property("vo", "gpu-next")),
+            None => core
+                .set_property("vo", "null")
+                .and_then(|()| core.set_property("force-window", "no"))
+                .and_then(|()| core.set_property("wid", "0")),
+        };
+        if let Err(err) = result {
+            tracing::warn!("mpv and the video surface: {err}");
+        }
+    })
 }
 
 fn value_string(value: &Value) -> String {

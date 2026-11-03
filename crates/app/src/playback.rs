@@ -18,7 +18,7 @@ use jellyfin::models::{
 };
 use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
 use player::libmpv::{VideoImport, VideoOutput};
-use player::{EndReason, LoadRequest, Player, PlayerEvent};
+use player::{Cues, EndReason, LoadRequest, Player, PlayerEvent};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 use url::Url;
@@ -260,6 +260,10 @@ pub struct NowPlaying {
     pub resumed_from: Option<Duration>,
     /// Counts [`PlayerEvent::Restarted`]: playback resumed after loading or seeking.
     pub restarts: u64,
+    /// The subtitle cues to draw, from a player that leaves them to the UI (Media3), and how
+    /// many times they've changed.
+    pub cues: Cues,
+    pub cues_changed: u64,
     commands: mpsc::UnboundedSender<UiCommand>,
 }
 
@@ -346,6 +350,10 @@ impl NowPlaying {
             PlayerEvent::Volume(volume) => self.volume = *volume,
             PlayerEvent::Muted(muted) => self.muted = *muted,
             PlayerEvent::Restarted => self.restarts += 1,
+            PlayerEvent::Cues(cues) => {
+                self.cues = cues.clone();
+                self.cues_changed += 1;
+            }
             _ => {}
         }
     }
@@ -989,6 +997,8 @@ impl Services {
                     group_item: running.options.group_item.clone(),
                     resumed_from: running.resumed_from,
                     restarts: 0,
+                    cues: Cues::default(),
+                    cues_changed: 0,
                     commands: running.commands.clone(),
                 });
                 self.events.push(AppEvent::PlaybackStarted);
@@ -1229,10 +1239,11 @@ fn subtitle_index(choice: SubtitleChoice) -> Option<i32> {
 async fn start_player(
     import: VideoImport,
 ) -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, VideoOutput), String> {
-    Player::spawn(import).await.map_err(|err| match err {
+    let engine = Config::load().android_player.unwrap_or_default().engine();
+    Player::spawn(import, engine).await.map_err(|err| match err {
         player::Error::LibmpvUnavailable(reason) if cfg!(target_os = "android") => {
             tracing::warn!("libmpv unavailable: {reason}");
-            "Playing videos doesn't work on Android yet.".to_owned()
+            "mpv couldn't start. Pick Media3 as the player in Settings › Playback.".to_owned()
         }
         player::Error::LibmpvUnavailable(reason) => {
             tracing::warn!("libmpv unavailable: {reason}");
@@ -1532,7 +1543,7 @@ async fn run_session(
             http_headers: vec![format!("Authorization: {}", client.authorization_header())],
         })
         .await
-        .map_err(|err| format!("mpv couldn't open the stream: {err}"))?;
+        .map_err(|err| format!("The player couldn't open the stream: {err}"))?;
 
     let _ = channels.updates.send(SessionUpdate::Started {
         source: Box::new(source.clone()),
@@ -1589,7 +1600,7 @@ async fn run_session(
                     PlayerEvent::Duration(length) => duration = Some(*length),
                     PlayerEvent::EndFile(EndReason::Eof) if !stopping => finished = true,
                     PlayerEvent::EndFile(EndReason::Error(message)) => {
-                        error = Some(format!("mpv couldn't play this file: {message}"));
+                        error = Some(format!("The player couldn't play this file: {message}"));
                     }
                     PlayerEvent::Exited => break,
                     _ => {}
