@@ -107,9 +107,11 @@ Against `mise run dev:min` (port 8097): signing in with a password and with Quic
 
 ## 12. Android
 
-Built with `mise run android:install` and tried on the emulator only (`docs/android.md`, *Testing*).
+Built with `mise run android:install`, and tried on the emulator and one phone (a Honor with Android 16; `docs/android.md`).
 
-- The app starts on a phone with wgpu on Vulkan (the emulator uses GL, since its software Vulkan stops presenting after the first frames).
+- Playback on Media3: external subtitles (`sub-add`), image subtitles (PGS, VobSub), subtitle and audio delay, an HLS transcode, and audio focus (a call or another app's audio pauses it).
+- Playback on mpv: ASS subtitles with their styling and the system's fonts.
+- Playback on a second phone, and whether HDR reaches an HDR screen as HDR.
 - Typing with Gboard, Samsung Keyboard and SwiftKey: suggestions and autocorrect, swipe typing, Backspace held down, and a password field getting the password keyboard.
 - The status bar, gesture bar and a display cutout keep clear of the app, in portrait and landscape.
 - Back with gesture navigation (and three-button navigation): closes a menu, goes back a page, then puts the app in the background; opening it again shows the same page.
