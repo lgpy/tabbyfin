@@ -78,7 +78,8 @@ tabbyfin/
 
 ```
 crates/app/src/
-├── main.rs          logging, player host check, wgpu setup, eframe::run_native; declares every module
+├── main.rs          the desktop binary: calls lib.rs's run
+├── lib.rs           logging, player host check, wgpu setup, eframe::run_native (run, android_main); declares every module
 ├── app.rs           eframe::App: screens (restoring, sign-in, signed in), account switching; owns Services and the toasts
 ├── services.rs      Services: everything per signed-in session, AppEvent, Services::tick
 ├── task.rs          Task<T>: a tokio future whose result the UI polls; channel: repaint-on-send; Deadline: a timer

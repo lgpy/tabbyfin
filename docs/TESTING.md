@@ -104,3 +104,13 @@ Against `mise run dev:min` (port 8097): signing in with a password and with Quic
 ## 11. Update notice
 
 *Download* on the update notice opens the release page in the browser.
+
+## 12. Android
+
+Built with `mise run android:install` and tried on the emulator only (`docs/android.md`, *Testing*).
+
+- The app starts on a phone with wgpu on Vulkan (the emulator uses GL, since its software Vulkan stops presenting after the first frames).
+- Typing with Gboard, Samsung Keyboard and SwiftKey: suggestions and autocorrect, swipe typing, Backspace held down, and a password field getting the password keyboard.
+- The status bar, gesture bar and a display cutout keep clear of the app, in portrait and landscape.
+- Back with gesture navigation (and three-button navigation): closes a menu, goes back a page, then puts the app in the background; opening it again shows the same page.
+- The app restores its session after Android ends it in the background (Developer options, *Don't keep activities*, or `adb shell am kill`).

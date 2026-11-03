@@ -27,7 +27,7 @@ pub const WINDOW: egui::Vec2 = egui::vec2(1000., 760.);
 const SCALE: f32 = 2.;
 
 /// How many times finer than [`SCALE`] a mockup is rendered before it's scaled down. The
-/// headless renderer has no multisampling, which the window has (`main.rs`), and the mascot's
+/// headless renderer has no multisampling, which the window has (`lib.rs`), and the mascot's
 /// meshes rely on it for smooth edges, since epaint feathers only the shapes it tessellates.
 const SUPERSAMPLE: f32 = 2.;
 

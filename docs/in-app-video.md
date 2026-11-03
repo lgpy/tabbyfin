@@ -25,7 +25,7 @@ crates/app/src/widgets/video.rs
   register it with egui-wgpu (Renderer::register_native_texture), draw it letterboxed
 ```
 
-Files: `crates/player/src/libmpv/{video,opengl,angle,wgl,egl,d3d11}.rs`, `crates/player/src/{host,remote,wire}.rs`, `crates/app/src/widgets/video.rs`, `widgets/video/{vulkan,dx12}.rs`, `crates/app/src/main.rs` (wgpu setup), `crates/app/src/app.rs` and `playback.rs` (the import is set per sign-in), `views/player.rs` (a failed import falls back).
+Files: `crates/player/src/libmpv/{video,opengl,angle,wgl,egl,d3d11}.rs`, `crates/player/src/{host,remote,wire}.rs`, `crates/app/src/widgets/video.rs`, `widgets/video/{vulkan,dx12}.rs`, `crates/app/src/lib.rs` (wgpu setup), `crates/app/src/app.rs` and `playback.rs` (the import is set per sign-in), `views/player.rs` (a failed import falls back).
 
 ## Constraints
 
@@ -48,7 +48,7 @@ The app tells the player, before libmpv starts, which frames it can show. **`pla
 - `adapter_import(render_state)` reads what wgpu's adapter and device can take, through wgpu-hal: on Vulkan with `Features::VULKAN_EXTERNAL_MEMORY_FD`, the physical device's `deviceUUID` (`vulkan_device_uuid`, using `ash`); on DX12 on a hardware adapter, the adapter's LUID (`dx12_adapter_luid`, not on WARP, where the player's GPU path would cost more than pixels); `Pixels` otherwise, which includes wgpu on GL and macOS.
 - `import(render_state)` is what the app asks for: `adapter_import`'s answer as it is (or `Pixels` when there's no render state, as in tests), logged as `video: what the player is asked for`.
 - `App` sets it on the session's `PlaybackManager` at sign-in (`set_video_import`), and each session passes it to `Player::spawn(import)` (`crates/app/src/playback.rs`).
-- wgpu is set up for this in `main.rs`: backends `DX12` on Windows, `METAL` on macOS, `VULKAN | GL` elsewhere (`WGPU_BACKEND` still overrides); and the device is requested with `VULKAN_EXTERNAL_MEMORY_FD` when the adapter has it, because a device must be created with that feature to import fds.
+- wgpu is set up for this in `lib.rs`: backends `DX12` on Windows, `METAL` on macOS, `VULKAN | GL` elsewhere (`WGPU_BACKEND` still overrides); and the device is requested with `VULKAN_EXTERNAL_MEMORY_FD` when the adapter has it, because a device must be created with that feature to import fds.
 
 **The player side:**
 
@@ -61,7 +61,7 @@ The app tells the player, before libmpv starts, which frames it can show. **`pla
 
 ## Linux GPU frames
 
-`crates/app/src/widgets/video/vulkan.rs` (import), `crates/player/src/libmpv/egl.rs` (renderer), `crates/app/src/main.rs` (device features).
+`crates/app/src/widgets/video/vulkan.rs` (import), `crates/player/src/libmpv/egl.rs` (renderer), `crates/app/src/lib.rs` (device features).
 
 - **When:** wgpu runs on Vulkan and its device was made with `VULKAN_EXTERNAL_MEMORY_FD`. On wgpu's GL fallback (`WGPU_BACKEND=gl`, or no Vulkan) `adapter_import` finds nothing to import and the app asks for pixels.
 - **Same GPU:** the app sends its Vulkan `deviceUUID`, and the player puts everything there (`egl.rs`): the exporting Vulkan device is the one with that UUID, and mpv's OpenGL context is made on the EGL display whose `GL_DEVICE_UUID_EXT` matches — the default display first, then each EGL device (`EGL_EXT_device_enumeration` + `EGL_EXT_platform_device`) — which covers laptops whose default GL is the other GPU. Nothing matching means software frames. The context asks for no surface type, since a device's display has no window configs.
@@ -77,7 +77,7 @@ The app tells the player, before libmpv starts, which frames it can show. **`pla
 
 `crates/app/src/widgets/video/dx12.rs` (import), `crates/player/src/libmpv/{angle,wgl,d3d11}.rs` (renderers), `crates/player/src/wire.rs` (`SharedHandle`).
 
-- **When:** wgpu runs on DX12 (`main.rs` forces it; `WGPU_BACKEND` can pick another API, which gets pixels) on a hardware adapter. The app sends the adapter's LUID.
+- **When:** wgpu runs on DX12 (`lib.rs` forces it; `WGPU_BACKEND` can pick another API, which gets pixels) on a hardware adapter. The app sends the adapter's LUID.
 - **Same GPU:** D3D12 only opens textures made on its own adapter, so the player makes its textures there (`d3d11.rs`). ANGLE gets the LUID as display attributes (`EGL_PLATFORM_ANGLE_D3D_LUID_HIGH_ANGLE` / `_LOW_ANGLE`, when ANGLE has `EGL_ANGLE_platform_angle_d3d_luid`), and the player then checks the adapter of the D3D11 device ANGLE made; another adapter is an error, so WGL is tried. The WGL path creates its D3D11 device on the DXGI adapter with that LUID (`EnumAdapterByLuid`, `D3D_DRIVER_TYPE_UNKNOWN`); its OpenGL runs wherever the driver puts it, and if that's the other GPU of a laptop the interop fails and playback uses software frames.
 - **NT handles:** D3D12 can't open D3D11's legacy share handles. Each ring texture is made with `D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE` (no keyed mutex) and shared with `IDXGIResource1::CreateSharedHandle` under a name, `Local\tabbyfin-video-<pid>-<process start>-<id>`: unique per texture and never reused, so a name can only open the texture it was made for. The app opens it by name (`ID3D12Device1::OpenSharedHandleByName`, then `OpenSharedHandle` → `ID3D12Resource`), so nothing has to be duplicated into the app's process and the same frames work from the host and embedded. Duplicating the NT handle into the app (`DuplicateHandle`, which needs the app's process handle in the host) was the alternative; named handles were simpler and worked, so it wasn't needed. The wire message is `SharedHandle { id, name, width, height }` (`crates/player/src/wire.rs`).
 - **Texture lifetime:** a name opens only while some handle to the texture is open. `SharedFrame` holds the texture's NT handle (`Arc<OwnedHandle>`, shared with its ring slot), so in-process a frame keeps its texture alive until the UI has drawn it, even after a resize replaced the ring. Frames from the host arrive without it; the host keeps the handles of the last 6 frames it sent (two rings). If a name doesn't open anyway (`ImportError::Gone`), the widget keeps the last frame up and waits for the next one; 10 in a row count as a failed import. Once the app has opened a texture, its `ID3D12Resource` keeps it alive on its own.
@@ -85,6 +85,7 @@ The app tells the player, before libmpv starts, which frames it can show. **`pla
 - **Resource state:** the texture is handed to wgpu as already in `TextureUses::RESOURCE` (shader resource) and only ever sampled, so wgpu never puts a barrier on it. A texture opened from another device starts in `COMMON`; D3D12 promotes it to a shader resource implicitly on each submit that samples it and lets it decay back to `COMMON` when that submit finishes, which is the state the player's D3D11 device needs to draw into it again. Declaring it `UNINITIALIZED`, as on Linux, would have wgpu move it out of `COMMON` once with an explicit barrier and leave it there while the player writes it.
 - **Sync:** `glFinish` before the frame is published, and the ring of three. No shared fences (ROADMAP 2.3.7); no tearing was seen on the RX 6600.
 - **Fallback:** ANGLE, then WGL, then software, as before; a failed import switches the session to software frames (the handshake's fallback above).
+- **The `dxva2-egl` warning:** with ANGLE, mpv probes its `dxva2-egl` hwdec (D3D9 textures shared through EGL), can't get an EGL surface, and logs `mpv: [libmpv_render/dxva2-egl] Failed to create EGL surface` once at the start of every playback, then decodes with `d3d11va`. It's the same on every codec and version tried (H.264 1080p, HEVC 4K 10-bit), once per playback and not again after a resize; the WGL and software paths don't log it. It's mpv's own probe, not the frame path.
 - **Measured** (debug builds, RX 6600, Test Movie's 4K HEVC 10-bit version at 24 fps in a 1296×759 window, rendered at 1280×720; Windows-side CPU time over 8–10 s windows, after the first seconds; a temporary counter showed the UI drawing all 24 frames a second):
 
   | Path | App | Player host | Together | Embedded (`TABBYFIN_PLAYER=embedded`) |

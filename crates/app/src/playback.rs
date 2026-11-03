@@ -1230,6 +1230,10 @@ async fn start_player(
     import: VideoImport,
 ) -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, VideoOutput), String> {
     Player::spawn(import).await.map_err(|err| match err {
+        player::Error::LibmpvUnavailable(reason) if cfg!(target_os = "android") => {
+            tracing::warn!("libmpv unavailable: {reason}");
+            "Playing videos doesn't work on Android yet.".to_owned()
+        }
         player::Error::LibmpvUnavailable(reason) => {
             tracing::warn!("libmpv unavailable: {reason}");
             let hint = if cfg!(target_os = "macos") {

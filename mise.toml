@@ -5,13 +5,18 @@
 # in a script under dev/ or packaging/, and the scripts run from Git Bash (or WSL/Linux).
 
 [tools]
-rust = { version = "1.99.0", components = "clippy,rustfmt" }
+rust = { version = "1.99.0", components = "clippy,rustfmt", targets = "aarch64-linux-android,x86_64-linux-android" }
 # `python`, on every OS: Windows has no `python3` (its `python3.exe` is a Microsoft Store stub).
 python = "3.13"
 # Builds the Linux .deb (packaging/package.sh).
 "cargo:cargo-deb" = { version = "3.8.0", os = ["linux"] }
 # GitHub CLI, for the ci:* tasks.
 gh = "2.102.0"
+# The Android build (packaging/android/build.sh): the Rust targets, cargo-ndk, and Gradle with the
+# JDK it runs on. The SDK and NDK come from ANDROID_HOME (docs/android.md).
+"cargo:cargo-ndk" = "4.1.2"
+gradle = "9.8.2"
+java = "temurin-21.0.13+9.0.LTS"
 
 [env]
 RUST_LOG = "info"
@@ -49,6 +54,16 @@ depends = ["fmt:check", "check", "test"]
 [tasks.smoke]
 description = "Exercise the Jellyfin API client against the dev server"
 run = "cargo run -p jellyfin --example smoke"
+
+# Android (docs/android.md)
+
+[tasks."android:build"]
+description = "Build the Android debug APK (arm64 and x86_64)"
+run = "bash packaging/android/build.sh"
+
+[tasks."android:install"]
+description = "Build the x86_64 debug APK and install it on the running emulator or phone"
+run = "bash packaging/android/install.sh"
 
 # Dev server (dev/README.md)
 

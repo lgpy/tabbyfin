@@ -1037,6 +1037,10 @@ impl SettingsPage {
     fn about(&mut self, ui: &mut Ui) {
         info(ui, &self.search, VERSION, env!("CARGO_PKG_VERSION"));
 
+        // The store updates the app on Android, so there's no check to turn off.
+        if cfg!(target_os = "android") {
+            return;
+        }
         let current = self.config.check_for_updates.unwrap_or(true);
         if let Some(edit) = toggle(ui, &self.search, CHECK_FOR_UPDATES, current, Some(true)) {
             self.save(|config| config.check_for_updates = edit.or_unset());

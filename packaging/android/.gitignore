@@ -1,0 +1,6 @@
+/.gradle
+/build
+/.kotlin
+/local.properties
+# Built by build.sh from crates/app.
+/src/main/jniLibs

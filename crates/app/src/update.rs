@@ -31,6 +31,10 @@ struct Release {
 /// Checks for a newer release if the setting allows and a day has passed since the last
 /// check. Any failure is logged and reads as no update. Runs on tokio.
 pub async fn check() -> Option<Update> {
+    // The store updates the app on Android.
+    if cfg!(target_os = "android") {
+        return None;
+    }
     // Dev aid: `TABBYFIN_UPDATE_URL` points the check elsewhere and checks every launch.
     let override_url = cfg!(debug_assertions)
         .then(|| std::env::var("TABBYFIN_UPDATE_URL").ok())

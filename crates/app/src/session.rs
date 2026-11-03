@@ -18,10 +18,22 @@ impl Session {
 }
 
 pub fn client_info(device_id: &str) -> ClientInfo {
+    #[cfg(not(target_os = "android"))]
     let device = gethostname::gethostname().to_string_lossy().into_owned();
+    #[cfg(target_os = "android")]
+    let device = crate::android::device_name().unwrap_or_default();
     ClientInfo {
         client: "Tabbyfin".into(),
-        device: if device.is_empty() { "Desktop".into() } else { device },
+        device: if device.is_empty() {
+            if cfg!(target_os = "android") {
+                "Android"
+            } else {
+                "Desktop"
+            }
+            .into()
+        } else {
+            device
+        },
         device_id: device_id.to_owned(),
         version: env!("CARGO_PKG_VERSION").into(),
     }
