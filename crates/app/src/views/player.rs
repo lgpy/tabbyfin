@@ -25,6 +25,8 @@
 //! Auto-skip and the clock's "time left" are config settings read when the page opens; the clock
 //! saves its choice when clicked.
 
+mod touch;
+
 use std::time::Duration;
 
 use egui::{
@@ -176,6 +178,8 @@ pub struct PlayerPage {
     show_remaining: bool,
     /// Subtitle cues, from a player that leaves drawing them to the UI (Media3).
     subtitles: Subtitles,
+    /// Taps and drags on the video, on a touch screen.
+    touch: touch::Touch,
 }
 
 impl PlayerPage {
@@ -204,6 +208,7 @@ impl PlayerPage {
                 config.subtitle_color.unwrap_or_default(),
                 config.subtitle_style.unwrap_or_default(),
             ),
+            touch: touch::Touch::default(),
         };
         this.show_controls();
         this
@@ -214,8 +219,9 @@ impl PlayerPage {
         // Dark over the video in either theme.
         ui.style_mut().visuals = egui::Visuals::dark();
         ui.style_mut().visuals.override_text_color = Some(over_video::FOREGROUND);
-        // Any mouse movement brings the controls (and the cursor) back.
-        if ui.input(|input| input.pointer.delta() != Vec2::ZERO) {
+        // Any mouse movement brings the controls (and the cursor) back. A touch screen has taps
+        // for that, and a finger's movement is a gesture.
+        if !touch::TOUCH && ui.input(|input| input.pointer.delta() != Vec2::ZERO) {
             self.show_controls();
         }
         self.sync_video(cx);
@@ -273,6 +279,7 @@ impl PlayerPage {
                 self.controls(ui, &view, cx, bottom);
             });
         }
+        self.touch_feedback(ui, rect, &view);
         self.prompt(ui, &view, cx);
         if let Some(response) = response {
             let bars = self.controls_visible.then_some([top, bottom]);
@@ -304,7 +311,7 @@ impl PlayerPage {
         let Some((_, video)) = &mut self.video else {
             return (None, false, false);
         };
-        let response = video.show(ui);
+        let response = video.show(ui, touch::sense());
         (Some(response), video.has_frame(), video.import_failed())
     }
 
@@ -457,6 +464,10 @@ impl PlayerPage {
     /// back. The wheel changes the volume, except over the bars: `bars` is `None` while they're
     /// hidden, so the whole window is the video then.
     fn video_input(&mut self, response: &Response, ui: &Ui, view: &View, cx: &mut PageCx, bars: Option<[Rect; 2]>) {
+        if touch::TOUCH {
+            self.touch_input(response, ui, view, cx, bars);
+            return;
+        }
         let over_bar = ui
             .input(|input| input.pointer.interact_pos())
             .is_some_and(|pos| bars.is_some_and(|bars| bars.iter().any(|bar| bar.contains(pos))));
@@ -731,7 +742,11 @@ impl PlayerPage {
                     cx.services.control(UiCommand::ToggleMute);
                     self.show_controls();
                 }
-                self.volume_slider(ui, view, cx);
+                // A touch screen sets the volume by dragging on the video (or with the phone's
+                // buttons), which leaves the row room for the rest on a phone.
+                if !touch::TOUCH {
+                    self.volume_slider(ui, view, cx);
+                }
                 // The clock's own 8 points, on top of the bar's gap.
                 ui.add_space(8.);
                 let clock = ui.add(
@@ -759,19 +774,22 @@ impl PlayerPage {
                 .layout(Layout::right_to_left(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                let fullscreen = fullscreen(ui.ctx());
-                let icon = if fullscreen {
-                    ICON_FULLSCREEN_EXIT
-                } else {
-                    ICON_FULLSCREEN
-                };
-                let tip = if fullscreen {
-                    "Exit fullscreen (F)"
-                } else {
-                    "Fullscreen (F)"
-                };
-                if control(icon, CONTROL, tip).show(ui).clicked() {
-                    toggle_fullscreen(ui.ctx());
+                // On a touch screen (Android) the player is always full screen.
+                if !touch::TOUCH {
+                    let fullscreen = fullscreen(ui.ctx());
+                    let icon = if fullscreen {
+                        ICON_FULLSCREEN_EXIT
+                    } else {
+                        ICON_FULLSCREEN
+                    };
+                    let tip = if fullscreen {
+                        "Exit fullscreen (F)"
+                    } else {
+                        "Fullscreen (F)"
+                    };
+                    if control(icon, CONTROL, tip).show(ui).clicked() {
+                        toggle_fullscreen(ui.ctx());
+                    }
                 }
                 let open = egui::Popup::is_id_open(ui.ctx(), settings_id());
                 let lit = open.then(|| view.lit_button(self.settings_tab));
