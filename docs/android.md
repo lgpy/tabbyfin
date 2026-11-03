@@ -2,10 +2,18 @@
 
 **Goal:** Tabbyfin on Android phones and tablets, driven by touch. It's the same Rust and egui app as on the desktop, started through eframe's Android backend, so the API client, the pages, the cozy look (`DESIGN.md`), SyncPlay and remote control come along. There's no separate Kotlin UI.
 
-**Status:** the app runs on the emulator in the desktop layout: sign-in by touch and the soft keyboard, Home, libraries and item pages, the system Back, and the session kept across restarts (A0 and A1 below; neither tried on a phone yet). Not done: the touch layout and playback. The video player is chosen by a spike (below) before playback work starts.
+**Status:** the app runs in the desktop layout: sign-in by touch and the soft keyboard, Home, libraries and item pages, the system Back, and the session kept across restarts (A0 and A1 below), on the emulator and a Honor phone. Playback works on the phone with both players (A3, below): Media3 by default and mpv as a setting, drawing into a SurfaceView under the app's surface. Not done: the touch player page and the touch layout.
 
 - **Phones and tablets first.** Android TV comes later; the keyboard cursor (`browse::Browse`, `keys.rs`) already suits a D-pad, so most of TV is a launcher entry and a 10-foot layout.
 - **Devices:** Android 8 (API 26) and newer, where AHardwareBuffer and Vulkan 1.0 are available. arm64-v8a first, x86_64 for the emulator.
+
+## Decision
+
+Both players, as [Findroid](https://github.com/jarnedemeulemeester/findroid) has them (see the video spike below for the measurements):
+- **Media3 (ExoPlayer) by default,** with Jellyfin's ffmpeg audio extension (`media3-ffmpeg-decoder`, for DTS, TrueHD and the like) and tunneled playback. It keeps HDR on an HDR screen and uses the least CPU in the app at 4K.
+- **libmpv as a setting** (mpv-android's build), for what Media3 plays badly: ASS subtitles with their styling, and anything Android's decoders can't take. It runs with `vo=gpu-next`, `gpu-context=android`, `hwdec=mediacodec`, `ao=aaudio`, `profile=fast` and a `fonts.conf` for the system's fonts.
+- **Both draw into a SurfaceView,** never through the CPU: on this phone that's every frame of 4K60 HDR10 at about 1.6 to 1.8 W, where copying the frames to the CPU loses most of them. The SurfaceView sits under the egui surface, which stays transparent over the video so the player page's controls show.
+- **Both are backends behind the `Player` API.** Media3's translates the app's commands, as `media3.rs` does in the spike. Track selection, external subtitles and delays get built for it, and its subtitle cues are drawn in egui.
 
 ## Scope
 
@@ -33,7 +41,7 @@ Android is `target_os = "android"`, not `"linux"`. Code gated on `target_os = "l
 
 | Area | Desktop | Android |
 |---|---|---|
-| Player process (`player::is_host_process`, `host.rs`) | libmpv in a player host process, the same executable re-run | In-process, always (`Player::spawn`); there's no libmpv in the APK yet (A3) |
+| Player process (`player::is_host_process`, `host.rs`) | libmpv in a player host process, the same executable re-run | In-process, always (`Player::spawn`): Media3 by default (`media3.rs`, `Media3Bridge.java`), mpv-android's libmpv as the *Player* setting; both draw into `VideoSurface.java`, placed by `android.rs` |
 | wgpu backends (`lib.rs`, `BACKENDS`) | Vulkan with GL fallback on Linux | Vulkan with GLES fallback (works on the emulator's SwiftShader Vulkan) |
 | Config and logs (`config.rs`, `ProjectDirs`) | Platform config dir | `android_main` sets `TABBYFIN_CONFIG_DIR` to `internal_data_path()`, so config, logs and image cache all go there; the image cache belongs in the cache dir, which the OS may clear |
 | Tokens (`credentials.rs`) | System keychain, `tokens/` file fallback | keyring has no Android store, so the `tokens/` fallback in app-private storage; Android Keystore through JNI later |
@@ -55,7 +63,7 @@ The cozy look stays. What changes is everything that assumes a mouse, a keyboard
 - **Text input:** done for the platform (above); left: the keyboard's kind per field (URL for the server address, no suggestions for user names) and a form taller than what the keyboard leaves scrolling its focused field into view.
 - **Back:** done (above); left: predictive Back's animation.
 - **Safe areas:** the insets are applied (above); left: dark or light status bar icons to match the theme (they're white on the light backdrop now), and the player drawing under the bars.
-- **Player page** (`views/player.rs`): tap to show and hide the controls, double-tap left or right to skip, drag sideways to seek with trickplay thumbnails, drag up and down for volume (right side) and brightness (left side), landscape while playing, and the screen kept on.
+- **Player page** (`views/player.rs`): tap to show and hide the controls, double-tap left or right to skip, drag sideways to seek with trickplay thumbnails, drag up and down for volume (right side) and brightness (left side), and landscape while playing. The screen is kept on while a video shows (`VideoSurface.java`).
 
 ## Video spike
 
@@ -69,14 +77,101 @@ About a week, on a throwaway branch: both players playing the dev server's media
 
 The result goes in a *Decision* section at the top of this file.
 
+### Groundwork on the emulator
+
+On the `spike/android-video` branch, both players play the dev server's 1080p H.264 movie on the emulator, through the `Player` API and the software video path (`Frame::Pixels`). Nothing is measured yet: the emulator renders in software, so CPU, battery and dropped frames wait for a phone.
+
+**libmpv** (the default player on Android):
+- `build.sh` takes mpv-android's libraries from its release APKs (`mpv-android.lock`, tag 2026-09-17): `libmpv.so`, ffmpeg's shared libraries and `libc++_shared.so`, but not mpv-android's own JNI glue (`libplayer.so`). The existing loader finds `libmpv.so` by name.
+- ffmpeg needs the JavaVM for MediaCodec: `android_main` hands it over (`libmpv::set_java_vm`), and loading libmpv passes it to `av_jni_set_java_vm`.
+- With `hwdec=mediacodec-copy`, MediaCodec decodes and mpv copies the frames back; audio goes through AudioTrack, and SRT subtitles render through libass even though mpv warns there's no fontconfig.
+- The API is unchanged: tracks, seeking and subtitles work as on the desktop.
+- Size: about 32 MB per ABI for arm64 (38 MB for x86_64), stored uncompressed in the APK.
+
+**Media3** (`TABBYFIN_PLAYER=media3`):
+- `Media3Bridge.java` runs ExoPlayer 1.8 on its own looper thread. `crates/player/src/media3.rs` turns the app's mpv commands and properties into JSON commands for it (load with headers and start, pause, seek, volume, mute, speed, release), and its callbacks into `PlayerEvent`s. JNI goes through raw `jni-sys`; the bridge class is loaded through the activity's class loader, and its native methods are registered at runtime.
+- Frames go to a YUV `ImageReader` sized from the video track (ExoPlayer reports no video size until it has a surface). Rust converts them to RGBA, scaled down to the view: a CPU copy, standing in for the zero-copy import of the reader's AHardwareBuffers.
+- Playback, pause, seeking, position and duration reporting, and the end of the file work. Not done: audio and subtitle track selection (`aid`, `sid`), external and embedded subtitles, subtitle and audio delay, and the `sub-*` style properties. Those are logged as ignored.
+- On the emulator, the hardware H.264 decoder (`c2.goldfish.h264.decoder`) gives garbage through a CPU-read `ImageReader`, while libmpv's `mediacodec-copy` reads it fine. `TABBYFIN_PLAYER=media3sw` limits Media3 to Android's software decoders, which draw correctly. Whether a phone's decoders behave like this matters only for the CPU path, not for the AHardwareBuffer import.
+- Size: a few MB of dex before R8.
+
+### On a phone
+
+**Setup:** a Honor ELI-NX9 (Snapdragon 7 Gen 3, Adreno 720, Android 16, a 1200×2664 HDR10/HLG/HDR10+ screen, on battery), with an optimised build that keeps the dev aids (`SPIKE_DEBUG_ASSERTIONS=1 build.sh --release`). The test files were the dev server's 1080p24 H.264 movie, and Jellyfin's `Test Jellyfin 4K HEVC HDR10 40M.mp4` (3840×2160, 60 fps, Main 10, about 39 Mbps), added to the dev library as "HDR10 Test 4K (2024)".
+
+Each run starts playback with `TABBYFIN_ROUTE`, waits 8 s, then samples for 15 s:
+- **CPU:** from `/proc`, in % of one core. Codec means the media.hwcodec, media.codec and media.swcodec processes; system is all 8 cores together.
+- **Power:** the battery's current × voltage, from `BatteryManager` once a second.
+- **Frames:** the frames handed to the UI per second (`player::stats`), with each player's drop counters.
+- **Seek:** two seeks back (the Left key), timed from the seek to the first frame after it.
+
+MagicOS hides app logs from logcat, so the app's log file and `files/spike.log` (`SpikeLog.java`) hold the numbers.
+
+| Run | Shown | Drops | App CPU | Codec CPU | SurfaceFlinger | System CPU | Power |
+|---|---|---|---|---|---|---|---|
+| Home screen, idle | – | – | 0% | 0% | 0% | 15% | 735 mW |
+| libmpv, CPU copy (`mediacodec-copy`, `vo=libmpv`), 1080p24 | 24 fps | 2 | 92% | 11% | 9% | 192% | 1832 mW |
+| libmpv, CPU copy, 4K60 HDR10 | 17–20 fps | about 40/s | 147% | 86% | 8% | 297% | 2957 mW |
+| libmpv, SurfaceView (`mediacodec`, `vo=gpu`), 1080p24 | yes | 0 | 42% | 9% | 21% | 197% | 1539 mW |
+| libmpv, SurfaceView, 4K60 HDR10 | yes | 0 | 92% | 31% | 35% | 255% | 2320 mW |
+| Media3, SurfaceView, 1080p24 | yes | 0 | 55% | 16% | 30% | 198% | 1464 mW |
+| Media3, SurfaceView, 4K60 HDR10 | yes | 0 | 53% | 28% | 32% | 202% | 1723 mW |
+
+- **Same hardware:** both players decode with Qualcomm's `c2.qti.avc.decoder` and `c2.qti.hevc.decoder`, and neither decoder drops frames.
+- **The CPU copy can't keep up at 4K60:** libmpv's copy back to the CPU and its software rendering drop most frames there, at the highest power.
+- **The SurfaceView runs** (`TABBYFIN_PLAYER=mpvsv` and `media3sv`, `VideoSurface.java`) put a SurfaceView over the player page, 16:9 across the width, and the player draws straight into it. Both show every frame. At 1080p they cost about the same. At 4K60 HDR10, Media3 uses about 600 mW (25%) less power, and about 40 points less of a core in the app.
+- **Media3's CPU path doesn't run on this phone:** Qualcomm's decoders only produce GPU-compressed buffers, even with `USAGE_CPU_READ_OFTEN` asked for, and `Image.getPlanes()` aborts the app. With GPU-only frames (`media3gpu`: a `PRIVATE` `ImageReader`, each frame acquired and released, nothing drawn) it decodes 4K60 at about 1580 mW. That's the starting point for importing its AHardwareBuffers into wgpu.
+- **Seek times aren't comparable:** libmpv's (15–50 ms) and Media3's (300–600 ms) count from different events.
+- **The app's CPU includes the player page,** which repaints every frame.
+- **Subtitles:** libmpv on the SurfaceView renders them itself (the 1080p run showed the SRT cue). Media3 doesn't render any yet.
+
+**What mpv can do on Android** (mpv's manual): `hwdec=mediacodec` without the copy needs `--vo=gpu --gpu-context=android` (mpv drawing to an `android.view.Surface` it owns, as here) or `--vo=mediacodec_embed` (no subtitles, OSD or filters). It also cuts 10-bit to 8, so HDR is tone-mapped to SDR. libmpv can't hand frames to the wgpu UI without the CPU copy. Media3 can either have its AHardwareBuffers imported into wgpu or draw to a SurfaceView, which can keep HDR on an HDR screen.
+
+### How Findroid does it
+
+[Findroid](https://github.com/jarnedemeulemeester/findroid) (a native Kotlin Jellyfin client) ships both players behind Media3's `Player` interface: `MPVPlayer` implements it, so one player screen (Media3's `PlayerView`, whose SurfaceView both draw into) drives either.
+- **The default is ExoPlayer,** with tunneled playback on, and Jellyfin's `media3-ffmpeg-decoder` extension for the audio Android lacks (DTS, DTS-HD, TrueHD). Its README says ASS styling is limited.
+- **mpv is a setting** (with libmpv built by Findroid's author): `vo=gpu-next` by default (`gpu` as a choice), `gpu-context=android`, `hwdec=mediacodec` (or `mediacodec-copy`, or `no`), `ao=aaudio` (or `audiotrack`, `opensles`). The SurfaceView's surface is attached on creation, with `force-window=yes` and `vo` set; on destruction, `vo=null` and `force-window=no`. Like `mpvsv` here.
+- **mpv details we don't have:**
+  - A `fonts.conf` in mpv's config dir that points fontconfig at `/system/fonts` and `/product/fonts`, so libass finds the system's fonts.
+  - `profile=fast` and a 64 MiB demuxer cache.
+  - `hwdec-codecs` limited to the main codecs.
+  - An audio session ID, audio focus (pausing when another app takes it), and `audio-set-media-role`.
+- **Around the player** (whichever it is): the screen kept on while playing, immersive mode, cutout insets for the controls, picture-in-picture, a `MediaSession`, and touch gestures (`PlayerGestureHelper`).
+- **Direct play only** (`static=true`): it posts playback info with a device profile, but doesn't transcode.
+
+### Measured again, with Findroid's settings
+
+- **libmpv** (`mpvsv`): `vo=gpu-next`, `ao=aaudio`, `profile=fast`.
+- **Media3** (`media3sv`): tunneling asked for, and Jellyfin's ffmpeg audio extension (`media3-ffmpeg-decoder` 1.8.0+1, `EXTENSION_RENDERER_MODE_ON`).
+
+Three runs each, alternating the players. A fourth round stalled on Wi-Fi (Media3 rendered 71 frames in 20 s) and is left out.
+
+| Run (mean of 3) | Shown | App CPU | Codec CPU | System CPU | Power (each run) |
+|---|---|---|---|---|---|
+| libmpv, SurfaceView, 1080p24 | every frame | 44% | 8% | 187% | 1308 mW (1239, 1340, 1345) |
+| Media3, SurfaceView, 1080p24 | every frame | 58% | 15% | 203% | 1349 mW (1272, 1522, 1254) |
+| libmpv, SurfaceView, 4K60 HDR10 | every frame | 91% | 29% | 251% | 1597 mW (1607, 1548, 1637) |
+| Media3, SurfaceView, 4K60 HDR10 | every frame | 53% | 27% | 214% | 1770 mW (1944, 1698, 1669) |
+
+- **No power gap left:** with `gpu-next` and AAudio, libmpv draws about as much power as Media3 at 1080p, and slightly less at 4K. The earlier 25% gap at 4K came from libmpv's `vo=gpu` (2320 mW) and AudioTrack. Media3 still uses less of a core in the app at 4K.
+- **The 4K clip has no audio track,** so tunneling (which pairs the video with the audio) can't have been active in those runs. At 1080p it made no measurable difference. Whether the decoder actually tunneled wasn't confirmed.
+- **Audio** (a copy of the 1080p movie with DTS and TrueHD tracks, made with Jellyfin's ffmpeg: "Audio Codecs Test (2024)"):
+  - libmpv decodes both itself.
+  - Media3 played the DTS track with this phone's licensed decoder (`c2.DTS.audio_decoder`, which many phones don't have). It reports TrueHD as playable only through the ffmpeg extension, since the phone has no TrueHD decoder.
+  - So Media3 needs the extension: about 1.5 MB of native code per ABI. The debug APK with all four of its ABIs grew from 74 to 87 MB.
+- **Subtitles:** Media3 without its `PlayerView` would have its cues drawn in egui. mpv renders them itself, ASS included, but needs the `fonts.conf` above for the system's fonts.
+
+**Not checked:** whether HDR actually reaches the screen as HDR (a screenshot can't show it); battery over a long session (the 15 s windows show the draw, not a percentage per hour); a second phone.
+
 ## Milestones
 
 | # | Milestone | Effort | Done when |
 |---|---|---|---|
 | A0 | **Hello Android** | S–M | An eframe window with the cozy backdrop runs on a phone; `android:build` and the CI APK work. Runs on the emulator; a phone and the first CI run are left. |
 | A1 | **Platform gaps** | M | The table above is handled; sign-in and Home work by touch, in the desktop layout. Done on the emulator. |
-| A2 | **Video spike** | M | The decision is written down. |
-| A3 | **Playback** | L | The chosen player plays with reporting, resume and tracks, and the touch player page. |
+| A2 | **Video spike** | M | The decision is written down. Done (above). |
+| A3 | **Playback** | L | Media3 (default) and libmpv (a setting) play on a SurfaceView under egui, with reporting, resume, tracks and subtitles, and the touch player page. Both play on the phone, with tracks, subtitles, seeking and the screen kept on; left: the touch player page. |
 | A4 | **Touch layout** | L | Layout sizes, the bottom bar, touch targets, long-press menus, insets and the soft keyboard. |
 | A5 | **Release** | M | A signed APK on F-Droid (and maybe the Play Store). |
 

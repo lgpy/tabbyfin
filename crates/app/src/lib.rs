@@ -163,17 +163,31 @@ fn android_main(android_app: winit::platform::android::activity::AndroidApp) {
     // The config, logs and image cache go in the app's private storage: `directories` knows no
     // Android folders.
     if let Some(dir) = android_app.internal_data_path() {
-        // SAFETY: set before any of the app's threads start; nothing else reads it.
-        unsafe { std::env::set_var("TABBYFIN_CONFIG_DIR", dir) };
+        // libass (mpv's subtitles) finds the system's fonts through fontconfig, which has no
+        // configuration on Android: point it at one listing them, as Findroid does.
+        let fonts = dir.join("fonts.conf");
+        if let Err(err) = std::fs::write(&fonts, fonts_conf(&dir.join("fontconfig-cache"))) {
+            eprintln!("couldn't write {}: {err}", fonts.display());
+        }
+        // SAFETY: set before any of the app's threads start; nothing else reads them.
+        unsafe {
+            std::env::set_var("TABBYFIN_CONFIG_DIR", &dir);
+            std::env::set_var("FONTCONFIG_FILE", &fonts);
+        }
     }
     android::env_from_property();
     let _log_guard = init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting tabbyfin");
     android::init(android_app.clone());
+    // SAFETY: the activity's JavaVM and a global reference to it, valid for the life of the
+    // process.
+    unsafe { player::android::init(android_app.vm_as_ptr(), android_app.activity_as_ptr()) };
 
     let config = config::Config::load();
     let options = eframe::NativeOptions {
         android_app: Some(android_app),
+        // A see-through surface, over the video's (`MainActivity`, `player::android`).
+        viewport: egui::ViewportBuilder::default().with_transparent(true),
         wgpu_options: wgpu_options(),
         multisampling: 4,
         ..Default::default()
@@ -189,6 +203,23 @@ fn android_main(android_app: winit::platform::android::activity::AndroidApp) {
     if let Err(err) = result {
         tracing::error!("couldn't open the window: {err}");
     }
+}
+
+/// A fontconfig configuration for the system's fonts on Android, with its cache in `cache`.
+#[cfg(target_os = "android")]
+fn fonts_conf(cache: &std::path::Path) -> String {
+    format!(
+        r#"<fontconfig>
+    <dir>/system/fonts/</dir>
+    <dir>/product/fonts/</dir>
+    <cachedir>{}</cachedir>
+    <alias><family>serif</family><prefer><family>Noto Serif</family></prefer></alias>
+    <alias><family>sans-serif</family><prefer><family>Roboto</family><family>Noto Sans</family></prefer></alias>
+    <alias><family>monospace</family><prefer><family>Droid Sans Mono</family></prefer></alias>
+</fontconfig>
+"#,
+        cache.display()
+    )
 }
 
 /// The graphics API per OS. mpv's frames are shown without a copy by importing the player's

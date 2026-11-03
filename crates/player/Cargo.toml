@@ -43,3 +43,7 @@ rustix = { version = "1", features = ["net", "fs"] }
 # examples/vk_interop_probe.rs. Same versions wgpu uses.
 ash = { version = "0.38", features = ["loaded"] }
 khronos-egl = { version = "6", features = ["dynamic"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# The JNI calls to the video surface and the player (android.rs). The version jni uses.
+jni-sys = "0.4"

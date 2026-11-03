@@ -41,7 +41,7 @@ use egui_material_icons::icons::{
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
-use crate::config::{self, Config, SubtitleColor, SubtitleStyle, ThemePreference};
+use crate::config::{self, AndroidPlayer, Config, SubtitleColor, SubtitleStyle, ThemePreference};
 use crate::services::AppEvent;
 use crate::task::Task;
 use crate::theme;
@@ -66,6 +66,8 @@ const THEMES: [(ThemePreference, &str); 3] = [
 
 const SUBTITLE_COLORS: [(SubtitleColor, &str); 2] =
     [(SubtitleColor::White, "White"), (SubtitleColor::Yellow, "Yellow")];
+
+const PLAYERS: [(AndroidPlayer, &str); 2] = [(AndroidPlayer::Media3, "Media3"), (AndroidPlayer::Mpv, "mpv")];
 
 const SUBTITLE_STYLES: [(SubtitleStyle, &str); 2] =
     [(SubtitleStyle::Outline, "Outline"), (SubtitleStyle::Box, "Dark box")];
@@ -278,6 +280,15 @@ const BITRATE: Row = Row {
     key: "max_streaming_bitrate",
     unset: "no limit",
 };
+const PLAYER: Row = Row {
+    section: Section::Playback,
+    label: "Player",
+    description: "Media3 plays with Android's own decoders, keeps HDR and uses the least battery. mpv plays \
+                  more kinds of files, and shows styled (ASS) subtitles as they were made. Read when the next \
+                  item starts.",
+    key: "android_player",
+    unset: "Media3",
+};
 const HEVC: Row = Row {
     section: Section::Playback,
     label: "Ask for HEVC when the server transcodes",
@@ -430,7 +441,7 @@ const HOME_SECTIONS_NOTE: Row = Row {
 
 /// Every row, for the search. A row left out of here still shows in its section, but a search
 /// would only find it through another row of the same section.
-const ROWS: [Row; 33] = [
+const ROWS: [Row; 34] = [
     THEME,
     TEXT_SIZE,
     ANIMATIONS,
@@ -439,6 +450,7 @@ const ROWS: [Row; 33] = [
     SKIP_INTRO,
     BITRATE,
     HEVC,
+    PLAYER,
     SUBTITLES_NOTE,
     SUBTITLE_TRACKS_NOTE,
     SUBTITLE_COLOR,
@@ -949,6 +961,24 @@ impl SettingsPage {
         let current = self.config.prefer_hevc.unwrap_or(false);
         if let Some(edit) = toggle(ui, &self.search, HEVC, current, Some(false)) {
             self.save(|config| config.prefer_hevc = edit.or_unset());
+        }
+
+        // Only Android has a second player.
+        if !cfg!(target_os = "android") {
+            return;
+        }
+        let current = self.config.android_player.unwrap_or_default();
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            PLAYER,
+            "settings_player",
+            &PLAYERS,
+            current,
+            Some(AndroidPlayer::default()),
+        );
+        if let Some(edit) = picked {
+            self.save(|config| config.android_player = edit.or_unset());
         }
     }
 
