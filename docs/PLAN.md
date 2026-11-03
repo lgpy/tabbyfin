@@ -67,6 +67,8 @@ tabbyfin/
 │   ├── player/               # mpv via libmpv: no UI
 │   │   ├── lib.rs            #   Player: load, set_property, command, add_subtitle, quit
 │   │   ├── events.rs         #   PlayerEvent enum and event translation
+│   │   ├── android.rs        #   Android: JNI context and the video surface under the app's
+│   │   ├── media3.rs         #   Android: Media3 (ExoPlayer) behind the same API
 │   │   └── libmpv/           #   runtime-loaded libmpv: core, event thread, video output
 │   └── app/                  # the eframe binary, `tabbyfin` (§3.1)
 └── docs/
@@ -98,7 +100,7 @@ crates/app/src/
 ├── theme.rs         appearance: theme, text size, zoom, animations, over_video; `theme::apply` is called at launch
 ├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
 ├── ui_tests/        the headless UI tests (egui_kittest)
-├── widgets/         text (Load<T>), card, image, shelf, menu, popup, select, dialog, button, state, mascot, video
+├── widgets/         text (Load<T>), card, image, shelf, menu, popup, select, dialog, button, state, mascot, video, subtitles (cues a player leaves to the UI)
 └── views/           mod (Page, PageCx, open), shell, home, login, search, library, value_filters, item, settings, player, dialogs
 ```
 
@@ -221,6 +223,8 @@ Video plays **inside the app** through libmpv; there's no separate mpv window. `
 ### 5.1b The player host process
 
 libmpv doesn't run inside the app. `Player::spawn` starts this same executable again as `tabbyfin --player-host` (`crates/player/src/host.rs`). That process runs libmpv and the video output described above, and the app talks to it over its stdin and stdout (`remote.rs`, `wire.rs`). An mpv or GPU driver crash then only kills the player process.
+
+Android is the exception (an app can't start its own executable again): the player runs in the app, and it's Media3's ExoPlayer by default, with libmpv as a setting (`docs/android.md`). Both draw into a SurfaceView under the app's transparent surface (`VideoOutput::draws_itself`); Media3 takes the same mpv commands and properties (`media3.rs`) and hands its subtitle cues to the UI (`PlayerEvent::Cues`, `widgets/subtitles.rs`).
 
 - **Messages:** length-prefixed JSON headers with an optional binary payload.
   - App to host: first `Start` with what the app's renderer can draw (`VideoImport`: pixels only, Vulkan memory for a device UUID, or D3D11 textures for a DX12 adapter LUID), which picks the host's video output; then mpv commands, properties (each answered with a reply) and the on-screen size.
