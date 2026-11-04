@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's background: the dark theme's backdrop, deep plum, lit from behind the
+     mascot by its lavender glow (docs/DESIGN.md). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54"
+                android:startY="0"
+                android:endX="54"
+                android:endY="108">
+                <item android:offset="0" android:color="#FF0E0B16" />
+                <item android:offset="1" android:color="#FF1D1633" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- The glow fades as (1 - t²)³, as the app's does. -->
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="50"
+                android:gradientRadius="44">
+                <item android:offset="0" android:color="#66C396E7" />
+                <item android:offset="0.25" android:color="#53C396E7" />
+                <item android:offset="0.5" android:color="#2BC396E7" />
+                <item android:offset="0.75" android:color="#08C396E7" />
+                <item android:offset="1" android:color="#00C396E7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
