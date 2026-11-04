@@ -76,9 +76,9 @@ def main():
     groups = None
     if only:
         groups = set(only.split(","))
-        tests = [(fn, name) for fn, name in test_names(src.read_text()) if name and group_of(name) in groups]
+        tests = [(fn, name) for fn, name in test_names(src.read_text(encoding="utf-8")) if name and group_of(name) in groups]
         if not tests:
-            known = sorted({group_of(name) for _, name in test_names(src.read_text()) if name})
+            known = sorted({group_of(name) for _, name in test_names(src.read_text(encoding="utf-8")) if name})
             sys.exit(f"no mockups in {only}; the groups are: {', '.join(known)}")
         filters = ["--", "--exact", *(f"ui_tests::scratch::{fn}" for fn, _ in tests)]
 
@@ -102,9 +102,9 @@ def main():
     if not cargo(filters, env, src):
         sys.exit("mockup render failed")
 
-    renders = [json.loads(p.read_text()) for p in sorted(out.glob("*.json"))]
+    renders = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(out.glob("*.json"))]
     # In the file's order, so its sections read as written.
-    order = [name for _, name in test_names(src.read_text()) if name]
+    order = [name for _, name in test_names(src.read_text(encoding="utf-8")) if name]
     renders.sort(key=lambda r: order.index(r["name"]) if r["name"] in order else len(order))
     if not renders:
         sys.exit("no mockups rendered: the file needs #[test] fns that call mockup() or Mockup::show")
@@ -126,9 +126,9 @@ def main():
         if stems:
             print(f"{kind}: {', '.join(stems)}")
 
-    notes = parse(src.read_text())
+    notes = parse(src.read_text(encoding="utf-8"))
     index = out / "index.html"
-    index.write_text(build(src.stem, renders, notes))
+    index.write_text(build(src.stem, renders, notes), encoding="utf-8")
 
     look = [s for s, k in status.items() if k != "unchanged"]
     sheet = out / "preview.png"
@@ -300,8 +300,12 @@ SAID = set()
 
 def cargo(filters, env, src, cwd=None):
     """Runs the matching tests, printing only what needs acting on. True if they passed."""
-    cmd = ["cargo", "test", "-p", "tabbyfin", "--features", "mockup", "--message-format", "short", *filters]
-    run = subprocess.run(cmd, cwd=cwd or root, env=env, capture_output=True, text=True)
+    # A shell without mise's tools on its PATH (a fresh Git Bash) still has mise to find them.
+    tool = ["cargo"] if shutil.which("cargo") or not shutil.which("mise") else ["mise", "exec", "--", "cargo"]
+    cmd = [*tool, "test", "-p", "tabbyfin", "--features", "mockup", "--message-format", "short", *filters]
+    run = subprocess.run(
+        cmd, cwd=cwd or root, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     lines = (run.stderr + "\n" + run.stdout).splitlines()
     shown = []
     for line in lines:
