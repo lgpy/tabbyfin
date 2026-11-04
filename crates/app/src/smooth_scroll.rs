@@ -8,21 +8,66 @@
 //!
 //! What egui has no counterpart for is the shelves' glide: their arrows glide a page of cards.
 //! [`Glide`] is that glide's maths, used by `widgets/shelf.rs`: an exponential approach to a
-//! target that a second click while it moves aims further.
+//! target that a second click while it moves aims further. Touch adds the flings: a shelf's row
+//! coasting after a release ([`Fling`]) and a page's ([`Coast`], [`page`]), which egui can't
+//! run itself once a row has taken the drag.
 
+use egui::style::KineticScrollStyle;
 use egui::{Event, InputOptions, MouseWheelSource, MouseWheelUnit, RawInput, TouchPhase, Vec2};
 
-/// A page's coast after a vertical drag that a shelf passed on to it (`widgets/shelf.rs`). egui
-/// coasts a drag on the page's own scroll area by itself, but a shelf's row takes the drag and
-/// scrolls the page by hand, and egui keeps the velocity it would coast with to itself. The
-/// shelf starts one at the release with [`Coast::start`]; the page's scroll area runs it with
-/// [`Coast::run`] each frame, which decays it as egui decays its own (`KineticScrollStyle`), so a
-/// fling feels the same wherever it started. Anything pressed stops it.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Coast {
-    /// Points per second the content moves down the screen: the pointer's velocity.
+/// A fling: a velocity that decays as egui decays its own coasting (`KineticScrollStyle`'s
+/// defaults), so a fling run here feels like one egui runs. A page's [`Coast`] and a shelf's row
+/// (`widgets/shelf.rs`) both move by one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fling {
+    /// Points per second, in whichever direction its owner moves.
     velocity: f32,
 }
+
+impl Fling {
+    /// A fling at `velocity` points per second, or none when that's too slow to go anywhere.
+    pub fn new(velocity: f32) -> Option<Self> {
+        let fling = Self { velocity };
+        (velocity.is_finite() && fling.distance_left() >= KineticScrollStyle::default().stop_distance).then_some(fling)
+    }
+
+    fn distance_left(&self) -> f32 {
+        self.velocity.abs() * KineticScrollStyle::default().decay_time
+    }
+
+    /// Lets `dt` seconds pass: how far it moves, and whether it's still moving. The velocity
+    /// decays as `v₀ · exp(-t / decay)`, and the distance is its exact integral.
+    pub fn step(&mut self, dt: f32) -> (f32, bool) {
+        let KineticScrollStyle {
+            decay_time,
+            stop_distance,
+            ..
+        } = KineticScrollStyle::default();
+        if self.distance_left() < stop_distance {
+            return (0., false);
+        }
+        let next = self.velocity * (-dt / decay_time).exp();
+        let delta = decay_time * (self.velocity - next);
+        self.velocity = next;
+        (delta, true)
+    }
+}
+
+/// Whether a finger or button is on the screen this frame, which stops any fling: a touch on a
+/// moving list catches it, as on a phone.
+pub fn caught(ui: &egui::Ui) -> bool {
+    ui.input(|input| input.pointer.any_pressed() || input.pointer.any_down())
+}
+
+/// A page's coast after a vertical drag: egui coasts a drag on a scroll area by itself, but a
+/// shelf's row takes the drag and scrolls the page by hand, and egui keeps the velocity it
+/// would coast with to itself. So with touch every fling of a page with shelves is this one
+/// ([`page`] turns egui's own off): a shelf starts it at the release with [`Coast::start`], as
+/// [`page`] does for a drag on the page itself, and the page's scroll area runs it each frame.
+/// A touch anywhere stops it, so a page still moving can't carry on under a row being dragged
+/// sideways.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Coast(Fling);
 
 impl Coast {
     fn id() -> egui::Id {
@@ -31,30 +76,30 @@ impl Coast {
 
     /// Starts the page coasting at the pointer's velocity at a release.
     pub fn start(ctx: &egui::Context) {
+        // The content moves down the screen as the pointer does.
         let velocity = ctx.input(|input| input.pointer.velocity().y);
-        if velocity.is_finite() && velocity.abs() > 1. {
-            ctx.data_mut(|data| data.insert_temp(Self::id(), Coast { velocity }));
+        if let Some(fling) = Fling::new(velocity) {
+            ctx.data_mut(|data| data.insert_temp(Self::id(), Coast(fling)));
             ctx.request_repaint();
         }
     }
 
     /// Moves the page this frame's share of a coast, from inside its scroll area.
-    pub fn run(ui: &egui::Ui) {
+    fn run(ui: &egui::Ui) {
         let ctx = ui.ctx();
-        let Some(mut coast) = ctx.data(|data| data.get_temp::<Coast>(Self::id())) else {
+        let Some(Coast(mut fling)) = ctx.data(|data| data.get_temp::<Coast>(Self::id())) else {
             return;
         };
-        if ui.input(|input| input.pointer.any_pressed() || input.pointer.any_down()) {
+        if caught(ui) {
             ctx.data_mut(|data| data.remove::<Coast>(Self::id()));
             return;
         }
-        let kinetic = ui.spacing().scroll.kinetic;
         let dt = ui.input(|input| input.stable_dt).min(0.1);
-        let (delta, moving) = coast.step(dt, kinetic.decay_time, kinetic.stop_distance);
+        let (delta, moving) = fling.step(dt);
         ui.scroll_with_delta_animation(egui::vec2(0., delta), egui::style::ScrollAnimation::none());
         ctx.data_mut(|data| {
             if moving {
-                data.insert_temp(Self::id(), coast);
+                data.insert_temp(Self::id(), Coast(fling));
             } else {
                 data.remove::<Coast>(Self::id());
             }
@@ -63,18 +108,38 @@ impl Coast {
             ctx.request_repaint();
         }
     }
+}
 
-    /// Lets `dt` seconds pass: how far the content moves, and whether it's still moving. The
-    /// velocity decays as `v₀ · exp(-t / decay)`, and the distance is its exact integral.
-    fn step(&mut self, dt: f32, decay: f32, stop: f32) -> (f32, bool) {
-        if self.velocity.abs() * decay < stop {
-            return (0., false);
-        }
-        let next = self.velocity * (-dt / decay).exp();
-        let delta = decay * (self.velocity - next);
-        self.velocity = next;
-        (delta, true)
+/// A page's vertical scroll area that has shelves in it (Home, the item page). With touch, egui
+/// doesn't coast it itself: a drag on the page starts a [`Coast`] at the release instead, the
+/// same one a vertical drag on a shelf starts, so a touch stops either. Without touch it's
+/// `area` as it is, plus the coast (which only a touch starts).
+pub fn page<R>(
+    ui: &mut egui::Ui,
+    area: egui::ScrollArea,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::scroll_area::ScrollAreaOutput<R> {
+    let touch = crate::layout::touch(ui.ctx());
+    let kinetic = ui.spacing().scroll.kinetic;
+    if touch {
+        ui.spacing_mut().scroll.kinetic.decay_time = 0.;
     }
+    let out = area.show(ui, |ui| {
+        // The contents (a shelf's own rows) get the usual style back.
+        ui.spacing_mut().scroll.kinetic = kinetic;
+        Coast::run(ui);
+        add_contents(ui)
+    });
+    ui.spacing_mut().scroll.kinetic = kinetic;
+    if touch {
+        let dragged = ui.ctx().is_being_dragged(out.id.with("area"));
+        let key = out.id.with("page_dragged");
+        if ui.data(|data| data.get_temp::<bool>(key)).unwrap_or(false) && !dragged {
+            Coast::start(ui.ctx());
+        }
+        ui.data_mut(|data| data.insert_temp(key, dragged));
+    }
+    out
 }
 
 /// How quickly a glide closes the distance: about 63 % of what's left every `TAU`.
@@ -220,14 +285,14 @@ pub fn instant_wheel(input: &mut RawInput, options: &InputOptions, viewport_heig
 mod tests {
     use egui::{Event, InputOptions, Modifiers, MouseWheelSource, MouseWheelUnit, RawInput, TouchPhase, vec2};
 
-    use super::{Coast, Glide, SETTLE, TAU, instant_wheel};
+    use super::{Fling, Glide, SETTLE, TAU, instant_wheel};
 
     #[test]
-    fn a_coast_goes_as_far_as_egui_coasts_and_stops() {
-        let mut coast = Coast { velocity: 1000. };
+    fn a_fling_goes_as_far_as_egui_coasts_and_stops() {
+        let mut coast = Fling::new(1000.).expect("a fast fling moves");
         let mut moved = 0.;
         for _ in 0..1000 {
-            let (delta, moving) = coast.step(1. / 60., 0.5, 0.5);
+            let (delta, moving) = coast.step(1. / 60.);
             moved += delta;
             if !moving {
                 break;
@@ -235,7 +300,10 @@ mod tests {
         }
         // v₀ × decay, less the last half point it stops short of.
         assert!((moved - 500.).abs() < 1., "{moved}");
-        assert_eq!(coast.step(1. / 60., 0.5, 0.5), (0., false));
+        assert_eq!(coast.step(1. / 60.), (0., false));
+        // Too slow to go anywhere.
+        assert_eq!(Fling::new(0.5), None);
+        assert_eq!(Fling::new(f32::NAN), None);
     }
 
     #[test]

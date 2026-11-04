@@ -215,6 +215,64 @@ pub struct Shell {
     syncplay_scroll: bool,
     /// The app icon at the start of the bar.
     logo: Option<egui::TextureHandle>,
+    /// The compact layout's bottom bar, hidden while the page scrolls down.
+    bottom_bar: BottomBar,
+}
+
+/// Whether the phone's bottom bar is out of the way: it slides down as the page scrolls down,
+/// back up as it scrolls up, at the page's top, and when another page comes up.
+#[derive(Default)]
+struct BottomBar {
+    hidden: bool,
+    /// How far the page has scrolled in one direction since it last turned, in points: positive
+    /// down the page. A small jiggle doesn't move the bar.
+    run: f32,
+    /// The page on top the last time, by its serial.
+    page: Option<u64>,
+}
+
+impl BottomBar {
+    /// The scroll it takes in one direction to move the bar.
+    const RUN: f32 = 24.;
+    /// More than the bar and the gesture bar under it give back to the page as it goes.
+    const ROOM: f32 = 2. * NAV_H;
+    /// How long it takes to slide, in seconds.
+    const SLIDE: f32 = 0.2;
+
+    /// Follows the page on top, `page`, and how it scrolled last frame.
+    fn follow(&mut self, page: u64, scroll: Option<layout::PageScroll>) {
+        if self.page != Some(page) {
+            *self = Self {
+                page: Some(page),
+                ..Self::default()
+            };
+            return;
+        }
+        let Some(scroll) = scroll else {
+            return;
+        };
+        if scroll.offset <= 1. {
+            self.hidden = false;
+            self.run = 0.;
+            return;
+        }
+        // At the end only a scroll down counts: the offset moving back there is the page
+        // growing as the bar goes.
+        if scroll.delta == 0. || (scroll.at_end && scroll.delta < 0.) {
+            return;
+        }
+        if scroll.delta.signum() != self.run.signum() {
+            self.run = 0.;
+        }
+        self.run += scroll.delta;
+        // Only a page with room to spare hides it: one that would fit once the bar's room is
+        // given back would scroll back to its top and bring the bar up again.
+        if self.run > Self::RUN && scroll.max > Self::ROOM {
+            self.hidden = true;
+        } else if self.run < -Self::RUN {
+            self.hidden = false;
+        }
+    }
 }
 
 /// A page's [`StackEntry::serial`]. Counted for the whole process rather than per shell, so a
@@ -248,6 +306,7 @@ impl Shell {
             syncplay_highlight: None,
             syncplay_scroll: false,
             logo: load_logo(cx.ctx),
+            bottom_bar: BottomBar::default(),
         };
         // A new session starts with no menu left over from the last one.
         egui::Popup::close_id(cx.ctx, account_menu_id());
@@ -346,12 +405,31 @@ impl Shell {
                 .rect;
             under_bar.bar = bar;
             // The bottom bar goes while the soft keyboard is up, as an Android app's does: the
-            // keyboard would push it up over the page.
-            if compact && !layout::keyboard_open(ui.ctx()) {
+            // keyboard would push it up over the page. It slides away while the page scrolls
+            // down, by last frame's scroll (the page draws after it).
+            let serial = self.stack.last().expect("the page stack is never empty").serial;
+            self.bottom_bar.follow(serial, layout::take_page_scroll(ui.ctx()));
+            let slide = if theme::animations(ui.ctx()) {
+                BottomBar::SLIDE
+            } else {
+                0.
+            };
+            let shown = ui.ctx().animate_bool_with_time_and_easing(
+                Id::unique("bottom_bar_shown"),
+                !self.bottom_bar.hidden,
+                slide,
+                egui::emath::easing::cubic_out,
+            );
+            if compact && !layout::keyboard_open(ui.ctx()) && shown > 0. {
+                // As it slides it leaves the page more room, all of it once it's below the
+                // window's edge (the gesture bar's inset under it too).
+                let inset = ui.ctx().viewport_rect().bottom() - ui.max_rect().bottom();
+                let height = NAV_H * shown - inset * (1. - shown);
                 egui::Panel::bottom("bottom_bar")
+                    .exact_size(height.max(0.))
                     .frame(egui::Frame::NONE)
                     .show_separator_line(false)
-                    .show(ui, |ui| self.bottom_bar(ui, cx));
+                    .show(ui, |ui| self.bottom_bar(ui, shown, cx));
             }
             cx.under_bar = Some(under_bar);
             egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -998,10 +1076,19 @@ impl Shell {
     /// in `brand` on an `inset_hover` pill. It's on the floor of the window: filled with the
     /// backdrop's bottom colour down under the gesture bar, with a hairline over it, as the top
     /// bar meets a scrolled page.
-    fn bottom_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+    ///
+    /// `shown` is how far it has slid up into place: 0 is all the way below the window's edge.
+    /// It takes taps only once it's fully up.
+    fn bottom_bar(&mut self, ui: &mut egui::Ui, shown: f32, cx: &mut PageCx) {
         let tokens = theme::tokens_of(ui);
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), NAV_H), Sense::hover());
         let window = ui.ctx().viewport_rect();
+        let floor_top = ui.max_rect().bottom();
+        let top = egui::lerp(window.bottom()..=floor_top - NAV_H, shown);
+        let rect = Rect::from_min_size(
+            egui::pos2(ui.max_rect().left(), top),
+            vec2(ui.max_rect().width(), NAV_H),
+        );
+        let sense = if shown >= 1. { Sense::CLICK } else { Sense::hover() };
         let floor = Rect::from_x_y_ranges(window.x_range(), rect.top()..=window.bottom());
         let painter = ui.painter().with_clip_rect(window);
         painter.rect_filled(floor, 0., tokens.backdrop_bottom);
@@ -1017,7 +1104,7 @@ impl Shell {
                 egui::pos2(rect.left() + width * index as f32, rect.top()),
                 vec2(width, rect.height()),
             );
-            let response = ui.interact(cell, Id::unique("bottom_bar").with(index), Sense::CLICK);
+            let response = ui.interact(cell, Id::unique("bottom_bar").with(index), sense);
             let on = index == open;
             response.widget_info(|| egui::WidgetInfo::selected(Role::Tab, true, on, *name));
             let icon_center = egui::pos2(cell.center().x, cell.top() + 22.);
@@ -1803,9 +1890,69 @@ mod tests {
     use egui::{Event, Key, Modifiers, RawInput};
 
     use super::{
-        BarItem, Highlight, MenuEntry, bar_items, bar_step, highlight_step, move_target, resolve_highlight,
+        BarItem, BottomBar, Highlight, MenuEntry, bar_items, bar_step, highlight_step, move_target, resolve_highlight,
         syncplay_entries, take_horizontal_keys,
     };
+    use crate::layout::PageScroll;
+
+    fn scrolled(delta: f32, offset: f32) -> Option<PageScroll> {
+        Some(PageScroll {
+            delta,
+            offset,
+            at_end: false,
+            max: 2000.,
+        })
+    }
+
+    #[test]
+    fn the_bottom_bar_hides_while_the_page_scrolls_down() {
+        let mut bar = BottomBar::default();
+        bar.follow(1, None);
+        // A small jiggle doesn't move it, a run down does.
+        bar.follow(1, scrolled(10., 100.));
+        assert!(!bar.hidden);
+        bar.follow(1, scrolled(20., 120.));
+        assert!(bar.hidden);
+        // A run back up brings it back.
+        bar.follow(1, scrolled(-10., 110.));
+        assert!(bar.hidden);
+        bar.follow(1, scrolled(-20., 90.));
+        assert!(!bar.hidden);
+        // So does the page's top, and another page.
+        bar.follow(1, scrolled(40., 130.));
+        assert!(bar.hidden);
+        bar.follow(1, scrolled(-1., 0.));
+        assert!(!bar.hidden);
+        bar.follow(1, scrolled(40., 130.));
+        bar.follow(2, None);
+        assert!(!bar.hidden);
+    }
+
+    #[test]
+    fn the_bottom_bar_stays_for_short_pages_and_the_end() {
+        let mut bar = BottomBar::default();
+        bar.follow(1, None);
+        // A page that would fit without the bar keeps it.
+        let short = PageScroll {
+            delta: 60.,
+            offset: 60.,
+            at_end: true,
+            max: 60.,
+        };
+        bar.follow(1, Some(short));
+        assert!(!bar.hidden);
+        // At the end, the offset moving back as the page grows isn't a scroll up.
+        bar.follow(1, scrolled(40., 400.));
+        assert!(bar.hidden);
+        let grown = PageScroll {
+            delta: -50.,
+            offset: 350.,
+            at_end: true,
+            max: 350.,
+        };
+        bar.follow(1, Some(grown));
+        assert!(bar.hidden);
+    }
 
     #[test]
     fn the_bar_starts_on_back_or_search() {

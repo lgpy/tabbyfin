@@ -390,8 +390,7 @@ fn show_shelves(
     let moved = cursor.take_reveal();
     let selected = cursor.selected();
     let mut target = None;
-    let area = egui::ScrollArea::vertical().show(ui, |ui| {
-        crate::smooth_scroll::Coast::run(ui);
+    let area = crate::smooth_scroll::page(ui, egui::ScrollArea::vertical(), |ui| {
         // The page keeps clear of the window's top and bottom edges, and each shelf is inset by
         // its own padding, so its row scrolls to the window's edge.
         egui::Frame::NONE

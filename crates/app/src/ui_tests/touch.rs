@@ -261,6 +261,55 @@ fn a_phones_library_grid_fills_its_rows() {
     assert!((80.0..100.).contains(&width), "a third of the row each, not {width}");
 }
 
+/// A phone's toolbar has the sort and a Filters button, which opens the filters in a dialog: a
+/// choice there applies at once and leaves the dialog open, the button lights up while
+/// anything is filtered, and *Done* closes it.
+#[test]
+fn a_phones_filters_open_in_a_dialog() {
+    let _config = ConfigDir::new("touch-filters");
+    let server = home_server();
+    let mut ui = phone_page(&server, movies_route());
+    ui.step_until("the grid", |harness| harness.query_by_label("2 items").is_some());
+    assert!(
+        ui.harness()
+            .query_by_role_and_label(Role::ComboBox, "Progress")
+            .is_none(),
+        "no filters in the toolbar"
+    );
+    ui.harness().get_by_label("Sort");
+    let filters_on = |ui: &PageHarness| {
+        ui.harness()
+            .get_by_role_and_label(Role::Button, "Filters")
+            .accesskit_node()
+            .toggled()
+    };
+    assert_eq!(filters_on(&ui), Some(Toggled::False));
+
+    ui.harness().get_by_role_and_label(Role::Button, "Filters").click();
+    ui.step_until("the dialog", |harness| {
+        harness.query_by_role_and_label(Role::ComboBox, "Progress").is_some()
+    });
+    ui.harness().get_by_role_and_label(Role::ComboBox, "Progress").click();
+    ui.step_until("the progress menu", |harness| {
+        harness.query_by_label("Unwatched").is_some()
+    });
+    ui.harness().get_by_label("Unwatched").click();
+    ui.step_until("the choice", |harness| {
+        harness
+            .get_by_role_and_label(Role::ComboBox, "Progress")
+            .accesskit_node()
+            .value()
+            .as_deref()
+            == Some("Unwatched")
+    });
+    assert_eq!(filters_on(&ui), Some(Toggled::True), "lit while filtered");
+
+    ui.harness().get_by_label("Done").click();
+    ui.step_until("the dialog to close", |harness| {
+        harness.query_by_role_and_label(Role::ComboBox, "Progress").is_none()
+    });
+}
+
 /// A long press on a card opens its menu, as a right click does with a mouse, and doesn't open
 /// the card.
 #[test]

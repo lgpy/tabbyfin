@@ -802,9 +802,8 @@ impl ItemPage {
         // The closing band has folded away.
         let mut folded = false;
 
-        let area = egui::ScrollArea::vertical().show(ui, |ui| {
-            // A fling that started on a shelf goes on here (`smooth_scroll::Coast`).
-            crate::smooth_scroll::Coast::run(ui);
+        // A fling, from a shelf or the page, goes on here (`smooth_scroll::Coast`).
+        let area = crate::smooth_scroll::page(ui, egui::ScrollArea::vertical(), |ui| {
             egui::Frame::NONE
                 .inner_margin(Margin {
                     left: padding as i8,
