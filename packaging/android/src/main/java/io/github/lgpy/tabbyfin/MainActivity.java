@@ -4,8 +4,12 @@ import android.app.Activity;
 import android.content.Context;
 import android.graphics.PixelFormat;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.Selection;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
+import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.InputMethodManager;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.graphics.Insets;
@@ -13,6 +17,7 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.google.androidgamesdk.GameActivity;
+import com.google.androidgamesdk.gametextinput.InputConnection;
 import com.google.androidgamesdk.gametextinput.State;
 
 /**
@@ -59,6 +64,48 @@ public class MainActivity extends GameActivity {
                 }
             }
         });
+        mSurfaceView.setOnKeyListener(this::onSurfaceKey);
+    }
+
+    /**
+     * Key presses while the soft keyboard is up, in place of GameTextInput's own listener, which
+     * types them and then restarts the keyboard's input: keyboards that send digits and Backspace
+     * as key presses (FUTO, AOSP's) then fall back to their letters after every key. A press that
+     * types or deletes a character is applied here the way a keyboard's own text is, and the rest
+     * (Enter's action, arrows, Backspace with nothing before the cursor, which the app takes as a
+     * key) goes on to GameTextInput.
+     */
+    private boolean onSurfaceKey(View view, int keyCode, KeyEvent event) {
+        InputConnection input = mSurfaceView.onCreateInputConnection(null);
+        if (input == null) {
+            return false;
+        }
+        Editable text = input.getEditable();
+        int start = Selection.getSelectionStart(text);
+        int end = Selection.getSelectionEnd(text);
+        boolean delete = keyCode == KeyEvent.KEYCODE_DEL && (start != end || start > 0);
+        int typed = keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+                || event.isCtrlPressed() || event.isMetaPressed() ? 0 : event.getUnicodeChar();
+        if (!delete && typed == 0) {
+            return input.onKey(view, keyCode, event);
+        }
+        // The press did it; its release has nothing left to do.
+        if (event.getAction() != KeyEvent.ACTION_DOWN) {
+            return true;
+        }
+        input.beginBatchEdit();
+        input.finishComposingText();
+        if (delete && start == end) {
+            input.deleteSurroundingTextInCodePoints(1, 0);
+        } else {
+            input.commitText(delete ? "" : new String(Character.toChars(typed)), 1);
+        }
+        input.endBatchEdit();
+        // The keyboard sent a key rather than text, so it learns where the cursor went from here.
+        InputMethodManager keyboard = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        keyboard.updateSelection(view, Selection.getSelectionStart(text), Selection.getSelectionEnd(text),
+                BaseInputConnection.getComposingSpanStart(text), BaseInputConnection.getComposingSpanEnd(text));
+        return true;
     }
 
     /**

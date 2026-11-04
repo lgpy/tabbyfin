@@ -113,7 +113,7 @@ Built with `mise run android:install`, and tried on the emulator and one phone (
 - Playback on mpv: ASS subtitles with their styling and the system's fonts.
 - Playback on a second phone, and whether HDR reaches an HDR screen as HDR.
 - The player's gestures with real fingers (they were tried with `adb shell input`): a double tap's timing, a drag that starts diagonally, and a second finger during a drag.
-- Typing with Gboard, Samsung Keyboard and SwiftKey: suggestions and autocorrect, swipe typing, Backspace held down, and a password field getting the password keyboard.
+- Typing with Gboard, Samsung Keyboard, SwiftKey and FUTO (on the phone; the emulator only had FUTO typing an address): suggestions and autocorrect, swipe typing, Backspace held down, and a password field getting the password keyboard.
 - The status bar, gesture bar and a display cutout keep clear of the app, in portrait and landscape.
 - The keyboard per field: the server address's has the URL layout, the user name's suggests and learns nothing, a search box's (the top bar's, and the library's genres and tags) action key says Search and still submits, and the playlist name's suggests nothing.
 - The sign-in form taller than the room the keyboard leaves, in portrait: the field the keyboard opens over scrolls into view above it.
