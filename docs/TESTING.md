@@ -122,4 +122,5 @@ Built with `mise run android:install`, and tried on the emulator and one phone (
 - The phone layout on a tablet (medium and expanded with touch: the desktop's top bar, the grid filling its rows) and on the phone in landscape.
 - A quick vertical flick that starts on a Home shelf coasts as one on the page between shelves does (a page long enough to tell; the dev server's Home is short).
 - Touch targets with real fingers: the 30-point SyncPlay and playlist handles, the field's clear and show-password buttons, and a long press on a card that's also the start of a scroll.
+- The release-signed APK (`build.sh --sign`, with R8) on a phone: playback on Media3 and on mpv, DTS and TrueHD audio through the ffmpeg extension, and the keyboard and Back (all Java the Rust side calls into). The emulator only showed it signs in and plays Media3 with its subtitles.
 - The app restores its session after Android ends it in the background (Developer options, *Don't keep activities*, or `adb shell am kill`).

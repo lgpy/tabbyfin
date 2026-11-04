@@ -2,7 +2,7 @@
 
 **Goal:** Tabbyfin on Android phones and tablets, driven by touch. It's the same Rust and egui app as on the desktop, started through eframe's Android backend, so the API client, the pages, the cozy look (`DESIGN.md`), SyncPlay and remote control come along. There's no separate Kotlin UI.
 
-**Status:** the app runs in the desktop layout: sign-in by touch and the soft keyboard, Home, libraries and item pages, the system Back, and the session kept across restarts (A0 and A1 below), on the emulator and a Honor phone. Playback works on the phone with both players (A3, below): Media3 by default and mpv as a setting, drawing into a SurfaceView under the app's surface, with a touch player page. The touch layout (A4) is done on the phone: a bottom bar on compact screens, the pages fitted to a phone's width, 48-point touch targets and long-press menus.
+**Status:** the app runs in the desktop layout: sign-in by touch and the soft keyboard, Home, libraries and item pages, the system Back, and the session kept across restarts (A0 and A1 below), on the emulator and a Honor phone. Playback works on the phone with both players (A3, below): Media3 by default and mpv as a setting, drawing into a SurfaceView under the app's surface, with a touch player page. The touch layout (A4) is done on the phone: a bottom bar on compact screens, the pages fitted to a phone's width, 48-point touch targets and long-press menus. The release build (A5) makes release-signed APKs, but nothing is published until the touch UI has been refined.
 
 - **Phones and tablets first.** Android TV comes later; the keyboard cursor (`browse::Browse`, `keys.rs`) already suits a D-pad, so most of TV is a launcher entry and a 10-foot layout.
 - **Devices:** Android 8 (API 26) and newer, where AHardwareBuffer and Vulkan 1.0 are available. arm64-v8a first, x86_64 for the emulator.
@@ -31,9 +31,19 @@ Both players, as [Findroid](https://github.com/jarnedemeulemeester/findroid) has
 - **No autofocus:** the sign-in form doesn't focus its first field at launch, since that opens the keyboard over a form not yet seen.
 - **Environment:** an app gets no environment, so the system property `debug.tabbyfin.env` stands in for it: `adb shell setprop debug.tabbyfin.env "RUST_LOG=debug;WGPU_BACKEND=vulkan"`, then restart the app (the value needs quoting inside the adb shell when it has `;`).
 - `packaging/android/` is a Gradle project (AGP 9.5, Gradle 9.8, JDK 21, all in `mise.toml` except AGP): the manifest (`io.github.lgpy.tabbyfin`, the Flatpak's ID; `INTERNET`, `WAKE_LOCK`, cleartext HTTP for LAN servers; rotation handled by the activity), the launcher icon at each density, made from `packaging/tabbyfin.png`. Gradle rather than `cargo-apk` or `xbuild`, because GameActivity, Media3 (if the spike picks it) and any Kotlin glue need it anyway.
-- `packaging/android/build.sh [--release] [--abi …]` builds the library into `src/main/jniLibs/` (git-ignored) and packages it; mise tasks `android:build` (both ABIs) and `android:install` (the connected device's ABI, then starts it). `--release` optimises the library but still makes the debug-signed APK, about 75 MB for both ABIs, so it installs anywhere until there's a release key. A debug library is ~500 MB of debug info. Gradle repackages in place, so an incremental APK can look much bigger than its contents; `rm -rf packaging/android/build` shrinks it.
-- CI's `android` job builds the `--release` APK on every push and uploads it.
-- Release: a signing key, then F-Droid (fits GPL-3.0) and possibly the Play Store.
+- `packaging/android/build.sh [--release | --sign] [--abi …]` builds the library into `src/main/jniLibs/` (git-ignored) and packages it; mise tasks `android:build` (both ABIs) and `android:install` (the connected device's ABI, then starts it). `--release` optimises the library but still makes the debug-signed APK, about 75 MB for both ABIs, so it installs over a debug build. A debug library is ~500 MB of debug info. Gradle repackages in place, so an incremental APK can look much bigger than its contents; `rm -rf packaging/android/build` shrinks it.
+- **The release** (`--sign`): the library in release, R8 over the Java side (`proguard-rules.pro` keeps the app's classes, which Rust finds by name), and a release-signed APK per ABI in `build/outputs/apk/release/` (about 60 MB for arm64 and 69 MB for x86_64, with the library's symbol table stripped). The version is the workspace's in `Cargo.toml`; the version code is that version as a number times ten (0.2.0 is 2000), plus 1 for arm64-v8a and 2 for x86_64, and a debug APK ends in 0.
+- **The signing key** never enters the repository. `build.sh --sign` reads it from `TABBYFIN_KEYSTORE` (the file), `TABBYFIN_KEYSTORE_PASSWORD`, `TABBYFIN_KEY_ALIAS` and `TABBYFIN_KEY_PASSWORD`; CI will take it from the repository's secrets `ANDROID_KEYSTORE` (the file in base64), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Losing the key means no update can install over the app again, so keep a backup outside the machine. To make it, and later hand it to CI (`keytool` is the JDK's, under `mise exec --`):
+
+  ```sh
+  keytool -genkeypair -keystore tabbyfin-release.jks -alias tabbyfin -keyalg RSA -keysize 4096 -validity 10000
+  base64 -w0 tabbyfin-release.jks | gh secret set ANDROID_KEYSTORE
+  gh secret set ANDROID_KEYSTORE_PASSWORD
+  gh secret set ANDROID_KEY_ALIAS --body tabbyfin
+  gh secret set ANDROID_KEY_PASSWORD
+  ```
+- CI's `android` job builds the `--release` APK on every push and uploads it. The GitHub release doesn't carry the Android APKs yet: that's a `--sign` step on `v*` tags, with the key from the secrets above, added to the release job's `needs` once the touch UI is ready to ship.
+- **Stores, later:** the main F-Droid repository builds everything from source, and the APK holds prebuilt native code (mpv-android's libmpv and ffmpeg, Jellyfin's ffmpeg extension for Media3), so it would need libmpv built with mpv-android's buildscripts first. IzzyOnDroid takes the GitHub release's APKs as they are. The Play Store wants an app bundle and its own upload key.
 
 ## What the desktop code assumes
 
@@ -173,7 +183,7 @@ Three runs each, alternating the players. A fourth round stalled on Wi-Fi (Media
 | A2 | **Video spike** | M | The decision is written down. Done (above). |
 | A3 | **Playback** | L | Media3 (default) and libmpv (a setting) play on a SurfaceView under egui, with reporting, resume, tracks and subtitles, and the touch player page. Done on the phone. |
 | A4 | **Touch layout** | L | Layout sizes, the bottom bar, touch targets, long-press menus, insets and the soft keyboard. Done on the phone. |
-| A5 | **Release** | M | A signed APK on F-Droid (and maybe the Play Store). |
+| A5 | **Release** | M | A release-signed APK per ABI on each GitHub release. `build.sh --sign` makes them; left: refining the touch UI, then the real key in CI's secrets, CI signing on tags, and the first release. Stores (above) after that. |
 
 After that: Android TV, picture-in-picture, background audio, downloads.
 
