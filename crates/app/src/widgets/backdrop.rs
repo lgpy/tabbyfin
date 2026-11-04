@@ -67,7 +67,12 @@ pub fn wash(rect: Rect, window: Rect, top: f32, bottom: f32, tokens: &Tokens) ->
 /// area's top edge, coming in over the first [`EDGE_IN`] points of a scroll. The bar has no fill
 /// of its own, so without it a scrolled page's rows would look cut off at an invisible line.
 /// Call it after the scroll area, with the `Ui` it was shown in, so the line is over the content.
+///
+/// It also tells the shell how the page scrolled (`layout::note_page_scroll`), since every
+/// page's main scroll area calls it: a phone's bottom bar hides as the page scrolls down.
 pub fn scroll_edge<R>(ui: &Ui, area: &egui::scroll_area::ScrollAreaOutput<R>) {
+    let max = area.content_size.y - area.inner_rect.height();
+    crate::layout::note_page_scroll(ui.ctx(), area.id, area.state.clamped_offset().y, max);
     let shown = edge_opacity(area.state.clamped_offset().y);
     if shown <= 0. {
         return;

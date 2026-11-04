@@ -93,6 +93,47 @@ pub fn grow(ui: &Ui, response: egui::Response, sense: egui::Sense) -> egui::Resp
     response.union(outer)
 }
 
+/// How the page's main scroll area moved in a frame, for the bottom bar to hide while the page
+/// scrolls down and come back as it scrolls up.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PageScroll {
+    /// Points the content moved up this frame (the offset grew); negative when it moved down.
+    pub delta: f32,
+    /// The area's offset from its top now.
+    pub offset: f32,
+    /// Scrolled as far down as it goes. The offset moves back here when the area grows (as the
+    /// bar slides away), which isn't a scroll up.
+    pub at_end: bool,
+    /// How far it scrolls at all.
+    pub max: f32,
+}
+
+fn page_scroll_id() -> Id {
+    Id::unique("page_scroll")
+}
+
+/// Notes where the page's main scroll area `area` is this frame, `offset` of at most `max`
+/// (`backdrop::scroll_edge` does, since every page's main area calls it). A new area, as a page
+/// opens, has moved nowhere yet.
+pub fn note_page_scroll(ctx: &Context, area: Id, offset: f32, max: f32) {
+    let last_id = area.with("page_scroll_last");
+    ctx.data_mut(|data| {
+        let last = data.get_temp::<f32>(last_id);
+        data.insert_temp(last_id, offset);
+        let delta = last.map_or(0., |last| offset - last);
+        let scroll = data.get_temp_mut_or_default::<PageScroll>(page_scroll_id());
+        scroll.delta += delta;
+        scroll.offset = offset;
+        scroll.at_end = offset >= max - 1.;
+        scroll.max = max;
+    });
+}
+
+/// How the page scrolled since this was last taken, if it was drawn.
+pub fn take_page_scroll(ctx: &Context) -> Option<PageScroll> {
+    ctx.data_mut(|data| data.remove_temp::<PageScroll>(page_scroll_id()))
+}
+
 /// Whether the soft keyboard is up: it takes the bottom of the window out of the content
 /// rectangle, much more of it than the gesture bar does.
 pub fn keyboard_open(ctx: &Context) -> bool {

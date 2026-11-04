@@ -201,7 +201,9 @@ bottom bar (64 tall, on the floor of the window)
                              surface_border hairline over it
   Home · Libraries         — half the width each: icon 24 over an xs label; the open
                              one's icon brand on an inset_hover pill 56 × 30 and its
-                             label ink, the others ink_muted
+                             label ink, the others ink_muted; it slides down out of
+                             the window while the page scrolls down (0.2 s, cubic out),
+                             back up as it scrolls up or reaches its top
 ```
 
 Home leaves out *My Media* there, as Libraries is a tap away. Settings is a list of its sections instead of the menu and column: a heading per store (`overline`), then one surface of rows, each its icon in `brand`, its title in `ink` at `base` over a `sm` muted line of what it has, and a chevron in `ink_muted`, at least 64 tall with an inset hairline between them and `inset_hover` while pressed. A row opens its section on a page of its own, titled with its name.
@@ -272,7 +274,17 @@ toolbar (surface::strip, 24 from the window's sides, 16 above it and above the g
 jump bar (right edge, while sorted by name)
   # A B …                  — ink_muted at 11; the first row's letter (by its first card's name,
                              past a leading article) brand at 13; an inset_hover pill in ink
-                             under the pointer; each a Button "Jump to X", the current selected
+                             under the pointer; each a Button "Jump to X", the current selected;
+                             a drag along it shows the letter it's on in a brand circle 56
+                             across, 24 left of the bar at the finger's height, the letter in
+                             brand_foreground at 2xl
+phone toolbar (layout::Size::Compact)
+  Filters                  — button::quiet_icon with the tune icon, on (brand) while
+                             anything is filtered; opens a dialog of the filters, one
+                             48-tall row each (the name, its select at the right), with
+                             Done (brand) and Clear filters (quiet) under them and the
+                             count under its title
+  n items · [Name ▾] (↑)  — the count, then the sort without its label
 genres and tags popover (popup::panel, 380 wide)
   search                   — field::with_leading + field::leading, search icon in its left end
   chosen pills             — the ones picked so far

@@ -67,6 +67,13 @@ pub fn danger(ui: &mut Ui, label: &str, state: State) -> Response {
     button::danger(ui, label, width, state, Focus::Skip)
 }
 
+/// A `quiet` button beside the main one, for a dialog's second action (the library's
+/// *Clear filters*).
+pub fn quiet(ui: &mut Ui, label: &str, state: State) -> Response {
+    let width = button_width(ui, label);
+    button::quiet(ui, label, width, state, Focus::Skip)
+}
+
 /// *Cancel*: closes the dialog, as Esc and a click on the backdrop do.
 pub fn cancel(ui: &mut Ui) {
     let width = button_width(ui, "Cancel");

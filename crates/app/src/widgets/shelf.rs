@@ -11,14 +11,15 @@
 //!
 //! The row drags like a rail: the wheel keeps scrolling the page (the row takes none of it), a
 //! press and a move drags the row with the mouse and the closed hand shows while it moves, a
-//! drag doesn't open the card it ends on, and the row follows the pointer 1:1 and stops with it
-//! (no egui coasting after the release, no rubber band past the ends). The keyboard's
-//! `scroll_to_me` still brings a card into view, through egui's own scroll animation.
+//! drag doesn't open the card it ends on, and the row follows the pointer 1:1 (no rubber band
+//! past the ends). With a mouse it stops with the pointer; with touch a flung row coasts on
+//! (`smooth_scroll::Fling`) until it slows down, reaches an end or a touch catches it. The
+//! keyboard's `scroll_to_me` still brings a card into view, through egui's own scroll animation.
 //!
 //! A drag on the row is the row's or the page's, decided once it has moved [`DRAG_LOCK`] points:
-//! mostly sideways moves the row, mostly up or down scrolls the page while the row holds still.
-//! On a touch screen, where shelves fill most of Home, that's how the page scrolls at all, since
-//! the row takes every drag that starts on it.
+//! mostly sideways moves the row, mostly up or down scrolls the page while the row holds still,
+//! so one drag never moves both. On a touch screen, where shelves fill most of Home, that's how
+//! the page scrolls at all, since the row takes every drag that starts on it.
 
 use std::hash::Hash;
 
@@ -27,7 +28,7 @@ use egui::style::KineticScrollStyle;
 use egui::{Align, Layout, Rect, ScrollArea, Ui};
 use egui_material_icons::icons::{ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT};
 
-use crate::smooth_scroll::Glide;
+use crate::smooth_scroll::{Fling, Glide};
 use crate::theme;
 use crate::theme::text;
 use crate::widgets::label;
@@ -209,10 +210,17 @@ fn shelf_inner(
         .is_some_and(|area| ui.ctx().is_being_dragged(area.with("area")));
     state.drag = match (dragged, state.drag) {
         // A drag the page took keeps the page going at the release, as a drag on the page's
-        // own area would.
+        // own area would; with touch, the row's own drag flings the row.
         (false, Some(drag)) => {
-            if drag.axis == Some(DragAxis::Page) {
-                crate::smooth_scroll::Coast::start(ui.ctx());
+            match drag.axis {
+                Some(DragAxis::Page) => crate::smooth_scroll::Coast::start(ui.ctx()),
+                Some(DragAxis::Row) if crate::layout::touch(ui.ctx()) => {
+                    // The offset grows as the cards move left, against the pointer.
+                    let velocity = -ui.input(|input| input.pointer.velocity().x);
+                    state.fling = Fling::new(velocity);
+                    state.glide = None;
+                }
+                _ => {}
             }
             None
         }
@@ -241,6 +249,20 @@ fn shelf_inner(
             Some(drag)
         }
     };
+    // A fling carries the row on after the release until it slows to a stop or reaches an end,
+    // and a touch anywhere catches it, so it never moves under a drag of the page.
+    if let Some(fling) = &mut state.fling {
+        let dt = ui.input(|input| input.stable_dt).min(0.1);
+        let (delta, moving) = fling.step(dt);
+        let next = (state.offset + delta).clamp(0., max);
+        let at_end = next != state.offset + delta;
+        if crate::smooth_scroll::caught(ui) || !moving || at_end {
+            state.fling = None;
+        }
+        if !crate::smooth_scroll::caught(ui) {
+            offset = Some(next);
+        }
+    }
     if let Some(drag) = state.drag
         && drag.axis != Some(DragAxis::Row)
     {
@@ -298,6 +320,7 @@ fn shelf_inner(
         glide: state.glide,
         area: Some(out.id),
         drag: state.drag,
+        fling: state.fling,
     };
     if measured
         .glide
@@ -307,7 +330,7 @@ fn shelf_inner(
         // since the offset isn't the one it set.
         measured.glide = None;
     }
-    if measured != state || measured.glide.is_some() {
+    if measured != state || measured.glide.is_some() || measured.fling.is_some() {
         // The arrows were drawn from the previous frame's widths: a row that just grew, or that
         // a key or a flung drag scrolled to an end, needs one more frame to show or grey them.
         // A running glide needs each frame too. Only a change or a glide asks for it, so an idle
@@ -341,6 +364,8 @@ struct State {
     area: Option<egui::Id>,
     /// A drag on the row, while it lasts.
     drag: Option<Drag>,
+    /// The row coasting after a touch let go of it.
+    fling: Option<Fling>,
 }
 
 #[derive(Clone, Copy, PartialEq)]

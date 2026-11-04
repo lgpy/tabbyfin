@@ -28,7 +28,7 @@ use std::collections::{HashMap, HashSet};
 
 use egui::accesskit::Role;
 use egui::{Align, Align2, CornerRadius, FontId, Layout, Response, Sense, Ui, WidgetInfo, vec2};
-use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD};
+use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_TUNE};
 use jellyfin::models::{
     BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemFilterValues, ItemSortBy, QueryResult,
 };
@@ -47,7 +47,7 @@ use crate::widgets::focus;
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::round_button::RoundButton;
 use crate::widgets::text::{CARD_GAP, POSTER_H, POSTER_W};
-use crate::widgets::{backdrop, button, card, label, select, state, surface};
+use crate::widgets::{backdrop, button, card, dialog, label, select, state, surface};
 
 /// Items per request: rows show placeholders until the page holding them arrives.
 const PAGE_SIZE: usize = 100;
@@ -60,9 +60,14 @@ const COMPACT_CARD_GAP: f32 = 12.;
 const ORDER_BUTTON: f32 = 32.;
 /// The genres and tags button's width.
 const VALUES_BUTTON_W: f32 = 200.;
+/// The phone's filters dialog's width, narrowed to the window by `dialog::show`.
+const FILTERS_DIALOG_W: f32 = 400.;
 /// The jump bar's letters; `#` is the top (names starting with digits or symbols).
 const LETTERS: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const LETTER_BAR_W: f32 = 28.;
+/// The bubble showing the letter a drag along the bar is on, and its room from the bar.
+const SCRUB_BUBBLE: f32 = 56.;
+const SCRUB_BUBBLE_GAP: f32 = 24.;
 
 /// The cursor's sections: the toolbar's controls, then the grid.
 const TOOLBAR: usize = 0;
@@ -192,6 +197,8 @@ struct FilterScope {
 /// The toolbar's controls, left to right, as the keyboard cursor sees them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tool {
+    /// A phone's: opens the filters' dialog.
+    Filters,
     Show,
     Rating,
     /// Opens the genres and tags popover.
@@ -213,6 +220,7 @@ enum ToolAction {
     Resolution(usize),
     ToggleOrder,
     OpenValues,
+    OpenFilters,
     Clear,
 }
 
@@ -265,6 +273,12 @@ pub struct LibraryPage {
     jump: Option<Task<JumpResult>>,
     /// The item a letter jump scrolls to, when the grid draws next.
     scroll_to: Option<usize>,
+    /// The letter a drag along the jump bar is on, while it lasts.
+    scrubbing: Option<char>,
+    /// Laid out for a phone last frame: the filters are in a dialog, opened from the toolbar.
+    compact: bool,
+    /// The phone's filters dialog is open.
+    filters_open: bool,
     /// The `services.user_data` the loaded pages were fetched at.
     loaded_at: Option<u64>,
     cursor: Cursor,
@@ -383,6 +397,9 @@ impl LibraryPage {
             values_task: None,
             jump: None,
             scroll_to: None,
+            scrubbing: None,
+            compact: layout::compact(cx.ctx),
+            filters_open: false,
             loaded_at: Some(cx.services.user_data),
             cursor: Cursor::starting_at(GRID_START),
             columns: 1,
@@ -811,6 +828,7 @@ impl LibraryPage {
                 self.change_view(cx);
             }
             ToolAction::OpenValues => self.value_filters.toggle(cx.ctx),
+            ToolAction::OpenFilters => self.filters_open = true,
             ToolAction::Clear => self.clear_filters(cx),
         }
     }
@@ -824,6 +842,7 @@ impl LibraryPage {
             Tool::Year => ToolAction::Year((self.year_index + 1) % (self.years.len() + 1)),
             Tool::Resolution => ToolAction::Resolution((self.resolution_index + 1) % RESOLUTIONS.len()),
             Tool::Order => ToolAction::ToggleOrder,
+            Tool::Filters => ToolAction::OpenFilters,
             Tool::Values => {
                 self.value_filters.open(cx.ctx);
                 return;
@@ -927,8 +946,19 @@ impl LibraryPage {
         }));
     }
 
-    /// The toolbar's controls shown now, left to right: the filters, then the sort.
+    /// The toolbar's controls shown now, left to right: the filters, then the sort. A phone has
+    /// room for the sort only, with a button opening the filters in a dialog.
     fn tools(&self) -> Vec<Tool> {
+        if self.compact {
+            return vec![Tool::Filters, Tool::Sort, Tool::Order];
+        }
+        let mut tools = self.filter_tools();
+        tools.extend([Tool::Sort, Tool::Order]);
+        tools
+    }
+
+    /// The filters this library offers, and *Clear filters* after them.
+    fn filter_tools(&self) -> Vec<Tool> {
         let mut tools = vec![Tool::Show];
         if let Some(scope) = &self.filter_scope {
             if !self.values.ratings.is_empty() {
@@ -945,53 +975,46 @@ impl LibraryPage {
             }
         }
         tools.push(Tool::Clear);
-        tools.extend([Tool::Sort, Tool::Order]);
         tools
     }
 
     /// The toolbar on its strip (`surface::strip`), as wide as the grid's padding leaves: the
     /// filters and the count at the left, the sort at the right.
     fn toolbar(&mut self, ui: &mut Ui, cx: &mut PageCx) {
+        let compact = layout::compact(ui.ctx());
+        self.compact = compact;
         let tools = self.tools();
         let split = tools.iter().position(|tool| *tool == Tool::Sort).unwrap_or(tools.len());
         let mut action = None;
         let mut values_button = None;
         let padding = layout::side(ui.ctx());
-        let compact = layout::compact(ui.ctx());
         ui.horizontal(|ui| {
             ui.add_space(padding);
             let width = ui.available_width() - padding;
             surface::strip(ui).show(ui, |ui| {
                 ui.set_width(width - 2. * f32::from(surface::STRIP_PAD[0]));
                 if compact {
-                    // A phone has room for a few of the controls: they scroll sideways in the
-                    // strip, in one row, the sort last.
-                    egui::ScrollArea::horizontal()
-                        .id_salt("library_toolbar")
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                for (index, tool) in tools.iter().copied().enumerate() {
-                                    if index == split {
-                                        if let Some(total) = self.total {
-                                            ui.add_space(8.);
-                                            ui.label(label::muted(ui, item_count(total)));
-                                            ui.add_space(8.);
-                                        }
-                                        ui.label(label::muted(ui, "Sort"));
-                                    }
-                                    let selected = self.cursor.is_selected(TOOLBAR, index);
-                                    let (response, control) = self.tool(ui, tool, selected);
-                                    action = action.or(control);
-                                    if selected && tool != Tool::Order {
-                                        focus::ring_widget(ui, &response);
-                                    }
-                                    if tool == Tool::Values {
-                                        values_button = Some(response);
-                                    }
+                    // A phone's: the filters' button and the count at the left, the sort at the
+                    // right.
+                    ui.horizontal(|ui| {
+                        let selected = self.cursor.is_selected(TOOLBAR, 0);
+                        let (_, control) = self.tool(ui, Tool::Filters, selected);
+                        action = action.or(control);
+                        if let Some(total) = self.total {
+                            ui.add_space(4.);
+                            ui.label(label::muted(ui, item_count(total)));
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            for index in (split..tools.len()).rev() {
+                                let selected = self.cursor.is_selected(TOOLBAR, index);
+                                let (response, control) = self.tool(ui, tools[index], selected);
+                                action = action.or(control);
+                                if selected && tools[index] != Tool::Order {
+                                    focus::ring_widget(ui, &response);
                                 }
-                            });
+                            }
                         });
+                    });
                     return;
                 }
                 ui.horizontal(|ui| {
@@ -1041,6 +1064,11 @@ impl LibraryPage {
     fn tool(&self, ui: &mut Ui, tool: Tool, selected: bool) -> (Response, Option<ToolAction>) {
         let view = &self.view;
         match tool {
+            Tool::Filters => {
+                // Lit while anything is filtered out, as the grid then isn't the whole library.
+                let response = button::quiet_icon(ui, ICON_TUNE, "Filters", Some(self.filtered()), 1., selected);
+                (response.clone(), response.clicked().then_some(ToolAction::OpenFilters))
+            }
             Tool::Sort => {
                 let labels = SORTS.iter().map(|(_, label, ..)| *label).collect();
                 let (response, index) = picker(ui, "library_sort", "Sort", 150., labels, self.sort_index);
@@ -1117,43 +1145,89 @@ impl LibraryPage {
 
     /// The jump bar: the letters in `ink_muted`, `current` (the first row's) in `brand`, and an
     /// `inset_hover` pill in `ink` under the pointer.
+    ///
+    /// A click on a letter jumps there; a drag along the bar scrubs through them, jumping to
+    /// each letter it passes, with the letter under the finger in a `brand` bubble beside the
+    /// bar, since the finger covers the bar's own.
     fn letters(&mut self, ui: &mut Ui, current: Option<char>, cx: &mut PageCx) {
         // The letters spread down the whole grid, at 12 px each.
-        let count = LETTERS.chars().count() as f32;
+        let count = LETTERS.chars().count();
         let line = 12.;
-        let gap = ((ui.available_height() - line * count) / (count - 1.)).clamp(0., 16.);
-        let size = vec2(LETTER_BAR_W, ui.available_height());
-        ui.allocate_ui_with_layout(size, Layout::top_down(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.y = gap;
-            let tokens = crate::theme::tokens_of(ui);
-            for letter in LETTERS.chars() {
-                let (rect, response) = ui.allocate_exact_size(vec2(LETTER_BAR_W, line), Sense::CLICK);
-                let is_current = current == Some(letter);
-                response
-                    .widget_info(|| WidgetInfo::selected(Role::Button, true, is_current, format!("Jump to {letter}")));
-                let hovered = response.hovered();
-                if hovered {
-                    let pill = rect.expand2(vec2(-4., 2.));
-                    ui.painter()
-                        .rect_filled(pill, CornerRadius::same((pill.height() / 2.) as u8), tokens.inset_hover);
-                }
-                let (color, size) = match (hovered, is_current) {
-                    (_, true) => (tokens.brand, 13.),
-                    (true, false) => (tokens.ink, 11.),
-                    (false, false) => (tokens.ink_muted, 11.),
-                };
-                ui.painter().text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    letter,
-                    FontId::new(size, egui::FontFamily::Proportional),
-                    color,
-                );
-                if response.clicked() {
-                    self.jump_to(letter, false, cx);
-                }
+        let gap = ((ui.available_height() - line * count as f32) / (count as f32 - 1.)).clamp(0., 16.);
+        let (bar, scrub) = ui.allocate_exact_size(vec2(LETTER_BAR_W, ui.available_height()), Sense::DRAG);
+        let letter_rect = |index: usize| {
+            egui::Rect::from_min_size(
+                egui::pos2(bar.left(), bar.top() + index as f32 * (line + gap)),
+                vec2(LETTER_BAR_W, line),
+            )
+        };
+        // The scrub: the letter nearest the finger, down the bar's length, jumped to once as
+        // the finger reaches it.
+        if scrub.dragged()
+            && let Some(pointer) = scrub.interact_pointer_pos()
+        {
+            let pitch = line + gap;
+            let index = ((pointer.y - bar.top() - line / 2.) / pitch)
+                .round()
+                .clamp(0., (count - 1) as f32) as usize;
+            let letter = LETTERS.chars().nth(index).unwrap_or('#');
+            if self.scrubbing != Some(letter) {
+                self.scrubbing = Some(letter);
+                self.jump_to(letter, false, cx);
             }
-        });
+        } else {
+            self.scrubbing = None;
+        }
+        let tokens = crate::theme::tokens_of(ui);
+        for (index, letter) in LETTERS.chars().enumerate() {
+            let rect = letter_rect(index);
+            let response = ui.interact(rect, ui.make_persistent_id(("jump_letter", letter)), Sense::CLICK);
+            let is_current = self
+                .scrubbing
+                .map_or(current == Some(letter), |scrubbed| scrubbed == letter);
+            response.widget_info(|| WidgetInfo::selected(Role::Button, true, is_current, format!("Jump to {letter}")));
+            let hovered = response.hovered() && self.scrubbing.is_none();
+            if hovered {
+                let pill = rect.expand2(vec2(-4., 2.));
+                ui.painter()
+                    .rect_filled(pill, CornerRadius::same((pill.height() / 2.) as u8), tokens.inset_hover);
+            }
+            let (color, size) = match (hovered, is_current) {
+                (_, true) => (tokens.brand, 13.),
+                (true, false) => (tokens.ink, 11.),
+                (false, false) => (tokens.ink_muted, 11.),
+            };
+            ui.painter().text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                letter,
+                FontId::new(size, egui::FontFamily::Proportional),
+                color,
+            );
+            if response.clicked() {
+                self.jump_to(letter, false, cx);
+            }
+        }
+        if let Some(letter) = self.scrubbing
+            && let Some(pointer) = scrub.interact_pointer_pos()
+        {
+            // Over the grid, clear of the finger, at the finger's height (kept on screen).
+            let radius = SCRUB_BUBBLE / 2.;
+            let y = pointer.y.clamp(bar.top() + radius, bar.bottom() - radius);
+            let center = egui::pos2(bar.left() - SCRUB_BUBBLE_GAP - radius, y);
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                ui.make_persistent_id("scrub_bubble"),
+            ));
+            painter.circle_filled(center, radius, tokens.brand);
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                letter,
+                crate::theme::text::font(ui, "2xl"),
+                tokens.brand_foreground,
+            );
+        }
     }
 
     /// The letter of the first row in view (the first whose cards are at least half on
@@ -1297,7 +1371,77 @@ impl LibraryPage {
         }
     }
 
+    /// A phone's filters: each of the library's filters on a row of its own, its name at the left
+    /// and its control at the right, with *Clear filters* and *Done* under them. A choice
+    /// applies as it's picked, so the grid behind changes with it, and the count under the
+    /// title says how many are left.
+    fn filters_dialog(&mut self, cx: &mut PageCx) {
+        if !self.filters_open {
+            return;
+        }
+        // Turned to a wider layout, the toolbar has them again.
+        if !self.compact {
+            self.filters_open = false;
+            return;
+        }
+        let tools: Vec<Tool> = self
+            .filter_tools()
+            .into_iter()
+            .filter(|tool| *tool != Tool::Clear)
+            .collect();
+        let mut action = None;
+        let mut values_button = None;
+        let mut done = false;
+        let subtitle = self.total.map(item_count);
+        let filtered = self.filtered();
+        let modal = dialog::show(
+            cx.ctx,
+            egui::Id::unique("library_filters"),
+            FILTERS_DIALOG_W,
+            "Filters",
+            subtitle.as_deref(),
+            |ui| {
+                for tool in tools.iter().copied() {
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(layout::TARGET);
+                        ui.label(tool_name(tool));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let (response, control) = self.tool(ui, tool, false);
+                            action = action.or(control);
+                            if tool == Tool::Values {
+                                values_button = Some(response);
+                            }
+                        });
+                    });
+                }
+                dialog::buttons(ui, |ui| {
+                    done = dialog::main(ui, "Done", button::State::Ready).clicked();
+                    let state = if filtered {
+                        button::State::Ready
+                    } else {
+                        button::State::Disabled
+                    };
+                    if dialog::quiet(ui, "Clear filters", state).clicked() {
+                        action = Some(ToolAction::Clear);
+                    }
+                });
+            },
+        );
+        if let Some(anchor) = values_button
+            && self.value_filters.show(&anchor, &self.values, &mut self.view)
+        {
+            self.change_view(cx);
+        }
+        if let Some(action) = action {
+            self.apply_tool(action, cx);
+        }
+        if done || modal.should_close() {
+            self.filters_open = false;
+        }
+    }
+
     fn dialogs(&mut self, cx: &mut PageCx) {
+        self.filters_dialog(cx);
         if let Some(dialog) = &mut self.add_to_playlist
             && !dialog.show(cx)
         {
@@ -1404,6 +1548,21 @@ impl Browse for LibraryPage {
             return;
         };
         self.step(tool, cx);
+    }
+}
+
+/// A filter's name on its row of the phone's filters dialog.
+fn tool_name(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Show => "Progress",
+        Tool::Rating => "Rating",
+        Tool::Values => "Genres and tags",
+        Tool::Year => "Year",
+        Tool::Resolution => "Resolution",
+        Tool::Filters => "Filters",
+        Tool::Clear => "Clear filters",
+        Tool::Sort => "Sort",
+        Tool::Order => "Order",
     }
 }
 
