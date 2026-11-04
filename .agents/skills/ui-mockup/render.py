@@ -102,7 +102,7 @@ def main():
     if not cargo(filters, env, src):
         sys.exit("mockup render failed")
 
-    renders = [json.loads(p.read_text()) for p in sorted(out.glob("*.json"))]
+    renders = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(out.glob("*.json"))]
     # In the file's order, so its sections read as written.
     order = [name for _, name in test_names(src.read_text(encoding="utf-8")) if name]
     renders.sort(key=lambda r: order.index(r["name"]) if r["name"] in order else len(order))
@@ -300,8 +300,12 @@ SAID = set()
 
 def cargo(filters, env, src, cwd=None):
     """Runs the matching tests, printing only what needs acting on. True if they passed."""
-    cmd = ["cargo", "test", "-p", "tabbyfin", "--features", "mockup", "--message-format", "short", *filters]
-    run = subprocess.run(cmd, cwd=cwd or root, env=env, capture_output=True, text=True)
+    # A shell without mise's tools on its PATH (a fresh Git Bash) still has mise to find them.
+    tool = ["cargo"] if shutil.which("cargo") or not shutil.which("mise") else ["mise", "exec", "--", "cargo"]
+    cmd = [*tool, "test", "-p", "tabbyfin", "--features", "mockup", "--message-format", "short", *filters]
+    run = subprocess.run(
+        cmd, cwd=cwd or root, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     lines = (run.stderr + "\n" + run.stdout).splitlines()
     shown = []
     for line in lines:
