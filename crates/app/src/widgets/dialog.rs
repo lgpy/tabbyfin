@@ -28,6 +28,12 @@ pub fn show<R>(
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> ModalResponse<R> {
     let tokens = theme::tokens(&ctx.style_of(ctx.theme()).visuals);
+    // On a phone, no wider than the window leaves with a margin either side.
+    let width = if crate::layout::touch(ctx) {
+        width.min(ctx.content_rect().width() - 2. * crate::layout::side(ctx))
+    } else {
+        width
+    };
     egui::Modal::new(id)
         .backdrop_color(tokens.scrim)
         .frame(surface::frame_of(tokens))

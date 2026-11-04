@@ -518,8 +518,15 @@ pub fn row(ui: &mut Ui, entry: &Entry, slot: bool, highlighted: bool, fill: Colo
 }
 
 /// A row's height, taller with larger text.
+///
+/// A finger's height with touch.
 pub fn row_height(ui: &Ui) -> f32 {
-    ROW_H.max(text::font(ui, "sm").size + 20.)
+    let height = ROW_H.max(text::font(ui, "sm").size + 20.);
+    if crate::layout::touch(ui.ctx()) {
+        height.max(crate::layout::TARGET)
+    } else {
+        height
+    }
 }
 
 /// Up and Down wrap round. In a menu opened with a click, Down starts at the top and Up at the

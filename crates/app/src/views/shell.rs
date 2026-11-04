@@ -31,13 +31,16 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_CLOSE, ICON_GROUPS, ICON_REPEAT, ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE,
+    ICON_ARROW_BACK, ICON_CLOSE, ICON_GROUPS, ICON_HOME, ICON_REPEAT, ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS,
+    ICON_SHUFFLE, ICON_VIDEO_LIBRARY,
 };
 use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 
 use crate::browse::Move;
 use crate::config::{Config, SavedServer};
+use crate::keyboard::Kind;
 use crate::keys::{self, Action, Press, Scope};
+use crate::layout;
 use crate::motion;
 use crate::nav::{NavRequest, Route};
 use crate::playback;
@@ -66,6 +69,18 @@ const BAR_BUTTON: f32 = 40.;
 const BAR_ICON: f32 = 24.;
 /// The app icon's size in the bar.
 const LOGO: f32 = 40.;
+/// The compact layout's top bar (a phone in portrait): shorter, with the app's icon smaller.
+const COMPACT_BAR_H: f32 = 56.;
+const COMPACT_LOGO: f32 = 32.;
+/// The compact layout's bottom bar, above the gesture bar's inset.
+const NAV_H: f32 = 64.;
+/// The places the bottom bar leads to, in its order.
+const PLACES: [(MaterialIcon, &str); 4] = [
+    (ICON_HOME, "Home"),
+    (ICON_VIDEO_LIBRARY, "Libraries"),
+    (ICON_SEARCH, "Search"),
+    (ICON_SETTINGS, "Settings"),
+];
 /// The open search box's width, when the window has room for it.
 const SEARCH_BOX_W: f32 = 400.;
 /// The search box's id: it gives its focus back when the keyboard leaves it.
@@ -323,14 +338,25 @@ impl Shell {
             // behind the bar. The bar's rectangle is only known once it's laid out.
             let mut under_bar = UnderBar::reserve(ui.painter());
             // The bar keeps its contents 24 points from the window's edges; the pages own
-            // their own 24 (or less, for a grid's own padding), so the panel adds none.
+            // their own 24 (or less, for a grid's own padding), so the panel adds none. A
+            // phone's bar has round buttons at its ends, whose circles bring them in far enough.
+            let compact = layout::compact(ui.ctx());
+            let margin = if compact { 4 } else { 24 };
             let bar = egui::Panel::top("top_bar")
-                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(24, 0)))
+                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(margin, 0)))
                 .show_separator_line(false)
                 .show(ui, |ui| self.top_bar(ui, cx))
                 .response
                 .rect;
             under_bar.bar = bar;
+            // The bottom bar goes while the soft keyboard is up, as an Android app's does: the
+            // keyboard would push it up over the page.
+            if compact && !layout::keyboard_open(ui.ctx()) {
+                egui::Panel::bottom("bottom_bar")
+                    .frame(egui::Frame::NONE)
+                    .show_separator_line(false)
+                    .show(ui, |ui| self.bottom_bar(ui, cx));
+            }
             cx.under_bar = Some(under_bar);
             egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
                 // Each page's widgets and scroll areas live under its own id scope, so stacked
@@ -715,7 +741,12 @@ impl Shell {
         }
         let term = self.search_text.trim().to_owned();
         if term.is_empty() {
-            if let Some(index) = self.search_page() {
+            // On a phone the results are a place of the bottom bar, and the box lives on their
+            // page: clearing it empties the page rather than closing it.
+            if layout::compact(cx.ctx) && self.top_is_search() {
+                let fresh = views::open(Route::Search, cx);
+                self.stack.last_mut().expect("the page stack is never empty").page = fresh;
+            } else if let Some(index) = self.search_page() {
                 self.stack.remove(index);
             }
             cx.ctx.request_repaint();
@@ -799,6 +830,10 @@ impl Shell {
         self.sync_own_search();
         self.search_box_keys(cx);
         self.syncplay_panel_keys(cx);
+        if layout::compact(ui.ctx()) {
+            self.compact_top_bar(ui, cx);
+            return;
+        }
         let can_go_back = self.can_go_back();
         let keyboard = self.bar_key;
         let in_group = cx.services.in_group();
@@ -827,15 +862,7 @@ impl Shell {
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                let (rect, _) = ui.allocate_exact_size(vec2(LOGO, LOGO), Sense::hover());
-                if let Some(logo) = &logo {
-                    ui.painter().image(
-                        logo.id(),
-                        rect,
-                        Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)),
-                        Color32::WHITE,
-                    );
-                }
+                logo_image(ui, logo.as_ref(), LOGO);
                 if can_go_back {
                     let back = bar_button(ICON_ARROW_BACK, "Back", keyboard == Some(BarItem::Back)).show(ui);
                     if back.clicked() {
@@ -894,6 +921,154 @@ impl Shell {
         if pressed_outside {
             self.bar_key = None;
         }
+    }
+
+    /// The top bar of a phone in portrait (`layout::Size::Compact`), whose bottom bar has the
+    /// places to go: Back or the app's icon, the title, and SyncPlay and the account at the
+    /// right. Over the search results, and over a page that searches itself (Settings), the
+    /// search box takes the title's place and the buttons', as the bar has no room for both.
+    fn compact_top_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        let can_go_back = self.can_go_back();
+        let in_group = cx.services.in_group();
+        let searching = self.top_is_search() || self.own_search.is_some();
+        let title = self.top().title().to_owned();
+        let logo = self.logo.clone();
+        let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), COMPACT_BAR_H), Sense::hover());
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(bar)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| {
+                // Apart enough that the buttons' 48-point targets don't overlap.
+                ui.spacing_mut().item_spacing.x = 8.;
+                if can_go_back {
+                    if bar_button(ICON_ARROW_BACK, "Back", false).show(ui).clicked() {
+                        self.bar_key = None;
+                        cx.nav.push(NavRequest::Back);
+                    }
+                } else {
+                    // Where Back would be: the icon, centred on the same slot.
+                    ui.add_space((BAR_BUTTON - COMPACT_LOGO) / 2.);
+                    logo_image(ui, logo.as_ref(), COMPACT_LOGO);
+                    ui.add_space((BAR_BUTTON - COMPACT_LOGO) / 2.);
+                }
+                if searching {
+                    let left = ui.cursor().min.x;
+                    let rect = Rect::from_min_max(
+                        egui::pos2(left, bar.center().y - BAR_BUTTON / 2.),
+                        egui::pos2(bar.right() - 4., bar.center().y + BAR_BUTTON / 2.),
+                    );
+                    self.search_box(ui, rect, false, cx);
+                    return;
+                }
+                let buttons = 2. * BAR_BUTTON + 2. * ui.spacing().item_spacing.x;
+                let room = (ui.available_width() - buttons).max(0.);
+                ui.scope(|ui| {
+                    ui.set_max_width(room);
+                    ui.add(egui::Label::new(RichText::new(title).font(text::font(ui, "lg")).strong()).truncate());
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    self.account_button(ui, cx, false);
+                    let syncplay = bar_button(ICON_GROUPS, "Watch together (SyncPlay)", false)
+                        .on(in_group)
+                        .show(ui);
+                    if syncplay.clicked() {
+                        self.bar_key = None;
+                        self.toggle_syncplay_panel(cx);
+                    }
+                    self.syncplay_panel(&syncplay, cx);
+                });
+            },
+        );
+    }
+
+    /// The compact layout's bottom bar: Home, Libraries, Search and Settings, each a quarter of
+    /// the width and the bar's height, an icon over an `xs` label. The open place has its icon
+    /// in `brand` on an `inset_hover` pill. It's on the floor of the window: filled with the
+    /// backdrop's bottom colour down under the gesture bar, with a hairline over it, as the top
+    /// bar meets a scrolled page.
+    fn bottom_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        let tokens = theme::tokens_of(ui);
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), NAV_H), Sense::hover());
+        let window = ui.ctx().viewport_rect();
+        let floor = Rect::from_x_y_ranges(window.x_range(), rect.top()..=window.bottom());
+        let painter = ui.painter().with_clip_rect(window);
+        painter.rect_filled(floor, 0., tokens.backdrop_bottom);
+        painter.hline(
+            window.x_range(),
+            rect.top(),
+            egui::Stroke::new(1., tokens.surface_border),
+        );
+        let open = self.place();
+        let width = rect.width() / PLACES.len() as f32;
+        for (index, (icon, name)) in PLACES.iter().enumerate() {
+            let cell = Rect::from_min_size(
+                egui::pos2(rect.left() + width * index as f32, rect.top()),
+                vec2(width, rect.height()),
+            );
+            let response = ui.interact(cell, Id::unique("bottom_bar").with(index), Sense::CLICK);
+            let on = index == open;
+            response.widget_info(|| egui::WidgetInfo::selected(Role::Tab, true, on, *name));
+            let icon_center = egui::pos2(cell.center().x, cell.top() + 22.);
+            if on || response.is_pointer_button_down_on() {
+                let pill = Rect::from_center_size(icon_center, vec2(56., 30.));
+                painter.rect_filled(pill, 15., tokens.inset_hover);
+            }
+            let colour = if on { tokens.brand } else { tokens.ink_muted };
+            crate::widgets::round_button::glyph(ui, icon_center, *icon, 24., colour);
+            painter.text(
+                egui::pos2(cell.center().x, cell.top() + 48.),
+                egui::Align2::CENTER_CENTER,
+                *name,
+                text::font(ui, "xs"),
+                if on { tokens.ink } else { tokens.ink_muted },
+            );
+            if response.clicked() {
+                self.go_to(index, cx);
+            }
+        }
+    }
+
+    /// Which of the bottom bar's places is open: the page just above Home names it, so a page
+    /// opened from a library is still under Libraries.
+    fn place(&self) -> usize {
+        match self.stack.get(1).map(|entry| &entry.route) {
+            Some(Route::Libraries) => 1,
+            Some(Route::Search) => 2,
+            Some(Route::Settings) => 3,
+            _ => 0,
+        }
+    }
+
+    /// The bottom bar's place `index`: its page right above Home, closing the pages there were.
+    /// The open place goes back to its first page, and Search puts the keyboard in the box.
+    fn go_to(&mut self, index: usize, cx: &mut PageCx) {
+        let current = self.place();
+        let keep = if index == current && index != 0 { 2 } else { 1 };
+        if self.stack[keep.min(self.stack.len())..]
+            .iter()
+            .any(|entry| matches!(entry.route, Route::Search))
+        {
+            self.search_text.clear();
+            self.leave_search(cx.ctx);
+        }
+        self.stack.truncate(keep);
+        if index != current {
+            let route = match index {
+                1 => Some(Route::Libraries),
+                2 => Some(Route::Search),
+                3 => Some(Route::Settings),
+                _ => None,
+            };
+            if let Some(route) = route {
+                self.push(route, cx);
+            }
+        }
+        if index == 2 {
+            self.want_search_focus = true;
+        }
+        self.bar_key = None;
+        cx.ctx.request_repaint();
     }
 
     /// The user's button and menu: the saved accounts to switch to (the current one checked),
@@ -1121,6 +1296,9 @@ impl Shell {
                 },
             )
             .inner;
+        // The keyboard is a search one while the box has it, and the box comes back above the
+        // keyboard when it opens over it.
+        field::shown(&response, Kind::Search);
         // Clearing keeps the keyboard in the box; the results close through `search_changed`
         // from the empty text, as clearing with the keyboard does.
         if clear_clicked {
@@ -1297,6 +1475,19 @@ struct StackEntry {
     /// What it was opened for, which the shell matches on for Settings and the search results.
     route: Route,
     page: Box<dyn Page>,
+}
+
+/// The app's icon, `size` across, in the bar's layout.
+fn logo_image(ui: &mut Ui, logo: Option<&egui::TextureHandle>, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    if let Some(logo) = logo {
+        ui.painter().image(
+            logo.id(),
+            rect,
+            Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)),
+            Color32::WHITE,
+        );
+    }
 }
 
 /// A top-bar button: every item takes the same round slot, with the keyboard's ring around it

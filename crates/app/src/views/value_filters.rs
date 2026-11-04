@@ -13,6 +13,7 @@ use egui::{Align, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Ui, vec2}
 use egui_material_icons::icons::ICON_SEARCH;
 
 use crate::config::LibraryView;
+use crate::keyboard::Kind;
 use crate::views::library::{FilterValues, ValueKind};
 use crate::widgets::pill::{self, Mark};
 use crate::widgets::popup;
@@ -132,8 +133,8 @@ impl ValueFilters {
                 ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
                 for (kind, value, mark) in &chosen {
                     let response = pill::filter(ui, value, *mark, false);
-                    if response.clicked() || response.secondary_clicked() {
-                        cycled = Some((*kind, value.clone(), response.secondary_clicked()));
+                    if response.clicked() || excludes(&response) {
+                        cycled = Some((*kind, value.clone(), excludes(&response)));
                     }
                 }
             });
@@ -167,8 +168,8 @@ impl ValueFilters {
                     for value in group {
                         let highlighted = self.highlighted == Some(index);
                         let response = pill::filter(ui, value, mark(view, kind, value), highlighted);
-                        if response.clicked() || response.secondary_clicked() {
-                            cycled = Some((kind, value.clone(), response.secondary_clicked()));
+                        if response.clicked() || excludes(&response) {
+                            cycled = Some((kind, value.clone(), excludes(&response)));
                             self.highlighted = Some(index);
                         }
                         if highlighted && self.scroll_to_highlight {
@@ -182,10 +183,12 @@ impl ValueFilters {
         });
 
         ui.add_space(10.);
-        ui.label(label::note(
-            ui,
-            "Click once to include, twice to exclude, right-click to clear.",
-        ));
+        let hint = if crate::layout::touch(ui.ctx()) {
+            "Tap once to include, twice to exclude, long-press to clear."
+        } else {
+            "Click once to include, twice to exclude, right-click to clear."
+        };
+        ui.label(label::note(ui, hint));
         cycled
     }
 
@@ -194,6 +197,7 @@ impl ValueFilters {
     fn search_box(&mut self, ui: &mut Ui) -> bool {
         let edit = field::with_leading(ui, Self::id().with("search"), &mut self.search, "Find a genre or tag");
         let response = ui.add(edit);
+        field::shown(&response, Kind::Search);
         if std::mem::take(&mut self.focus_search) {
             response.request_focus();
         }
@@ -288,6 +292,11 @@ fn set_off(view: &mut LibraryView, kind: ValueKind, value: &str) {
     let (included, excluded) = lists_mut(view, kind);
     included.retain(|v| v != value);
     excluded.retain(|v| v != value);
+}
+
+/// Whether a pill's value is let go: a right click, or a long press with touch.
+fn excludes(response: &egui::Response) -> bool {
+    response.secondary_clicked() || response.long_touched()
 }
 
 #[cfg(test)]

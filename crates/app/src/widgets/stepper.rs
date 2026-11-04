@@ -100,6 +100,7 @@ pub fn row(ui: &mut Ui, label: &str, keys: Option<&str>, value: &str, moved: boo
 fn pressed(ui: &Ui, center: Pos2, icon: MaterialIcon, name: &str, ink: Color32, colours: Colours) -> bool {
     let rect = egui::Rect::from_center_size(center, vec2(BUTTON, BUTTON));
     let response = ui.interact(rect, ui.scope_id().with(name), Sense::CLICK);
+    let response = crate::layout::grow(ui, response, Sense::CLICK);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), name));
     if response.hovered() {
         ui.painter().circle_filled(center, BUTTON / 2., colours.hover);

@@ -711,7 +711,7 @@ impl eframe::App for App {
             // Android puts the app in the background.
             let goes_back = keys::egui_wants_keys(&ctx)
                 || matches!(&self.screen, Some(Screen::SignedIn(signed_in)) if signed_in.shell.handles_back());
-            crate::android::after_frame(ctx.output(|output| output.ime), goes_back);
+            crate::android::after_frame(&ctx, goes_back);
         }
         self.handle_events(&ctx);
         if let Some(action) = self.toasts.show(&ctx) {

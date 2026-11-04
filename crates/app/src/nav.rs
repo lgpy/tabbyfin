@@ -27,6 +27,8 @@ pub enum Route {
         id: String,
         name: String,
     },
+    /// The user's libraries, the phone's bottom bar's second place.
+    Libraries,
     Search,
     Settings,
 }

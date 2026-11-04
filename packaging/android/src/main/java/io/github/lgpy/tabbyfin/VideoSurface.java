@@ -83,6 +83,8 @@ final class VideoSurface implements SurfaceHolder.Callback {
             } else {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                // The icons' own light or dark appearance (MainActivity.setLightSystemBars) is
+                // the window's, and stays as it was across hiding and showing the bars.
                 bars.show(WindowInsetsCompat.Type.systemBars());
                 applyBrightness(window, WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE);
             }

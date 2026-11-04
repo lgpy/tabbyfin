@@ -111,6 +111,7 @@ pub fn filter(ui: &mut Ui, label: &str, mark: Mark, highlighted: bool) -> Respon
     let max_w = ui.available_width().max(height);
     let width = (galley.size().x + icon_w + 2. * FILTER_INSET).min(max_w);
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::CLICK);
+    let response = crate::layout::grow(ui, response, Sense::CLICK);
     response.widget_info(|| {
         let state = match mark {
             Mark::Off => "",
