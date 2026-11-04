@@ -31,6 +31,8 @@ pub enum Route {
     Libraries,
     Search,
     Settings,
+    /// One section of Settings on a page of its own: a phone's Settings is a list of them.
+    SettingsSection(crate::views::settings::Section),
 }
 
 impl Route {

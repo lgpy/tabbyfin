@@ -1,5 +1,5 @@
 //! The phone's layout (`layout::Size::Compact`), driven headless with touch turned on for the
-//! harness's context: the shell's bottom bar, the library grid filling its rows, the item page's
+//! harness's context: the shell's bars, Settings' sections, the library grid filling its rows, the item page's
 //! stacked header, and a long press opening a card's menu.
 
 use egui::accesskit::{Role, Toggled};
@@ -116,21 +116,29 @@ fn tap(harness: &mut Harness<'static, ShellRun>, name: &str) {
     }
 }
 
-/// The bottom bar leads to its four places, each right above Home, and shows which is open;
-/// Settings' own buttons aren't in the top bar, which has only Back, the title and the account.
+/// The bottom bar leads to its two places, each right above Home, and shows which is open; the
+/// top bar has Search, SyncPlay and the account, but no Settings, and Home leaves *My Media* to
+/// the bottom bar.
 #[test]
 fn the_bottom_bar_opens_its_places_above_home() {
     let _config = config_dir("touch-bottom-bar");
     let server = home_server();
     let mut harness = phone_shell(&server);
     step_until(&mut harness, "Home", |harness| {
-        harness.query_by_label("My Media").is_some()
+        harness.query_by_label("Continue Watching").is_some()
     });
+    assert!(
+        harness.query_by_label("My Media").is_none(),
+        "no libraries shelf on a phone"
+    );
     assert!(place_selected(&harness, "Home"));
+    assert!(harness.query_by_role_and_label(Role::Tab, "Search").is_none());
+    assert!(harness.query_by_role_and_label(Role::Tab, "Settings").is_none());
     assert!(
         harness.query_by_role_and_label(Role::Button, "Settings").is_none(),
         "no Settings button in a phone's top bar"
     );
+    assert!(harness.query_by_role_and_label(Role::Button, "Search").is_some());
 
     tap(&mut harness, "Libraries");
     step_until(&mut harness, "the Libraries page", |harness| {
@@ -153,11 +161,6 @@ fn the_bottom_bar_opens_its_places_above_home() {
         harness.query_by_role_and_label(Role::Button, "Movies").is_some()
     });
 
-    // Settings takes Libraries' place, with the search box in the bar instead of its title.
-    tap(&mut harness, "Settings");
-    assert!(place_selected(&harness, "Settings"));
-    assert!(harness.query_by_label("Appearance").is_some());
-
     tap(&mut harness, "Home");
     assert!(place_selected(&harness, "Home"));
     assert!(
@@ -166,14 +169,17 @@ fn the_bottom_bar_opens_its_places_above_home() {
     );
 }
 
-/// Search opens with the keyboard in the box, and emptying the box keeps the page open.
+/// The top bar's Search button opens the results with the keyboard in the box, and emptying the
+/// box keeps the page open.
 #[test]
-fn search_is_a_place_with_its_box_in_the_top_bar() {
+fn search_opens_from_the_top_bar() {
     let _config = config_dir("touch-search");
     let server = home_server();
     let mut harness = phone_shell(&server);
-    tap(&mut harness, "Search");
-    assert!(place_selected(&harness, "Search"));
+    harness.get_by_role_and_label(Role::Button, "Search").click();
+    for _ in 0..3 {
+        harness.step();
+    }
     let focused = harness.ctx.memory(|memory| memory.focused());
     assert_eq!(
         focused,
@@ -181,6 +187,57 @@ fn search_is_a_place_with_its_box_in_the_top_bar() {
         "the box has the keyboard"
     );
     assert!(harness.query_by_label("Type in the search box to search.").is_some());
+    assert!(harness.query_by_label("Back").is_some(), "Back closes the results");
+}
+
+/// Settings is in the account menu, a list of its sections, each opening on a page of its own.
+#[test]
+fn settings_opens_from_the_account_menu_as_a_list_of_sections() {
+    let _config = config_dir("touch-settings");
+    let server = home_server();
+    let account = session(&server);
+    let label = format!(
+        "{} on {}",
+        account.user.name,
+        account
+            .server
+            .server_name
+            .as_deref()
+            .expect("the fixture names its server")
+    );
+    let mut harness = phone_shell(&server);
+    harness.get_by_role_and_label(Role::Button, &label).click();
+    step_until(&mut harness, "the account menu", |harness| {
+        harness.query_by_label("Sign out").is_some()
+    });
+    harness.get_by_label("Settings").click();
+    step_until(&mut harness, "the sections", |harness| {
+        harness.query_by_role_and_label(Role::Button, "Playback").is_some()
+    });
+    assert!(
+        harness
+            .query_all_by_label("Play the next episode automatically")
+            .next()
+            .is_none(),
+        "the list has the sections, not their settings"
+    );
+
+    harness.get_by_role_and_label(Role::Button, "Playback").click();
+    step_until(&mut harness, "the Playback page", |harness| {
+        harness
+            .query_all_by_label("Play the next episode automatically")
+            .next()
+            .is_some()
+    });
+    assert!(
+        harness.query_all_by_label("Theme").next().is_none(),
+        "only Playback's settings"
+    );
+
+    harness.get_by_label("Back").click();
+    step_until(&mut harness, "the sections again", |harness| {
+        harness.query_by_role_and_label(Role::Button, "Appearance").is_some()
+    });
 }
 
 /// The grid makes its cards as wide as three fill the phone's row beside the letter bar, rather
