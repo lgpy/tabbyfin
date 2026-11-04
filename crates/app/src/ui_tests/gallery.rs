@@ -1344,7 +1344,7 @@ impl Page for Cards {
                         card::person(ui, images, person, 1., false);
                     }
                 });
-                shown(ui, "card::placeholder", card::placeholder);
+                shown(ui, "card::placeholder_scaled", |ui| card::placeholder_scaled(ui, 1.));
             });
             ui.add_space(theme::SPACE.md);
             ui.horizontal_top(|ui| {
