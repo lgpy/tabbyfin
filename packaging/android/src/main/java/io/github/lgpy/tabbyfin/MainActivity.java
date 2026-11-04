@@ -1,13 +1,17 @@
 package io.github.lgpy.tabbyfin;
 
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.PixelFormat;
 import android.os.Bundle;
 import android.view.View;
+import android.view.Window;
 import android.view.inputmethod.InputMethodManager;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.graphics.Insets;
+import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.google.androidgamesdk.GameActivity;
 import com.google.androidgamesdk.gametextinput.State;
 
@@ -95,6 +99,19 @@ public class MainActivity extends GameActivity {
     public void onEditorAction(int action) {
         super.onEditorAction(action);
         nativeEditorAction();
+    }
+
+    /**
+     * The status and navigation bar icons: dark over the app's light theme, light over the dark
+     * one. Called by Rust when the theme changes (`crates/app/src/android.rs`).
+     */
+    static void setLightSystemBars(Activity activity, boolean light) {
+        activity.runOnUiThread(() -> {
+            Window window = activity.getWindow();
+            WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(window, window.getDecorView());
+            bars.setAppearanceLightStatusBars(light);
+            bars.setAppearanceLightNavigationBars(light);
+        });
     }
 
     @Override

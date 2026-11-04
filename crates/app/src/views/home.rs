@@ -40,6 +40,7 @@ const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
 /// Home's cards are larger than the other pages', with more room between them.
 const CARD_SCALE: f32 = 1.2;
 const CARD_GAP: f32 = 24.;
+const COMPACT_CARD_GAP: f32 = 12.;
 /// Home's cards start closer under their shelf's title than the other pages' (8 px).
 const TITLE_GAP: f32 = 8.;
 /// The page's top and bottom padding, and the space between its shelves.
@@ -379,6 +380,7 @@ fn show_shelves(
     let selected = cursor.selected();
     let mut target = None;
     let area = egui::ScrollArea::vertical().show(ui, |ui| {
+        crate::smooth_scroll::Coast::run(ui);
         // The page keeps clear of the window's top and bottom edges, and each shelf is inset by
         // its own padding, so its row scrolls to the window's edge.
         egui::Frame::NONE
@@ -390,6 +392,14 @@ fn show_shelves(
             })
             .show(ui, |ui| {
                 let images = &mut cx.services.images;
+                // A phone's shelves sit closer to its edges, their cards closer together.
+                let compact = crate::layout::compact(ui.ctx());
+                let padding = if compact {
+                    crate::layout::side(ui.ctx())
+                } else {
+                    shelf::PADDING
+                };
+                let gap = if compact { COMPACT_CARD_GAP } else { CARD_GAP };
                 for (index, row) in rows.iter().enumerate() {
                     if index > 0 {
                         ui.add_space(SHELF_GAP);
@@ -414,13 +424,13 @@ fn show_shelves(
                                 row.id,
                                 &row.title,
                                 &mut title_clicked,
-                                CARD_GAP,
+                                gap,
                                 TITLE_GAP,
-                                shelf::PADDING,
+                                padding,
                                 body,
                             )
                         } else {
-                            shelf::shelf_with_gaps(ui, row.id, &row.title, CARD_GAP, TITLE_GAP, shelf::PADDING, body)
+                            shelf::shelf_with_gaps(ui, row.id, &row.title, gap, TITLE_GAP, padding, body)
                         }
                     });
                     if title_clicked {

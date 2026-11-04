@@ -13,6 +13,7 @@ use jellyfin::models::PublicSystemInfo;
 use jellyfin::{Client, ClientInfo, Error, MIN_SUPPORTED_VERSION};
 
 use crate::config::SavedServer;
+use crate::keyboard::Kind;
 use crate::session::{self, Session, describe_error};
 use crate::task::{self, Deadline, Receiver, Sender, Task};
 use crate::theme;
@@ -272,11 +273,16 @@ impl Login {
                 let id = egui::Id::unique("sign-in-form-height");
                 let form_height: f32 = ui.data(|data| data.get_temp(id)).unwrap_or(0.);
                 ui.add_space(((viewport - form_height) * 0.5).max(0.));
-                let form = ui.allocate_ui_with_layout(
-                    egui::vec2(FORM_WIDTH, 0.),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| self.form(ui, ctx),
-                );
+                // A phone narrower than the column keeps the page's margin either side.
+                let width = if crate::layout::touch(ui.ctx()) {
+                    FORM_WIDTH.min(ui.available_width() - 2. * crate::layout::side(ui.ctx()))
+                } else {
+                    FORM_WIDTH
+                };
+                let form =
+                    ui.allocate_ui_with_layout(egui::vec2(width, 0.), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        self.form(ui, ctx)
+                    });
                 let measured = form.response.rect.height();
                 if (measured - form_height).abs() > 0.5 {
                     ui.ctx().request_repaint();
@@ -614,6 +620,7 @@ impl Login {
         .show(ui);
         self.watch_field(&address);
         let address = address.response.response;
+        field::shown(&address, Kind::Url);
         if self.focus == Some(Field::Server) {
             address.request_focus();
             self.focus = None;
@@ -649,6 +656,7 @@ impl Login {
             .show(ui);
         self.watch_field(&username);
         let username = username.response.response;
+        field::shown(&username, Kind::Name);
         if self.focus == Some(Field::Username) {
             username.request_focus();
             self.focus = None;
@@ -669,6 +677,8 @@ impl Login {
             self.watch.eyes_shut = true;
         }
         let password = password.response.response;
+        // A password's own kind comes from egui (its IME purpose), not from here.
+        field::shown(&password, Kind::Text);
         if self.focus == Some(Field::Password) {
             password.request_focus();
             self.focus = None;

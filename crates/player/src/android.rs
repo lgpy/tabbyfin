@@ -121,6 +121,43 @@ fn call_video_surface(method: &CStr, signature: &CStr, args: &[jvalue]) -> Resul
     })
 }
 
+/// Calls a static `void` method of one of the app's Java classes (`packaging/android/`), through
+/// the activity's class loader as the surface's calls are. The method posts to the UI thread
+/// itself, since this runs on the Rust app's thread.
+fn call_app_static(class: &CStr, method: &CStr, signature: &CStr, args: &[jvalue]) -> Result<()> {
+    with_env(|env, activity| unsafe {
+        let class = load_class(env, activity, class)?;
+        let f = &**env;
+        let id = (f.v1_1.GetStaticMethodID)(env, class, method.as_ptr(), signature.as_ptr());
+        // Before calling it: a name or signature the class doesn't have leaves it null, and
+        // calling through null takes the process with it.
+        let mut result = check(env, "the app's Java");
+        if result.is_ok() {
+            (f.v1_1.CallStaticVoidMethodA)(env, class, id, args.as_ptr());
+            result = check(env, "the app's Java");
+        }
+        (f.v1_1.DeleteLocalRef)(env, class);
+        result
+    })
+}
+
+/// The status and navigation bar icons: dark over the app's light theme, light over the dark one.
+/// `MainActivity` sets them on the UI thread, and keeps them while the player hides the bars.
+pub fn light_system_bars(light: bool) {
+    let result = context().and_then(|(_, activity)| {
+        let args = [jvalue { l: activity }, jvalue { z: light }];
+        call_app_static(
+            c"io.github.lgpy.tabbyfin.MainActivity",
+            c"setLightSystemBars",
+            c"(Landroid/app/Activity;Z)V",
+            &args,
+        )
+    });
+    if let Err(err) = result {
+        tracing::warn!("couldn't set the system bars' icons: {err}");
+    }
+}
+
 /// The window while the player page is open (`on`): the screen kept on, landscape and the
 /// system bars hidden. Closing it undoes that and gives the brightness back to the system.
 pub fn watching(on: bool) {

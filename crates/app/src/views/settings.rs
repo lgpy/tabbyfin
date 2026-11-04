@@ -707,6 +707,13 @@ impl Page for SettingsPage {
         // the sections' surfaces set the column apart. Drawn in that order, so Tab goes through
         // the menu before the sections' controls.
         let rect = ui.available_rect_before_wrap();
+        // A phone has room for the sections alone: the top bar's box finds one, and they
+        // follow each other down the page.
+        if crate::layout::compact(ui.ctx()) {
+            ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| self.content(ui, cx));
+            ui.advance_cursor_after_rect(rect);
+            return;
+        }
         let menu_w = (rect.width() * 0.25).clamp(MENU_MIN_W, MENU_MAX_W);
         let menu = Rect::from_min_max(rect.min, pos2(rect.left() + menu_w, rect.bottom()));
         let content = Rect::from_min_max(pos2(menu.right(), rect.top()), rect.max);
@@ -756,7 +763,7 @@ impl SettingsPage {
             .show(ui, |ui| {
                 let viewport = ui.clip_rect();
                 let full = ui.available_width();
-                let column = (full - 2. * PAGE_PADDING).clamp(0., CONTENT_W);
+                let column = (full - 2. * crate::layout::side(ui.ctx()).min(PAGE_PADDING)).clamp(0., CONTENT_W);
                 let side = ((full - column) * 0.5).max(0.);
                 // A nested `vertical` Ui, not `with_layout` around the whole column: a frame's
                 // contents lay out the way its parent does, and they have to stack downwards.
@@ -1493,7 +1500,13 @@ fn row_with_folder(
     let top = full.top() + ROW_PAD;
     // The text keeps clear of the widest control and its undo button, so every row of a card
     // wraps at the same width.
-    let text_w = (full.width() - PICKER_W - RESET_W - 2. * SPACE.sm).max(120.);
+    // A phone's column is too narrow for both: the control goes under the text, at the right.
+    let compact = crate::layout::compact(ui.ctx());
+    let text_w = if compact {
+        full.width()
+    } else {
+        (full.width() - PICKER_W - RESET_W - 2. * SPACE.sm).max(120.)
+    };
     let text_rect = Rect::from_min_size(pos2(full.left(), top), vec2(text_w, f32::INFINITY));
     let text = ui
         .scope_builder(UiBuilder::new().max_rect(text_rect), |ui| {
@@ -1515,10 +1528,18 @@ fn row_with_folder(
         })
         .response
         .rect;
-    let controls = Rect::from_min_max(
-        pos2(text.right() + SPACE.sm, top),
-        pos2(full.right(), text.bottom().max(top + ui.spacing().interact_size.y)),
-    );
+    let controls = if compact {
+        let below = text.bottom() + SPACE.sm;
+        Rect::from_min_max(
+            pos2(full.left(), below),
+            pos2(full.right(), below + ui.spacing().interact_size.y),
+        )
+    } else {
+        Rect::from_min_max(
+            pos2(text.right() + SPACE.sm, top),
+            pos2(full.right(), text.bottom().max(top + ui.spacing().interact_size.y)),
+        )
+    };
     let mut reset_clicked = false;
     let drawn = ui
         .scope_builder(

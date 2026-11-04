@@ -232,6 +232,12 @@ impl<'a> ListRow<'a> {
         } else {
             regular_height(ui)
         };
+        // A finger's height with touch: a list's rows are its targets.
+        let height = if crate::layout::touch(ui.ctx()) {
+            height.max(crate::layout::TARGET)
+        } else {
+            height
+        };
         let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::CLICK);
         response.widget_info(|| WidgetInfo::labeled(self.role, true, self.label.unwrap_or(self.title)));
 
