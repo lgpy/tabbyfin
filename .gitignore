@@ -3,11 +3,6 @@
 /dist
 mise.local.toml
 
-# Claude Code's skills live in .agents/skills; it needs them under .claude/skills too, which is a
-# symlink in Linux checkouts. Windows can't check symlinks out, so make it a junction there:
-#   mklink /J ".claude\skills\ui-mockup" ".agents\skills\ui-mockup"
-/.claude/skills
-
 # Claude Code keeps local, machine-specific settings here.
 /.claude/settings.local.json
 
