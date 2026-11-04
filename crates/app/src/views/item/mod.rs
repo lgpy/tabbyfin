@@ -219,7 +219,6 @@ const PICKER_H: f32 = 28.;
 const PICKER_LABEL_W: f32 = 90.;
 /// Between the page's sections.
 const SECTION_GAP: f32 = 24.;
-const PAGE_PADDING: f32 = 24.;
 const BOTTOM_PADDING: f32 = 32.;
 /// Cast & crew, "More like this" and the seasons: larger cards, further apart, like Home's.
 const BIG_CARD_SCALE: f32 = 1.2;
@@ -228,6 +227,11 @@ const BIG_CARD_GAP: f32 = 24.;
 const SHELF_TITLE_GAP: f32 = 16.;
 /// The item's title: a fixed 40-point size, which doesn't follow the text size.
 const TITLE_SIZE: f32 = 40.;
+/// A phone's header (`layout::Size::Compact`): a banner about 16:9 of its width, the poster
+/// at 60 % of the desktop's on it, and a smaller title across the width under them.
+const COMPACT_BACKDROP_H: f32 = 240.;
+const COMPACT_IMAGE_SCALE: f32 = 0.6;
+const COMPACT_TITLE_SIZE: f32 = 28.;
 /// Between the action buttons: room for the cursor's ring outside each (`focus::GAP` and its
 /// width) with a little to spare.
 const ACTION_GAP: f32 = 10.;
@@ -770,7 +774,8 @@ impl ItemPage {
         };
         // The seasons' (or a collection's posters') column count comes from the page's width,
         // which the padded content area has; the keys then use the layout the page last showed.
-        let width = (ui.available_width() - 2. * PAGE_PADDING).max(1.);
+        let padding = crate::layout::side(ui.ctx());
+        let width = (ui.available_width() - 2. * padding).max(1.);
         let columns = children::grid_columns(data.item.kind, width);
         self.columns = columns;
         let episode_columns = media_row::episode_columns(width);
@@ -798,10 +803,12 @@ impl ItemPage {
         let mut folded = false;
 
         let area = egui::ScrollArea::vertical().show(ui, |ui| {
+            // A fling that started on a shelf goes on here (`smooth_scroll::Coast`).
+            crate::smooth_scroll::Coast::run(ui);
             egui::Frame::NONE
                 .inner_margin(Margin {
-                    left: PAGE_PADDING as i8,
-                    right: PAGE_PADDING as i8,
+                    left: padding as i8,
+                    right: padding as i8,
                     top: 0,
                     bottom: 0,
                 })

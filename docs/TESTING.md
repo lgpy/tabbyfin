@@ -115,5 +115,11 @@ Built with `mise run android:install`, and tried on the emulator and one phone (
 - The player's gestures with real fingers (they were tried with `adb shell input`): a double tap's timing, a drag that starts diagonally, and a second finger during a drag.
 - Typing with Gboard, Samsung Keyboard and SwiftKey: suggestions and autocorrect, swipe typing, Backspace held down, and a password field getting the password keyboard.
 - The status bar, gesture bar and a display cutout keep clear of the app, in portrait and landscape.
+- The keyboard per field: the server address's has the URL layout, the user name's suggests and learns nothing, a search box's (the top bar's, and the library's genres and tags) action key says Search and still submits, and the playlist name's suggests nothing.
+- The sign-in form taller than the room the keyboard leaves, in portrait: the field the keyboard opens over scrolls into view above it.
+- The status and navigation bar icons are dark on the light theme and light on the dark one, and still so after the player closes and its bars come back.
 - Back with gesture navigation (and three-button navigation): closes a menu, goes back a page, then puts the app in the background; opening it again shows the same page.
+- The phone layout on a tablet (medium and expanded with touch: the desktop's top bar, the grid filling its rows) and on the phone in landscape.
+- A quick vertical flick that starts on a Home shelf coasts as one on the page between shelves does (a page long enough to tell; the dev server's Home is short).
+- Touch targets with real fingers: the 30-point SyncPlay and playlist handles, the field's clear and show-password buttons, and a long press on a card that's also the start of a scroll.
 - The app restores its session after Android ends it in the background (Developer options, *Don't keep activities*, or `adb shell am kill`).

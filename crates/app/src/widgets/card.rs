@@ -96,6 +96,8 @@ fn item_card(
     selected: bool,
 ) -> Response {
     let (response, image) = picture(ui, cache, size, request, Some(item));
+    // A button named by the item, for TalkBack and the like.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, &item.name));
     cursor_ring(ui, image, selected);
     let (title, subtitle) = card_text(item);
     let lines = lines(ui, image, "sm", "xs", GAP);
@@ -246,10 +248,13 @@ pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scal
 
 /// Grey card used while a grid page is still loading. It takes a real card's place without
 /// asking for anything.
-pub fn placeholder(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(vec2(POSTER_W, POSTER_H + text_height(ui)), Sense::hover());
+///
+/// `scale` times a poster card's size, as the grid's cards are.
+pub fn placeholder_scaled(ui: &mut Ui, scale: f32) {
+    let size = vec2(POSTER_W, POSTER_H) * scale;
+    let (rect, _) = ui.allocate_exact_size(vec2(size.x, size.y + text_height(ui)), Sense::hover());
     ui.painter().rect_filled(
-        Rect::from_min_size(rect.min, vec2(POSTER_W, POSTER_H)),
+        Rect::from_min_size(rect.min, size),
         image::RADIUS,
         theme::tokens_of(ui).inset_hover,
     );

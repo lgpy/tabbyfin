@@ -49,6 +49,7 @@ pub mod shelf;
 pub mod states;
 pub mod theme;
 pub mod toasts;
+pub mod touch;
 pub mod widgets;
 
 /// A disposable mockup, a file outside the tree that `.agents/skills/ui-mockup/render.py` points

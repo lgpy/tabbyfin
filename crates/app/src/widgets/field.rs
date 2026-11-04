@@ -4,6 +4,7 @@
 use egui::{Id, Margin, Pos2, Response, RichText, TextBuffer, TextEdit, Ui, pos2};
 use egui_material_icons::MaterialIcon;
 
+use crate::keyboard;
 use crate::theme::{self, text};
 use crate::widgets::round_button::{self, RoundButton};
 
@@ -99,4 +100,12 @@ pub fn leading(ui: &Ui, field: &Response, icon: MaterialIcon) {
         size,
         theme::tokens_of(ui).ink_muted,
     );
+}
+
+/// What a field holds, for the soft keyboard, and the field's own scrolling when the keyboard
+/// opens over it. These helpers return the field's builder rather than its response, so the page
+/// that shows one hands the response here, once it has it.
+pub fn shown(response: &Response, kind: keyboard::Kind) {
+    keyboard::kind(response, kind);
+    keyboard::reveal(response);
 }

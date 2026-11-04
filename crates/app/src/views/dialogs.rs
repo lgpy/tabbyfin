@@ -16,6 +16,7 @@ use egui_material_icons::icons::{ICON_ADD, ICON_PLAYLIST_PLAY};
 use jellyfin::ItemsQuery;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 
+use crate::keyboard::Kind;
 use crate::nav::NavRequest;
 use crate::task::Task;
 use crate::theme;
@@ -163,6 +164,7 @@ impl AddToPlaylist {
             // up the focus.
             let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
             let field = ui.add(field::single_line(ui, id.with("field"), &mut self.typed, "").interactive(!self.busy));
+            field::shown(&field, Kind::Name);
             if std::mem::take(&mut self.focus) {
                 field.request_focus();
             }
@@ -391,6 +393,7 @@ impl EditPlaylist {
 
             field::label(ui, "Name");
             let field = ui.add(field::single_line(ui, id.with("name"), &mut self.typed, "").interactive(!self.busy));
+            field::shown(&field, Kind::Name);
             if std::mem::take(&mut self.focus) {
                 field.request_focus();
             }

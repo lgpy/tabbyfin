@@ -12,6 +12,71 @@
 
 use egui::{Event, InputOptions, MouseWheelSource, MouseWheelUnit, RawInput, TouchPhase, Vec2};
 
+/// A page's coast after a vertical drag that a shelf passed on to it (`widgets/shelf.rs`). egui
+/// coasts a drag on the page's own scroll area by itself, but a shelf's row takes the drag and
+/// scrolls the page by hand, and egui keeps the velocity it would coast with to itself. The
+/// shelf starts one at the release with [`Coast::start`]; the page's scroll area runs it with
+/// [`Coast::run`] each frame, which decays it as egui decays its own (`KineticScrollStyle`), so a
+/// fling feels the same wherever it started. Anything pressed stops it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Coast {
+    /// Points per second the content moves down the screen: the pointer's velocity.
+    velocity: f32,
+}
+
+impl Coast {
+    fn id() -> egui::Id {
+        egui::Id::unique("page_coast")
+    }
+
+    /// Starts the page coasting at the pointer's velocity at a release.
+    pub fn start(ctx: &egui::Context) {
+        let velocity = ctx.input(|input| input.pointer.velocity().y);
+        if velocity.is_finite() && velocity.abs() > 1. {
+            ctx.data_mut(|data| data.insert_temp(Self::id(), Coast { velocity }));
+            ctx.request_repaint();
+        }
+    }
+
+    /// Moves the page this frame's share of a coast, from inside its scroll area.
+    pub fn run(ui: &egui::Ui) {
+        let ctx = ui.ctx();
+        let Some(mut coast) = ctx.data(|data| data.get_temp::<Coast>(Self::id())) else {
+            return;
+        };
+        if ui.input(|input| input.pointer.any_pressed() || input.pointer.any_down()) {
+            ctx.data_mut(|data| data.remove::<Coast>(Self::id()));
+            return;
+        }
+        let kinetic = ui.spacing().scroll.kinetic;
+        let dt = ui.input(|input| input.stable_dt).min(0.1);
+        let (delta, moving) = coast.step(dt, kinetic.decay_time, kinetic.stop_distance);
+        ui.scroll_with_delta_animation(egui::vec2(0., delta), egui::style::ScrollAnimation::none());
+        ctx.data_mut(|data| {
+            if moving {
+                data.insert_temp(Self::id(), coast);
+            } else {
+                data.remove::<Coast>(Self::id());
+            }
+        });
+        if moving {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Lets `dt` seconds pass: how far the content moves, and whether it's still moving. The
+    /// velocity decays as `v₀ · exp(-t / decay)`, and the distance is its exact integral.
+    fn step(&mut self, dt: f32, decay: f32, stop: f32) -> (f32, bool) {
+        if self.velocity.abs() * decay < stop {
+            return (0., false);
+        }
+        let next = self.velocity * (-dt / decay).exp();
+        let delta = decay * (self.velocity - next);
+        self.velocity = next;
+        (delta, true)
+    }
+}
+
 /// How quickly a glide closes the distance: about 63 % of what's left every `TAU`.
 pub const TAU: f32 = 0.07;
 /// Close enough to the target to stop.
@@ -155,7 +220,23 @@ pub fn instant_wheel(input: &mut RawInput, options: &InputOptions, viewport_heig
 mod tests {
     use egui::{Event, InputOptions, Modifiers, MouseWheelSource, MouseWheelUnit, RawInput, TouchPhase, vec2};
 
-    use super::{Glide, SETTLE, TAU, instant_wheel};
+    use super::{Coast, Glide, SETTLE, TAU, instant_wheel};
+
+    #[test]
+    fn a_coast_goes_as_far_as_egui_coasts_and_stops() {
+        let mut coast = Coast { velocity: 1000. };
+        let mut moved = 0.;
+        for _ in 0..1000 {
+            let (delta, moving) = coast.step(1. / 60., 0.5, 0.5);
+            moved += delta;
+            if !moving {
+                break;
+            }
+        }
+        // v₀ × decay, less the last half point it stops short of.
+        assert!((moved - 500.).abs() < 1., "{moved}");
+        assert_eq!(coast.step(1. / 60., 0.5, 0.5), (0., false));
+    }
 
     #[test]
     fn a_glide_closes_the_distance_exponentially() {

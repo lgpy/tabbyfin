@@ -7,6 +7,7 @@
 pub mod dialogs;
 pub mod home;
 pub mod item;
+pub mod libraries;
 pub mod library;
 pub mod login;
 pub mod player;
@@ -150,6 +151,7 @@ pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
             Box::new(item::ItemPage::new(id, name, marks_seen))
         }
         Route::Person { id, name } => Box::new(library::LibraryPage::new(cx, library::Source::Person { id }, name)),
+        Route::Libraries => Box::new(libraries::LibrariesPage::default()),
         Route::Search => Box::new(search::SearchPage::default()),
         Route::Settings => Box::new(settings::SettingsPage::new()),
     }

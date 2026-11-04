@@ -293,7 +293,9 @@ fn page_with_similar_card(server: &FixtureServer) -> (PageHarness, egui::Pos2) {
         )
     });
     ui.step_until("the similar card", |harness| {
-        harness.query_by_label_contains("The Similar One").is_some()
+        harness
+            .query_by_role_and_label(Role::Button, "The Similar One")
+            .is_some()
     });
     for _ in 0..16 {
         ui.press(Key::Tab);
@@ -302,7 +304,10 @@ fn page_with_similar_card(server: &FixtureServer) -> (PageHarness, egui::Pos2) {
         ui.step();
     }
     let window = ui.harness().ctx.input(|input| input.viewport_rect());
-    let card = ui.harness().get_by_label_contains("The Similar One").rect();
+    let card = ui
+        .harness()
+        .get_by_role_and_label(Role::Button, "The Similar One")
+        .rect();
     assert!(window.contains_rect(card), "{card:?} is outside {window:?}");
     (ui, card.center())
 }

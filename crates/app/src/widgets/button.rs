@@ -163,6 +163,12 @@ const ICON_PADDING: f32 = 18.;
 /// (the item page's Play). Clicks only: the page's keys are its own, so `ringed` draws the
 /// keyboard's ring while its cursor is on it.
 pub fn brand_icon(ui: &mut Ui, icon: MaterialIcon, label: &str, ringed: bool) -> Response {
+    brand_icon_wide(ui, icon, label, ringed, COZY_HEIGHT)
+}
+
+/// [`brand_icon`] at least `width` wide, its content centred: a phone's item page has it across
+/// the page.
+pub fn brand_icon_wide(ui: &mut Ui, icon: MaterialIcon, label: &str, ringed: bool, width: f32) -> Response {
     let tokens = theme::tokens_of(ui);
     let content = icon_text(icon, ICON_SIZE, label, text::font(ui, "base"), tokens.brand_foreground);
     let response = ui
@@ -179,7 +185,7 @@ pub fn brand_icon(ui: &mut Ui, icon: MaterialIcon, label: &str, ringed: bool) ->
                 Button::new(content)
                     .corner_radius(tokens.radius_control)
                     .sense(egui::Sense::CLICK)
-                    .min_size(vec2(COZY_HEIGHT, COZY_HEIGHT)),
+                    .min_size(vec2(width, COZY_HEIGHT)),
             )
         })
         .inner;

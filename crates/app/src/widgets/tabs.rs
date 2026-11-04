@@ -47,6 +47,7 @@ pub fn bar<T: Copy + PartialEq>(ui: &mut Ui, tabs: &[Tab<T>], current: T, colour
         let cell = Rect::from_min_size(pos2(left, rect.top() + INSET), vec2(width, height - 2. * INSET));
         let id = ui.scope_id().with(("tab", index));
         let response = ui.interact(cell, id, Sense::CLICK);
+        let response = crate::layout::grow(ui, response, Sense::CLICK);
         let selected = tab.value == current;
         response.widget_info(|| WidgetInfo::selected(Role::Tab, ui.is_enabled(), selected, tab.label));
         let color = if selected { colours.ink } else { colours.ink_muted };
