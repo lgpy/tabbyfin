@@ -190,17 +190,21 @@ On a phone in portrait (`layout::Size::Compact`, touch under 600 points wide) th
 
 ```
 top bar (56 tall, on the backdrop)
-  Back · title (lg)        — or the app's icon at 32 on Home; over Search and Settings
-                             the search box in the title's place, the buttons gone
-  SyncPlay · account       — RoundButton 40/24, sensing 48 (layout::grow), 8 apart
+  Back · title (lg)        — or the app's icon at 32 on Home; over Search, and over
+                             Settings while its search is open, the search box in the
+                             title's place, the buttons gone
+  Search · SyncPlay · account
+                           — RoundButton 40/24, sensing 48 (layout::grow), 8 apart;
+                             Settings is in the account menu
 bottom bar (64 tall, on the floor of the window)
   fill                     — backdrop_bottom, down under the gesture bar; a 1 pt
                              surface_border hairline over it
-  Home · Libraries · Search · Settings
-                           — a quarter of the width each: icon 24 over an xs label;
-                             the open one's icon brand on an inset_hover pill 56 × 30
-                             and its label ink, the others ink_muted
+  Home · Libraries         — half the width each: icon 24 over an xs label; the open
+                             one's icon brand on an inset_hover pill 56 × 30 and its
+                             label ink, the others ink_muted
 ```
+
+Home leaves out *My Media* there, as Libraries is a tap away. Settings is a list of its sections instead of the menu and column: a heading per store (`overline`), then one surface of rows, each its icon in `brand`, its title in `ink` at `base` over a `sm` muted line of what it has, and a chevron in `ink_muted`, at least 64 tall with an inset hairline between them and `inset_hover` while pressed. A row opens its section on a page of its own, titled with its name.
 
 The pages keep 16 from the sides there (`layout::side`). Touch targets are 48 at least: lists and menus draw their rows that tall, and smaller controls keep their size and sense 48 round their centre.
 

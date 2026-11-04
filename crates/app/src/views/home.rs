@@ -194,8 +194,9 @@ enum ShelfId {
 
 /// The shelves in the user's section order. Favorites, which the web client has no section
 /// for, comes just before the Latest shelves, or last without them. Empty shelves are left out,
-/// so the cursor never stops on a row with nothing in it.
-fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
+/// so the cursor never stops on a row with nothing in it. Without `my_media` the libraries'
+/// shelf is left out: a phone's bottom bar has them a tap away.
+fn shelves(data: &HomeData, my_media: bool) -> Vec<Shelf<'_>> {
     let favorites = || {
         row(
             ShelfId::Favorites,
@@ -207,7 +208,10 @@ fn shelves(data: &HomeData) -> Vec<Shelf<'_>> {
     let mut shelves = Vec::new();
     for section in &data.sections {
         match section {
-            HomeSection::MyMedia => shelves.push(row(ShelfId::Views, "My Media".to_owned(), &data.views, Cards::Tiles)),
+            HomeSection::MyMedia if my_media => {
+                shelves.push(row(ShelfId::Views, "My Media".to_owned(), &data.views, Cards::Tiles))
+            }
+            HomeSection::MyMedia => {}
             HomeSection::Resume => shelves.push(row(
                 ShelfId::Resume,
                 "Continue Watching".to_owned(),
@@ -274,6 +278,9 @@ pub struct HomePage {
     cursor: Cursor,
     /// *Add to playlist…* from a card's menu, while it's open.
     add_to_playlist: Option<AddToPlaylist>,
+    /// Whether *My Media* shows: not in the compact layout, whose bottom bar leads to the
+    /// libraries. Set as the page draws, for the cursor's sections too.
+    my_media: bool,
 }
 
 impl Default for HomePage {
@@ -284,6 +291,7 @@ impl Default for HomePage {
             loaded_at: None,
             cursor: Cursor::default(),
             add_to_playlist: None,
+            my_media: true,
         }
     }
 }
@@ -327,6 +335,8 @@ impl Page for HomePage {
             };
         }
         browse::hide_on_click(&mut self.cursor, ui);
+        self.my_media = !crate::layout::compact(ui.ctx());
+        let my_media = self.my_media;
 
         match &self.data {
             Load::Loading => state::spinner(ui),
@@ -339,10 +349,10 @@ impl Page for HomePage {
             }
             // The same line shows whenever there's no shelf to draw, whether the server has no
             // libraries or the user hid every section in the web client.
-            Load::Loaded(data) if shelves(data).is_empty() => {
+            Load::Loaded(data) if shelves(data, my_media).is_empty() => {
                 state::empty(ui, "Your server has no libraries yet.");
             }
-            Load::Loaded(data) => show_shelves(ui, data, &mut self.cursor, &mut self.add_to_playlist, cx),
+            Load::Loaded(data) => show_shelves(ui, data, my_media, &mut self.cursor, &mut self.add_to_playlist, cx),
         }
 
         if let Some(dialog) = &mut self.add_to_playlist
@@ -366,11 +376,12 @@ struct Asked {
 fn show_shelves(
     ui: &mut egui::Ui,
     data: &HomeData,
+    my_media: bool,
     cursor: &mut Cursor,
     dialog: &mut Option<AddToPlaylist>,
     cx: &mut PageCx,
 ) {
-    let rows = shelves(data);
+    let rows = shelves(data, my_media);
     let mut asked = Asked::default();
     // A key moved the cursor this frame: the card scrolls itself into view inside its shelf, and
     // the page scrolls to the whole shelf. The page's target has to wait until every shelf is
@@ -528,7 +539,7 @@ impl Browse for HomePage {
     /// One row per shelf.
     fn sections(&self) -> Vec<Section> {
         match &self.data {
-            Load::Loaded(data) => shelves(data)
+            Load::Loaded(data) => shelves(data, self.my_media)
                 .iter()
                 .map(|shelf| Section::row(shelf.items.len()))
                 .collect(),
@@ -538,7 +549,7 @@ impl Browse for HomePage {
 
     fn activate(&mut self, position: Position, cx: &mut PageCx) {
         if let Load::Loaded(data) = &self.data
-            && let Some(item) = shelves(data)
+            && let Some(item) = shelves(data, self.my_media)
                 .get(position.section)
                 .and_then(|shelf| shelf.items.get(position.index))
         {
@@ -571,7 +582,10 @@ mod tests {
     }
 
     fn shown(data: &HomeData) -> Vec<(ShelfId, String)> {
-        shelves(data).into_iter().map(|shelf| (shelf.id, shelf.title)).collect()
+        shelves(data, true)
+            .into_iter()
+            .map(|shelf| (shelf.id, shelf.title))
+            .collect()
     }
 
     fn name(id: ShelfId, title: &str) -> (ShelfId, String) {

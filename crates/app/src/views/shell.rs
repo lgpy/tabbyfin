@@ -74,13 +74,9 @@ const COMPACT_BAR_H: f32 = 56.;
 const COMPACT_LOGO: f32 = 32.;
 /// The compact layout's bottom bar, above the gesture bar's inset.
 const NAV_H: f32 = 64.;
-/// The places the bottom bar leads to, in its order.
-const PLACES: [(MaterialIcon, &str); 4] = [
-    (ICON_HOME, "Home"),
-    (ICON_VIDEO_LIBRARY, "Libraries"),
-    (ICON_SEARCH, "Search"),
-    (ICON_SETTINGS, "Settings"),
-];
+/// The places the bottom bar leads to, in its order. Search is the top bar's button and
+/// Settings is in the account menu, as on a phone's other apps.
+const PLACES: [(MaterialIcon, &str); 2] = [(ICON_HOME, "Home"), (ICON_VIDEO_LIBRARY, "Libraries")];
 /// The open search box's width, when the window has room for it.
 const SEARCH_BOX_W: f32 = 400.;
 /// The search box's id: it gives its focus back when the keyboard leaves it.
@@ -924,13 +920,16 @@ impl Shell {
     }
 
     /// The top bar of a phone in portrait (`layout::Size::Compact`), whose bottom bar has the
-    /// places to go: Back or the app's icon, the title, and SyncPlay and the account at the
-    /// right. Over the search results, and over a page that searches itself (Settings), the
-    /// search box takes the title's place and the buttons', as the bar has no room for both.
+    /// places to go: Back or the app's icon, the title, and Search, SyncPlay and the account at
+    /// the right. Over the search results, and over a page that searches itself (Settings) while
+    /// its search is open, the search box takes the title's place and the buttons', as the bar
+    /// has no room for both.
     fn compact_top_bar(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         let can_go_back = self.can_go_back();
         let in_group = cx.services.in_group();
-        let searching = self.top_is_search() || self.own_search.is_some();
+        let own_searching = self.own_search.is_some()
+            && (self.search_focused || self.want_search_focus || !self.search_text.trim().is_empty());
+        let searching = self.top_is_search() || own_searching;
         let title = self.top().title().to_owned();
         let logo = self.logo.clone();
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), COMPACT_BAR_H), Sense::hover());
@@ -961,7 +960,7 @@ impl Shell {
                     self.search_box(ui, rect, false, cx);
                     return;
                 }
-                let buttons = 2. * BAR_BUTTON + 2. * ui.spacing().item_spacing.x;
+                let buttons = 3. * BAR_BUTTON + 3. * ui.spacing().item_spacing.x;
                 let room = (ui.available_width() - buttons).max(0.);
                 ui.scope(|ui| {
                     ui.set_max_width(room);
@@ -977,13 +976,25 @@ impl Shell {
                         self.toggle_syncplay_panel(cx);
                     }
                     self.syncplay_panel(&syncplay, cx);
+                    if bar_button(ICON_SEARCH, "Search", false).show(ui).clicked() {
+                        self.open_search(cx);
+                    }
                 });
             },
         );
     }
 
-    /// The compact layout's bottom bar: Home, Libraries, Search and Settings, each a quarter of
-    /// the width and the bar's height, an icon over an `xs` label. The open place has its icon
+    /// The compact bar's Search button: the box over a page that searches itself, otherwise
+    /// the results page with the keyboard in its box.
+    fn open_search(&mut self, cx: &mut PageCx) {
+        if self.own_search.is_none() && !self.top_is_search() {
+            self.push(Route::Search, cx);
+        }
+        self.focus_search(cx);
+    }
+
+    /// The compact layout's bottom bar: Home and Libraries, each an equal share of the width and
+    /// the bar's height, an icon over an `xs` label. The open place has its icon
     /// in `brand` on an `inset_hover` pill. It's on the floor of the window: filled with the
     /// backdrop's bottom colour down under the gesture bar, with a hairline over it, as the top
     /// bar meets a scrolled page.
@@ -1034,14 +1045,12 @@ impl Shell {
     fn place(&self) -> usize {
         match self.stack.get(1).map(|entry| &entry.route) {
             Some(Route::Libraries) => 1,
-            Some(Route::Search) => 2,
-            Some(Route::Settings) => 3,
             _ => 0,
         }
     }
 
     /// The bottom bar's place `index`: its page right above Home, closing the pages there were.
-    /// The open place goes back to its first page, and Search puts the keyboard in the box.
+    /// The open place goes back to its first page.
     fn go_to(&mut self, index: usize, cx: &mut PageCx) {
         let current = self.place();
         let keep = if index == current && index != 0 { 2 } else { 1 };
@@ -1053,26 +1062,16 @@ impl Shell {
             self.leave_search(cx.ctx);
         }
         self.stack.truncate(keep);
-        if index != current {
-            let route = match index {
-                1 => Some(Route::Libraries),
-                2 => Some(Route::Search),
-                3 => Some(Route::Settings),
-                _ => None,
-            };
-            if let Some(route) = route {
-                self.push(route, cx);
-            }
-        }
-        if index == 2 {
-            self.want_search_focus = true;
+        if index != current && index == 1 {
+            self.push(Route::Libraries, cx);
         }
         self.bar_key = None;
         cx.ctx.request_repaint();
     }
 
     /// The user's button and menu: the saved accounts to switch to (the current one checked),
-    /// adding one, and signing out. The app carries the choice out after the frame.
+    /// adding one, Settings in the compact layout (whose bar has no button for it), and signing
+    /// out. The app carries the choice out after the frame.
     fn account_button(&mut self, ui: &mut egui::Ui, cx: &mut PageCx, highlighted: bool) {
         let name = cx.services.session.user.name.clone();
         let tooltip = match &cx.services.session.server.server_name {
@@ -1108,6 +1107,9 @@ impl Shell {
             })
             .collect();
         entries.push(Entry::new("Add account…").checked(false).separated());
+        if layout::compact(ui.ctx()) {
+            entries.push(Entry::new("Settings").checked(false).separated());
+        }
         entries.push(Entry::new("Sign out").checked(false));
         let shown = PopupMenu::new(id)
             .align(RectAlign::BOTTOM_END)
@@ -1121,11 +1123,16 @@ impl Shell {
         }
     }
 
-    /// Does what an account-menu entry says: switch to that account, add one, or sign out.
-    /// The app carries the event out after the frame.
+    /// Does what an account-menu entry says: switch to that account, add one, open Settings or
+    /// sign out. The app carries the account events out after the frame.
     fn choose_account(&mut self, index: usize, cx: &mut PageCx) {
         let actions = self.accounts.len();
-        if index < actions {
+        if layout::compact(cx.ctx) && index == actions + 1 {
+            if !self.stack.iter().any(|entry| matches!(entry.route, Route::Settings)) {
+                self.bar_key = None;
+                cx.nav.push(NavRequest::Push(Route::Settings));
+            }
+        } else if index < actions {
             let account = self.accounts[index].clone();
             // Choosing the account already signed in just closes the menu: switching to it
             // would end the session and lose the page stack. The keyboard stays in the bar,
@@ -1140,6 +1147,7 @@ impl Shell {
             if index == actions {
                 cx.services.events.push(AppEvent::AddAccount);
             } else {
+                // Sign out, the last entry.
                 cx.services.events.push(AppEvent::SignOut);
             }
         }

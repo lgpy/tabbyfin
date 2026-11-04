@@ -27,6 +27,10 @@
 //! of both stores by its section, label, description and key, leaving out the sections with
 //! nothing left; a menu entry leaves the search.
 //!
+//! On a phone in portrait (`layout::Size::Compact`) the page is a list of the sections by
+//! store instead, each opening on a page of its own ([`Route::SettingsSection`]); the top bar's
+//! Search button still filters every row, the results replacing the list while there's a term.
+//!
 //! The page isn't on the browse cursor: [`Page::scope`] is `None`, so egui's own focus handles
 //! Tab (the menu, then the sections' controls, scrolling each into view), Space or Enter on a
 //! menu entry, the arrows in a picker and Space on a switch, and Esc still goes back.
@@ -36,12 +40,13 @@ use std::path::Path;
 use egui::{Align, Align2, Rect, RichText, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ACCOUNT_CIRCLE, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_HOME, ICON_INFO, ICON_PALETTE,
-    ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
+    ICON_ACCOUNT_CIRCLE, ICON_CHEVRON_RIGHT, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_HOME, ICON_INFO,
+    ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
 use crate::config::{self, AndroidPlayer, Config, SubtitleColor, SubtitleStyle, ThemePreference};
+use crate::nav::{NavRequest, Route};
 use crate::services::AppEvent;
 use crate::task::Task;
 use crate::theme;
@@ -191,6 +196,20 @@ impl Section {
             Section::Account => "Account",
             Section::Languages => "Languages",
             Section::Home => "Home",
+        }
+    }
+
+    /// What the section has, under its title in a phone's list of sections.
+    fn summary(self) -> &'static str {
+        match self {
+            Section::Appearance => "Theme, text size and animations",
+            Section::Playback => "Next episode, intros, quality and the player",
+            Section::Subtitles => "Colour, style and size",
+            Section::Storage => "Image cache and logs",
+            Section::About => "Version and updates",
+            Section::Account => "Who's signed in, and the server",
+            Section::Languages => "Audio and subtitle tracks",
+            Section::Home => "What Home's rows show",
         }
     }
 
@@ -560,6 +579,13 @@ pub struct SettingsPage {
     arriving: Option<(Section, f64)>,
     search: Search,
     server: ServerSettings,
+    /// The one section this page shows, when it's a phone's page for it.
+    only: Option<Section>,
+    /// Whether the page drew in the compact layout, the sections each a page of their own.
+    compact: bool,
+    /// A section a note's link asked for, opened as its own page after the frame when the
+    /// sections are pages of their own.
+    push: Option<Section>,
 }
 
 /// What a button on the page asked for, with how it went.
@@ -581,6 +607,18 @@ impl SettingsPage {
             arriving: None,
             search: Search::default(),
             server: ServerSettings::default(),
+            only: None,
+            compact: false,
+            push: None,
+        }
+    }
+
+    /// A phone's page for one section.
+    pub fn for_section(section: Section) -> Self {
+        Self {
+            only: Some(section),
+            section,
+            ..Self::new()
         }
     }
 
@@ -602,8 +640,13 @@ impl SettingsPage {
         cx.services.events.push(AppEvent::AppearanceChanged);
     }
 
-    /// Scrolls to `section`, from the menu or a note's link, leaving the search.
+    /// Scrolls to `section`, from the menu or a note's link, leaving the search; or opens its
+    /// page when the sections are pages of their own.
     fn open(&mut self, ctx: &egui::Context, section: Section) {
+        if self.only.is_some() || self.compact {
+            self.push = Some(section);
+            return;
+        }
         self.section = section;
         self.scroll_to = Some(section);
         self.arriving = Some((section, ctx.input(|input| input.time)));
@@ -687,11 +730,12 @@ impl Default for SettingsPage {
 
 impl Page for SettingsPage {
     fn title(&self) -> &str {
-        "Settings"
+        self.only.map_or("Settings", Section::title)
     }
 
+    /// A section's own page has nothing to search but what it shows.
     fn own_search(&self) -> Option<&str> {
-        Some(&self.search.text)
+        self.only.is_none().then_some(self.search.text.as_str())
     }
 
     fn set_own_search(&mut self, text: &str) {
@@ -707,11 +751,23 @@ impl Page for SettingsPage {
         // the sections' surfaces set the column apart. Drawn in that order, so Tab goes through
         // the menu before the sections' controls.
         let rect = ui.available_rect_before_wrap();
-        // A phone has room for the sections alone: the top bar's box finds one, and they
-        // follow each other down the page.
-        if crate::layout::compact(ui.ctx()) {
-            ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| self.content(ui, cx));
+        self.compact = crate::layout::compact(ui.ctx());
+        // A section's own page, and a phone's: the list of sections, or what a search finds in
+        // them.
+        if self.only.is_some() || self.compact {
+            ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
+                if self.only.is_none() && !self.search.active() {
+                    self.list(ui, cx);
+                } else {
+                    self.content(ui, cx);
+                }
+            });
             ui.advance_cursor_after_rect(rect);
+            if let Some(section) = self.push.take()
+                && self.only != Some(section)
+            {
+                cx.nav.push(NavRequest::Push(Route::SettingsSection(section)));
+            }
             return;
         }
         let menu_w = (rect.width() * 0.25).clamp(MENU_MIN_W, MENU_MAX_W);
@@ -747,6 +803,39 @@ impl SettingsPage {
                                     self.open(ui.ctx(), section);
                                 }
                             }
+                        }
+                    });
+            });
+        backdrop::scroll_edge(ui, &area);
+    }
+
+    /// A phone's list of sections, by store: each a row of its icon, its title over what it
+    /// has, and a chevron, opening its own page.
+    fn list(&mut self, ui: &mut Ui, cx: &mut PageCx) {
+        let area = egui::ScrollArea::vertical()
+            .id_salt("settings_list")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let side = crate::layout::side(ui.ctx()).min(PAGE_PADDING);
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::symmetric(side as i8, PAGE_PADDING as i8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        for (index, store) in Store::ALL.into_iter().enumerate() {
+                            if index > 0 {
+                                ui.add_space(SECTION_GAP);
+                            }
+                            menu_heading(ui, store);
+                            ui.add_space(SPACE.xs);
+                            surface::frame(ui).inner_margin(egui::Margin::ZERO).show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.spacing_mut().item_spacing.y = 0.;
+                                for section in Section::ALL.into_iter().filter(|section| section.store() == store) {
+                                    if section_entry(ui, section).clicked() {
+                                        cx.nav.push(NavRequest::Push(Route::SettingsSection(section)));
+                                    }
+                                }
+                            });
                         }
                     });
             });
@@ -805,6 +894,7 @@ impl SettingsPage {
     fn sections(&mut self, ui: &mut Ui, cx: &mut PageCx) -> Vec<(Section, f32)> {
         let found: Vec<Section> = Section::ALL
             .into_iter()
+            .filter(|&section| self.only.is_none_or(|only| only == section))
             .filter(|&section| self.search.matches(section) > 0)
             .collect();
         let mut starts = Vec::with_capacity(found.len());
@@ -1452,6 +1542,63 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
             tokens.ink_muted,
         );
     }
+    response
+}
+
+/// A section in a phone's list: its icon in `brand`, its title over what it has, and a chevron at
+/// the right, at least 64 points tall, with a hairline above all but the first. `inset_hover`
+/// while pressed.
+fn section_entry(ui: &mut Ui, section: Section) -> egui::Response {
+    let tokens = theme::tokens_of(ui);
+    let title = text::font(ui, "base");
+    let summary = text::font(ui, "sm");
+    let (title_h, summary_h) = ui.fonts_mut(|fonts| (fonts.row_height(&title), fonts.row_height(&summary)));
+    let lines = title_h + summary_h;
+    let height = (lines + 2. * ROW_PAD).max(64.);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, section.title()));
+    let first = rect.top() <= ui.min_rect().top() + 0.5;
+    let focused = ui.memory(|memory| memory.has_focus(response.id));
+    if response.is_pointer_button_down_on() || response.hovered() || focused {
+        ui.painter().rect_filled(rect, 0., tokens.inset_hover);
+    }
+    if !first {
+        let stroke = egui::Stroke::new(1., tokens.surface_border);
+        ui.painter().hline(rect.x_range().shrink(16.), rect.top(), stroke);
+    }
+    if focused {
+        focus::ring(ui, rect, tokens.radius_control as f32, Place::Inside);
+    }
+    let icon = text::icon(ui, section.icon().font_family());
+    let icon_x = rect.left() + 16. + icon.size / 2.;
+    let chevron_x = rect.right() - 12. - icon.size / 2.;
+    let left = icon_x + icon.size / 2. + 16.;
+    let width = (chevron_x - icon.size / 2. - 8. - left).max(0.);
+    let line = |text: &str, font: egui::FontId, colour| {
+        let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, colour);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
+    };
+    let title_galley = line(section.title(), title, tokens.ink);
+    let summary_galley = line(section.summary(), summary, tokens.ink_muted);
+    let painter = ui.painter();
+    painter.text(
+        pos2(icon_x, rect.center().y),
+        Align2::CENTER_CENTER,
+        section.icon().codepoint,
+        icon.clone(),
+        tokens.brand,
+    );
+    painter.text(
+        pos2(chevron_x, rect.center().y),
+        Align2::CENTER_CENTER,
+        ICON_CHEVRON_RIGHT.codepoint,
+        icon,
+        tokens.ink_muted,
+    );
+    let top = rect.center().y - lines / 2.;
+    painter.galley(pos2(left, top), title_galley, tokens.ink);
+    painter.galley(pos2(left, top + title_h), summary_galley, tokens.ink_muted);
     response
 }
 
