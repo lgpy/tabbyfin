@@ -120,6 +120,8 @@ impl<'a> RoundButton<'a> {
     /// Adds the button to `ui`'s layout.
     pub fn show(self, ui: &mut Ui) -> Response {
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(self.size), self.sense());
+        // A finger's 48 points, whatever the button's drawn size (`layout::grow`).
+        let response = crate::layout::grow(ui, response, self.sense());
         self.paint(ui, rect, response)
     }
 
@@ -128,6 +130,7 @@ impl<'a> RoundButton<'a> {
     pub fn show_at(self, ui: &mut Ui, center: Pos2, id: Id) -> Response {
         let rect = Rect::from_center_size(center, Vec2::splat(self.size));
         let response = ui.interact(rect, id, self.sense());
+        let response = crate::layout::grow(ui, response, self.sense());
         self.paint(ui, rect, response)
     }
 

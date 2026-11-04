@@ -23,7 +23,8 @@ const ROW_PADDING: Vec2 = vec2(12., 9.);
 /// A switch for `on`, called `name` for screen readers. Returns its response, `changed()` when a
 /// click or key flipped it.
 pub fn switch(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
-    let (rect, mut response) = ui.allocate_exact_size(SIZE, Sense::click());
+    let (rect, response) = ui.allocate_exact_size(SIZE, Sense::click());
+    let mut response = crate::layout::grow(ui, response, Sense::click());
     if response.clicked() {
         *on = !*on;
         response.mark_changed();

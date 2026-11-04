@@ -53,6 +53,7 @@ pub fn show<S: AsRef<str>>(ui: &mut Ui, labels: &[S], current: Option<usize>, co
         let cell = Rect::from_min_size(pos2(left, rect.top()), vec2(galley.size().x + share, height));
         left = cell.right();
         let response = ui.interact(cell, ui.scope_id().with(("segment", index)), Sense::CLICK);
+        let response = crate::layout::grow(ui, response, Sense::CLICK);
         let selected = current == Some(index);
         let name = labels[index].as_ref();
         response.widget_info(|| WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected, name));

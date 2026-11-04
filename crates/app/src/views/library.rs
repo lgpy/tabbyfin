@@ -37,6 +37,7 @@ use jellyfin::{Client, ItemsQuery, SortOrder};
 use crate::browse::{self, Browse, Cursor, Position, Section};
 use crate::config::{Config, LibraryView};
 use crate::keys::{Action, Scope};
+use crate::layout;
 use crate::nav::{NavRequest, Route};
 use crate::task::Task;
 use crate::views::dialogs::AddToPlaylist;
@@ -52,6 +53,9 @@ use crate::widgets::{backdrop, button, card, label, select, state, surface};
 const PAGE_SIZE: usize = 100;
 /// The padding around the toolbar and the grid.
 const GRID_PADDING: f32 = 24.;
+/// The narrowest a phone's grid makes a card: three across a phone in portrait.
+const COMPACT_CARD_MIN_W: f32 = 84.;
+const COMPACT_CARD_GAP: f32 = 12.;
 /// The order button's diameter: the selects' height.
 const ORDER_BUTTON: f32 = 32.;
 /// The genres and tags button's width.
@@ -952,11 +956,44 @@ impl LibraryPage {
         let split = tools.iter().position(|tool| *tool == Tool::Sort).unwrap_or(tools.len());
         let mut action = None;
         let mut values_button = None;
+        let padding = layout::side(ui.ctx());
+        let compact = layout::compact(ui.ctx());
         ui.horizontal(|ui| {
-            ui.add_space(GRID_PADDING);
-            let width = ui.available_width() - GRID_PADDING;
+            ui.add_space(padding);
+            let width = ui.available_width() - padding;
             surface::strip(ui).show(ui, |ui| {
                 ui.set_width(width - 2. * f32::from(surface::STRIP_PAD[0]));
+                if compact {
+                    // A phone has room for a few of the controls: they scroll sideways in the
+                    // strip, in one row, the sort last.
+                    egui::ScrollArea::horizontal()
+                        .id_salt("library_toolbar")
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                for (index, tool) in tools.iter().copied().enumerate() {
+                                    if index == split {
+                                        if let Some(total) = self.total {
+                                            ui.add_space(8.);
+                                            ui.label(label::muted(ui, item_count(total)));
+                                            ui.add_space(8.);
+                                        }
+                                        ui.label(label::muted(ui, "Sort"));
+                                    }
+                                    let selected = self.cursor.is_selected(TOOLBAR, index);
+                                    let (response, control) = self.tool(ui, tool, selected);
+                                    action = action.or(control);
+                                    if selected && tool != Tool::Order {
+                                        focus::ring_widget(ui, &response);
+                                    }
+                                    if tool == Tool::Values {
+                                        values_button = Some(response);
+                                    }
+                                }
+                            });
+                        });
+                    return;
+                }
                 ui.horizontal(|ui| {
                     for (index, tool) in tools[..split].iter().copied().enumerate() {
                         let selected = self.cursor.is_selected(TOOLBAR, index);
@@ -1136,15 +1173,25 @@ impl LibraryPage {
             0.
         };
         let grid_width = (ui.available_width() - bar).max(1.);
-        let columns = columns(grid_width);
+        let padding = layout::side(ui.ctx());
+        // With touch the cards grow to fill the row, as many as fit at their narrowest; the
+        // desktop keeps them at their size, as many as fit.
+        let compact = layout::compact(ui.ctx());
+        let gap = if compact { COMPACT_CARD_GAP } else { CARD_GAP };
+        let (columns, scale) = if layout::touch(ui.ctx()) {
+            let narrowest = if compact { COMPACT_CARD_MIN_W } else { POSTER_W };
+            touch_columns(grid_width, padding, narrowest, gap)
+        } else {
+            (columns(grid_width), 1.)
+        };
         self.columns = columns;
         let rows = total.div_ceil(columns);
-        let card_height = POSTER_H + card::text_height(ui);
-        let pitch = card_height + CARD_GAP;
+        let card_height = POSTER_H * scale + card::text_height(ui);
+        let pitch = card_height + gap;
         // The grid sits 16 points under the toolbar, so it has that much less room.
         let viewport = (ui.available_height() - 16.).max(0.);
         // `show_rows` leaves out the last row's gap below it.
-        let max_offset = (rows as f32 * pitch - CARD_GAP - viewport).max(0.);
+        let max_offset = (rows as f32 * pitch - gap - viewport).max(0.);
         if let Some(index) = self.scroll_to.take() {
             self.offset = (index / columns) as f32 * pitch;
         }
@@ -1175,7 +1222,7 @@ impl LibraryPage {
             ui.allocate_ui_with_layout(size, Layout::top_down(Align::Min), |ui| {
                 // `show_rows` spaces its rows by the ui's item spacing: it must be the grid's
                 // gap before it's called, and not only inside its contents.
-                ui.spacing_mut().item_spacing.y = CARD_GAP;
+                ui.spacing_mut().item_spacing.y = gap;
                 let out = egui::ScrollArea::vertical()
                     .id_salt("library_grid")
                     .auto_shrink([false, false])
@@ -1187,14 +1234,15 @@ impl LibraryPage {
                             visible_pages.insert(start / PAGE_SIZE);
                             visible_pages.insert((end - 1) / PAGE_SIZE);
                             ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = CARD_GAP;
-                                ui.add_space(GRID_PADDING);
+                                ui.spacing_mut().item_spacing.x = gap;
+                                ui.add_space(padding);
                                 for (column, slot) in self.items[start..end].iter().enumerate() {
                                     let index = start + column;
                                     let selected = self.cursor.is_selected(GRID, index);
                                     match slot {
                                         Some(item) => {
-                                            let response = card::poster(ui, &mut cx.services.images, item, selected);
+                                            let response =
+                                                card::poster_scaled(ui, &mut cx.services.images, item, scale, selected);
                                             if response.hovered() {
                                                 cx.services.prefetch.hover(Route::for_item(item));
                                             }
@@ -1210,7 +1258,7 @@ impl LibraryPage {
                                             if !missing.contains(&page) {
                                                 missing.push(page);
                                             }
-                                            card::placeholder(ui);
+                                            card::placeholder_scaled(ui, scale);
                                         }
                                     }
                                 }
@@ -1440,6 +1488,15 @@ pub fn letter_of(name: &str) -> char {
     }
 }
 
+/// With touch: the cards per row that fit `width` at `narrowest` or wider, with `padding` on
+/// both sides, and how much bigger than a poster card they are to fill the row.
+fn touch_columns(width: f32, padding: f32, narrowest: f32, gap: f32) -> (usize, f32) {
+    let inner = (width - 2. * padding).max(0.);
+    let columns = (((inner + gap) / (narrowest + gap)).floor() as usize).max(1);
+    let card = (inner - gap * (columns - 1) as f32) / columns as f32;
+    (columns, (card / POSTER_W).max(0.1))
+}
+
 /// Cards per row that fit `width`, with the toolbar's padding on both sides.
 fn columns(width: f32) -> usize {
     let inner = (width - 2. * GRID_PADDING).max(0.);
@@ -1477,7 +1534,18 @@ fn item_count(total: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{GRID_PADDING, Jump, chosen, columns, item_count, jump_target, letter_of, year_choices, years_of};
+    use super::{
+        GRID_PADDING, Jump, chosen, columns, item_count, jump_target, letter_of, touch_columns, year_choices, years_of,
+    };
+
+    #[test]
+    fn a_phone_fills_its_rows_with_three_cards() {
+        // A 369-point phone less the letter bar's 36.
+        let (columns, scale) = touch_columns(333., 16., 84., 12.);
+        assert_eq!(columns, 3);
+        // (301 - 2 × 12) / 3 across, of a 150-point card.
+        assert!((scale - (277. / 3.) / 150.).abs() < 1e-4);
+    }
 
     #[test]
     fn a_name_is_under_its_first_letter_past_an_article() {

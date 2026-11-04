@@ -149,7 +149,8 @@ fn shelf_inner(
             }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if !arrows.shown {
+            // With touch the row is dragged instead: the arrows are for a pointer.
+            if !arrows.shown || crate::layout::touch(ui.ctx()) {
                 return;
             }
             if padding > 0. {
@@ -207,7 +208,15 @@ fn shelf_inner(
         .area
         .is_some_and(|area| ui.ctx().is_being_dragged(area.with("area")));
     state.drag = match (dragged, state.drag) {
-        (false, _) => None,
+        // A drag the page took keeps the page going at the release, as a drag on the page's
+        // own area would.
+        (false, Some(drag)) => {
+            if drag.axis == Some(DragAxis::Page) {
+                crate::smooth_scroll::Coast::start(ui.ctx());
+            }
+            None
+        }
+        (false, None) => None,
         (true, None) => Some(Drag {
             held_at: state.offset,
             axis: None,

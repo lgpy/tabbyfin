@@ -13,6 +13,8 @@ use winit::platform::android::activity::AndroidApp;
 use winit::platform::android::activity::input::{ImeOptions, InputType, TextInputAction, TextInputState, TextSpan};
 use winit::platform::android::activity::ndk::configuration::UiModeNight;
 
+use crate::keyboard;
+
 static APP: OnceLock<AndroidApp> = OnceLock::new();
 /// Repainted when Java reports a change, since winit wakes nothing for it.
 static CONTEXT: OnceLock<egui::Context> = OnceLock::new();
@@ -28,8 +30,16 @@ static ENTER: AtomicBool = AtomicBool::new(false);
 static GOES_BACK: AtomicBool = AtomicBool::new(false);
 /// Set when Back was passed on, which the app takes as Escape.
 static BACK: AtomicBool = AtomicBool::new(false);
-/// Whether the keyboard was last set up for a password, which it mustn't suggest or learn from.
-static PASSWORD: AtomicBool = AtomicBool::new(false);
+/// The keyboard's height as of the last frame, in pixels, and whether it grew since: a focused
+/// field the keyboard now covers scrolls itself into view (`keyboard::reveal`).
+static KEYBOARD_HEIGHT: AtomicI32 = AtomicI32::new(0);
+static KEYBOARD_GREW: AtomicBool = AtomicBool::new(false);
+/// The focused field's kind and whether it's a password, as the keyboard was last told: it's told
+/// again only when that pair changes, since Java restarts the input each time.
+static EDITOR_INFO: Mutex<(keyboard::Kind, bool)> = Mutex::new((keyboard::Kind::Text, false));
+/// Whether the status bar's icons were last set for a light theme, so the bars are told only when
+/// the theme changes.
+static LIGHT_BARS: Mutex<Option<bool>> = Mutex::new(None);
 static KEYBOARD: Mutex<Keyboard> = Mutex::new(Keyboard {
     finished: String::new(),
     word: String::new(),
@@ -60,6 +70,10 @@ pub fn set_context(ctx: egui::Context) {
 
 /// Adds the frame's safe area and keyboard text to egui's input.
 pub fn raw_input(ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    let keyboard = INSETS[4].load(Ordering::Relaxed);
+    if keyboard > KEYBOARD_HEIGHT.swap(keyboard, Ordering::Relaxed) {
+        KEYBOARD_GREW.store(true, Ordering::Relaxed);
+    }
     let px = |i: usize| INSETS[i].load(Ordering::Relaxed) as f32 / ctx.pixels_per_point();
     raw_input.safe_area_insets = Some(egui::SafeAreaInsets(egui::epaint::MarginF32 {
         left: px(0),
@@ -167,29 +181,83 @@ fn keyboard_text(ctx: &egui::Context, app: &AndroidApp, events: &mut Vec<egui::E
     keyboard.word = word;
 }
 
-/// Takes what a frame decided: whether Back has somewhere to go (`goes_back`), and the keyboard
-/// for the focused field (`ime` is the frame's IME output): a password field gets a password
-/// keyboard, which shows no suggestions and learns nothing.
-pub fn after_frame(ime: Option<egui::output::IMEOutput>, goes_back: bool) {
+/// Whether the keyboard's inset grew this frame, which `keyboard::reveal` scrolls a covered field
+/// back into view for.
+pub fn keyboard_grew() -> bool {
+    KEYBOARD_GREW.load(Ordering::Relaxed)
+}
+
+/// Takes what a frame decided: whether Back has somewhere to go (`goes_back`), the keyboard's kind
+/// for the focused field, and the status bar icons' colour for the theme.
+pub fn after_frame(ctx: &egui::Context, goes_back: bool) {
     GOES_BACK.store(goes_back, Ordering::Relaxed);
-    let Some(ime) = ime else {
+    keyboard_kind(ctx);
+    bar_icons(ctx.theme() == egui::Theme::Light);
+    // The fields have scrolled themselves by now: the keyboard's growth is news for one frame.
+    KEYBOARD_GREW.store(false, Ordering::Relaxed);
+}
+
+/// Sets the soft keyboard's kind for the focused field, when it changed: a server address gets the
+/// URL layout, a name no suggestions, a search box a Search action key (which still arrives as
+/// Enter), and a password field a password keyboard, which suggests and learns nothing.
+fn keyboard_kind(ctx: &egui::Context) {
+    let Some(ime) = ctx.output(|output| output.ime) else {
         return;
     };
-    let password = ime.purpose == egui::IMEPurpose::Password;
-    if PASSWORD.swap(password, Ordering::Relaxed) == password {
+    let editor = (keyboard::focused(ctx), ime.purpose == egui::IMEPurpose::Password);
+    let mut last = EDITOR_INFO.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *last == editor {
         return;
     }
-    if let Some(app) = APP.get() {
-        let (input_type, options) = if password {
-            (
-                InputType::TYPE_CLASS_TEXT | InputType::TYPE_TEXT_VARIATION_PASSWORD,
+    *last = editor;
+    drop(last);
+    let (kind, password) = editor;
+    let (input_type, action, mut options) = if password {
+        (
+            InputType::TYPE_CLASS_TEXT | InputType::TYPE_TEXT_VARIATION_PASSWORD,
+            TextInputAction::Done,
+            ImeOptions::IME_FLAG_NO_PERSONALIZED_LEARNING,
+        )
+    } else {
+        match kind {
+            keyboard::Kind::Url => (
+                InputType::TYPE_CLASS_TEXT | InputType::TYPE_TEXT_VARIATION_URI,
+                TextInputAction::Done,
                 ImeOptions::IME_FLAG_NO_PERSONALIZED_LEARNING,
-            )
-        } else {
-            (InputType::TYPE_CLASS_TEXT, ImeOptions::IME_NULL)
-        };
-        app.set_ime_editor_info(input_type, TextInputAction::Done, options);
+            ),
+            keyboard::Kind::Name => (
+                InputType::TYPE_CLASS_TEXT | InputType::TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+                TextInputAction::Done,
+                ImeOptions::IME_FLAG_NO_PERSONALIZED_LEARNING,
+            ),
+            keyboard::Kind::Search => (
+                InputType::TYPE_CLASS_TEXT,
+                TextInputAction::Search,
+                ImeOptions::IME_NULL,
+            ),
+            keyboard::Kind::Text => (InputType::TYPE_CLASS_TEXT, TextInputAction::Done, ImeOptions::IME_NULL),
+        }
+    };
+    if let Some(app) = APP.get() {
+        // The action has to be in the options as well as passed as the action id: a keyboard
+        // labels its action key from the options' action bits, and GameActivity hands the two
+        // on separately.
+        options.set_action(action);
+        app.set_ime_editor_info(input_type, action, options);
     }
+}
+
+/// The status and navigation bar icons, dark over the light theme and light over the dark one, so
+/// they're readable on either backdrop. Only when the theme changes: it's a call into Java, and the
+/// icons keep their colour while the player hides the bars.
+fn bar_icons(light: bool) {
+    let mut last = LIGHT_BARS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *last == Some(light) {
+        return;
+    }
+    *last = Some(light);
+    drop(last);
+    player::android::light_system_bars(light);
 }
 
 /// Sets the environment variables listed in the system property `debug.tabbyfin.env`

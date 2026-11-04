@@ -77,6 +77,7 @@ pub fn select(
 pub fn button(ui: &mut Ui, size: Vec2, value: &str, name: &str, focusable: bool) -> Response {
     let sense = if focusable { Sense::click() } else { Sense::CLICK };
     let (rect, response) = ui.allocate_exact_size(size, sense);
+    let response = crate::layout::grow(ui, response, sense);
     response.widget_info(|| {
         let mut info = WidgetInfo::new(Role::ComboBox);
         info.enabled = ui.is_enabled();

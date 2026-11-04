@@ -56,7 +56,8 @@ pub fn item_menu(response: &Response, item: &BaseItemDto) -> Option<MenuAction> 
     let ctx = &response.ctx;
     let id = Id::unique("item_context_menu");
     let owner = id.with("owner");
-    let opening = response.secondary_clicked();
+    // A right click, or a long press with touch.
+    let opening = response.secondary_clicked() || response.long_touched();
     if opening {
         ctx.data_mut(|data| data.insert_temp(owner, response.id));
     } else if ctx.data(|data| data.get_temp::<Id>(owner)) != Some(response.id) {
