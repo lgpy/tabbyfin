@@ -32,13 +32,8 @@ const SHADOW_ROOM: f32 = 16.;
 /// Draws `view` as a tile, with the keyboard cursor's ring when `selected`. The response is the
 /// tile's, a button named by the library to AccessKit.
 pub fn show(ui: &mut Ui, cache: &mut ImageCache, view: &BaseItemDto, selected: bool) -> Response {
-    show_wide(ui, cache, view, SIZE.x, selected)
-}
-
-/// [`show`], `width` wide: the Libraries page's tiles fill their column.
-pub fn show_wide(ui: &mut Ui, cache: &mut ImageCache, view: &BaseItemDto, width: f32, selected: bool) -> Response {
-    let (outer, response) = ui.allocate_exact_size(vec2(width, SIZE.y + SHADOW_ROOM), Sense::click());
-    let rect = Rect::from_min_size(outer.min, vec2(width, SIZE.y));
+    let (outer, response) = ui.allocate_exact_size(SIZE + vec2(0., SHADOW_ROOM), Sense::click());
+    let rect = Rect::from_min_size(outer.min, SIZE);
     let name = view.name.clone();
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
     let tokens = theme::tokens_of(ui);
