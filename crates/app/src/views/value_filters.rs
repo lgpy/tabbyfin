@@ -1,4 +1,5 @@
-//! The library's genres and tags popover, hung from the toolbar's button: a search box, the
+//! The library's genres and tags popover, hung from the toolbar's button (on a phone, a page of
+//! the filters dialog with the same contents, [`ValueFilters::page`]): a search box, the
 //! filters chosen so far, and every genre and tag as a pill. A click on a pill includes its value,
 //! a second excludes it, a third, or a right click, lets it go. Items with every included genre and tag show
 //! (the two kinds must both match), and items with any excluded value are left out, whatever
@@ -50,10 +51,11 @@ impl ValueFilters {
         egui::Popup::is_id_open(ctx, Self::id())
     }
 
-    /// Opens the popover with an empty search box holding the keyboard.
+    /// Opens the popover with an empty search box holding the keyboard. With touch the box waits
+    /// for a tap: the soft keyboard would come up over the pills before anyone asked to search.
     pub fn open(&mut self, ctx: &egui::Context) {
         *self = Self {
-            focus_search: true,
+            focus_search: !crate::layout::touch(ctx),
             ..Default::default()
         };
         egui::Popup::open_id(ctx, Self::id());
@@ -73,33 +75,40 @@ impl ValueFilters {
     /// and `view` what's chosen; a click changes `view` and returns true.
     pub fn show(&mut self, anchor: &Response, values: &FilterValues, view: &mut LibraryView) -> bool {
         let mut cycled: Option<(ValueKind, String, bool)> = None;
-        popup::panel(Self::id(), anchor, RectAlign::BOTTOM_START, WIDTH, |ui| {
+        let title = Some("Genres and tags");
+        popup::panel(Self::id(), anchor, RectAlign::BOTTOM_START, WIDTH, title, |ui| {
             // A frame, not a `horizontal`, which would cap the scroll area's room at one row.
             egui::Frame::new()
                 .inner_margin(egui::Margin::same(PAD as i8))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    cycled = self.contents(ui, values, view);
+                    cycled = self.contents(ui, values, view, None);
                 });
         });
-        let Some((kind, value, release)) = cycled else {
-            return false;
-        };
-        if release {
-            set_off(view, kind, &value);
-        } else {
-            cycle(view, kind, &value);
-        }
-        // The chosen pills above the list come and go: the panel sizes itself again next frame.
-        anchor.ctx.request_repaint();
-        true
+        apply(&anchor.ctx, view, cycled)
     }
 
+    /// Readies the phone's page of them: an empty search box, which waits for a tap before it
+    /// brings up the keyboard (it would cover half the pills).
+    pub fn open_page(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The same contents as a page of the phone's filters dialog, the pills in a list
+    /// `list_height` tall. A tap changes `view` and returns true.
+    pub fn page(&mut self, ui: &mut Ui, values: &FilterValues, view: &mut LibraryView, list_height: f32) -> bool {
+        let cycled = self.contents(ui, values, view, Some(list_height));
+        apply(ui.ctx(), view, cycled)
+    }
+
+    /// `list_height`: the list's set height on a page; the popover's grows with its pills, to
+    /// [`LIST_MAX_H`].
     fn contents(
         &mut self,
         ui: &mut Ui,
         values: &FilterValues,
         view: &LibraryView,
+        list_height: Option<f32>,
     ) -> Option<(ValueKind, String, bool)> {
         let mut cycled = None;
         let shown = matching(values, &self.search);
@@ -141,7 +150,12 @@ impl ValueFilters {
         }
 
         ui.add_space(12.);
-        ScrollArea::vertical().max_height(LIST_MAX_H).show(ui, |ui| {
+        let list = match list_height {
+            // A set height, so the dialog doesn't change size as the search narrows the pills.
+            Some(height) => ScrollArea::vertical().max_height(height).auto_shrink([false, false]),
+            None => ScrollArea::vertical().max_height(LIST_MAX_H),
+        };
+        list.show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
             if shown.is_empty() {
                 let message = format!("No genres or tags match \u{201c}{}\u{201d}.", self.search.trim());
@@ -204,6 +218,35 @@ impl ValueFilters {
         field::leading(ui, &response, ICON_SEARCH);
         response.changed()
     }
+}
+
+/// Carries out a tap on a pill (`release`: a long press or right click, letting it go). Returns
+/// whether anything changed.
+fn apply(ctx: &egui::Context, view: &mut LibraryView, cycled: Option<(ValueKind, String, bool)>) -> bool {
+    let Some((kind, value, release)) = cycled else {
+        return false;
+    };
+    if release {
+        set_off(view, kind, &value);
+    } else {
+        cycle(view, kind, &value);
+    }
+    // The chosen pills above the list come and go: the panel sizes itself again next frame.
+    ctx.request_repaint();
+    true
+}
+
+/// How many genres and tags are chosen, included or excluded.
+pub fn chosen_count(view: &LibraryView) -> usize {
+    view.genres.len() + view.tags.len() + view.exclude_genres.len() + view.exclude_tags.len()
+}
+
+/// Lets every genre and tag go: the page's *Clear*.
+pub fn clear(view: &mut LibraryView) {
+    view.genres.clear();
+    view.tags.clear();
+    view.exclude_genres.clear();
+    view.exclude_tags.clear();
 }
 
 /// What the toolbar's button says: what's chosen, or what it's for.
