@@ -105,7 +105,22 @@ Against `mise run dev:min` (port 8097): signing in with a password and with Quic
 
 *Download* on the update notice opens the release page in the browser.
 
-## 12. Android
+## 12. Chromecast (2.11)
+
+Everything so far ran against the fake device in `crates/cast/tests/` and the app's UI tests. On a real Chromecast and a Google TV, with the dev server reached by its LAN address:
+
+- **The live check first:** `mise run cast` lists the TVs, launches the receiver and prints its answer to `Identify`; `mise run cast -- --play <item id>` plays a dev item and prints its progress. Then the heartbeat holds for an hour, and how big a `PlayNow` with a long queue can get (the limit is said to be 64 KB).
+- **The dev server's address:** the server reports a `LocalAddress` from inside Docker (`http://172.18.0.2:8096` in the fixtures), which a TV can't reach; the TV needs the host's LAN address, and `dev/setup-server.py`'s port binding may need opening beyond `localhost`. Signed in by the LAN address, the TV is given that address as is.
+- **The panel:** the TV, a cast group (shown as *Group*) and the last TV first; casting, *Disconnect* (the TV keeps playing) and *Stop casting* (back to its idle screen).
+- **Playing:** a movie and an episode (the receiver plays the next one), a transcode (the receiver's choice), another version, audio and subtitle changes (each reloads on the TV), seeking, the chapters menu, pause from the player and from the now-casting bar, and the TV's volume from the slider, the wheel and the keys.
+- **Handover:** casting while something plays here picks it up on the TV at the same spot, version and tracks, and the dashboard shows the local session stop before the TV's starts.
+- **The dashboard's *Play on Tabbyfin*** plays on the TV while casting.
+- **SyncPlay:** the cast button is off in a group; joining one while casting asks first and stops the cast.
+- **Errors:** a launch that fails, the TV turned off mid-cast (*Lost the connection*), a server address the TV can't reach (`connectionerror`'s toast), an item the TV can't play (`playbackerror`).
+- **The bitrate setting:** *Settings → Playback → Chromecast bitrate* caps what the TV streams.
+- **Two senders:** a phone casting to the same TV while this app casts (it follows `MEDIA_STATUS` then).
+
+## 13. Android
 
 Built with `mise run android:install`, and tried on the emulator and one phone (a Honor with Android 16; `docs/android.md`).
 

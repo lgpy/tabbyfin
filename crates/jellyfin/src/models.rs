@@ -69,6 +69,9 @@ pub struct UserConfiguration {
     /// Leaves watched items out of Home's "Latest" rows (`/Items/Latest` applies it).
     #[serde(default, deserialize_with = "nullable")]
     pub hide_played_in_latest: bool,
+    /// The Chromecast receiver app this user casts to (the web client's *Google Cast version*),
+    /// one of `/System/Info`'s `CastReceiverApplications`. Missing on older servers.
+    pub cast_receiver_id: Option<String>,
 }
 
 /// Changes to a [`UserConfiguration`]: the fields that are `Some` are written, the rest stay

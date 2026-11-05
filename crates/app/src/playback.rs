@@ -485,6 +485,16 @@ impl PlaybackManager {
         .clamped();
     }
 
+    /// What plays after the current item, in order.
+    pub(crate) fn queued(&self) -> impl Iterator<Item = &BaseItemDto> {
+        self.queue.iter()
+    }
+
+    /// Forgets the queue (it went to the TV with a cast).
+    pub(crate) fn clear_queue(&mut self) {
+        self.queue.clear();
+    }
+
     /// The signed-in session's client.
     pub fn client(&self) -> &Client {
         &self.client
@@ -739,12 +749,18 @@ fn save_preferences(volume: f64, adjustments: Adjustments) {
     }
 }
 
-/// Playing, and the controls: these may go to a SyncPlay group instead of the local player.
+/// Playing, and the controls: these may go to a SyncPlay group or a cast instead of the local
+/// player.
 impl Services {
     /// A control from the player UI (or remote control). In a SyncPlay group, pause, seek and
-    /// stop are requests to the group, which then commands every member. Stop with no session
-    /// to send it to (waiting to reconnect, or the next one still loading) stops that instead.
+    /// stop are requests to the group, which then commands every member; while casting they go
+    /// to the TV. Stop with no session to send it to (waiting to reconnect, or the next one
+    /// still loading) stops that instead.
     pub fn control(&mut self, command: UiCommand) {
+        if self.is_casting() {
+            self.cast_control(command);
+            return;
+        }
         let Some(state) = self.playback.current() else {
             if matches!(command, UiCommand::Stop) {
                 self.stop_playback();
@@ -768,6 +784,10 @@ impl Services {
     }
 
     pub fn play(&mut self, item: &BaseItemDto, options: PlayOptions) {
+        if self.is_casting() {
+            self.cast_play(std::slice::from_ref(item), &options);
+            return;
+        }
         // Playing the queue's next item moves the queue on; playing anything else drops it.
         self.playback.advance_queue(item, &options);
         self.play_now(item, options);
@@ -796,8 +816,12 @@ impl Services {
     }
 
     /// Plays `items` in order, the first with `options`. A SyncPlay group gets them as its
-    /// new queue instead, from the start.
+    /// new queue instead, from the start; a cast plays them on the TV.
     pub fn play_all_with(&mut self, items: Vec<BaseItemDto>, options: PlayOptions) {
+        if self.is_casting() {
+            self.cast_play(&items, &options);
+            return;
+        }
         let mut items = VecDeque::from(items);
         let Some(first) = items.pop_front() else { return };
         if self.in_group() {
@@ -813,6 +837,10 @@ impl Services {
     /// Adds `items` to the queue: right after the playing item with `next`, otherwise at the
     /// end. With nothing playing they play now.
     pub fn enqueue(&mut self, items: Vec<BaseItemDto>, next: bool) {
+        if self.is_casting() {
+            self.cast_enqueue(&items, next);
+            return;
+        }
         if self.in_group() {
             self.group_enqueue(&items, next);
             return;
@@ -836,6 +864,10 @@ impl Services {
     }
 
     fn play_now(&mut self, item: &BaseItemDto, options: PlayOptions) {
+        if self.is_casting() {
+            self.cast_play(std::slice::from_ref(item), &options);
+            return;
+        }
         // In a SyncPlay group, starting something means giving the group a new queue; the
         // server then has every member (this one included) load it.
         if options.group_item.is_none() && self.in_group() {
@@ -848,6 +880,10 @@ impl Services {
 
     /// Plays the next episode (or queued item, or movie of the collection) now.
     pub fn play_next(&mut self) {
+        if self.is_casting() {
+            self.cast_skip(true);
+            return;
+        }
         if let Some(next) = self.playback.now_playing().and_then(|state| state.next.clone()) {
             self.play_from_resume(&next);
         }
@@ -855,6 +891,10 @@ impl Services {
 
     /// Plays the previous episode (or movie of the collection) from its resume point.
     pub fn play_previous(&mut self) {
+        if self.is_casting() {
+            self.cast_skip(false);
+            return;
+        }
         if let Some(previous) = self.playback.now_playing().and_then(|state| state.previous.clone()) {
             self.play_from_resume(&previous);
         }
@@ -872,6 +912,10 @@ impl Services {
     /// Switches the audio track. A transcode carries only the chosen track, so it restarts
     /// at the current position.
     pub fn change_audio(&mut self, index: i32) {
+        if self.is_casting() {
+            self.cast_control(UiCommand::Audio(index));
+            return;
+        }
         let Some(state) = self.playback.now_playing.as_mut() else {
             return;
         };
@@ -889,6 +933,10 @@ impl Services {
     /// Switches subtitles. A transcode restarts if a burned-in subtitle has to go, or the new
     /// one has to be burned in.
     pub fn change_subtitle(&mut self, choice: SubtitleChoice) {
+        if self.is_casting() {
+            self.cast_control(UiCommand::Subtitle(choice));
+            return;
+        }
         let Some(state) = self.playback.now_playing.as_mut() else {
             return;
         };
@@ -966,6 +1014,10 @@ impl Services {
     /// (`SyncPlay::reload`), rather than the group getting a new queue as when something new is
     /// played.
     pub fn reload(&mut self, mut options: PlayOptions) {
+        if self.is_casting() {
+            self.cast_reload(options);
+            return;
+        }
         let Some(state) = self.playback.now_playing() else {
             return;
         };

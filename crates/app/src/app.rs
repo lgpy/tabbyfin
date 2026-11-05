@@ -473,7 +473,7 @@ impl App {
                         signed_in.shell.player_started(ctx);
                     }
                 }
-                AppEvent::PlaybackEnded => {
+                AppEvent::PlaybackEnded | AppEvent::LeavePlayer => {
                     if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
                         signed_in.shell.player_ended(ctx);
                     }

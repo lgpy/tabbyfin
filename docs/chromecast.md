@@ -2,7 +2,7 @@
 
 **Goal:** cast to a Chromecast or Google TV from the desktop and Android. We cast to Jellyfin's own receiver app ([jellyfin-chromecast](https://github.com/jellyfin/jellyfin-chromecast), the one the web client casts to), not to Google's Default Media Receiver. The receiver does the Jellyfin work itself: it calls `PlaybackInfo` with its own device profile, chooses direct play or a transcode, reports start, progress and stop to the server with our token, and plays the next episode. The app is only the remote: it finds devices, launches the receiver, sends it commands and draws what it reports.
 
-**Status:** not started. Nothing here has been tried against a device. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
+**Status:** milestones 1 to 4 are built (`crates/cast`, `crates/app/src/cast.rs`, `views/casting.rs` and the player's casting view) and tested against the fake device, but nothing has been tried against a device yet. Staying connected and Android are left. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
 
 ## Decision
 
@@ -122,7 +122,7 @@ The look below was settled with mockups.
 
 - A **cast button** (`cast` icon, `cast_connected` and lit while casting) sits in the top bar just left of SyncPlay. It shows only when a device has been found or something is casting.
   - **Its panel** is built like SyncPlay's (`popup::panel`). Its heading is *Cast to a TV*, with a *Casting* status dot while casting, and a line saying what the panel does.
-  - **The devices** are listed under an *On this network* overline, as one `list_row::block` of `ListRow`s. Each row has a TV icon (a group's is `speaker_group`), the device's name, and its model or *Group · N TVs* at the right.
+  - **The devices** are listed under an *On this network* overline, as one `list_row::block` of `ListRow`s. Each row has a TV icon (a group's is `speaker_group`), the device's name, and its model or *Group* at the right (mDNS doesn't say how many TVs a group has).
   - **The TV in use** is highlighted, with a `brand` `cast_connected` icon and *Casting*.
   - **While casting**, a quiet *Disconnect* and a quiet-danger *Stop casting* sit under the list.
 - **While casting**, the player page draws `Casting` instead of `NowPlaying`.

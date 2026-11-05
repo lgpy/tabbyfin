@@ -169,6 +169,29 @@ impl Services {
     /// as the player's own controls (and so the group's, in a SyncPlay group).
     pub fn on_remote_playstate(&mut self, request: PlaystateRequest) {
         tracing::info!(?request, "remote playstate");
+        // While casting, the TV is what plays.
+        if let Some(casting) = self.cast.casting() {
+            let command = match request.command {
+                PlaystateCommand::Stop => UiCommand::Stop,
+                PlaystateCommand::Pause => UiCommand::SetPause(true),
+                PlaystateCommand::Unpause => UiCommand::SetPause(false),
+                PlaystateCommand::PlayPause => UiCommand::TogglePause,
+                PlaystateCommand::Seek => match request.seek_position_ticks {
+                    Some(position) => UiCommand::SeekTo(position.into()),
+                    None => return,
+                },
+                PlaystateCommand::Rewind => UiCommand::SeekBy(-SEEK_STEP),
+                PlaystateCommand::FastForward => UiCommand::SeekBy(SEEK_STEP),
+                PlaystateCommand::NextTrack => return self.play_next(),
+                PlaystateCommand::PreviousTrack if casting.position() <= RESTART_WITHIN => {
+                    return self.play_previous();
+                }
+                PlaystateCommand::PreviousTrack => UiCommand::SeekTo(Duration::ZERO),
+                PlaystateCommand::Other => return,
+            };
+            self.control(command);
+            return;
+        }
         let Some(state) = self.playback.now_playing() else {
             // A reconnect may be pending; Stop cancels it.
             if request.command == PlaystateCommand::Stop {
@@ -216,12 +239,13 @@ impl Services {
             self.toast(Toast::info(message));
             return;
         }
-        // The rest act on what's playing.
-        let Some(state) = self.playback.now_playing() else {
-            return;
+        // The rest act on what's playing: the TV while casting.
+        let volume = match (self.cast.casting(), self.playback.now_playing()) {
+            (Some(casting), _) => casting.volume,
+            // mpv's last reported volume: two steps in one batch move once.
+            (None, Some(state)) => state.volume,
+            (None, None) => return,
         };
-        // mpv's last reported volume: two steps in one batch move once.
-        let volume = state.volume;
         let set_volume = |volume: f64| UiCommand::SetVolume(volume.clamp(0., 100.));
         let command = match command {
             GeneralCommand::VolumeUp => set_volume(volume + VOLUME_STEP),
