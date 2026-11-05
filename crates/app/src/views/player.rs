@@ -1235,6 +1235,7 @@ impl PlayerPage {
             .map(|version| Entry::new(&version.name).checked(version.id == view.source_id))
             .collect();
         let shown = PopupMenu::new(versions_id())
+            .title("Version")
             .align(RectAlign::TOP_END)
             .width(240.)
             .show(response, &entries);

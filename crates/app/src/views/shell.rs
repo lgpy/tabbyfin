@@ -1199,6 +1199,7 @@ impl Shell {
         }
         entries.push(Entry::new("Sign out").checked(false));
         let shown = PopupMenu::new(id)
+            .hung()
             .align(RectAlign::BOTTOM_END)
             .width(ACCOUNT_MENU_W)
             .show(&response, &entries);
@@ -1250,6 +1251,7 @@ impl Shell {
             button,
             RectAlign::BOTTOM_END,
             SYNCPLAY_PANEL_W,
+            popup::OnTouch::Hung,
             |ui| self.syncplay_content(ui, cx),
         )
         .flatten();

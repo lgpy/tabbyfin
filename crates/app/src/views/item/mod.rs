@@ -774,6 +774,7 @@ impl ItemPage {
         let actions = more_actions(&data.item);
         let entries: Vec<Entry> = actions.iter().map(|&action| more_entry(action)).collect();
         let shown = PopupMenu::new(id)
+            .title(&data.item.name)
             .align(RectAlign::BOTTOM_END)
             .width(MENU_W)
             .show(response, &entries);
@@ -797,7 +798,10 @@ impl ItemPage {
             .enumerate()
             .map(|(index, source)| Entry::new(version_label(source, index)).checked(index == current))
             .collect();
-        let shown = PopupMenu::new(id).width(PICKER_W).show(response, &entries);
+        let shown = PopupMenu::new(id)
+            .title("Version")
+            .width(PICKER_W)
+            .show(response, &entries);
         if shown.search {
             cx.nav.push(NavRequest::OpenSearch);
         }
