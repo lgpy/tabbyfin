@@ -59,6 +59,13 @@ pub struct Config {
     /// `None` means no.
     #[serde(default)]
     pub prefer_hevc: Option<bool>,
+    /// The Chromecast cast to last (its mDNS `id`), listed first in the cast panel.
+    #[serde(default)]
+    pub cast_device: Option<String>,
+    /// Bits per second, sent to the Chromecast receiver as its `maxBitrate`. `None` leaves it
+    /// to the receiver, which measures the connection itself.
+    #[serde(default)]
+    pub cast_max_bitrate: Option<u64>,
     /// Play the next episode when one ends. `None` means yes.
     #[serde(default)]
     pub autoplay_next_episode: Option<bool>,

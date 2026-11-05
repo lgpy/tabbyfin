@@ -6,6 +6,7 @@
 mod android;
 mod app;
 mod browse;
+mod cast;
 mod config;
 mod credentials;
 #[cfg(debug_assertions)]

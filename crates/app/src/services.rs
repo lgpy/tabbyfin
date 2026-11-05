@@ -7,6 +7,7 @@
 //! block (playback's controls are in `playback.rs`, SyncPlay's in `syncplay.rs`, remote
 //! control's in `remote.rs`).
 
+use crate::cast::Cast;
 use crate::config::SavedServer;
 use crate::images::ImageCache;
 use crate::item_menu::{Mark, PlaylistEdits};
@@ -66,6 +67,9 @@ pub struct Services {
     /// `tick_remote` places them (playing and the controls are methods on `Services`,
     /// `remote.rs`).
     pub remote: Remote,
+    /// Chromecasts on the network and the cast in progress. While casting, playing and the
+    /// controls go to the TV (`cast.rs`).
+    pub cast: Cast,
 }
 
 /// A watched or favorite change, as its request finishes: what was asked for, on which item,
@@ -104,6 +108,9 @@ pub enum AppEvent {
     /// Another client asked for fullscreen (remote control's `ToggleFullscreen`): the app owns
     /// the window, so it carries this out.
     ToggleFullscreen,
+    /// Back from the player while casting: it closes and the cast goes on, with the
+    /// now-casting bar to come back by.
+    LeavePlayer,
 }
 
 impl Services {
@@ -117,6 +124,7 @@ impl Services {
             syncplay: SyncPlay::new(session.client.clone(), ctx),
             live: Live::connect(session.client.clone(), ctx),
             remote: Remote::new(session.client.clone(), ctx),
+            cast: Cast::new(&session, ctx),
             playlist_edits: PlaylistEdits::new(ctx),
             session,
             user_data: 0,
@@ -145,15 +153,18 @@ impl Services {
         self.tick_live();
         self.tick_remote();
         self.tick_syncplay();
+        self.tick_cast();
     }
 
     /// The one hook for "this session is ending", called before another account takes over or
-    /// the screen showing it is dropped: stops playback and leaves a SyncPlay group. Dropping
-    /// the services afterwards cancels whatever they still have running; a stopped playback
-    /// session finishes in the background, reporting its stop once, and the request leaving the
-    /// group still goes out.
+    /// the screen showing it is dropped: stops playback and a cast, and leaves a SyncPlay group.
+    /// Dropping the services afterwards cancels whatever they still have running; a stopped
+    /// playback session finishes in the background, reporting its stop once, and the request
+    /// leaving the group still goes out. The cast stops rather than being left playing: the
+    /// receiver uses this session's token, which signing out revokes.
     pub fn end(&mut self) {
         self.stop_playback();
+        self.stop_cast();
         if self.in_group() {
             self.syncplay.leave();
         }
@@ -161,12 +172,14 @@ impl Services {
 
     /// The app is quitting: stops what these sessions (the signed-in one, and one parked behind
     /// *Add account*) are doing on the server, playback and a SyncPlay group, and waits a
-    /// little for the server to hear it, since the process ends right after.
+    /// little for the server to hear it, since the process ends right after. A cast is left
+    /// playing on the TV, as the web client leaves it.
     pub fn shut_down<'a>(all: impl IntoIterator<Item = &'a mut Services>) {
         let mut stopping = Vec::new();
         for services in all {
             stopping.extend(services.playback.stop_for_exit());
             stopping.extend(services.syncplay.leave_for_exit());
+            stopping.extend(services.cast.disconnect_for_exit());
         }
         playback::wait_for_exit(stopping);
     }
