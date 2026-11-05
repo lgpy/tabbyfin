@@ -203,8 +203,11 @@ fn shelf_inner(
     }
 
     // A drag on the row: the row holds still until it's decided, and while it's the page's,
-    // which scrolls by the pointer's vertical movement instead. egui applies the drag after the
-    // offset set here, so the row is held at its offset plus this frame's sideways movement.
+    // which scrolls by the pointer's vertical movement instead. The cards are laid out at the
+    // offset set here, and egui takes the drag off it only after that, so the row is held at
+    // its offset as it is: adding this frame's sideways movement to make up for egui would draw
+    // the cards that far off each frame, a jitter under the finger. What egui leaves in its
+    // state is off by the last frame's movement, so the release puts the row back too.
     let dragged = state
         .area
         .is_some_and(|area| ui.ctx().is_being_dragged(area.with("area")));
@@ -212,6 +215,9 @@ fn shelf_inner(
         // A drag the page took keeps the page going at the release, as a drag on the page's
         // own area would; with touch, the row's own drag flings the row.
         (false, Some(drag)) => {
+            if drag.axis != Some(DragAxis::Row) {
+                offset = Some(drag.held_at);
+            }
             match drag.axis {
                 Some(DragAxis::Page) => crate::smooth_scroll::Coast::start(ui.ctx()),
                 Some(DragAxis::Row) if crate::layout::touch(ui.ctx()) => {
@@ -266,9 +272,9 @@ fn shelf_inner(
     if let Some(drag) = state.drag
         && drag.axis != Some(DragAxis::Row)
     {
-        let delta = ui.input(|input| input.pointer.delta());
-        offset = Some(drag.held_at + delta.x);
+        offset = Some(drag.held_at);
         if drag.axis == Some(DragAxis::Page) {
+            let delta = ui.input(|input| input.pointer.delta());
             ui.scroll_with_delta_animation(egui::vec2(0., delta.y), egui::style::ScrollAnimation::none());
         }
     }

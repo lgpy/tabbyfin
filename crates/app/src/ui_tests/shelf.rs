@@ -225,20 +225,29 @@ fn a_drag_up_or_down_scrolls_the_page_and_holds_the_row() {
     let start = card(&ui);
     let from = ui.get_by_label("card 1").rect().center();
 
-    // Press on the row, then drag 100 points up, a little sideways, in 20-point frames.
+    // Press on the row, then drag 100 points up in 20-point frames, wobbling a few points from
+    // side to side as a finger does. The row holds still on every frame, not only at the end:
+    // a row drawn off by each frame's sideways movement jitters under the finger.
     ui.hover_at(from);
     ui.step();
     ui.drag_at(from);
     ui.step();
     for step in 1..=5 {
-        ui.hover_at(from + vec2(-2. * step as f32, -20. * step as f32));
+        let wobble = if step % 2 == 0 { 4. } else { -4. };
+        ui.hover_at(from + vec2(wobble, -20. * step as f32));
         ui.step();
+        let moved = card(&ui) - start;
+        assert!(moved.x.abs() < 0.5, "the row held still at frame {step}: {moved:?}");
     }
-    ui.drop_at(from + vec2(-10., -100.));
+    ui.drop_at(from + vec2(-4., -100.));
     ui.step();
     let moved = card(&ui) - start;
     assert!(moved.y < -60., "the page scrolled up with the drag: {moved:?}");
     assert!(moved.x.abs() < 0.5, "the row held still: {moved:?}");
+    // Nor does it move once the drag is over.
+    ui.step();
+    let moved = card(&ui) - start;
+    assert!(moved.x.abs() < 0.5, "the row stayed put after the release: {moved:?}");
 }
 
 #[test]
