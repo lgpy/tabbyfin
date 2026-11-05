@@ -84,13 +84,24 @@ impl Coast {
         }
     }
 
-    /// Moves the page this frame's share of a coast, from inside its scroll area.
-    fn run(ui: &egui::Ui) {
+    /// Moves the page this frame's share of a coast, from inside its scroll area, `area` (as of
+    /// the last frame).
+    ///
+    /// A page pulled past its end and let go springs back, which egui runs itself; a coast
+    /// heading further out stops there instead of carrying on. egui clamps a page's scroll to
+    /// its ends only while it's inside them, so a coast that kept going from a page pulled past
+    /// its top would fling the whole page off the screen before the spring brought it back.
+    fn run(ui: &egui::Ui, area: Option<egui::Id>) {
         let ctx = ui.ctx();
         let Some(Coast(mut fling)) = ctx.data(|data| data.get_temp::<Coast>(Self::id())) else {
             return;
         };
-        if caught(ui) {
+        // The content moves down as the velocity is positive, while the offset goes up as it
+        // moves past its end: opposite signs are a coast heading further out.
+        let overscroll = area
+            .and_then(|id| egui::scroll_area::State::load(ctx, id))
+            .map_or(0., |state| state.overscroll().y);
+        if caught(ui) || overscroll * fling.velocity < 0. {
             ctx.data_mut(|data| data.remove::<Coast>(Self::id()));
             return;
         }
@@ -124,12 +135,16 @@ pub fn page<R>(
     if touch {
         ui.spacing_mut().scroll.kinetic.decay_time = 0.;
     }
+    // The scroll area's id, from the last frame: egui makes it inside `show`.
+    let area_key = ui.scope_id().with("page_area");
+    let last_area = ui.data(|data| data.get_temp::<egui::Id>(area_key));
     let out = area.show(ui, |ui| {
         // The contents (a shelf's own rows) get the usual style back.
         ui.spacing_mut().scroll.kinetic = kinetic;
-        Coast::run(ui);
+        Coast::run(ui, last_area);
         add_contents(ui)
     });
+    ui.data_mut(|data| data.insert_temp(area_key, out.id));
     ui.spacing_mut().scroll.kinetic = kinetic;
     if touch {
         let dragged = ui.ctx().is_being_dragged(out.id.with("area"));
