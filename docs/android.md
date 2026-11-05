@@ -21,7 +21,7 @@ Both players, as [Findroid](https://github.com/jarnedemeulemeester/findroid) has
 
 **Later:** SyncPlay and remote control (they compile as-is, but need care around the app going to the background), Android TV, picture-in-picture, background audio, downloads for offline viewing (on every platform, not only Android), Chromecast.
 
-**Chromecast** comes next, through Jellyfin's own receiver app (the one the web client and Jellyfin's Android app cast to) rather than Google's Default Media Receiver: the receiver negotiates, transcodes and reports to the server itself, and shows up as a Jellyfin session, so the app's remote control can drive it. It needs a Chromecast or Google TV on the network to test against.
+**Chromecast** comes next, through Jellyfin's own receiver app (the one the web client and Jellyfin's Android app cast to) rather than Google's Default Media Receiver: the receiver negotiates, transcodes and reports to the server itself. It's driven over the cast channel only (it opens no websocket, so the server can't forward remote control to it), with the same Rust sender as the desktop. Plan in [`chromecast.md`](chromecast.md). It needs a Chromecast or Google TV on the network to test against.
 
 ## Build and packaging
 
