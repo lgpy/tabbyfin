@@ -118,9 +118,22 @@
 
 ### UI
 
-- A **cast button** in the top bar, beside SyncPlay. It shows only when a device has been found or something is casting, and is lit while casting. Its panel lists the devices by name, plus *Stop casting* and *Disconnect* while casting. The same button goes in the player's top bar, to hand over what's playing.
-- **While casting**, the player page draws `Casting` instead of `NowPlaying`. Instead of the video it shows the item's backdrop and *Playing on <TV>*. It keeps the seek bar with chapters, play and pause, previous and next, volume, and the audio, subtitle and version menus. It leaves out speed, delays, subtitle size and trickplay; trickplay can come later, since it's the server's. Back leaves the page while the cast keeps going, and a **now-casting bar** at the bottom of the shell (above the phone's bottom bar) brings it back.
-- The look is open. Mock up the cast panel, the casting player page and the now-casting bar with the `ui-mockup` skill before building them.
+The look below was settled with mockups.
+
+- A **cast button** (`cast` icon, `cast_connected` and lit while casting) sits in the top bar just left of SyncPlay. It shows only when a device has been found or something is casting.
+  - **Its panel** is built like SyncPlay's (`popup::panel`). Its heading is *Cast to a TV*, with a *Casting* status dot while casting, and a line saying what the panel does.
+  - **The devices** are listed under an *On this network* overline, as one `list_row::block` of `ListRow`s. Each row has a TV icon (a group's is `speaker_group`), the device's name, and its model or *Group · N TVs* at the right.
+  - **The TV in use** is highlighted, with a `brand` `cast_connected` icon and *Casting*.
+  - **While casting**, a quiet *Disconnect* and a quiet-danger *Stop casting* sit under the list.
+- **While casting**, the player page draws `Casting` instead of `NowPlaying`.
+  - **It keeps today's player layout.** Where the video was, it shows the item's backdrop, dimmed (`over_video::VEIL`). In the middle, a `cast_connected` mark in a dark circle sits over *Playing on <TV>* (`xl`) and the TV's model (`sm`, muted).
+  - **The top bar is today's**, with a lit `cast_connected` button at its right end.
+  - **The bottom bar is today's**, minus the settings button and fullscreen: play and pause, the 10 s skips, the TV's volume, the clock, previous and next, the version picker, chapters, audio and subtitles.
+  - **It leaves out** speed, delays, subtitle size and trickplay. Trickplay can come later, since the thumbnails come from the server.
+- **Back leaves the player while the cast keeps going.** A **now-casting bar** then brings it back with a click.
+  - **On the desktop** it floats over the bottom of every page: at most 640 wide, 68 tall and 24 up from the bottom, in a popup's frame with radius 18.
+  - **Its contents:** a 16:9 thumbnail, the episode's name (`sm`), and a `brand` cast mark beside *Series · on <TV>* (`xs`, muted). At the right end are the time and a pause button. The progress runs along its bottom edge in `brand` over `inset`.
+  - **On a phone** it's full width less 8 on each side, 64 tall, sitting just above the bottom bar. It names only the TV and has no time.
 
 ### Android
 
@@ -139,7 +152,7 @@
 1. **Channel:** codec, TLS, heartbeat, the receiver namespace and discovery, plus `examples/cast.rs` launching the receiver on a real device.
 2. **Jellyfin receiver:** the typed messages and `--play` casting a dev item, with progress printed.
 3. **App service:** `Cast` in `Services`, the redirects, the handover, the errors and the config.
-4. **UI:** mockups first, then the cast panel, the casting player page and the now-casting bar.
+4. **UI:** the cast panel, the casting player page and the now-casting bar.
 5. **Staying connected:** reconnect, the reconnect offer at launch, other senders, and sign-out.
 6. **Android:** the multicast lock, the volume keys, and the background.
 
