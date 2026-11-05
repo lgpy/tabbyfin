@@ -127,7 +127,7 @@ Built with `mise run android:install`, and tried on the emulator and one phone (
 - One axis per gesture: a diagonal drag on a shelf moves the row or the page, never both; a touch on a coasting page or row stops it; a flung row coasts and stops at its ends.
 - The bottom bar slides away while scrolling down Home, a library and an item page and comes back on a scroll up, without flickering at a page's end or on a page barely taller than the screen.
 - Scrubbing the library's letter bar with a finger: the bubble follows, and the grid lands on each letter (on a big library, `dev/fake-library.py`).
-- The library's filters dialog on the phone: each select and the genres and tags popover open over it, and the grid behind updates as they're picked.
+- The library's filters dialog on the phone: it opens over the page blurred (no flash of the sharp page first), each select opens over it, *Genres and tags* turns it to their page and Back (the button and the phone's) returns, and the count updates as they're picked. Turning the phone while it's open drops the blur for the scrim.
 - Touch targets with real fingers: the 30-point SyncPlay and playlist handles, the field's clear and show-password buttons, and a long press on a card that's also the start of a scroll.
 - The release-signed APK (`build.sh --sign`, with R8) on a phone: playback on Media3 and on mpv, DTS and TrueHD audio through the ffmpeg extension, and the keyboard and Back (all Java the Rust side calls into). The emulator only showed it signs in and plays Media3 with its subtitles.
 - The app restores its session after Android ends it in the background (Developer options, *Don't keep activities*, or `adb shell am kill`).

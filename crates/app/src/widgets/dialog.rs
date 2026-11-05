@@ -6,10 +6,15 @@
 //! while a modal is open (`keys.rs`), which is also why their buttons take no focus.
 
 use egui::{Align, Id, Layout, ModalResponse, Response, Ui};
+use egui_material_icons::icons::ICON_ARROW_BACK;
 
 use crate::theme::{self, text};
 use crate::widgets::button::{self, Focus, State};
+use crate::widgets::round_button::RoundButton;
 use crate::widgets::surface;
+
+/// The Back button before a dialog page's heading.
+const BACK_BUTTON: f32 = 36.;
 
 /// A button's room either side of its label: wide enough for the loading spinner at its right
 /// end (`button::State::Loading`) to clear a centred label.
@@ -27,6 +32,32 @@ pub fn show<R>(
     subtitle: Option<&str>,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> ModalResponse<R> {
+    modal(ctx, id, width, title, subtitle, None, contents)
+}
+
+/// [`show`] for a page of a dialog that opened from another of its pages: a Back button before
+/// the heading, which sets `back` when pressed.
+pub fn show_page<R>(
+    ctx: &egui::Context,
+    id: Id,
+    width: f32,
+    title: &str,
+    subtitle: Option<&str>,
+    back: &mut bool,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> ModalResponse<R> {
+    modal(ctx, id, width, title, subtitle, Some(back), contents)
+}
+
+fn modal<R>(
+    ctx: &egui::Context,
+    id: Id,
+    width: f32,
+    title: &str,
+    subtitle: Option<&str>,
+    back: Option<&mut bool>,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> ModalResponse<R> {
     let tokens = theme::tokens(&ctx.style_of(ctx.theme()).visuals);
     // On a phone, no wider than the window leaves with a margin either side.
     let width = if crate::layout::touch(ctx) {
@@ -39,7 +70,21 @@ pub fn show<R>(
         .frame(surface::frame_of(tokens))
         .show(ctx, |ui| {
             ui.set_width(width - 2. * f32::from(surface::PADDING));
-            surface::heading_left(ui, title, subtitle);
+            match back {
+                Some(back) => {
+                    ui.horizontal(|ui| {
+                        let pressed = RoundButton::icon(ICON_ARROW_BACK, "Back")
+                            .size(BACK_BUTTON, 22.)
+                            .focus(Focus::Skip)
+                            .show(ui)
+                            .clicked();
+                        *back |= pressed;
+                        ui.add_space(4.);
+                        surface::heading_left(ui, title, subtitle);
+                    });
+                }
+                None => surface::heading_left(ui, title, subtitle),
+            }
             ui.add_space(surface::GAP_GROUP);
             contents(ui)
         })

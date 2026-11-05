@@ -310,6 +310,64 @@ fn a_phones_filters_open_in_a_dialog() {
     });
 }
 
+/// The phone's genres and tags are a page of the filters dialog: the row leads there without
+/// the keyboard coming up, a tap on a pill includes it and the row says so, Back returns to the
+/// filters and *Clear* lets the genres and tags go.
+#[test]
+fn a_phones_genres_and_tags_are_a_page_of_the_filters() {
+    let _config = ConfigDir::new("touch-genres-page");
+    let server = home_server();
+    let mut ui = phone_page(&server, movies_route());
+    ui.step_until("the grid", |harness| harness.query_by_label("2 items").is_some());
+    ui.harness().get_by_role_and_label(Role::Button, "Filters").click();
+    ui.step_until("the genres and tags row", |harness| {
+        harness
+            .query_by_role_and_label(Role::Button, "Genres and tags: Genres and tags")
+            .is_some()
+    });
+    ui.harness()
+        .get_by_role_and_label(Role::Button, "Genres and tags: Genres and tags")
+        .click();
+    ui.step_until("the page", |harness| {
+        harness.query_by_role_and_label(Role::Button, "Comedy").is_some()
+    });
+    // A new modal's first frame only sizes it: tap where it settles.
+    for _ in 0..3 {
+        ui.step();
+    }
+    assert!(
+        ui.harness().query_by_role_and_label(Role::ComboBox, "Progress").is_none(),
+        "the page in place of the filters"
+    );
+    assert_eq!(
+        ui.harness().ctx.memory(|memory| memory.focused()),
+        None,
+        "the search box waits for a tap"
+    );
+
+    ui.harness().get_by_role_and_label(Role::Button, "Comedy").click();
+    ui.step_until("Comedy included", |harness| {
+        harness.query_by_label("1 chosen \u{b7} 2 items").is_some()
+            || harness.query_all_by_label("Comedy, included").next().is_some()
+    });
+
+    ui.harness().get_by_label("Back").click();
+    ui.step_until("the filters again", |harness| {
+        harness
+            .query_by_role_and_label(Role::Button, "Genres and tags: Comedy")
+            .is_some()
+    });
+
+    ui.harness()
+        .get_by_role_and_label(Role::Button, "Genres and tags: Comedy")
+        .click();
+    ui.step_until("the page again", |harness| harness.query_by_label("Clear").is_some());
+    ui.harness().get_by_label("Clear").click();
+    ui.step_until("nothing chosen", |harness| {
+        harness.query_all_by_label("Comedy, included").next().is_none()
+    });
+}
+
 /// A long press on a card opens its menu, as a right click does with a mouse, and doesn't open
 /// the card.
 #[test]
