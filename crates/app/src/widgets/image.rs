@@ -111,6 +111,14 @@ fn shapes(
     shapes
 }
 
+/// A texture the caller already has (a downloaded poster, `ImageCache::get_file`) filling
+/// `rect`, cover-cropped like [`show`]'s pictures, with `radius` rounded corners.
+pub fn texture(ui: &Ui, rect: Rect, texture: &egui::TextureHandle, radius: u8) {
+    let uv = cover_uv(texture.size_vec2(), rect.size(), 0.5);
+    ui.painter()
+        .add(RectShape::filled(rect, CornerRadius::same(radius), Color32::WHITE).with_texture(texture.id(), uv));
+}
+
 /// Dims what's drawn in `rect` while the pointer is on it: the page's background at 20 % over
 /// the picture, so a card dims on a light theme as well as a dark one instead of only darkening.
 pub fn dim(ui: &Ui, rect: Rect, radius: u8) {

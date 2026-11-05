@@ -13,7 +13,7 @@ use egui_material_icons::icons::{ICON_CHECK, ICON_CHECK_CIRCLE, ICON_FAVORITE};
 use jellyfin::Ticks;
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 
-use super::header::{action_look, bar_wash, header_image, meta_job};
+use super::header::{DownloadLook, action_look, bar_wash, header_image, meta_job};
 use super::{
     ACTIONS, Asked, BACKDROP_FILL_W, COMPACT_BAND_H, COMPACT_IMAGE_TOP, COMPACT_OVERVIEW_ROWS, COMPACT_PICKER_LABEL_W,
     COMPACT_POSTER_H, COMPACT_POSTER_W, COMPACT_TITLE_SIZE, Fills, ItemAction, ItemData, meta_line,
@@ -50,6 +50,7 @@ pub(super) fn header(
     actions: &[ItemAction],
     selected: Option<Position>,
     fills: &Fills,
+    download: &DownloadLook,
     images: &mut ImageCache,
     under_bar: Option<&UnderBar>,
     overview_open: bool,
@@ -134,7 +135,7 @@ pub(super) fn header(
             }
             ui.add_space(4.);
         }
-        round_actions(ui, data, actions, primary, selected, fills, asked);
+        round_actions(ui, data, actions, primary, selected, fills, download, asked);
         overview(ui, item, overview_open, asked);
         details(ui, item);
         tags(ui, item);
@@ -216,6 +217,7 @@ fn progress_line(ui: &mut Ui, position: Ticks, runtime: Ticks) {
 
 /// The actions other than the main one, as round buttons with their names under them, centred
 /// in a row: Watched and Favorite toggles among them, More opening its menu.
+#[allow(clippy::too_many_arguments)]
 fn round_actions(
     ui: &mut Ui,
     data: &ItemData,
@@ -223,6 +225,7 @@ fn round_actions(
     primary: Option<usize>,
     selected: Option<Position>,
     fills: &Fills,
+    download: &DownloadLook,
     asked: &mut Asked,
 ) {
     let item = &data.item;
@@ -260,9 +263,15 @@ fn round_actions(
                 let scale = if animations { fills.favorite.scale(now) } else { 1. };
                 (icon, "Favorite", Some(favorite), scale)
             }
+            ItemAction::Download => (download.icon, download.short.as_str(), download.on, 1.),
             _ => (action_look(action, item, None).icon, short_name(action), None, 1.),
         };
         let response = round_action(ui, cell, icon, name, on, scale, ringed(selected, index));
+        if action == ItemAction::Download
+            && let Some(done) = download.progress
+        {
+            progress_arc(ui, pos2(cell.center().x, cell.top() + ACTION_RADIUS), done);
+        }
         if action == ItemAction::More {
             asked.more = Some(response.clone());
         }
@@ -331,6 +340,25 @@ fn round_action(
         focus::ring(ui, circle, ACTION_RADIUS, Place::Outside);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A download's progress as a `brand` arc round its round button, clockwise from the top,
+/// `done` of the way round.
+fn progress_arc(ui: &Ui, center: egui::Pos2, done: f32) {
+    let tokens = theme::tokens_of(ui);
+    let radius = ACTION_RADIUS - 2.;
+    let done = done.clamp(0., 1.);
+    let steps = ((48. * done).ceil() as usize).max(2);
+    let points: Vec<egui::Pos2> = (0..=steps)
+        .map(|step| {
+            let angle = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * done * step as f32 / steps as f32;
+            center + radius * egui::vec2(angle.cos(), angle.sin())
+        })
+        .collect();
+    if done > 0. {
+        ui.painter()
+            .add(egui::Shape::line(points, Stroke::new(2.5, tokens.brand)));
+    }
 }
 
 /// The synopsis: its first [`COMPACT_OVERVIEW_ROWS`] lines, and *More* (or *Less*) when there's

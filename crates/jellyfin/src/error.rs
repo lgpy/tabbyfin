@@ -23,6 +23,11 @@ pub enum Error {
     #[error("server returned {status}: {message}")]
     Status { status: u16, message: String },
 
+    /// A download went [`crate::download::STALL_TIMEOUT`] without a byte: the connection is
+    /// gone, however long the file still has to go.
+    #[error("the download stalled")]
+    Stalled,
+
     /// The session websocket failed to open or broke.
     #[error("websocket: {0}")]
     Socket(String),

@@ -31,8 +31,8 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_CLOSE, ICON_GROUPS, ICON_HOME, ICON_REPEAT, ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS,
-    ICON_SHUFFLE, ICON_VIDEO_LIBRARY,
+    ICON_ARROW_BACK, ICON_CLOSE, ICON_CLOUD_OFF, ICON_GROUPS, ICON_HOME, ICON_REPEAT, ICON_REPEAT_ONE, ICON_SEARCH,
+    ICON_SETTINGS, ICON_SHUFFLE, ICON_VIDEO_LIBRARY,
 };
 use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 
@@ -148,10 +148,18 @@ const BAR: [BarItem; 5] = [
     BarItem::Account,
 ];
 const BAR_WITHOUT_BACK: [BarItem; 4] = [BarItem::Search, BarItem::SyncPlay, BarItem::Settings, BarItem::Account];
+/// Offline there's nothing to search and no group to join.
+const BAR_OFFLINE: [BarItem; 3] = [BarItem::Back, BarItem::Settings, BarItem::Account];
+const BAR_OFFLINE_WITHOUT_BACK: [BarItem; 2] = [BarItem::Settings, BarItem::Account];
 
-/// The bar's items on a page that can go back or not.
-fn bar_items(can_go_back: bool) -> &'static [BarItem] {
-    if can_go_back { &BAR } else { &BAR_WITHOUT_BACK }
+/// The bar's items on a page that can go back or not, online or not.
+fn bar_items(can_go_back: bool, online: bool) -> &'static [BarItem] {
+    match (can_go_back, online) {
+        (true, true) => &BAR,
+        (false, true) => &BAR_WITHOUT_BACK,
+        (true, false) => &BAR_OFFLINE,
+        (false, false) => &BAR_OFFLINE_WITHOUT_BACK,
+    }
 }
 
 /// Where `item` sits among `items`: its own place, or the place of the first item to its right
@@ -178,8 +186,11 @@ fn bar_step(items: &[BarItem], current: Option<BarItem>, step: i32) -> Option<Ba
 }
 
 pub struct Shell {
-    /// Never empty: Home is at the bottom.
+    /// Never empty: Home is at the bottom, or Downloads offline.
     stack: Vec<StackEntry>,
+    /// The session is offline (`Services::online`): Downloads is the only place, with no
+    /// search, SyncPlay or bottom bar. A session coming back online gets a new shell.
+    online: bool,
     update_check: Option<Task<Option<Update>>>,
     /// The player, while a session shows: from a session's start until playback ends for good
     /// (it stays through autoplay and reconnects). Leaving it stops playback; it keeps the
@@ -287,12 +298,15 @@ impl Shell {
     pub fn new(cx: &mut PageCx) -> Self {
         // `mut` is for the debug build's `debug_start` below.
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
+        let online = cx.services.online;
+        let root = if online { Route::Home } else { Route::Downloads };
         let mut shell = Self {
             stack: vec![StackEntry {
                 serial: next_serial(),
-                route: Route::Home,
-                page: views::open(Route::Home, cx),
+                route: root.clone(),
+                page: views::open(root, cx),
             }],
+            online,
             update_check: Some(Task::spawn(cx.ctx, update::check())),
             player: None,
             #[cfg(debug_assertions)]
@@ -420,7 +434,7 @@ impl Shell {
                 slide,
                 egui::emath::easing::cubic_out,
             );
-            if compact && !layout::keyboard_open(ui.ctx()) && shown > 0. {
+            if compact && self.online && !layout::keyboard_open(ui.ctx()) && shown > 0. {
                 // As it slides it leaves the page more room, all of it once it's below the
                 // window's edge (the gesture bar's inset under it too).
                 let inset = ui.ctx().viewport_rect().bottom() - ui.max_rect().bottom();
@@ -455,7 +469,7 @@ impl Shell {
         // An item the bar lost with a page (Back on the first page) can't keep the keyboard.
         if self
             .bar_key
-            .is_some_and(|item| !bar_items(self.can_go_back()).contains(&item))
+            .is_some_and(|item| !bar_items(self.can_go_back(), self.online).contains(&item))
         {
             self.bar_key = None;
         }
@@ -539,7 +553,7 @@ impl Shell {
     /// A key in the top bar (`keys.rs`'s `Scope::Browse`, which the bar borrows): along it,
     /// pressing what it's on, or back down to the page.
     fn bar_key_action(&mut self, action: Action, cx: &mut PageCx) {
-        let items = bar_items(self.can_go_back());
+        let items = bar_items(self.can_go_back(), self.online);
         match action {
             Action::Move(Move::Left) => self.bar_key = bar_step(items, self.bar_key, -1),
             Action::Move(Move::Right) => self.bar_key = bar_step(items, self.bar_key, 1),
@@ -558,7 +572,7 @@ impl Shell {
 
     /// Moves the keyboard into the top bar, from Up past the page's first row.
     fn enter_top_bar(&mut self) {
-        self.bar_key = bar_step(bar_items(self.can_go_back()), self.bar_key, 0);
+        self.bar_key = bar_step(bar_items(self.can_go_back(), self.online), self.bar_key, 0);
     }
 
     /// Back to the page from the bar or the search box, with its cursor shown where it was:
@@ -734,6 +748,9 @@ impl Shell {
     /// Puts the keyboard in the search box. The page's cursor goes, so Esc back to the page
     /// shows it where it was instead of moving it a row.
     fn focus_search(&mut self, cx: &mut PageCx) {
+        if !self.online {
+            return;
+        }
         self.want_search_focus = true;
         self.bar_key = None;
         self.top_mut().hide_cursor();
@@ -966,6 +983,9 @@ impl Shell {
                 if settings.clicked() {
                     self.toggle_settings(cx);
                 }
+                if !self.online {
+                    return;
+                }
                 // On while in a group.
                 let syncplay = bar_button(
                     ICON_GROUPS,
@@ -984,8 +1004,12 @@ impl Shell {
             },
         );
 
-        let rect = Rect::from_center_size(bar.center(), vec2(box_w, BAR_BUTTON));
-        self.search_box(ui, rect, keyboard == Some(BarItem::Search), cx);
+        if self.online {
+            let rect = Rect::from_center_size(bar.center(), vec2(box_w, BAR_BUTTON));
+            self.search_box(ui, rect, keyboard == Some(BarItem::Search), cx);
+        } else {
+            offline_tag(ui, bar.center());
+        }
 
         // A click on the page takes the keyboard out of the bar, as it hides the page's cursor.
         let pressed_outside = ui.input(|input| input.pointer.any_pressed())
@@ -1046,6 +1070,10 @@ impl Shell {
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     self.account_button(ui, cx, false);
+                    if !self.online {
+                        ui.add(OfflineTag);
+                        return;
+                    }
                     let syncplay = bar_button(ICON_GROUPS, "Watch together (SyncPlay)", false)
                         .on(in_group)
                         .show(ui);
@@ -1193,6 +1221,7 @@ impl Shell {
                     .checked(account.credential_account() == current)
             })
             .collect();
+        entries.push(Entry::new("Downloads").checked(false).separated());
         entries.push(Entry::new("Add account…").checked(false).separated());
         if layout::compact(ui.ctx()) {
             entries.push(Entry::new("Settings").checked(false).separated());
@@ -1211,15 +1240,22 @@ impl Shell {
         }
     }
 
-    /// Does what an account-menu entry says: switch to that account, add one, open Settings or
-    /// sign out. The app carries the account events out after the frame.
+    /// Does what an account-menu entry says: switch to that account, open Downloads, add an
+    /// account, open Settings or sign out. The app carries the account events out after the
+    /// frame.
     fn choose_account(&mut self, index: usize, cx: &mut PageCx) {
         let actions = self.accounts.len();
-        if layout::compact(cx.ctx) && index == actions + 1 {
-            if !self.stack.iter().any(|entry| matches!(entry.route, Route::Settings)) {
-                self.bar_key = None;
-                cx.nav.push(NavRequest::Push(Route::Settings));
+        // A page already on the stack isn't opened twice.
+        let mut open = |route: Route, shell: &mut Self| {
+            if !shell.stack.iter().any(|entry| entry.route == route) {
+                shell.bar_key = None;
+                cx.nav.push(NavRequest::Push(route));
             }
+        };
+        if index == actions {
+            open(Route::Downloads, self);
+        } else if layout::compact(cx.ctx) && index == actions + 2 {
+            open(Route::Settings, self);
         } else if index < actions {
             let account = self.accounts[index].clone();
             // Choosing the account already signed in just closes the menu: switching to it
@@ -1232,7 +1268,7 @@ impl Shell {
         } else {
             // The screen changes: the bar's keyboard goes with it.
             self.bar_key = None;
-            if index == actions {
+            if index == actions + 1 {
                 cx.services.events.push(AppEvent::AddAccount);
             } else {
                 // Sign out, the last entry.
@@ -1868,6 +1904,25 @@ fn take_horizontal_keys(ctx: &egui::Context) -> bool {
 }
 
 /// The account menu's id in egui's popup memory, where `Popup::is_any_open` looks for it.
+/// The bar's word for an offline session, a tag where the search box would be: the server
+/// couldn't be reached, so only the downloads are here.
+struct OfflineTag;
+
+impl egui::Widget for OfflineTag {
+    fn ui(self, ui: &mut egui::Ui) -> Response {
+        crate::widgets::pill::icon_tag(ui, ICON_CLOUD_OFF, "Offline")
+            .on_hover_text("The server can't be reached. Your downloads are here, and the app keeps trying.")
+    }
+}
+
+/// [`OfflineTag`] centred on `center`.
+fn offline_tag(ui: &mut egui::Ui, center: egui::Pos2) {
+    ui.put(
+        Rect::from_center_size(center, vec2(SEARCH_BOX_W, BAR_BUTTON)),
+        OfflineTag,
+    );
+}
+
 fn account_menu_id() -> Id {
     Id::unique(ACCOUNT_MENU)
 }
@@ -1958,17 +2013,17 @@ mod tests {
 
     #[test]
     fn the_bar_starts_on_back_or_search() {
-        let items = bar_items(true);
+        let items = bar_items(true, true);
         assert_eq!(items.first(), Some(&BarItem::Back));
         assert_eq!(bar_step(items, None, 0), Some(BarItem::Back));
         // With nowhere to go back to, Back isn't there.
-        let items = bar_items(false);
+        let items = bar_items(false, true);
         assert_eq!(bar_step(items, None, 0), Some(BarItem::Search));
     }
 
     #[test]
     fn left_and_right_stop_at_the_ends() {
-        let items = bar_items(true);
+        let items = bar_items(true, true);
         assert_eq!(bar_step(items, Some(BarItem::Back), -1), Some(BarItem::Back));
         assert_eq!(bar_step(items, Some(BarItem::Account), 1), Some(BarItem::Account));
         assert_eq!(bar_step(items, Some(BarItem::Search), 1), Some(BarItem::SyncPlay));
@@ -1978,7 +2033,7 @@ mod tests {
     #[test]
     fn a_missing_item_steps_from_its_nearest_place() {
         // Back left the bar with the first page; Search is where it was.
-        let without_back = bar_items(false);
+        let without_back = bar_items(false, true);
         assert_eq!(bar_step(without_back, Some(BarItem::Back), 0), Some(BarItem::Search));
         // A hole in the middle (not possible today, but the bar's order decides): Settings
         // gone, Account is the nearest place, not the bar's first item.
