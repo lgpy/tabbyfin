@@ -28,7 +28,7 @@ use std::collections::{HashMap, HashSet};
 
 use egui::accesskit::Role;
 use egui::{Align, Align2, CornerRadius, FontId, Layout, Response, Sense, Ui, WidgetInfo, vec2};
-use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_TUNE};
+use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_TUNE};
 use jellyfin::models::{
     BaseItemDto, BaseItemKind, CollectionType, ItemField, ItemFilter, ItemFilterValues, ItemSortBy, QueryResult,
 };
@@ -44,6 +44,7 @@ use crate::views::dialogs::AddToPlaylist;
 use crate::views::value_filters::{self, ValueFilters};
 use crate::views::{Page, PageCx};
 use crate::widgets::focus;
+use crate::widgets::frosted::Frosted;
 use crate::widgets::menu::{self, MenuAction};
 use crate::widgets::round_button::RoundButton;
 use crate::widgets::text::{CARD_GAP, POSTER_H, POSTER_W};
@@ -62,6 +63,12 @@ const ORDER_BUTTON: f32 = 32.;
 const VALUES_BUTTON_W: f32 = 200.;
 /// The phone's filters dialog's width, narrowed to the window by `dialog::show`.
 const FILTERS_DIALOG_W: f32 = 400.;
+/// What the genres and tags page has round its list of pills (the heading, search box, chosen
+/// pills, hint and buttons, the dialog's padding and the margin round it): the list takes the
+/// window's height less this.
+const VALUES_PAGE_CHROME: f32 = 420.;
+/// The shortest that list gets, on a short window.
+const VALUES_LIST_MIN_H: f32 = 160.;
 /// The jump bar's letters; `#` is the top (names starting with digits or symbols).
 const LETTERS: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const LETTER_BAR_W: f32 = 28.;
@@ -224,6 +231,15 @@ enum ToolAction {
     Clear,
 }
 
+/// The pages of the phone's filters dialog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FiltersPage {
+    /// Each filter on a row, *Genres and tags* leading to its own page.
+    Filters,
+    /// The genres and tags as pills.
+    Values,
+}
+
 /// A letter jump's counted answer, for [`LibraryPage::land_from_jump`].
 struct JumpResult {
     generation: u64,
@@ -279,6 +295,10 @@ pub struct LibraryPage {
     compact: bool,
     /// The phone's filters dialog is open.
     filters_open: bool,
+    /// Which page of the phone's filters dialog is showing.
+    filters_page: FiltersPage,
+    /// The blurred page under the phone's filters dialog.
+    frosted: Frosted,
     /// The `services.user_data` the loaded pages were fetched at.
     loaded_at: Option<u64>,
     cursor: Cursor,
@@ -400,6 +420,8 @@ impl LibraryPage {
             scrubbing: None,
             compact: layout::compact(cx.ctx),
             filters_open: false,
+            filters_page: FiltersPage::Filters,
+            frosted: Frosted::default(),
             loaded_at: Some(cx.services.user_data),
             cursor: Cursor::starting_at(GRID_START),
             columns: 1,
@@ -826,6 +848,11 @@ impl LibraryPage {
             ToolAction::ToggleOrder => {
                 self.view.descending = !self.view.descending;
                 self.change_view(cx);
+            }
+            // On a phone they're a page of the filters dialog.
+            ToolAction::OpenValues if self.filters_open => {
+                self.value_filters.open_page();
+                self.filters_page = FiltersPage::Values;
             }
             ToolAction::OpenValues => self.value_filters.toggle(cx.ctx),
             ToolAction::OpenFilters => self.filters_open = true,
@@ -1371,29 +1398,48 @@ impl LibraryPage {
         }
     }
 
-    /// A phone's filters: each of the library's filters on a row of its own, its name at the left
-    /// and its control at the right, with *Clear filters* and *Done* under them. A choice
-    /// applies as it's picked, so the grid behind changes with it, and the count under the
-    /// title says how many are left.
+    /// A phone's filters, in a dialog over the page blurred (`Frosted`, taken as it opens). Its
+    /// first page has each of the library's filters on a row of its own, its name at the left
+    /// and its control at the right, with *Clear filters* and *Done* under them; *Genres and
+    /// tags* is a row saying what's chosen, leading to a page of its own. A choice applies as
+    /// it's picked, and the count under the title says how many items are left.
     fn filters_dialog(&mut self, cx: &mut PageCx) {
         if !self.filters_open {
             return;
         }
         // Turned to a wider layout, the toolbar has them again.
         if !self.compact {
-            self.filters_open = false;
+            self.close_filters();
             return;
         }
+        // The dialog waits a few frames for its blurred backdrop.
+        if !self.frosted.show(cx.ctx, cx.render_state.is_some()) {
+            return;
+        }
+        match self.filters_page {
+            FiltersPage::Filters => self.filters_page(cx),
+            FiltersPage::Values => self.values_page(cx),
+        }
+    }
+
+    fn close_filters(&mut self) {
+        self.filters_open = false;
+        self.filters_page = FiltersPage::Filters;
+        self.frosted.reset();
+    }
+
+    /// The filters dialog's first page.
+    fn filters_page(&mut self, cx: &mut PageCx) {
         let tools: Vec<Tool> = self
             .filter_tools()
             .into_iter()
             .filter(|tool| *tool != Tool::Clear)
             .collect();
         let mut action = None;
-        let mut values_button = None;
         let mut done = false;
         let subtitle = self.total.map(item_count);
         let filtered = self.filtered();
+        let summary = value_filters::summary(&self.view);
         let modal = dialog::show(
             cx.ctx,
             egui::Id::unique("library_filters"),
@@ -1402,15 +1448,18 @@ impl LibraryPage {
             subtitle.as_deref(),
             |ui| {
                 for tool in tools.iter().copied() {
+                    if tool == Tool::Values {
+                        if values_row(ui, &summary).clicked() {
+                            action = Some(ToolAction::OpenValues);
+                        }
+                        continue;
+                    }
                     ui.horizontal(|ui| {
                         ui.set_min_height(layout::TARGET);
                         ui.label(tool_name(tool));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let (response, control) = self.tool(ui, tool, false);
+                            let (_, control) = self.tool(ui, tool, false);
                             action = action.or(control);
-                            if tool == Tool::Values {
-                                values_button = Some(response);
-                            }
                         });
                     });
                 }
@@ -1427,16 +1476,61 @@ impl LibraryPage {
                 });
             },
         );
-        if let Some(anchor) = values_button
-            && self.value_filters.show(&anchor, &self.values, &mut self.view)
-        {
-            self.change_view(cx);
-        }
         if let Some(action) = action {
             self.apply_tool(action, cx);
         }
         if done || modal.should_close() {
-            self.filters_open = false;
+            self.close_filters();
+        }
+    }
+
+    /// The filters dialog's genres and tags page: the popover's search box and pills, the list as
+    /// tall as the window allows, with *Clear* letting go of the genres and tags only. Back (the
+    /// button, Esc or the phone's) returns to the filters; a tap outside or *Done* closes the
+    /// dialog.
+    fn values_page(&mut self, cx: &mut PageCx) {
+        let chosen = value_filters::chosen_count(&self.view);
+        let items = self.total.map(item_count);
+        let subtitle = match (chosen, items) {
+            (0, items) => items,
+            (chosen, Some(items)) => Some(format!("{chosen} chosen \u{b7} {items}")),
+            (chosen, None) => Some(format!("{chosen} chosen")),
+        };
+        let list_height = (cx.ctx.content_rect().height() - VALUES_PAGE_CHROME).max(VALUES_LIST_MIN_H);
+        let (mut back, mut changed, mut done, mut clear) = (false, false, false, false);
+        let modal = dialog::show_page(
+            cx.ctx,
+            // Its own id: a new modal is sized before it's shown, where the filters' would be
+            // drawn a frame at their size and place first.
+            egui::Id::unique("library_filters_values"),
+            FILTERS_DIALOG_W,
+            "Genres and tags",
+            subtitle.as_deref(),
+            &mut back,
+            |ui| {
+                changed = self.value_filters.page(ui, &self.values, &mut self.view, list_height);
+                dialog::buttons(ui, |ui| {
+                    done = dialog::main(ui, "Done", button::State::Ready).clicked();
+                    let state = if chosen > 0 {
+                        button::State::Ready
+                    } else {
+                        button::State::Disabled
+                    };
+                    clear = dialog::quiet(ui, "Clear", state).clicked();
+                });
+            },
+        );
+        if clear {
+            value_filters::clear(&mut self.view);
+            changed = true;
+        }
+        if changed {
+            self.change_view(cx);
+        }
+        if done || modal.backdrop_response.clicked() {
+            self.close_filters();
+        } else if back || modal.should_close() {
+            self.filters_page = FiltersPage::Filters;
         }
     }
 
@@ -1564,6 +1658,46 @@ fn tool_name(tool: Tool) -> &'static str {
         Tool::Sort => "Sort",
         Tool::Order => "Order",
     }
+}
+
+/// The filters dialog's *Genres and tags* row: its name at the left, what's chosen (`summary`) in
+/// `ink_muted` and a chevron at the right, the whole row a button leading to their page, with an
+/// `inset_hover` wash under the pointer or finger.
+fn values_row(ui: &mut Ui, summary: &str) -> Response {
+    let name = tool_name(Tool::Values);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), layout::TARGET), Sense::CLICK);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, format!("{name}: {summary}")));
+    let tokens = crate::theme::tokens_of(ui);
+    if response.hovered() || response.is_pointer_button_down_on() {
+        ui.painter()
+            .rect_filled(rect.expand2(vec2(8., 0.)), CornerRadius::same(10), tokens.inset_hover);
+    }
+    let painter = ui.painter();
+    let body = ui.style().text_styles[&egui::TextStyle::Body].clone();
+    painter.text(rect.left_center(), Align2::LEFT_CENTER, name, body, ui.visuals().text_color());
+    let chevron = painter.text(
+        rect.right_center(),
+        Align2::RIGHT_CENTER,
+        ICON_CHEVRON_RIGHT.codepoint,
+        crate::theme::text::icon(ui, ICON_CHEVRON_RIGHT.font_family()),
+        tokens.ink_muted,
+    );
+    // The summary takes what the name leaves, ending in an ellipsis when it's longer.
+    let name_w = painter
+        .layout_no_wrap(name.to_owned(), ui.style().text_styles[&egui::TextStyle::Body].clone(), tokens.ink)
+        .size()
+        .x;
+    let room = (chevron.left() - 4. - (rect.left() + name_w + 16.)).max(0.);
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        summary.to_owned(),
+        crate::theme::text::font(ui, "sm"),
+        tokens.ink_muted,
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+    let galley = painter.layout_job(job);
+    let at = egui::pos2(chevron.left() - 4. - galley.size().x, rect.center().y - galley.size().y / 2.);
+    painter.galley(at, galley, tokens.ink_muted);
+    response
 }
 
 /// A select over `labels`, with `selected` shown: its response and the line picked. It takes no
