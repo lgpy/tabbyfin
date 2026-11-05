@@ -34,6 +34,20 @@ use crate::toasts::Toast;
 /// How long after a `playbackstop` with nothing new playing the player closes. The receiver
 /// stops one item before it starts the next, so the gap between episodes mustn't close it.
 const STOPPED_FOR: Duration = Duration::from_secs(5);
+/// How long a reload waits after the receiver reported its stop, for the receiver's own stop
+/// handling (which can show its idle screen) to be over before the new `PlayNow`.
+const RELOAD_GAP: Duration = Duration::from_secs(1);
+/// How long a reload waits for the receiver to report its stop before going ahead anyway.
+const RELOAD_STOP_WAIT: Duration = Duration::from_secs(4);
+
+/// A reload between its `Stop` and its `PlayNow`.
+#[derive(Debug)]
+struct Reload {
+    request: PlayRequest,
+    /// The receiver reported the stop; `due` is then the end of [`RELOAD_GAP`].
+    stopped: bool,
+    due: Deadline,
+}
 /// How long the custom messages may go quiet before `MEDIA_STATUS` is followed instead: another
 /// sender cast to the TV, and the receiver now answers that one only.
 const FOLLOW_MEDIA_AFTER: Duration = Duration::from_secs(3);
@@ -75,13 +89,20 @@ pub struct CastSession {
     /// What was playing here, and its request, handed over once the local session has
     /// reported its stop.
     handover: Option<(BaseItemDto, PlayRequest)>,
-    /// `Identify`'s answer is a `playbackstop` that carries the current state: the first one
-    /// after connecting doesn't mean playback stopped.
+    /// `Identify`'s answer carries the current state, and can be a `playbackstop` (an idle
+    /// Chromecast sends a `volumechange` with empty ids): the first one after connecting doesn't
+    /// mean playback stopped.
     identifying: bool,
     /// The receiver stopped and nothing new started yet; closes the player when it fires.
     stopped: Deadline,
+    /// Something was played from here and hasn't started on the TV yet. The receiver stops
+    /// what it played first, and loading the new one (a reload for other tracks, a transcode)
+    /// can take longer than [`STOPPED_FOR`]: that stop mustn't close the player.
+    pub(crate) starting: bool,
+    /// A reload waiting for the receiver to finish stopping (see `Services::cast_reload`).
+    reload: Option<Reload>,
     /// When the receiver's own messages last came, to tell when another sender took over.
-    last_event: Option<Instant>,
+    pub(crate) last_event: Option<Instant>,
     /// The playing item's details (versions, chapters, images), fetched as it changes.
     fetching: Option<(String, Task<jellyfin::Result<BaseItemDto>>)>,
 }
@@ -138,12 +159,11 @@ impl Casting {
     fn apply(&mut self, event: &receiver_app::Event) -> bool {
         let data = &event.data;
         let mut changed = false;
-        if let Some(item) = &data.now_playing_item {
-            let id = item.id.clone().or_else(|| data.item_id.clone());
-            if let Some(id) = id
-                && self.item_id.as_ref() != Some(&id)
-            {
-                self.follow_item(id);
+        if let Some(item) = &data.now_playing_item
+            && let Some(id) = reported_item(event)
+        {
+            if self.item_id.as_deref() != Some(id) {
+                self.follow_item(id.to_owned());
                 changed = true;
             }
             if let Some(name) = &item.name {
@@ -311,6 +331,11 @@ impl Cast {
     }
 
     /// The cast button shows once there's something to cast to, or a cast to control.
+    /// Whether what played here is waiting to go to the TV (see `Services::start_cast`).
+    pub fn is_handing_over(&self) -> bool {
+        self.session.as_ref().is_some_and(|session| session.handover.is_some())
+    }
+
     pub fn has_devices(&self) -> bool {
         !self.devices.is_empty() || self.session.is_some()
     }
@@ -344,7 +369,7 @@ impl Cast {
             credentials: self.credentials_for(&device),
             config: ChannelConfig::default(),
         };
-        // Not a `Task`: leaving (`CLOSE`) or stopping the receiver has to reach the TV after
+        // Not a `Task`: leaving or stopping the receiver has to reach the TV after
         // the services that started it are gone.
         runtime::detach(async move {
             let end = run(target, commands_rx, &updates_tx).await;
@@ -366,6 +391,8 @@ impl Cast {
             handover,
             identifying: true,
             stopped: Deadline::default(),
+            starting: false,
+            reload: None,
             last_event: None,
             fetching: None,
         });
@@ -426,6 +453,17 @@ impl Cast {
     }
 }
 
+/// The item an event is about. The receiver sends empty ids when nothing plays (its answer to
+/// `Identify` on an idle TV is a `volumechange` like that), which isn't an item.
+fn reported_item(event: &receiver_app::Event) -> Option<&str> {
+    let data = &event.data;
+    let item = data.now_playing_item.as_ref()?;
+    item.id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .or_else(|| data.item_id.as_deref().filter(|id| !id.is_empty()))
+}
+
 /// The last device first, then by name.
 fn sort_devices(devices: &mut [Device], last: Option<&str>) {
     devices.sort_by(|a, b| {
@@ -483,6 +521,38 @@ fn play_request(items: &[BaseItemDto], options: &PlayOptions, server_id: &str) -
     }
 }
 
+/// Room the `PlayNow` envelope leaves in a frame for its addressing (sender, destination,
+/// namespace) and the protobuf around it.
+const FRAME_SLACK: usize = 1024;
+
+/// Shortens the queue's tail until the `PlayNow` fits in one frame ([`cast::MAX_FRAME`]): a
+/// bigger one can't be sent (a 400-episode queue was 67 KB). What plays first always stays.
+fn fit_play_request(request: &mut PlayRequest, credentials: &Credentials) {
+    let size = |request: &PlayRequest| {
+        receiver_app::Envelope::new(credentials, Command::PlayNow(request.clone()))
+            .to_value()
+            .to_string()
+            .len()
+    };
+    let budget = cast::MAX_FRAME - FRAME_SLACK;
+    let total = size(request);
+    if total <= budget {
+        return;
+    }
+    let queued = request.items.len();
+    // A first guess from the average item, then exact.
+    let keep = (budget * queued / total).clamp(1, queued);
+    request.items.truncate(keep);
+    while request.items.len() > 1 && size(request) > budget {
+        request.items.pop();
+    }
+    tracing::info!(
+        queued,
+        sent = request.items.len(),
+        "cast: the queue is longer than one message holds"
+    );
+}
+
 /// What a player control becomes on the receiver. `None` for what it has no control for (speed,
 /// delays, subtitle size). Volume goes to the TV instead (`SET_VOLUME`), see [`Outgoing`].
 fn outgoing_for(command: &UiCommand, casting: &Casting) -> Option<Outgoing> {
@@ -503,11 +573,10 @@ fn outgoing_for(command: &UiCommand, casting: &Casting) -> Option<Outgoing> {
         UiCommand::SetVolume(percent) => Outgoing::Volume((percent.clamp(0., 100.) / 100.) as f32),
         UiCommand::SetMute(muted) => Outgoing::Muted(muted),
         UiCommand::ToggleMute => Outgoing::Muted(!casting.muted),
-        UiCommand::Audio(index) => Outgoing::Command(Command::SetAudioStreamIndex(index)),
-        UiCommand::Subtitle(SubtitleChoice::Stream(index)) => Outgoing::Command(Command::SetSubtitleStreamIndex(index)),
-        UiCommand::Subtitle(SubtitleChoice::Off) => Outgoing::Command(Command::SetSubtitleStreamIndex(-1)),
         UiCommand::Stop => Outgoing::Command(Command::Stop),
-        UiCommand::Subtitle(SubtitleChoice::Auto)
+        // Tracks are a reload (`Services::cast_reload`), not a receiver command.
+        UiCommand::Audio(_)
+        | UiCommand::Subtitle(_)
         | UiCommand::SetSpeed(_)
         | UiCommand::SetSubtitleDelay(_)
         | UiCommand::SetAudioDelay(_)
@@ -551,7 +620,9 @@ impl Services {
                 subtitle: state.subtitle,
                 ..Default::default()
             };
-            (state.item.clone(), play_request(&items, &options, &server_id))
+            let mut request = play_request(&items, &options, &server_id);
+            fit_play_request(&mut request, &self.cast.credentials);
+            (state.item.clone(), request)
         });
         if handover.is_some() {
             // The receiver plays it once the local session has reported its stop (`tick_cast`).
@@ -559,7 +630,18 @@ impl Services {
             self.playback.clear_queue();
         }
         tracing::info!(device = %device.name, handover = handover.is_some(), "cast: connecting");
+        let handed = handover.as_ref().map(|(item, _)| item.clone());
         self.cast.connect(device, handover);
+        // The player stays up through the handover, showing what goes to the TV meanwhile.
+        if let Some(item) = handed
+            && let Some(session) = &mut self.cast.session
+        {
+            session.casting.name = item.name.clone();
+            session.casting.series_name = item.series_name.clone();
+            session.casting.duration = item.run_time_ticks.map(Duration::from);
+            session.casting.item = Some(item);
+            session.starting = true;
+        }
     }
 
     /// Stops the receiver: the TV goes back to its idle screen.
@@ -587,11 +669,19 @@ impl Services {
 
     /// Plays `items` on the TV, the first with `options`, and opens the player.
     pub(crate) fn cast_play(&mut self, items: &[BaseItemDto], options: &PlayOptions) {
-        if items.is_empty() {
-            return;
+        if let Some(request) = self.begin_cast_play(items, options) {
+            self.cast.send(Command::PlayNow(request));
         }
-        let request = play_request(items, options, &self.cast.credentials.server_id);
-        self.cast.send(Command::PlayNow(request));
+    }
+
+    /// What playing `items` on the TV shows at once, before the receiver reports anything; the
+    /// request to send for it.
+    fn begin_cast_play(&mut self, items: &[BaseItemDto], options: &PlayOptions) -> Option<PlayRequest> {
+        if items.is_empty() {
+            return None;
+        }
+        let mut request = play_request(items, options, &self.cast.credentials.server_id);
+        fit_play_request(&mut request, &self.cast.credentials);
         if let Some(session) = &mut self.cast.session {
             // What the TV played before is gone; the player waits for the new item's report.
             session.casting.item_id = None;
@@ -602,8 +692,12 @@ impl Services {
             session.casting.position_at = None;
             session.casting.duration = items[0].run_time_ticks.map(Duration::from);
             session.stopped.cancel();
+            session.starting = true;
+            // Something new replaces a reload still waiting.
+            session.reload = None;
         }
         self.events.push(AppEvent::PlaybackStarted);
+        Some(request)
     }
 
     /// Adds `items` to the TV's queue. The receiver puts *Play next* at the end too.
@@ -624,6 +718,22 @@ impl Services {
 
     /// A player control (or remote control) while casting.
     pub(crate) fn cast_control(&mut self, command: UiCommand) {
+        // Other tracks play the item again (see `cast_reload`).
+        match command {
+            UiCommand::Audio(index) => {
+                return self.cast_reload(PlayOptions {
+                    audio_stream_index: Some(index),
+                    ..Default::default()
+                });
+            }
+            UiCommand::Subtitle(choice @ (SubtitleChoice::Off | SubtitleChoice::Stream(_))) => {
+                return self.cast_reload(PlayOptions {
+                    subtitle: choice,
+                    ..Default::default()
+                });
+            }
+            _ => {}
+        }
         let Some(casting) = self.cast.casting() else {
             return;
         };
@@ -643,9 +753,6 @@ impl Services {
                 UiCommand::SetVolume(percent) => casting.volume = percent.clamp(0., 100.),
                 UiCommand::SetMute(muted) => casting.muted = muted,
                 UiCommand::ToggleMute => casting.muted = !casting.muted,
-                UiCommand::Audio(index) => casting.audio = Some(index),
-                UiCommand::Subtitle(SubtitleChoice::Stream(index)) => casting.subtitle = Some(index),
-                UiCommand::Subtitle(SubtitleChoice::Off) => casting.subtitle = Some(-1),
                 _ => {}
             }
         }
@@ -661,7 +768,18 @@ impl Services {
         });
     }
 
-    /// Plays the casting item again in another version, from where it is.
+    /// Plays the casting item again from where it is: in another version, or with other tracks.
+    ///
+    /// Tracks change this way rather than with the receiver's `SetAudioStreamIndex` and
+    /// `SetSubtitleStreamIndex`: when those reload the stream the receiver asks the server for a
+    /// fractional start position and gets no stream back (`NoCompatibleStream`, seen on a
+    /// Chromecast), and it never reloads to leave burned-in subtitles.
+    ///
+    /// Nor is it a `PlayNow` over what plays: the receiver's handling of the stop that interrupts
+    /// can land after the new stream started and put its idle screen (*Ready to cast*) over it
+    /// for good, while it plays on underneath (seen on a Chromecast, with Jellyfin's Android app
+    /// too). So it's a `Stop`, then once the receiver has reported that stop and had
+    /// [`RELOAD_GAP`] to settle, the `PlayNow`: the same path as casting from idle.
     pub(crate) fn cast_reload(&mut self, mut options: PlayOptions) {
         let Some(casting) = self.cast.casting() else {
             return;
@@ -669,12 +787,55 @@ impl Services {
         let Some(item) = casting.item.clone() else {
             return;
         };
+        // Whole ticks: the server rejects a fractional `StartTimeTicks`.
         options.start = options.start.or(Some(Ticks::from(casting.position())));
-        options.audio_stream_index = options.audio_stream_index.or(casting.audio);
-        if options.subtitle == SubtitleChoice::Auto {
-            options.subtitle = casting.subtitle_choice();
+        let same_version = options
+            .media_source_id
+            .as_ref()
+            .is_none_or(|id| casting.media_source_id.as_ref() == Some(id));
+        // Track indexes belong to a version: another one starts with the server's choice.
+        if same_version {
+            options.media_source_id = options.media_source_id.or_else(|| casting.media_source_id.clone());
+            options.audio_stream_index = options.audio_stream_index.or(casting.audio);
+            if options.subtitle == SubtitleChoice::Auto {
+                options.subtitle = casting.subtitle_choice();
+            }
         }
-        self.cast_play(&[item], &options);
+        // A reload already waiting keeps its place: its `Stop` is out, only the request changes.
+        let stop_sent = self
+            .cast
+            .session
+            .as_ref()
+            .and_then(|session| session.reload.as_ref())
+            .map(|reload| reload.stopped);
+        let Some(request) = self.begin_cast_play(&[item], &options) else {
+            return;
+        };
+        if let Some(session) = &mut self.cast.session {
+            let mut reload = Reload {
+                request,
+                stopped: stop_sent.unwrap_or(false),
+                due: Deadline::default(),
+            };
+            if stop_sent.is_none() {
+                let _ = session.commands.send(Outgoing::Command(Command::Stop));
+                reload.due.set(RELOAD_STOP_WAIT);
+            } else if reload.stopped {
+                reload.due.set(RELOAD_GAP);
+            } else {
+                reload.due.set(RELOAD_STOP_WAIT);
+            }
+            session.reload = Some(reload);
+            // Shown at once, as the receiver's report of them comes after the reload.
+            let casting = &mut session.casting;
+            casting.media_source_id = options.media_source_id.clone();
+            casting.audio = options.audio_stream_index;
+            casting.subtitle = match options.subtitle {
+                SubtitleChoice::Auto => None,
+                SubtitleChoice::Off => Some(-1),
+                SubtitleChoice::Stream(index) => Some(index),
+            };
+        }
     }
 
     /// Takes in what the devices and the cast reported. From [`Services::tick`].
@@ -720,6 +881,7 @@ impl Services {
                         ReceiverEvent::PlaybackStart(data) => {
                             casting.playing = true;
                             session.stopped.cancel();
+                            session.starting = false;
                             if casting.apply(data) {
                                 fetch = casting.item_id.clone();
                             }
@@ -727,16 +889,28 @@ impl Services {
                         ReceiverEvent::PlaybackProgress(data)
                         | ReceiverEvent::PlayStateChange(data)
                         | ReceiverEvent::VolumeChange(data) => {
-                            casting.playing = true;
+                            // An idle TV reports its volume too, about no item.
+                            if reported_item(data).is_some() {
+                                casting.playing = true;
+                            }
                             if casting.apply(data) {
                                 fetch = casting.item_id.clone();
                             }
                         }
                         // `Identify`'s answer: what plays now, if anything.
                         ReceiverEvent::PlaybackStop(data) if identifying => {
-                            casting.playing = data.data.now_playing_item.is_some();
+                            casting.playing = reported_item(data).is_some();
                             if casting.apply(data) {
                                 fetch = casting.item_id.clone();
+                            }
+                        }
+                        // What played before stops ahead of what was just played from here.
+                        ReceiverEvent::PlaybackStop(_) if session.starting => {
+                            if let Some(reload) = &mut session.reload
+                                && !reload.stopped
+                            {
+                                reload.stopped = true;
+                                reload.due.set(RELOAD_GAP);
                             }
                         }
                         ReceiverEvent::PlaybackStop(data) => {
@@ -745,10 +919,13 @@ impl Services {
                             session.stopped.set(STOPPED_FOR);
                         }
                         ReceiverEvent::PlaybackError(data) => {
+                            // Nothing is starting any more: its stop closes the player.
+                            session.starting = false;
                             let code = data.message.as_deref().unwrap_or("unknown error");
                             toasts.push(Toast::error(format!("The TV couldn't play this ({code}).")).title("Casting"));
                         }
                         ReceiverEvent::ConnectionError(_) => {
+                            session.starting = false;
                             toasts.push(
                                 Toast::error(format!(
                                     "The TV couldn't reach the server at {}. It needs an address the TV can \
@@ -796,6 +973,17 @@ impl Services {
                 Err(err) => tracing::warn!("cast: couldn't load the casting item: {err}"),
             }
             session.fetching = None;
+        }
+        if let Some(session) = &mut self.cast.session
+            && session
+                .reload
+                .as_mut()
+                .is_some_and(|reload| reload.due.fire(&self.cast.ctx))
+            && let Some(reload) = session.reload.take()
+        {
+            let _ = session
+                .commands
+                .send(Outgoing::Command(Command::PlayNow(reload.request)));
         }
         let stopped = self
             .cast
@@ -916,15 +1104,85 @@ async fn run(target: Target, mut commands: mpsc::UnboundedReceiver<Outgoing>, up
     }
     let status = receiver::get_status(&channel).await.unwrap_or_default();
     if updates.send(Update::Connected(status)).is_err() {
-        // Nobody listens: the services went while connecting.
-        let _ = channel.close_app(&transport).await;
+        // Nobody listens: the services went while connecting. Leave it as `Exit::Leave` does.
         channel.shutdown(EXIT_WAIT).await;
         return End::Disconnected;
     }
+    let exit = drive(&channel, &app, &mut credentials, &mut incoming, &mut commands, updates).await;
+    match exit {
+        Exit::Stop => {
+            if let Err(err) = receiver::stop(&channel, &app.session_id).await {
+                tracing::warn!("cast: stopping the receiver failed: {err}");
+            }
+            channel.shutdown(EXIT_WAIT).await;
+            End::Stopped
+        }
+        // Leaving, or the services that drove this are gone (signed out, quit). Only the socket
+        // closes: Jellyfin's receiver quits when its last sender leaves with a `CLOSE` (seen on a
+        // Chromecast), while a dropped connection leaves it playing.
+        Exit::Leave => {
+            channel.shutdown(EXIT_WAIT).await;
+            End::Disconnected
+        }
+        Exit::Ended(end) => end,
+    }
+}
+
+/// How [`drive`] ended: what's left to do with the connection.
+enum Exit {
+    Stop,
+    Leave,
+    Ended(End),
+}
+
+/// A volume change for the TV.
+#[derive(Clone, Copy)]
+enum VolumeChange {
+    Level(f32),
+    Muted(bool),
+}
+
+/// Relays between the UI and the receiver until one of them ends it. It never waits on the TV
+/// between messages: a volume request is answered while the loop goes on, and the wheel's next
+/// steps wait behind it as just the latest level.
+async fn drive(
+    channel: &Channel,
+    app: &cast::Application,
+    credentials: &mut Credentials,
+    incoming: &mut mpsc::UnboundedReceiver<cast::Message>,
+    commands: &mut mpsc::UnboundedReceiver<Outgoing>,
+    updates: &task::Sender<Update>,
+) -> Exit {
+    let transport = app.transport_id.as_str();
+    let send = async |credentials: &Credentials, command: Command| {
+        let envelope = receiver_app::Envelope::new(credentials, command).to_value();
+        // What's sent, but not the credentials every envelope carries.
+        tracing::debug!(command = %envelope["command"], options = %envelope["options"], "cast: to the receiver");
+        channel.send(receiver_app::NAMESPACE, transport, envelope).await
+    };
+    let set_volume = |change: VolumeChange| -> VolumeRequest<'_> {
+        match change {
+            VolumeChange::Level(level) => Box::pin(receiver::set_volume_level(channel, level)),
+            VolumeChange::Muted(muted) => Box::pin(receiver::set_muted(channel, muted)),
+        }
+    };
+    let mut volume: Option<VolumeRequest<'_>> = None;
+    // The level and mute asked for while a request was out; only the latest of each matters.
+    let mut next_level = None;
+    let mut next_muted = None;
     loop {
         tokio::select! {
+            status = async { volume.as_mut().expect("guarded").await }, if volume.is_some() => {
+                if report_status(status, updates).is_err() {
+                    return Exit::Ended(End::Dropped);
+                }
+                // The finished request is replaced (or cleared): mute first, then the level.
+                let next = next_muted.take().map(VolumeChange::Muted).or_else(|| next_level.take().map(VolumeChange::Level));
+                volume = next.map(set_volume);
+            }
             message = incoming.recv() => {
-                let Some(message) = message else { return End::Dropped };
+                let Some(message) = message else { return Exit::Ended(End::Dropped) };
+                tracing::debug!(namespace = %message.namespace, payload = %message.payload, "cast: from the TV");
                 let kind = message.payload.get("type").and_then(Value::as_str);
                 let update = match message.namespace.as_str() {
                     receiver_app::NAMESPACE => {
@@ -943,14 +1201,17 @@ async fn run(target: Target, mut commands: mpsc::UnboundedReceiver<Outgoing>, up
                         }
                     }
                     NS_RECEIVER if kind == Some("RECEIVER_STATUS") => {
-                        let status: ReceiverStatus = message
-                            .payload
-                            .get("status")
+                        let raw = message.payload.get("status");
+                        // The TV sends statuses with only the volume, right after a launch and
+                        // between apps: no `applications` says nothing about ours. It's gone only
+                        // when the list is there without it (the idle screen's, usually).
+                        let lists_apps = raw.is_some_and(|status| status.get("applications").is_some());
+                        let status: ReceiverStatus = raw
                             .cloned()
                             .and_then(|status| serde_json::from_value(status).ok())
                             .unwrap_or_default();
-                        if !status.applications.iter().any(|running| running.session_id == app.session_id) {
-                            return End::AppGone;
+                        if lists_apps && !status.applications.iter().any(|running| running.session_id == app.session_id) {
+                            return Exit::Ended(End::AppGone);
                         }
                         Update::Status(status)
                     }
@@ -961,43 +1222,50 @@ async fn run(target: Target, mut commands: mpsc::UnboundedReceiver<Outgoing>, up
                     _ => continue,
                 };
                 if updates.send(update).is_err() {
-                    let _ = channel.close_app(&transport).await;
-                    channel.shutdown(EXIT_WAIT).await;
-                    return End::Disconnected;
+                    return Exit::Leave;
                 }
             }
             command = commands.recv() => {
                 let result = match command {
-                    Some(Outgoing::Command(command)) => send(&channel, &credentials, command).await,
+                    Some(Outgoing::Command(command)) => send(credentials, command).await,
                     Some(Outgoing::Credentials(new)) => {
-                        credentials = new;
-                        send(&channel, &credentials, Command::Identify).await
+                        *credentials = new;
+                        send(credentials, Command::Identify).await
+                    }
+                    Some(Outgoing::Volume(level)) if volume.is_some() => {
+                        next_level = Some(level);
+                        Ok(())
+                    }
+                    Some(Outgoing::Muted(muted)) if volume.is_some() => {
+                        next_muted = Some(muted);
+                        Ok(())
                     }
                     Some(Outgoing::Volume(level)) => {
-                        report_status(receiver::set_volume_level(&channel, level).await, updates)
+                        volume = Some(set_volume(VolumeChange::Level(level)));
+                        Ok(())
                     }
-                    Some(Outgoing::Muted(muted)) => report_status(receiver::set_muted(&channel, muted).await, updates),
-                    Some(Outgoing::Stop) => {
-                        if let Err(err) = receiver::stop(&channel, &app.session_id).await {
-                            tracing::warn!("cast: stopping the receiver failed: {err}");
-                        }
-                        channel.shutdown(EXIT_WAIT).await;
-                        return End::Stopped;
+                    Some(Outgoing::Muted(muted)) => {
+                        volume = Some(set_volume(VolumeChange::Muted(muted)));
+                        Ok(())
                     }
-                    // Leaving, or the services that drove this are gone (signed out, quit).
-                    Some(Outgoing::Disconnect) | None => {
-                        let _ = channel.close_app(&transport).await;
-                        channel.shutdown(EXIT_WAIT).await;
-                        return End::Disconnected;
-                    }
+                    Some(Outgoing::Stop) => return Exit::Stop,
+                    Some(Outgoing::Disconnect) | None => return Exit::Leave,
                 };
-                if result.is_err() {
-                    return End::Dropped;
+                match result {
+                    Ok(()) => {}
+                    // Refused before it was sent; the connection is fine.
+                    Err(err @ cast::Error::FrameTooLarge { .. }) => {
+                        tracing::warn!("cast: a message too big to send: {err}");
+                    }
+                    Err(_) => return Exit::Ended(End::Dropped),
                 }
             }
         }
     }
 }
+
+/// A `SET_VOLUME` on its way, answered with the device's status.
+type VolumeRequest<'a> = std::pin::Pin<Box<dyn Future<Output = cast::Result<ReceiverStatus>> + Send + 'a>>;
 
 /// Hands a `SET_VOLUME`'s answer on. A failed one isn't a dropped connection: the channel
 /// notices that itself.
@@ -1078,15 +1346,6 @@ mod tests {
             command(UiCommand::SeekTo(Duration::from_secs(9000))),
             Some(Command::Seek { position_seconds: 600. })
         );
-        assert_eq!(command(UiCommand::Audio(2)), Some(Command::SetAudioStreamIndex(2)));
-        assert_eq!(
-            command(UiCommand::Subtitle(SubtitleChoice::Stream(4))),
-            Some(Command::SetSubtitleStreamIndex(4))
-        );
-        assert_eq!(
-            command(UiCommand::Subtitle(SubtitleChoice::Off)),
-            Some(Command::SetSubtitleStreamIndex(-1))
-        );
         assert_eq!(command(UiCommand::Stop), Some(Command::Stop));
         assert!(matches!(
             outgoing_for(&UiCommand::SetVolume(40.), &casting),
@@ -1097,6 +1356,8 @@ mod tests {
             Some(Outgoing::Muted(true))
         ));
         for ignored in [
+            UiCommand::Audio(2),
+            UiCommand::Subtitle(SubtitleChoice::Off),
             UiCommand::SetSpeed(1.5),
             UiCommand::SetSubtitleDelay(1.),
             UiCommand::SetAudioDelay(1.),
@@ -1104,6 +1365,50 @@ mod tests {
         ] {
             assert!(outgoing_for(&ignored, &casting).is_none());
         }
+    }
+
+    #[test]
+    fn a_long_queue_is_cut_to_one_message() {
+        let credentials = Credentials {
+            server_address: "http://192.168.1.149:8096".into(),
+            access_token: "0123456789abcdef0123456789abcdef".into(),
+            user_id: "0123456789abcdef0123456789abcdef".into(),
+            device_id: "device".into(),
+            server_id: "0123456789abcdef0123456789abcdef".into(),
+            server_version: "12.2.0".into(),
+            receiver_name: "Quarto TV".into(),
+            max_bitrate: None,
+            subtitle_appearance: None,
+        };
+        let episodes: Vec<BaseItemDto> = (0..1000)
+            .map(|index| BaseItemDto {
+                id: format!("{index:032x}"),
+                name: format!("Episode {index}"),
+                kind: BaseItemKind::Episode,
+                ..Default::default()
+            })
+            .collect();
+        let mut request = play_request(&episodes, &PlayOptions::default(), &credentials.server_id);
+        fit_play_request(&mut request, &credentials);
+        let size = |request: &PlayRequest| {
+            receiver_app::Envelope::new(&credentials, Command::PlayNow(request.clone()))
+                .to_value()
+                .to_string()
+                .len()
+        };
+        assert!(size(&request) <= cast::MAX_FRAME - FRAME_SLACK);
+        assert!(request.items.len() > 200, "as much as fits: {}", request.items.len());
+        assert_eq!(request.items[0].id, episodes[0].id);
+        // One more wouldn't fit.
+        let mut more = request.clone();
+        more.items
+            .push(play_request(&episodes[request.items.len()..][..1], &PlayOptions::default(), "s").items[0].clone());
+        assert!(size(&more) > cast::MAX_FRAME - FRAME_SLACK);
+
+        // A short one is left as it is.
+        let mut short = play_request(&episodes[..5], &PlayOptions::default(), &credentials.server_id);
+        fit_play_request(&mut short, &credentials);
+        assert_eq!(short.items.len(), 5);
     }
 
     #[test]

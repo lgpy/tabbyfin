@@ -229,6 +229,10 @@ pub enum BarClick {
 /// place; anywhere else opens the player.
 pub fn bar(ui: &mut Ui, services: &mut Services, compact: bool, floor: f32) -> Option<BarClick> {
     let session = services.cast.session.as_ref()?;
+    // Connected with nothing playing on the TV: there's nothing to show or go back to.
+    if session.casting.item_id.is_none() && session.casting.item.is_none() {
+        return None;
+    }
     let casting = session.casting.clone();
     let device = session.device.name.clone();
     let window = ui.ctx().content_rect();

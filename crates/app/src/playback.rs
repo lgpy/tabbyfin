@@ -1192,6 +1192,8 @@ impl Services {
                 self.toast(Toast::error(error));
                 self.events.push(AppEvent::PlaybackEnded);
             }
+            // Handed over to a TV: the player stays up, showing the cast.
+            Ok(_) if self.cast.is_handing_over() => {}
             Ok(_) => self.events.push(AppEvent::PlaybackEnded),
             Err(message) => {
                 tracing::warn!("playback failed: {message}");

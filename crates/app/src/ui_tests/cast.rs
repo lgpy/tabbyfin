@@ -160,6 +160,152 @@ fn playing_while_casting_goes_to_the_tv() {
 }
 
 #[test]
+fn tracks_and_versions_play_the_item_again() {
+    let _config = ConfigDir::new("cast-tracks");
+    let mut casting = Casting::new();
+    casting.connect();
+    let movie = movie();
+    casting.services.play(
+        &movie,
+        PlayOptions {
+            media_source_id: Some("source-1".into()),
+            audio_stream_index: Some(1),
+            subtitle: SubtitleChoice::Off,
+            ..Default::default()
+        },
+    );
+    casting.until("the receiver's progress", |this| {
+        this.services
+            .cast
+            .casting()
+            .is_some_and(|casting| casting.playing && casting.item_id.is_some())
+    });
+    let plays = |this: &Casting| -> Vec<Value> {
+        this.device
+            .envelopes()
+            .into_iter()
+            .filter(|envelope| envelope["command"] == "PlayNow")
+            .collect()
+    };
+
+    // Another audio track: the same version, from where it is, in whole ticks.
+    casting.services.change_audio(2);
+    casting.until("the audio reload", |this| plays(this).len() == 2);
+    let audio = &plays(&casting)[1]["options"];
+    assert_eq!(audio["items"][0]["Id"], movie.id.as_str());
+    assert_eq!(audio["mediaSourceId"], "source-1");
+    assert_eq!(audio["audioStreamIndex"], 2);
+    assert_eq!(audio["subtitleStreamIndex"], -1);
+    assert!(audio["startPositionTicks"].is_i64(), "{}", audio["startPositionTicks"]);
+    assert!(!casting.commands().iter().any(|command| command.starts_with("Set")));
+
+    // Another version: its own tracks, the server's choice.
+    casting.services.reload(PlayOptions {
+        media_source_id: Some("source-2".into()),
+        ..Default::default()
+    });
+    casting.until("the version reload", |this| plays(this).len() == 3);
+    let version = &plays(&casting)[2]["options"];
+    assert_eq!(version["mediaSourceId"], "source-2");
+    assert!(version["audioStreamIndex"].is_null());
+    assert!(version["subtitleStreamIndex"].is_null());
+
+    // Each reload stops first and plays once the receiver reported that stop, and the player
+    // stays open through it.
+    let commands = casting.commands();
+    let after_first_play: Vec<&str> = commands
+        .iter()
+        .skip_while(|command| *command != "PlayNow")
+        .skip(1)
+        .map(String::as_str)
+        .collect();
+    assert_eq!(after_first_play, ["Stop", "PlayNow", "Stop", "PlayNow"]);
+    assert!(
+        !casting
+            .events()
+            .iter()
+            .any(|event| matches!(event, AppEvent::PlaybackEnded))
+    );
+}
+
+#[test]
+fn the_end_of_an_item_closes_the_player() {
+    let _config = ConfigDir::new("cast-finished");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.play(&movie(), PlayOptions::default());
+    casting.until("the receiver's progress", |this| {
+        this.services
+            .cast
+            .casting()
+            .is_some_and(|casting| casting.playing && casting.item_id.is_some())
+    });
+    // The receiver's own start, then what a Chromecast sent at the end of a movie: a stop with
+    // empty ids.
+    casting.device.send_app_event(serde_json::json!({
+        "type": "playbackstart",
+        "data": {"ItemId": "d265861eae31cee1d44b13adac305eac", "NowPlayingItem": {"Id": "d265861eae31cee1d44b13adac305eac"}}
+    }));
+    casting.until("the receiver's start", |this| {
+        this.services
+            .cast
+            .session
+            .as_ref()
+            .is_some_and(|session| !session.starting)
+    });
+    casting.events();
+    casting.device.send_app_event(serde_json::json!({
+        "type": "playbackstop",
+        "data": {
+            "ItemId": "",
+            "NowPlayingItem": {"Id": "", "RunTimeTicks": 600_230_000},
+            "PlayState": {"ItemId": "", "MediaSourceId": "", "PositionTicks": 600_001_580, "IsPaused": false}
+        }
+    }));
+    casting.until("the player to close", |this| {
+        this.services
+            .events
+            .iter()
+            .any(|event| matches!(event, AppEvent::PlaybackEnded))
+    });
+    let casting_state = casting.services.cast.casting().expect("still connected");
+    assert!(!casting_state.playing);
+    assert_eq!(casting_state.item_id, None);
+}
+
+#[test]
+fn wheeling_the_volume_keeps_the_cast() {
+    let _config = ConfigDir::new("cast-wheel");
+    let mut casting = Casting::new();
+    casting.connect();
+    // A flick of the wheel: many steps at once. Only the last level matters.
+    for step in 1..=20 {
+        casting.services.control(UiCommand::SetVolume(f64::from(step)));
+    }
+    casting.until("the TV's volume", |this| {
+        this.device
+            .messages()
+            .iter()
+            .rev()
+            .find(|message| message.payload["type"] == "SET_VOLUME")
+            .is_some_and(|message| (message.payload["volume"]["level"].as_f64().unwrap_or(0.) - 0.2).abs() < 1e-6)
+    });
+    let sent = casting
+        .device
+        .messages()
+        .iter()
+        .filter(|message| message.payload["type"] == "SET_VOLUME")
+        .count();
+    assert!(
+        sent < 20,
+        "the steps queued behind a request are coalesced ({sent} sent)"
+    );
+    casting.services.control(UiCommand::TogglePause);
+    casting.wait_for("PlayPause");
+    assert!(casting.services.is_casting());
+}
+
+#[test]
 fn the_controls_go_to_the_receiver_while_casting() {
     let _config = ConfigDir::new("cast-controls");
     let mut casting = Casting::new();
@@ -169,7 +315,8 @@ fn the_controls_go_to_the_receiver_while_casting() {
     services.control(UiCommand::SetPause(true));
     services.control(UiCommand::SetPause(false));
     services.control(UiCommand::SeekTo(std::time::Duration::from_secs(90)));
-    // Not sent: the receiver has no control for them.
+    // Not sent: the receiver has no control for speed, and other tracks play the item again,
+    // which nothing is yet.
     services.control(UiCommand::SetSpeed(1.5));
     services.change_audio(2);
     services.change_subtitle(SubtitleChoice::Stream(3));
@@ -183,8 +330,6 @@ fn the_controls_go_to_the_receiver_while_casting() {
         "Pause",
         "Unpause",
         "Seek",
-        "SetAudioStreamIndex",
-        "SetSubtitleStreamIndex",
         "NextTrack",
         "PreviousTrack",
         "PlayNow",
@@ -236,6 +381,67 @@ fn stopping_the_cast_stops_the_receiver_and_closes_the_player() {
             .iter()
             .any(|message| message.payload["type"] == "STOP")
     });
+}
+
+#[test]
+fn an_idle_tv_has_nothing_playing() {
+    let _config = ConfigDir::new("cast-idle");
+    let mut casting = Casting::new();
+    casting.connect();
+    // The fake TV answers Identify as an idle one does: a volumechange with empty ids.
+    casting.until("Identify's answer", |this| {
+        this.services
+            .cast
+            .session
+            .as_ref()
+            .is_some_and(|session| session.last_event.is_some())
+    });
+    let session = casting.services.cast.session.as_ref().expect("casting");
+    assert_eq!(session.casting.item_id, None);
+    assert!(!session.casting.playing);
+}
+
+#[test]
+fn a_status_without_apps_doesnt_end_the_cast() {
+    let _config = ConfigDir::new("cast-status-without-apps");
+    let mut casting = Casting::new();
+    // The fake TV follows the launch with a volume-only status, as a real one does.
+    casting.connect();
+    casting.events();
+    // The volume's reply comes after that status, so the cast has seen it by then.
+    casting.services.control(UiCommand::SetVolume(30.));
+    casting.until("the TV's volume", |this| {
+        this.services
+            .cast
+            .casting()
+            .is_some_and(|casting| (casting.volume - 30.).abs() < 0.5)
+    });
+    assert!(casting.services.is_casting());
+    assert!(
+        !casting
+            .events()
+            .iter()
+            .any(|event| matches!(event, AppEvent::Toast(_) | AppEvent::PlaybackEnded))
+    );
+}
+
+#[test]
+fn disconnecting_leaves_the_tv_playing() {
+    let _config = ConfigDir::new("cast-disconnect");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.disconnect_cast();
+    assert!(!casting.services.is_casting());
+    casting.until("the connection to close", |this| this.device.disconnects() > 0);
+    // A `CLOSE` would make the receiver quit; dropping the connection leaves it playing.
+    assert!(
+        !casting
+            .device
+            .messages()
+            .iter()
+            .any(|message| message.payload["type"] == "CLOSE" || message.payload["type"] == "STOP")
+    );
+    assert!(casting.device.is_running());
 }
 
 #[test]

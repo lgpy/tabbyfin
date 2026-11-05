@@ -105,13 +105,18 @@ pub struct Channel {
 
 impl Channel {
     /// Connects with the default [`ChannelConfig`].
-    pub async fn connect(addr: SocketAddr) -> Result<(Self, mpsc::Receiver<Message>)> {
+    pub async fn connect(addr: SocketAddr) -> Result<(Self, mpsc::UnboundedReceiver<Message>)> {
         Self::connect_with(addr, ChannelConfig::default()).await
     }
 
     /// Connects to `addr` and returns the channel and the stream of messages the channel doesn't
-    /// consume. The stream ends when the connection does.
-    pub async fn connect_with(addr: SocketAddr, config: ChannelConfig) -> Result<(Self, mpsc::Receiver<Message>)> {
+    /// consume. The stream ends when the connection does. It's unbounded so that a caller busy
+    /// awaiting a [`Channel::request`] never stalls the connection: a full stream would stop it
+    /// reading that request's reply and the device's heartbeat.
+    pub async fn connect_with(
+        addr: SocketAddr,
+        config: ChannelConfig,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<Message>)> {
         let tcp = tokio::time::timeout(config.connect_timeout, TcpStream::connect(addr))
             .await
             .map_err(|_| Error::Timeout)??;
@@ -126,7 +131,7 @@ impl Channel {
 
         let sender_id = format!("sender-{}", uuid::Uuid::new_v4());
         let (out, out_rx) = mpsc::channel(32);
-        let (in_tx, in_rx) = mpsc::channel(32);
+        let (in_tx, in_rx) = mpsc::unbounded_channel();
         let task = tokio::spawn(supervise(stream, sender_id.clone(), config.clone(), out_rx, in_tx));
 
         Ok((
@@ -146,9 +151,18 @@ impl Channel {
         &self.sender_id
     }
 
+    /// Refuses a message too big for one frame here, with [`Error::FrameTooLarge`]: written, it
+    /// would fail in the connection task and end the connection.
+    fn check_size(&self, namespace: &str, destination: &str, payload: &Value) -> Result<()> {
+        message_json(&self.sender_id, destination, namespace, payload)
+            .encode()
+            .map(drop)
+    }
+
     /// Sends `payload` to `destination` in `namespace` without waiting for anything. Replies that
     /// carry no matching `requestId` (or none at all) come back on the message stream.
     pub async fn send(&self, namespace: &str, destination: &str, payload: Value) -> Result<()> {
+        self.check_size(namespace, destination, &payload)?;
         self.out
             .send(Outgoing::Send {
                 namespace: namespace.to_string(),
@@ -161,8 +175,10 @@ impl Channel {
 
     /// Sends `payload` with a fresh `requestId` and waits for the device's reply with the same id.
     /// Times out after [`ChannelConfig::request_timeout`].
-    pub async fn request(&self, namespace: &str, destination: &str, payload: Value) -> Result<Value> {
+    pub async fn request(&self, namespace: &str, destination: &str, mut payload: Value) -> Result<Value> {
         let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        payload["requestId"] = json!(request_id);
+        self.check_size(namespace, destination, &payload)?;
         let (reply, reply_rx) = oneshot::channel();
         self.out
             .send(Outgoing::Request {
@@ -194,7 +210,9 @@ impl Channel {
             .map_err(|_| Error::Closed)
     }
 
-    /// `CLOSE` the connection to an app's `transportId`: we stop listening, the app keeps playing.
+    /// `CLOSE` the connection to an app's `transportId`. This tells the app its sender left on
+    /// purpose, and Jellyfin's receiver quits when its last sender does: to leave it playing, drop
+    /// the connection instead ([`Channel::shutdown`]).
     pub async fn close_app(&self, transport_id: &str) -> Result<()> {
         self.out
             .send(Outgoing::CloseApp(transport_id.to_string()))
@@ -232,7 +250,7 @@ async fn supervise(
     sender_id: String,
     config: ChannelConfig,
     mut outgoing: mpsc::Receiver<Outgoing>,
-    incoming: mpsc::Sender<Message>,
+    incoming: mpsc::UnboundedSender<Message>,
 ) {
     let (mut reader, mut writer) = tokio::io::split(stream);
 
@@ -291,8 +309,8 @@ async fn supervise(
                     payload,
                 };
                 // A caller that doesn't read the stream (or no longer wants it) mustn't stop the
-                // connection; only a full channel applies backpressure.
-                let _ = incoming.send(message).await;
+                // connection, and neither may a slow one (see `connect_with`).
+                let _ = incoming.send(message);
             }
             command = outgoing.recv() => {
                 match command {

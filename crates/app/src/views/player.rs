@@ -43,9 +43,9 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_FAST_FORWARD, ICON_FAST_REWIND,
-    ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT, ICON_SETTINGS,
-    ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_FAST_FORWARD,
+    ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT,
+    ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
@@ -855,6 +855,15 @@ impl PlayerPage {
                             self.exit(cx);
                         }
                     });
+                } else if cx.services.cast.has_devices() && !cx.services.in_group() {
+                    // Playing here with a TV around: the same place, unlit, hands what plays over.
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let button = control(ICON_CAST, CONTROL, "Cast to a TV").show(ui);
+                        if button.clicked() {
+                            PopupMenu::toggle(ui.ctx(), cast_menu_id(), Opened::Pointer);
+                        }
+                        self.cast_menu(&button, cx);
+                    });
                 }
             },
         );
@@ -1373,6 +1382,27 @@ impl PlayerPage {
         if let Some(adjustments) = choice.adjustments {
             cx.services.adjust(adjustments);
             self.show_controls();
+        }
+    }
+
+    /// The cast button's menu while playing here: the TVs found, the one cast to last first.
+    /// Picking one hands what plays over to it, at the same spot.
+    fn cast_menu(&mut self, response: &Response, cx: &mut PageCx) {
+        let devices: Vec<(String, String)> = cx
+            .services
+            .cast
+            .devices
+            .iter()
+            .map(|device| (device.id.clone(), device.name.clone()))
+            .collect();
+        let entries: Vec<Entry> = devices.iter().map(|(_, name)| Entry::new(name)).collect();
+        let shown = PopupMenu::new(cast_menu_id())
+            .title("Cast to a TV")
+            .align(RectAlign::BOTTOM_END)
+            .width(240.)
+            .show(response, &entries);
+        if let Some(index) = shown.chosen {
+            cx.services.start_cast(&devices[index].0);
         }
     }
 
@@ -1904,6 +1934,10 @@ fn chapter_colours() -> media_row::ChapterColours {
 /// The version picker's menu.
 fn versions_id() -> Id {
     Id::unique("player_versions")
+}
+
+fn cast_menu_id() -> Id {
+    Id::unique("player_cast")
 }
 
 /// The skip button's, up-next card's or resume card's area.

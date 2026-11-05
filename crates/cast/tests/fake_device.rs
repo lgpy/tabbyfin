@@ -20,7 +20,7 @@ fn config() -> ChannelConfig {
     }
 }
 
-async fn connect(device: &FakeDevice) -> (Channel, mpsc::Receiver<Message>) {
+async fn connect(device: &FakeDevice) -> (Channel, mpsc::UnboundedReceiver<Message>) {
     Channel::connect_with(device.addr(), config())
         .await
         .expect("the fake device accepts the connection")
@@ -63,7 +63,7 @@ async fn wait_for(mut check: impl FnMut() -> bool) {
 }
 
 /// The next message in the app's namespace, parsed as a receiver event.
-async fn next_event(messages: &mut mpsc::Receiver<Message>) -> ReceiverEvent {
+async fn next_event(messages: &mut mpsc::UnboundedReceiver<Message>) -> ReceiverEvent {
     loop {
         let message = timeout(Duration::from_secs(2), messages.recv())
             .await
@@ -184,10 +184,10 @@ async fn the_jellyfin_contract_round_trips() {
         .await
         .unwrap();
 
-    // Identify is answered with the state, as a playbackstop-typed message.
+    // An idle receiver answers Identify with a volumechange about no item (empty ids).
     match next_event(&mut messages).await {
-        ReceiverEvent::PlaybackStop(event) => assert_eq!(event.data.item_id.as_deref(), Some("identify-item")),
-        other => panic!("expected a playbackstop, got {other:?}"),
+        ReceiverEvent::VolumeChange(event) => assert_eq!(event.data.item_id.as_deref(), Some("")),
+        other => panic!("expected a volumechange, got {other:?}"),
     }
 
     // The app got a CONNECT on its transport id.
@@ -268,7 +268,7 @@ async fn the_jellyfin_contract_round_trips() {
     assert_eq!(play["options"]["audioStreamIndex"], 1);
     assert_eq!(play["options"]["subtitleStreamIndex"], -1);
 
-    // Leaving the app playing is a CLOSE, not a STOP.
+    // A CLOSE reaches the app's transport (and, like the real receiver, the fake one quits).
     channel.close_app(&app.transport_id).await.unwrap();
     wait_for(|| {
         device.messages().iter().any(|message| {
@@ -278,6 +278,51 @@ async fn the_jellyfin_contract_round_trips() {
         })
     })
     .await;
+    assert!(!device.is_running());
+}
+
+#[tokio::test]
+async fn an_unread_stream_doesnt_stall_requests() {
+    let device = FakeDevice::start().await.unwrap();
+    // The messages are never read, as when the caller is busy awaiting a request.
+    let (channel, _messages) = connect(&device).await;
+    let app = receiver::launch(&channel, jf::STABLE_APP_ID).await.unwrap();
+    channel.connect_app(&app.transport_id).await.unwrap();
+    let credentials = credentials();
+    let play = PlayRequest {
+        items: vec![ItemStub {
+            id: "item-1".into(),
+            ..ItemStub::default()
+        }],
+        ..PlayRequest::default()
+    };
+    // Each PlayNow is answered with three progress events: far more than a bounded stream holds.
+    for _ in 0..30 {
+        let envelope = Envelope::new(&credentials, Command::PlayNow(play.clone())).to_value();
+        channel.send(jf::NAMESPACE, &app.transport_id, envelope).await.unwrap();
+    }
+    wait_for(|| device.envelopes().len() == 30).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let status = timeout(Duration::from_secs(2), receiver::get_status(&channel))
+        .await
+        .expect("the reply isn't stuck behind unread messages")
+        .unwrap();
+    assert!(status.application(jf::STABLE_APP_ID).is_some());
+}
+
+#[tokio::test]
+async fn a_message_too_big_is_refused_and_the_connection_stays() {
+    let device = FakeDevice::start().await.unwrap();
+    let (channel, _messages) = connect(&device).await;
+    let app = receiver::launch(&channel, jf::STABLE_APP_ID).await.unwrap();
+    let big = json!({"command": "PlayNow", "options": {"pad": "x".repeat(cast::MAX_FRAME)}});
+    assert!(matches!(
+        channel.send(jf::NAMESPACE, &app.transport_id, big).await,
+        Err(Error::FrameTooLarge { .. })
+    ));
+    // Still connected: a request still gets its answer.
+    let status = receiver::get_status(&channel).await.unwrap();
+    assert!(status.application(jf::STABLE_APP_ID).is_some());
 }
 
 #[tokio::test]
@@ -324,12 +369,12 @@ async fn a_closed_connection_ends_the_stream_and_fails_requests() {
         Err(Error::Closed) => {}
         other => panic!("expected the request to fail as closed, got {other:?}"),
     }
-    assert!(
-        timeout(Duration::from_secs(2), messages.recv())
-            .await
-            .expect("the message stream must end")
-            .is_none()
-    );
+    // What arrived before the close (the launch's broadcast) can still be read; then it ends.
+    timeout(Duration::from_secs(2), async {
+        while messages.recv().await.is_some() {}
+    })
+    .await
+    .expect("the message stream must end");
 }
 
 #[tokio::test]
