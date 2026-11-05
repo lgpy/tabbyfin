@@ -1193,6 +1193,7 @@ impl Shell {
                     .checked(account.credential_account() == current)
             })
             .collect();
+        entries.push(Entry::new("Downloads").checked(false).separated());
         entries.push(Entry::new("Add account…").checked(false).separated());
         if layout::compact(ui.ctx()) {
             entries.push(Entry::new("Settings").checked(false).separated());
@@ -1211,15 +1212,22 @@ impl Shell {
         }
     }
 
-    /// Does what an account-menu entry says: switch to that account, add one, open Settings or
-    /// sign out. The app carries the account events out after the frame.
+    /// Does what an account-menu entry says: switch to that account, open Downloads, add an
+    /// account, open Settings or sign out. The app carries the account events out after the
+    /// frame.
     fn choose_account(&mut self, index: usize, cx: &mut PageCx) {
         let actions = self.accounts.len();
-        if layout::compact(cx.ctx) && index == actions + 1 {
-            if !self.stack.iter().any(|entry| matches!(entry.route, Route::Settings)) {
-                self.bar_key = None;
-                cx.nav.push(NavRequest::Push(Route::Settings));
+        // A page already on the stack isn't opened twice.
+        let mut open = |route: Route, shell: &mut Self| {
+            if !shell.stack.iter().any(|entry| entry.route == route) {
+                shell.bar_key = None;
+                cx.nav.push(NavRequest::Push(route));
             }
+        };
+        if index == actions {
+            open(Route::Downloads, self);
+        } else if layout::compact(cx.ctx) && index == actions + 2 {
+            open(Route::Settings, self);
         } else if index < actions {
             let account = self.accounts[index].clone();
             // Choosing the account already signed in just closes the menu: switching to it
@@ -1232,7 +1240,7 @@ impl Shell {
         } else {
             // The screen changes: the bar's keyboard goes with it.
             self.bar_key = None;
-            if index == actions {
+            if index == actions + 1 {
                 cx.services.events.push(AppEvent::AddAccount);
             } else {
                 // Sign out, the last entry.

@@ -284,6 +284,19 @@ pub fn cache_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".tabbyfin/cache"))
 }
 
+/// Downloaded media, per account (`downloads.rs`). Under the config folder when
+/// `TABBYFIN_CONFIG_DIR` is set, so test runs keep their downloads to themselves; otherwise the
+/// platform's local data dir. Not [`cache_dir`]: a download is the user's file, kept until they
+/// remove it, while anything may delete the cache.
+pub fn downloads_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("TABBYFIN_CONFIG_DIR") {
+        return PathBuf::from(dir).join("downloads");
+    }
+    project_dirs()
+        .map(|d| d.data_local_dir().join("downloads"))
+        .unwrap_or_else(|| PathBuf::from(".tabbyfin/downloads"))
+}
+
 fn path() -> PathBuf {
     dir().join("config.toml")
 }

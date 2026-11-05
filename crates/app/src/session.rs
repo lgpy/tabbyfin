@@ -52,6 +52,7 @@ pub fn describe_error(err: &jellyfin::Error) -> String {
         Error::Forbidden => "This account isn't allowed to do that.".into(),
         Error::NotFound => "The server couldn't find what was requested.".into(),
         Error::Decode { .. } => "The server sent a response this app doesn't understand.".into(),
+        Error::Stalled => "The server sent nothing for 30 seconds.".into(),
         Error::Socket(_) => "The live connection to the server failed.".into(),
         Error::Status { status, .. } => format!("The server returned an error ({status})."),
     }

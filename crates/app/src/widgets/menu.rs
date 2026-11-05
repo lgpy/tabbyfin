@@ -1,5 +1,5 @@
 //! An item's context menu: play or resume it, play a series or season from its next episode,
-//! mark it watched or favorite, add it to a playlist. The rules (what's offered for which kind,
+//! mark it watched or favorite, add it to a playlist, download it. The rules (what's offered for which kind,
 //! what's checked) are [`crate::item_menu`]'s.
 //!
 //! The menu returns what was chosen instead of carrying it out. [`Services::carry_out`] does
@@ -20,10 +20,13 @@ use std::collections::VecDeque;
 
 use egui::{Id, Response};
 use egui_material_icons::icons::{
-    ICON_CHECK, ICON_CHECK_CIRCLE, ICON_FAVORITE, ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_REPLAY,
+    ICON_CHECK, ICON_CHECK_CIRCLE, ICON_CLOSE, ICON_DELETE, ICON_DOWNLOAD, ICON_FAVORITE, ICON_PLAY_ARROW,
+    ICON_PLAYLIST_ADD, ICON_REFRESH, ICON_REPLAY,
 };
 
 use jellyfin::models::{BaseItemDto, BaseItemKind};
+
+use crate::downloads::{Downloads, Offer};
 
 use crate::item_menu::{self, Mark, can_add_to_playlist, can_mark, is_favorite, is_playable, is_played, resume_point};
 use crate::playback::PlayOptions;
@@ -45,11 +48,13 @@ pub enum MenuAction {
     Mark(Mark),
     /// Open the *Add to playlist* dialog.
     AddToPlaylist,
+    /// Start, stop, delete or retry its download.
+    Download(Offer),
 }
 
-/// The menu worn by `response`: right-click it to open it.
-/// Kinds with none of the entries (libraries, people) get no menu.
-pub fn item_menu(response: &Response, item: &BaseItemDto) -> Option<MenuAction> {
+/// The menu worn by `response`: right-click it to open it. `downloads` says which download
+/// entry it has. Kinds with none of the entries (libraries, people) get no menu.
+pub fn item_menu(response: &Response, item: &BaseItemDto, downloads: &Downloads) -> Option<MenuAction> {
     if !can_mark(item) {
         return None;
     }
@@ -105,6 +110,23 @@ pub fn item_menu(response: &Response, item: &BaseItemDto) -> Option<MenuAction> 
     if can_add_to_playlist(item) {
         actions.push(MenuAction::AddToPlaylist);
         entries.push(Entry::new("Add to playlist…").icon(ICON_PLAYLIST_ADD).separated());
+    }
+    if let Some(offer) = downloads.offer(item) {
+        let folder = matches!(item.kind, BaseItemKind::Series | BaseItemKind::Season);
+        let entry = match offer {
+            Offer::Download if folder => Entry::new("Download all episodes").icon(ICON_DOWNLOAD),
+            Offer::Download => Entry::new("Download").icon(ICON_DOWNLOAD),
+            Offer::Cancel => Entry::new("Cancel download").icon(ICON_CLOSE),
+            Offer::Remove => Entry::new("Remove download").icon(ICON_DELETE.outlined()),
+            Offer::Retry => Entry::new("Retry download").icon(ICON_REFRESH),
+        };
+        actions.push(MenuAction::Download(offer));
+        // Its own group after Add to playlist, or after Favorite where there's none.
+        entries.push(if can_add_to_playlist(item) {
+            entry
+        } else {
+            entry.separated()
+        });
     }
     let chosen = PopupMenu::new(id)
         .title(&item.name)
@@ -188,6 +210,24 @@ impl Services {
                 None
             }
             MenuAction::AddToPlaylist => Some(action),
+            MenuAction::Download(offer) => {
+                self.download(offer, item);
+                None
+            }
+        }
+    }
+
+    /// Carries out a download choice, from the item menu or the item page's button.
+    pub fn download(&mut self, offer: Offer, item: &BaseItemDto) {
+        match offer {
+            Offer::Download => {
+                if let Err(message) = self.downloads.request(item) {
+                    self.toast(Toast::error(message));
+                }
+            }
+            Offer::Cancel => self.downloads.cancel(&item.id),
+            Offer::Remove => self.downloads.remove(&item.id),
+            Offer::Retry => self.downloads.retry(&item.id),
         }
     }
 

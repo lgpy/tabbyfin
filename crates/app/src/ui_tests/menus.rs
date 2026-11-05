@@ -70,7 +70,10 @@ fn a_right_click_opens_the_cards_menu_and_a_row_picks() {
     for _ in 0..3 {
         ui.step();
     }
-    assert_eq!(rows(&ui, Role::MenuItem), ["Play", "Add to playlist…"]);
+    assert_eq!(
+        rows(&ui, Role::MenuItem),
+        ["Play", "Add to playlist…", "Download all episodes"]
+    );
     // Watched and Favorite say they're toggles, and that both are off.
     assert_eq!(rows(&ui, Role::MenuItemCheckBox), ["Watched", "Favorite"]);
     let favorite = ui.harness().get_by_role_and_label(Role::MenuItemCheckBox, "Favorite");
