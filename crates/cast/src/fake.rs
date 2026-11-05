@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 use tokio_rustls::TlsAcceptor;
 
-use crate::channel::{NS_HEARTBEAT, NS_RECEIVER};
+use crate::channel::{NS_CONNECTION, NS_HEARTBEAT, NS_RECEIVER};
 use crate::codec::{self, CastMessage};
 use crate::jellyfin::{NAMESPACE as APP_NAMESPACE, STABLE_APP_ID, UNSTABLE_APP_ID};
 use crate::{Error, Result};
@@ -115,9 +115,25 @@ impl FakeDevice {
         self.state.lock().unwrap().connections
     }
 
+    /// How many connections have ended, from either side.
+    pub fn disconnects(&self) -> usize {
+        self.state.lock().unwrap().disconnects
+    }
+
+    /// Whether the receiver app is running: launched, and neither stopped nor left by its sender
+    /// with a `CLOSE`.
+    pub fn is_running(&self) -> bool {
+        self.state.lock().unwrap().launched.is_some()
+    }
+
     /// Sends a PING to the client, the way a device checks the sender is alive.
     pub fn send_ping(&self) {
         self.control(Control::Ping);
+    }
+
+    /// Sends `event` from the receiver app, as when something happens on the TV.
+    pub fn send_app_event(&self, event: Value) {
+        self.control(Control::AppEvent(event));
     }
 
     /// Closes the current connection.
@@ -157,6 +173,7 @@ impl Drop for FakeDevice {
 
 enum Control {
     Ping,
+    AppEvent(Value),
     Close,
 }
 
@@ -166,6 +183,7 @@ struct State {
     pings: usize,
     pongs: usize,
     connections: usize,
+    disconnects: usize,
     /// The client's sender id, the destination of anything the device sends unprompted.
     sender_id: Option<String>,
     level: f32,
@@ -184,6 +202,7 @@ impl Default for State {
             pings: 0,
             pongs: 0,
             connections: 0,
+            disconnects: 0,
             sender_id: None,
             level: 0.5,
             muted: false,
@@ -217,6 +236,7 @@ async fn handle_connection(
     *control.lock().unwrap() = Some(tx);
     serve(stream, &state, &mut commands).await;
     *control.lock().unwrap() = None;
+    state.lock().unwrap().disconnects += 1;
 }
 
 async fn serve(
@@ -248,6 +268,13 @@ async fn serve(
                 Some(Control::Ping) => {
                     let Some(ping) = device_ping(state) else { continue };
                     if codec::write_frame(&mut writer, &ping).await.is_err() {
+                        break;
+                    }
+                }
+                Some(Control::AppEvent(event)) => {
+                    let Some(sender) = state.lock().unwrap().sender_id.clone() else { continue };
+                    let message = CastMessage::json(APP_TRANSPORT_ID, &sender, APP_NAMESPACE, &event.to_string());
+                    if codec::write_frame(&mut writer, &message).await.is_err() {
                         break;
                     }
                 }
@@ -326,7 +353,8 @@ fn handle(frame: CastMessage, state: &Arc<Mutex<State>>) -> Vec<(Option<Instant>
                 }
                 Some("LAUNCH") => {
                     let app_id = payload.get("appId").and_then(Value::as_str).unwrap_or_default();
-                    let reply = if app_id == STABLE_APP_ID || app_id == UNSTABLE_APP_ID {
+                    let launched = app_id == STABLE_APP_ID || app_id == UNSTABLE_APP_ID;
+                    let reply = if launched {
                         state.launched = Some(app_id.to_string());
                         let status = status_of(&state);
                         receiver_reply(&sender, "RECEIVER_STATUS", request_id, status)
@@ -342,6 +370,12 @@ fn handle(frame: CastMessage, state: &Arc<Mutex<State>>) -> Vec<(Option<Instant>
                     // A real launch takes a moment; delaying it makes reply matching observable.
                     let due = (state.launch_delay > Duration::ZERO).then(|| Instant::now() + state.launch_delay);
                     replies.push((due, reply));
+                    if launched {
+                        // A real TV follows a launch with a broadcast that has the volume but no
+                        // `applications`: that isn't the app going away.
+                        let volume = json!({"volume": {"level": state.level, "muted": state.muted}});
+                        replies.push((due, receiver_reply(&sender, "RECEIVER_STATUS", json!(0), volume)));
+                    }
                 }
                 Some("STOP") => {
                     state.launched = None;
@@ -361,6 +395,14 @@ fn handle(frame: CastMessage, state: &Arc<Mutex<State>>) -> Vec<(Option<Instant>
                 }
                 _ => {}
             },
+            // Jellyfin's receiver quits when its last sender leaves with a `CLOSE`, as a real one
+            // does; a sender that only drops the connection leaves it playing.
+            NS_CONNECTION
+                if frame.destination_id == APP_TRANSPORT_ID
+                    && payload.get("type").and_then(Value::as_str) == Some("CLOSE") =>
+            {
+                state.launched = None;
+            }
             APP_NAMESPACE => {
                 replies.extend(app_events(&payload, &sender, &state));
             }
@@ -379,16 +421,33 @@ fn app_events(payload: &Value, sender: &str, state: &State) -> Vec<(Option<Insta
         (None, message)
     };
     match payload.get("command").and_then(Value::as_str) {
+        // What a real idle receiver answers (seen on a Chromecast): a `volumechange` about an
+        // item with empty ids.
         Some("Identify") => vec![event(json!({
-            "type": "playbackstop",
+            "type": "volumechange",
             "data": {
-                "ItemId": "identify-item",
+                "ItemId": "",
+                "NowPlayingItem": {"Id": "", "RunTimeTicks": 0},
                 "PlayState": {
                     "PositionTicks": 0,
                     "IsPaused": false,
+                    "IsMuted": state.muted,
                     "VolumeLevel": (state.level * 100.0).round(),
-                    "CanSeek": true
+                    "CanSeek": false,
+                    "ItemId": "",
+                    "MediaSourceId": "",
+                    "PlaySessionId": "",
+                    "RepeatMode": "RepeatNone"
                 }
+            }
+        }))],
+        // A real receiver reports the stop of what played (here, nothing in particular).
+        Some("Stop") => vec![event(json!({
+            "type": "playbackstop",
+            "data": {
+                "ItemId": "",
+                "NowPlayingItem": {"Id": ""},
+                "PlayState": {"PositionTicks": 0, "IsPaused": false}
             }
         }))],
         Some("PlayNow") => {
