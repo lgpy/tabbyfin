@@ -107,6 +107,7 @@ pub fn item_menu(response: &Response, item: &BaseItemDto) -> Option<MenuAction> 
         entries.push(Entry::new("Add to playlist…").icon(ICON_PLAYLIST_ADD).separated());
     }
     let chosen = PopupMenu::new(id)
+        .title(&item.name)
         .opening_at_pointer(opening)
         .show(response, &entries)
         .chosen;

@@ -66,6 +66,7 @@ pub fn select(
         .map(|(index, label)| Entry::new(*label).checked(index == selected))
         .collect();
     let chosen = PopupMenu::new(id)
+        .title(name)
         .width(width.max(160.))
         .show(&response, &entries)
         .chosen;
