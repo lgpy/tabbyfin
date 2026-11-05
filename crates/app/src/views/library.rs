@@ -1674,7 +1674,13 @@ fn values_row(ui: &mut Ui, summary: &str) -> Response {
     }
     let painter = ui.painter();
     let body = ui.style().text_styles[&egui::TextStyle::Body].clone();
-    painter.text(rect.left_center(), Align2::LEFT_CENTER, name, body, ui.visuals().text_color());
+    painter.text(
+        rect.left_center(),
+        Align2::LEFT_CENTER,
+        name,
+        body,
+        ui.visuals().text_color(),
+    );
     let chevron = painter.text(
         rect.right_center(),
         Align2::RIGHT_CENTER,
@@ -1684,7 +1690,11 @@ fn values_row(ui: &mut Ui, summary: &str) -> Response {
     );
     // The summary takes what the name leaves, ending in an ellipsis when it's longer.
     let name_w = painter
-        .layout_no_wrap(name.to_owned(), ui.style().text_styles[&egui::TextStyle::Body].clone(), tokens.ink)
+        .layout_no_wrap(
+            name.to_owned(),
+            ui.style().text_styles[&egui::TextStyle::Body].clone(),
+            tokens.ink,
+        )
         .size()
         .x;
     let room = (chevron.left() - 4. - (rect.left() + name_w + 16.)).max(0.);
@@ -1695,7 +1705,10 @@ fn values_row(ui: &mut Ui, summary: &str) -> Response {
     );
     job.wrap = egui::text::TextWrapping::truncate_at_width(room);
     let galley = painter.layout_job(job);
-    let at = egui::pos2(chevron.left() - 4. - galley.size().x, rect.center().y - galley.size().y / 2.);
+    let at = egui::pos2(
+        chevron.left() - 4. - galley.size().x,
+        rect.center().y - galley.size().y / 2.,
+    );
     painter.galley(at, galley, tokens.ink_muted);
     response
 }
