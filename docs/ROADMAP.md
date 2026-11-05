@@ -25,7 +25,7 @@ Done: license (GPL-3.0-or-later), package metadata, log files in release builds,
 
 ## 2. Playback
 
-Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay thumbnails, speed, subtitle and audio delay, subtitle size, the time-left clock, mouse niceties, previous and next, the resume prompt; transcoding (H.264 and HEVC, automatic bitrate), recovery from network drops and player crashes, volume and mute in reports, remote control from other clients; SyncPlay with group UI, queue and drift correction.
+Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay thumbnails, speed, subtitle and audio delay, subtitle size, the time-left clock, mouse niceties, previous and next, the resume prompt; transcoding (H.264 and HEVC, automatic bitrate), recovery from network drops and player crashes, volume and mute in reports, remote control from other clients; SyncPlay with group UI, queue and drift correction; downloads of the original file, played from disk.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
@@ -40,6 +40,8 @@ Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay t
 | 2.9 | **Frame pacing** | P3 | M | Sync between mpv's device and wgpu's relies on `glFinish` and a 3-texture ring, without keyed mutexes or fences, and the app redraws on mpv's frame timer rather than vsync. Fine at 24–60 fps; check judder at high refresh rates. |
 | 2.10 | **SyncPlay with real members** | P2 | M | Tested against the scripted member (`cargo run -p jellyfin --example syncplay`). Still to do: two app instances on different machines, the Jellyfin web client as a member, and tuning the drift thresholds (`syncplay.rs`) on real hardware. |
 | 2.11 | **Chromecast** | P3 | L | Cast to Jellyfin's own receiver app from the desktop and Android, through a CASTV2 sender of our own (`crates/cast`, not started). Needs a Chromecast or Google TV to test against. Plan in [`chromecast.md`](chromecast.md). |
+| 2.12 | **Offline mode** | P2 | L | Downloads play from disk (`PLAN.md` §5.5), but only once the server has let the session in. Left: a signed-in screen with just the Downloads page when the server can't be reached (the user and server info kept with the downloads), the player's chapters and skip buttons from `item.json`, local watch state and resume points, and handing them to the server once it answers. |
+| 2.13 | **Downloads on Android** | P3 | M | A foreground service so a long download survives the app going to the background, Wi-Fi only as a setting, the files in app-specific external storage, and Media3 playing the `file://` URL. |
 
 ## 3. Browsing and library
 

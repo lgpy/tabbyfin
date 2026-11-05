@@ -22,7 +22,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [egui](ht
 
 **Not in v1 (later)**
 - Music, Live TV, books, and photos.
-- Downloads and offline mode.
+- Offline mode (downloads are built, §5.5; playing them still needs the server to sign in).
 - Multiple servers at once, and admin features.
 - Casting, and remote-controlling other sessions (other clients can control this one).
 
@@ -96,13 +96,13 @@ crates/app/src/
 ├── motion.rs        animations: page entry, the shelves' stagger, image fades, toggle pops, the player's prompt and controls
 ├── config.rs, credentials.rs, session.rs, update.rs, markers.rs
 ├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
-├── playback.rs, syncplay.rs, remote.rs, live.rs   services
+├── playback.rs, syncplay.rs, remote.rs, live.rs, downloads.rs   services
 ├── images.rs, trickplay.rs   textures
 ├── theme.rs         appearance: theme, text size, zoom, animations, over_video; `theme::apply` is called at launch
 ├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
 ├── ui_tests/        the headless UI tests (egui_kittest)
 ├── widgets/         text (Load<T>), card, image, shelf, menu, popup, select, dialog, button, state, mascot, video, subtitles (cues a player leaves to the UI)
-└── views/           mod (Page, PageCx, open), shell, home, login, search, libraries, library, value_filters, item, settings, player (with its touch gestures and phone controls), dialogs; item has its phone header in item/compact.rs
+└── views/           mod (Page, PageCx, open), shell, home, login, search, libraries, library, value_filters, item, downloads, settings, player (with its touch gestures and phone controls), dialogs; item has its phone header in item/compact.rs
 ```
 
 **Models:** we write the serde DTOs by hand and keep them to the fields we need. Every field is `Option` or `#[serde(default)]`, and unknown fields are ignored. Generating code from the full OpenAPI spec would create a huge, churny surface. Swashbuckle v10 in 12.0 already changed the generated document once. If we later want generated code, we generate it from the 12.x spec.
@@ -327,6 +327,15 @@ The flow here:
 8. **Local reloads:** another version, or a transcode restarted for other tracks, reloads the item here only (`NowPlaying::reload` → `SyncPlay::reload`): report `Buffering` (the server pauses everyone and keeps the group's position), load paused as the same queue entry, report `Ready` once loaded (the server resumes everyone, or first has this member seek if it landed elsewhere). The old session stops being watched first, or it would answer `Ready` at once.
 9. **Leaving:** signing out, switching accounts and quitting leave the group first.
 10. **The queue:** the SyncPlay menu lists the group's queue (names fetched by id) with the playing entry marked: `SetPlaylistItem` plays an entry, `MovePlaylistItem` and `RemoveFromPlaylist` edit it, `SetShuffleMode` and `SetRepeatMode` set the modes. The changes come back as queue updates to everyone.
+
+### 5.5 Downloads
+
+`downloads.rs` keeps an account's downloads: original files only, from `GET /Items/{id}/Download`, which the server allows per user (*Allow media downloading*, sent as each item's `CanDownload`, which list queries must ask for with `Fields=CanDownload`).
+
+- **On disk:** `config::downloads_dir()` (the platform's local data dir, not the cache), one folder per account and one per item: `item.json` (the item with its chapters, the media source from a `PlaybackInfo` at download time, the segments), `media.<container>` (`.part` until it's complete), the external subtitles, and the poster and backdrop. A finished media file is what makes a download done, whatever `index.json` (the account's queue, with queued, paused and failed states) says.
+- **Transfers:** `Services.downloads`, two at a time on tokio, aborted when the services are dropped. A `.part` resumes with a `Range` request (a 200 instead of a 206 starts it over), a transfer with no bytes for 30 s fails (`Error::Stalled`) rather than hanging, and free space is checked first. Progress comes back over a `task::channel`, at most four times a second; finished and failed ones become toasts. Signing out or switching accounts leaves the unfinished ones queued for that account's next sign-in.
+- **Asking:** the item menu (*Download*, *Cancel download*, *Remove download*, *Retry download*) and the item page's Download button, which shows a bar (a ring on a phone) while the file comes. A series or season queues each of its episodes the account may download. The Downloads page (account menu) lists them all, with their progress, size or error.
+- **Playing:** `run_session` looks for a finished copy first (`downloads::find_local`), and when the version asked for is the one downloaded, it skips `PlaybackInfo` and plays the file (a `file://` URL, no auth header) with its stored media source, so the track mapping is the same as streaming it. Its external subtitles come from their files. It still reports to the server, as direct play with no play session.
 
 ## 6. App architecture
 
