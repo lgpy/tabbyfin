@@ -18,7 +18,7 @@ mod socket;
 mod syncplay;
 mod system;
 mod ticks;
-mod time;
+pub mod time;
 
 pub use client::{Client, ClientInfo, parse_server_url};
 pub use download::Download;

@@ -1,7 +1,8 @@
 //! The account's downloads, one row each in the order they were asked for: the item's picture,
 //! its title, where the download stands (waiting, how far along with a bar, its size once it's
 //! here, or why it failed), and round buttons at the right end for what can be done about it.
-//! Clicking a row opens the item's page.
+//! Clicking a row opens the item's page, while online. Offline (`Services::online`) it's the
+//! shell's only page.
 //!
 //! It reads [`Downloads`] each frame and asks the server for nothing, so it shows the same
 //! whatever the connection is doing.
@@ -84,7 +85,9 @@ impl Page for DownloadsPage {
                             .color(theme::tokens_of(ui).ink_muted),
                     );
                     for (item, state) in &entries {
-                        if let Some(row_asked) = row(ui, &mut cx.services.images, item, state, width) {
+                        let poster = cx.services.downloads.primary_image_path(&item.id);
+                        let images = &mut cx.services.images;
+                        if let Some(row_asked) = row(ui, images, item, poster.as_deref(), state, width) {
                             asked = Some(row_asked);
                         }
                     }
@@ -92,6 +95,8 @@ impl Page for DownloadsPage {
         });
         backdrop::scroll_edge(ui, &area);
         match asked {
+            // An item's page needs the server.
+            Some(Asked::Open(_)) if !cx.services.online => {}
             Some(Asked::Open(item)) => cx.nav.push(NavRequest::Push(Route::for_item(&item))),
             Some(Asked::Play(item)) => {
                 cx.services.carry_out(
@@ -179,6 +184,7 @@ fn row(
     ui: &mut Ui,
     images: &mut crate::images::ImageCache,
     item: &BaseItemDto,
+    poster: Option<&std::path::Path>,
     state: &DownloadState,
     width: f32,
 ) -> Option<Asked> {
@@ -199,8 +205,15 @@ fn row(
         IMAGE_H * 2. / 3.
     };
     let picture = Rect::from_min_size(rect.min + vec2(PAD, PAD), vec2(image_w, IMAGE_H));
-    let request = item.primary_image().map(|req| req.fill_width((2. * image_w) as u32));
-    image::show(ui, images, picture, request.as_ref(), Some(item), tokens.radius_control);
+    // The poster saved with the download, which needs no server; the server's while it's on
+    // its way.
+    match poster.and_then(|path| images.get_file(path)) {
+        Some(texture) => image::texture(ui, picture, &texture, tokens.radius_control),
+        None => {
+            let request = item.primary_image().map(|req| req.fill_width((2. * image_w) as u32));
+            image::show(ui, images, picture, request.as_ref(), Some(item), tokens.radius_control);
+        }
+    }
 
     let buttons = buttons(state);
     let buttons_w = buttons.len() as f32 * (BUTTON + BUTTON_GAP);

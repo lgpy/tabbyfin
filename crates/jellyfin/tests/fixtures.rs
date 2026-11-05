@@ -70,6 +70,20 @@ fn every_fixture_parses() {
 #[test]
 fn the_downloaded_models_round_trip_through_json() {
     for version in VERSIONS {
+        // The session snapshot `session.json` keeps, for a launch the server can't answer.
+        let auth: AuthenticationResult = load(version, "authenticate");
+        let user_value = fixture_value(version, "authenticate");
+        round_trips(&auth.user, &user_value["User"], version, "authenticate.User");
+        let configuration = auth.user.configuration.as_ref().expect("the user's configuration");
+        round_trips(
+            configuration,
+            &user_value["User"]["Configuration"],
+            version,
+            "authenticate.User.Configuration",
+        );
+        let info: PublicSystemInfo = load(version, "public_info");
+        round_trips(&info, &fixture_value(version, "public_info"), version, "public_info");
+
         let movie: BaseItemDto = load(version, "item_movie");
         round_trips(&movie, &fixture_value(version, "item_movie"), version, "item_movie");
         // A download keeps one media source (its streams are what the player's track mapping

@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 
 use futures_util::FutureExt;
 use jellyfin::models::{
-    BaseItemDto, BaseItemKind, ItemField, MediaSourceInfo, MediaStream, MediaStreamType, TrickplayInfo,
+    BaseItemDto, BaseItemKind, ChapterInfo, ItemField, MediaSegmentDto, MediaSourceInfo, MediaStream, MediaStreamType,
+    TrickplayInfo,
 };
 use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
 use player::libmpv::{VideoImport, VideoOutput};
@@ -382,6 +383,10 @@ pub struct PlaybackManager {
     client: Client,
     /// The signed-in account ([`crate::config::SavedServer::credential_account`]).
     account: String,
+    /// The session can report to the server. Offline it doesn't try: against a server that
+    /// drops packets every report would wait out the connect timeout inside the session's
+    /// loop, holding up pause and seek. A downloaded file's stop goes to `pending.json`.
+    online: bool,
     /// Stops the running session when sent or dropped.
     stop: Option<oneshot::Sender<()>>,
     /// Counts sessions, so the end of a replaced session doesn't close its successor's player.
@@ -436,9 +441,8 @@ struct Reconnect {
 }
 
 impl PlaybackManager {
-    /// The manager for a signed-in session. Also reports a playback the last run didn't finish.
+    /// The manager for a signed-in session.
     pub fn new(ctx: &egui::Context, client: Client, account: String) -> Self {
-        report_unfinished(&client, &account);
         let config = Config::load();
         let volume = config.volume.unwrap_or(DEFAULT_VOLUME);
         let adjustments = Adjustments {
@@ -450,6 +454,7 @@ impl PlaybackManager {
             ctx: ctx.clone(),
             client,
             account,
+            online: true,
             stop: None,
             generation: 0,
             active: false,
@@ -467,6 +472,11 @@ impl PlaybackManager {
 
     /// What the window's renderer can draw (`widgets::video::import`), for the sessions started
     /// from now on.
+    /// Stops the sessions from reporting to the server, for offline services.
+    pub fn set_offline(&mut self) {
+        self.online = false;
+    }
+
     pub fn set_video_import(&mut self, import: VideoImport) {
         self.video_import = import;
     }
@@ -580,7 +590,7 @@ impl PlaybackManager {
         self.stop = Some(stop_tx);
         self.generation += 1;
         self.active = true;
-        let (volume, muted, import) = (self.volume, self.muted, self.video_import);
+        let (volume, muted, import, online) = (self.volume, self.muted, self.video_import, self.online);
         if self.adjusted_item.as_ref() != Some(&item.id) {
             self.adjustments = self.adjustments.for_next_item();
             self.adjusted_item = Some(item.id.clone());
@@ -611,7 +621,7 @@ impl PlaybackManager {
                     options,
                     (volume, muted),
                     adjustments,
-                    account,
+                    (account, online),
                     import,
                     channels,
                 );
@@ -1077,6 +1087,9 @@ impl Services {
 
     fn session_ended(&mut self, running: Running, result: Result<Ended, String>) {
         self.playback.save_preferences();
+        // A downloaded file's playback writes its new watch state to the item's `item.json` on
+        // its way out; the Downloads page's own copy follows.
+        self.downloads.refresh_item(&running.item.id);
         // Watched state and resume points may have changed.
         self.user_data += 1;
         // A newer session took over (another item, version or episode); its player is
@@ -1321,9 +1334,15 @@ async fn start_player(
     })
 }
 
+/// A downloaded copy's chapters and segments, for the player's controls when the server can't
+/// answer (`details`).
+type LocalMarkers = (Vec<ChapterInfo>, Vec<MediaSegmentDto>);
+
 /// Versions, chapters, segments and the next episode, for the player's controls. Failures
-/// only lose those controls.
-async fn details(client: &Client, item: &BaseItemDto) -> Details {
+/// only lose those controls; a downloaded item's own chapters and segments stand in when the
+/// server can't be asked (offline, or the connection dropped), so the chapter marks and skip
+/// buttons work either way. `local` is what `run_session` already found on disk.
+async fn details(client: &Client, item: &BaseItemDto, local: Option<LocalMarkers>) -> Details {
     let (full, segments, neighbours) = tokio::join!(
         client.item(
             &item.id,
@@ -1339,17 +1358,15 @@ async fn details(client: &Client, item: &BaseItemDto) -> Details {
         .inspect_err(|err| tracing::warn!("couldn't find the previous and next items: {err}"))
         .unwrap_or_default();
     let sources = full.as_ref().map(|f| f.media_sources.clone()).unwrap_or_default();
-    let chapters = full
-        .as_ref()
-        .map(|f| markers::chapters(&f.chapters))
-        .unwrap_or_default();
-    let segments = match segments {
+    let (local_chapters, local_segments) = local.unwrap_or_default();
+    let chapters = match full.as_ref().map(|f| f.chapters.as_slice()) {
+        Some(chapters) if !chapters.is_empty() => markers::chapters(chapters),
+        _ => markers::chapters(&local_chapters),
+    };
+    let segments = match segments.inspect_err(|err| tracing::warn!("couldn't load media segments: {err}")) {
         Ok(segments) if !segments.is_empty() => markers::from_server(&segments),
-        Ok(_) => markers::from_chapters(&chapters, item.run_time_ticks.map(Duration::from)),
-        Err(err) => {
-            tracing::warn!("couldn't load media segments: {err}");
-            markers::from_chapters(&chapters, item.run_time_ticks.map(Duration::from))
-        }
+        _ if !local_segments.is_empty() => markers::from_server(&local_segments),
+        _ => markers::from_chapters(&chapters, item.run_time_ticks.map(Duration::from)),
     };
     let versions = sources
         .iter()
@@ -1474,14 +1491,25 @@ async fn run_session(
     options: PlayOptions,
     (volume, muted): (f64, bool),
     adjustments: Adjustments,
-    account: String,
+    (account, online): (String, bool),
     import: VideoImport,
     mut channels: Channels,
 ) -> Result<Ended, String> {
+    // Offline, nothing goes to the server: each call would only wait to fail.
+    let send = |result| {
+        if online {
+            report_or_log(result, "progress")
+        }
+    };
     // A downloaded copy plays from disk, with no negotiation and no auth header; the server
     // still hears about the playback, since the reports below are the same.
     let local = local_media(&account, &item, options.media_source_id.as_deref()).await;
     let from_disk = local.is_some();
+    // What the player's chapter marks and skip buttons fall back to when the server can't be
+    // asked; the lookup is done already, so `details` doesn't have to wait for it.
+    let local_markers = local
+        .as_ref()
+        .map(|local| (local.chapters.clone(), local.segments.clone()));
     let (source, url, method, subtitle_files, play_session_id) = match local {
         Some(local) => {
             tracing::info!(item = %item.name, path = %local.path.display(), "playing a downloaded file");
@@ -1642,7 +1670,7 @@ async fn run_session(
     let details_task = {
         let (client, item, updates) = (client.clone(), item.clone(), channels.updates.clone());
         tokio::spawn(async move {
-            let details = details(&client, &item).await;
+            let details = details(&client, &item, local_markers).await;
             let _ = updates.send(SessionUpdate::Details(Box::new(details)));
         })
     };
@@ -1694,30 +1722,37 @@ async fn run_session(
                 }
                 match reporting.on_event(&event, &mut report, tokio::time::Instant::now()) {
                     Outgoing::Start => {
-                        report_or_log(client.report_playback_start(&report).await, "start");
+                        if online {
+                            report_or_log(client.report_playback_start(&report).await, "start");
+                        }
                         save_unfinished(Some(&report), &account);
                     }
-                    Outgoing::Progress => report_or_log(client.report_playback_progress(&report).await, "progress"),
+                    Outgoing::Progress if online => send(client.report_playback_progress(&report).await),
+                    Outgoing::Progress => {}
                     Outgoing::Nothing => {}
                 }
             }
             Some(command) = channels.commands.recv() => {
                 tracing::debug!(?command, "player command");
-                let send = reporting.on_command(&command);
+                let send_now = reporting.on_command(&command);
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
-                if send == Outgoing::Progress {
-                    report_or_log(client.report_playback_progress(&report).await, "progress");
+                if online && send_now == Outgoing::Progress {
+                    send(client.report_playback_progress(&report).await);
                 }
             }
             _ = tokio::time::sleep_until(reporting.volume_due.unwrap_or_else(tokio::time::Instant::now)), if reporting.volume_due.is_some() => {
                 reporting.volume_reported();
-                report_or_log(client.report_playback_progress(&report).await, "progress");
+                if online {
+                    send(client.report_playback_progress(&report).await);
+                }
             }
             _ = ticker.tick(), if reporting.started => {
                 reporting.volume_reported();
-                report_or_log(client.report_playback_progress(&report).await, "progress");
+                if online {
+                    send(client.report_playback_progress(&report).await);
+                }
                 save_unfinished(Some(&report), &account);
             }
             _ = &mut channels.stop, if !stopping => {
@@ -1731,15 +1766,50 @@ async fn run_session(
 
     details_task.abort();
     let started = reporting.started;
+    let ended_early = duration.is_some_and(|d| Duration::from(report.position) + EARLY_END < d);
+    // Played to the end (not stopped, lost or ended early), for the local watch state below.
+    let completed = error.is_none() && finished && !ended_early;
     if started {
-        report_or_log(client.report_playback_stopped(&report).await, "stop");
+        let reported = online && {
+            let stopped = client.report_playback_stopped(&report).await;
+            let reported = stopped.is_ok();
+            report_or_log(stopped, "stop");
+            reported
+        };
         save_unfinished(None, &account);
+        if from_disk {
+            // A downloaded file's watch state is the app's to keep: the server may not be there
+            // to hold it. `item.json` gets the new position right away (so the next offline
+            // start resumes there), and the stop report that didn't go out waits in
+            // `pending.json` for the server's next answer.
+            let (account, item_id, media_source_id) =
+                (account.clone(), report.item_id.clone(), report.media_source_id.clone());
+            let position = report.position;
+            let played_at = (!reported).then(|| jellyfin::time::format_utc(std::time::SystemTime::now()));
+            let written = tokio::task::spawn_blocking(move || {
+                crate::downloads::record_progress(&account, &item_id, position, completed);
+                if let Some(played_at) = played_at {
+                    crate::downloads::add_pending(
+                        &account,
+                        crate::downloads::PendingReport {
+                            item_id,
+                            media_source_id,
+                            position_ticks: position,
+                            played_at,
+                        },
+                    );
+                }
+            })
+            .await;
+            if let Err(err) = written {
+                tracing::warn!("couldn't save the downloaded item's watch state: {err}");
+            }
+        }
     }
     if let (PlayMethod::Transcode, Some(id)) = (method, &play_session_id) {
         report_or_log(client.stop_transcoding(id).await, "transcode stop");
     }
     tracing::info!(item = %item.name, position = report.position.as_secs_f64(), "playback ended");
-    let ended_early = duration.is_some_and(|d| Duration::from(report.position) + EARLY_END < d);
     match error {
         // A failure right at the end isn't worth replaying from there.
         Some(message) if started && !stopping && ended_early => Ok(Ended::Lost {

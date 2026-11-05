@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Ticks;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PublicSystemInfo {
     pub id: Option<String>,
@@ -27,7 +27,7 @@ pub struct AuthenticationResult {
     pub server_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct UserDto {
     pub id: String,
@@ -41,7 +41,7 @@ pub struct UserDto {
 /// The user's preferences kept by the server (the web client's Settings → Home, Display and
 /// Playback). The server applies the track ones itself: `PlaybackInfo` picks the default audio
 /// and subtitle streams from them. Change them with [`crate::Client::update_user_configuration`].
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct UserConfiguration {
     /// Library ids left out of "My Media". `/UserViews` already leaves them out.

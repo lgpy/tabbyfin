@@ -4,6 +4,8 @@
 //!
 //! ```text
 //! <account>/index.json             the queue, in the order it was asked for
+//! <account>/session.json           who was signed in, for a launch the server can't answer
+//! <account>/pending.json           stop reports the server hasn't heard yet
 //! <account>/<item>/item.json       the item as it was downloaded, and what plays it
 //! <account>/<item>/media.<ext>     the finished file (a `.part` while it downloads)
 //! <account>/<item>/<index>.<ext>   its external subtitles
@@ -14,6 +16,10 @@
 //! A finished media file on disk is the source of truth: an item whose folder holds it is done
 //! whatever the queue says, so a lost or stale `index.json` never loses a download. `item.json`
 //! is written before the media starts, so an interrupted download still knows what it is.
+//!
+//! A downloaded file plays without the server, so what its playback changes is kept here too:
+//! the item's watch state goes back into its `item.json` ([`record_progress`]), and a stop
+//! report that couldn't reach the server waits in `pending.json` ([`flush_pending`]).
 //!
 //! Transfers run on tokio, at most [`MAX_TRANSFERS`] at a time, each with an abort handle that
 //! dropping [`Downloads`] fires, leaving its `.part` for the next sign-in. They report through a
@@ -29,8 +35,9 @@ use futures_util::FutureExt;
 
 use jellyfin::models::{
     BaseItemDto, BaseItemKind, ChapterInfo, ItemField, MediaSegmentDto, MediaSourceInfo, MediaStream, MediaStreamType,
+    PublicSystemInfo, UserDto,
 };
-use jellyfin::{Client, ImageRequest, PlaybackInfoRequest};
+use jellyfin::{Client, ImageRequest, PlaybackInfoRequest, PlaybackReport, Ticks};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
@@ -56,6 +63,11 @@ const BACKDROP_WIDTH: u32 = 1280;
 
 const INDEX_FILE: &str = "index.json";
 const ITEM_FILE: &str = "item.json";
+const SESSION_FILE: &str = "session.json";
+const PENDING_FILE: &str = "pending.json";
+/// How much of an item has to have played for it to count as watched: the server's default
+/// `MaxResumePct`, past which it marks the item played and clears the resume point.
+const PLAYED_SHARE: f64 = 0.9;
 
 /// What a page shows for one item.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +145,13 @@ pub struct LocalSubtitle {
     pub file: String,
 }
 
+impl LocalItem {
+    /// The poster's path in the item's folder, when one was saved.
+    fn poster(&self, dir: &Path) -> Option<PathBuf> {
+        self.primary_image.as_ref().map(|file| dir.join(file))
+    }
+}
+
 /// A finished download, as playback finds it.
 #[derive(Debug, Clone)]
 pub struct LocalMedia {
@@ -140,11 +159,9 @@ pub struct LocalMedia {
     pub source: MediaSourceInfo,
     /// Jellyfin stream index and the file holding it, for the external subtitles that are there.
     pub subtitles: Vec<(i32, PathBuf)>,
-    // For the player's chapters and skip buttons without the server; online, `playback::details`
-    // still asks the server, whose answer is fresher.
-    #[allow(dead_code)]
+    /// For the player's chapter marks and skip buttons when the server can't be asked
+    /// (`playback::details`).
     pub chapters: Vec<ChapterInfo>,
-    #[allow(dead_code)]
     pub segments: Vec<MediaSegmentDto>,
 }
 
@@ -190,6 +207,8 @@ pub struct Downloads {
 struct Entry {
     item: BaseItemDto,
     state: DownloadState,
+    /// The poster saved with the download, for a page drawing it without the server.
+    poster: Option<PathBuf>,
 }
 
 struct Running {
@@ -216,6 +235,7 @@ enum Update {
     Done {
         item_id: String,
         size: u64,
+        poster: Option<PathBuf>,
     },
     Failed {
         item_id: String,
@@ -267,31 +287,46 @@ impl Downloads {
         downloads
     }
 
+    /// Keeps the queue where it is until this account signs in again (`stopped`): for a session
+    /// signed in without the server (offline), where nothing can be downloaded and a queued
+    /// transfer must neither start nor fail. What's already on disk plays as usual.
+    pub fn hold(&mut self) {
+        self.stopped = true;
+        // Reports already on their way would show up as a transfer with nothing behind it.
+        self.updates.drain().for_each(drop);
+    }
+
     /// The queue as it was saved, with each item's state read from its folder: a finished file
     /// wins over what `index.json` remembers.
     fn load(&mut self) {
         let dir = account_dir(&self.account);
         let index: Index = read_json(&dir.join(INDEX_FILE)).unwrap_or_default();
         for entry in index.entries {
-            let state = match finished(&item_dir(&self.account, &entry.item.id)) {
-                Some(size) => DownloadState::Done { size },
-                None => match entry.state {
-                    SavedState::Queued => DownloadState::Queued,
-                    SavedState::Paused => DownloadState::Paused,
-                    SavedState::Failed { message } => DownloadState::Failed(message),
-                },
+            let item_dir = item_dir(&self.account, &entry.item.id);
+            let (state, poster) = match finished(&item_dir) {
+                Some(finished) => (DownloadState::Done { size: finished.size }, finished.poster),
+                None => (
+                    match entry.state {
+                        SavedState::Queued => DownloadState::Queued,
+                        SavedState::Paused => DownloadState::Paused,
+                        SavedState::Failed { message } => DownloadState::Failed(message),
+                    },
+                    None,
+                ),
             };
             self.entries.push(Entry {
                 item: entry.item,
                 state,
+                poster,
             });
         }
         // Finished downloads the index doesn't know (one it forgot, or one copied in).
-        for (item, size) in scan_finished(&dir) {
+        for (item, finished) in scan_finished(&dir) {
             if !self.entries.iter().any(|entry| entry.item.id == item.id) {
                 self.entries.push(Entry {
                     item,
-                    state: DownloadState::Done { size },
+                    state: DownloadState::Done { size: finished.size },
+                    poster: finished.poster,
                 });
             }
         }
@@ -350,6 +385,7 @@ impl Downloads {
             self.entries.push(Entry {
                 item,
                 state: DownloadState::Queued,
+                poster: None,
             });
             added = true;
         }
@@ -394,6 +430,37 @@ impl Downloads {
     /// The queue in order, finished downloads included, for a Downloads page.
     pub fn entries(&self) -> impl Iterator<Item = (&BaseItemDto, &DownloadState)> {
         self.entries.iter().map(|entry| (&entry.item, &entry.state))
+    }
+
+    /// The poster saved with the item's download (`primary.<ext>`), for a page drawing it
+    /// where the server can't be reached. The offline Downloads page draws these.
+    pub fn primary_image_path(&self, item_id: &str) -> Option<PathBuf> {
+        self.entries
+            .iter()
+            .find(|entry| entry.item.id == item_id)
+            .and_then(|entry| entry.poster.clone())
+    }
+
+    /// Reads the item's `item.json` again, for the page's own copy to follow what the playback
+    /// of a downloaded file wrote there (`record_progress`): its resume point and watched
+    /// state. Called when such a session ends, after that write.
+    pub fn refresh_item(&mut self, item_id: &str) {
+        if !self.entries.iter().any(|entry| entry.item.id == item_id) {
+            return;
+        }
+        let dir = item_dir(&self.account, item_id);
+        let Some(local) = read_json::<LocalItem>(&dir.join(ITEM_FILE)) else {
+            return;
+        };
+        let Some(entry) = self.entry_mut(item_id) else {
+            return;
+        };
+        if local.item.user_data.is_some() {
+            entry.item.user_data = local.item.user_data;
+        }
+        if entry.poster.is_none() {
+            entry.poster = local.primary_image.map(|file| dir.join(file));
+        }
     }
 
     /// What can be done about `item`'s download, `None` for what can't be downloaded. A series
@@ -451,12 +518,13 @@ impl Downloads {
                         entry.state = DownloadState::Downloading { done, total };
                     }
                 }
-                Update::Done { item_id, size } => {
+                Update::Done { item_id, size, poster } => {
                     self.running.retain(|run| run.item_id != item_id);
                     let Some(entry) = self.entry_mut(&item_id) else {
                         continue;
                     };
                     entry.state = DownloadState::Done { size };
+                    entry.poster = poster;
                     notices.push(Notice::Downloaded {
                         title: playback::title(&entry.item),
                     });
@@ -622,6 +690,173 @@ pub fn find_local(account_key: &str, item_id: &str) -> Option<LocalMedia> {
     })
 }
 
+/// `session.json`: the user and the server the account was signed in to.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedSession {
+    user: UserDto,
+    server: PublicSystemInfo,
+}
+
+/// Keeps who this account was signed in as, so a launch the server can't answer still knows
+/// its name and can show its downloads. A small file write: call it off the UI thread
+/// ([`Services::new`] does, on a blocking thread).
+pub fn save_session(account_key: &str, user: &UserDto, server: &PublicSystemInfo) {
+    let session = SavedSession {
+        user: user.clone(),
+        server: server.clone(),
+    };
+    if let Err(err) = write_json(&account_dir(account_key).join(SESSION_FILE), &session) {
+        tracing::warn!("couldn't save the session for offline use: {err}");
+    }
+}
+
+/// The session saved for the account, for a launch the server can't answer. The offline screen
+/// signs in with it.
+pub fn saved_session(account_key: &str) -> Option<(UserDto, PublicSystemInfo)> {
+    let saved: SavedSession = read_json(&account_dir(account_key).join(SESSION_FILE))?;
+    Some((saved.user, saved.server))
+}
+
+/// Whether the account has a finished download on disk: what makes opening it without the
+/// server worth it. The launch's offline check asks this.
+pub fn has_downloads(account_key: &str) -> bool {
+    !scan_finished(&account_dir(account_key)).is_empty()
+}
+
+/// Writes the watch state a downloaded file's playback leaves, so the next offline start
+/// resumes where this one stopped: its position, and played (with no position) once it went
+/// past the last tenth or ended. A small read and write: call it off the UI thread.
+pub fn record_progress(account_key: &str, item_id: &str, position: Ticks, finished: bool) {
+    let path = item_dir(account_key, item_id).join(ITEM_FILE);
+    let Some(mut local) = read_json::<LocalItem>(&path) else {
+        return;
+    };
+    let total = local.item.run_time_ticks.or(local.source.run_time_ticks);
+    let played = finished || total.is_some_and(|total| position.0 as f64 >= total.0 as f64 * PLAYED_SHARE);
+    let data = local.item.user_data.get_or_insert_with(Default::default);
+    data.played = played;
+    data.playback_position_ticks = if played { Ticks::ZERO } else { position };
+    if played {
+        data.last_played_date = Some(jellyfin::time::format_utc(std::time::SystemTime::now()));
+    }
+    if let Err(err) = write_json(&path, &local) {
+        tracing::warn!("couldn't save where the downloaded item stopped: {err}");
+    }
+}
+
+/// A stop report the server didn't get, kept in the account's `pending.json` until it can.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PendingReport {
+    pub item_id: String,
+    pub media_source_id: String,
+    pub position_ticks: Ticks,
+    /// When the playback ended, in the server's ISO-8601 format, to tell a later watch of the
+    /// item (here or on another device) apart.
+    pub played_at: String,
+}
+
+/// Appends a stop report the server didn't get, for [`flush_pending`] to send later. A small
+/// read and write: call it off the UI thread.
+pub fn add_pending(account_key: &str, report: PendingReport) {
+    let path = account_dir(account_key).join(PENDING_FILE);
+    let mut pending: Vec<PendingReport> = read_json(&path).unwrap_or_default();
+    pending.push(report);
+    if let Err(err) = write_json(&path, &pending) {
+        tracing::warn!("couldn't save the playback reports waiting for the server: {err}");
+    }
+}
+
+/// Sends the stop reports kept while the server couldn't be reached, in the order they
+/// happened. An item the server has seen played since (its `LastPlayedDate` is newer than the
+/// report's `played_at`) is left alone: that watch wins. Entries the server took or that are
+/// settled are dropped, and one that fails to go stays for the next sign-in, with the ones
+/// behind it (a report mustn't overtake an earlier one).
+pub async fn flush_pending(client: &Client, account_key: &str) {
+    let path = account_dir(account_key).join(PENDING_FILE);
+    let reading = path.clone();
+    let pending: Vec<PendingReport> = match tokio::task::spawn_blocking(move || read_json(&reading)).await {
+        Ok(Some(pending)) => pending,
+        Ok(None) => return,
+        Err(err) => {
+            tracing::warn!("couldn't read the pending playback reports: {err}");
+            return;
+        }
+    };
+    if pending.is_empty() {
+        return;
+    }
+    tracing::info!(count = pending.len(), "sending the playback reports the server missed");
+    let mut left: Vec<PendingReport> = Vec::new();
+    let mut blocked = false;
+    for report in pending {
+        if blocked {
+            left.push(report);
+            continue;
+        }
+        let item = match client.item(&report.item_id, &[]).await {
+            Ok(item) => item,
+            Err(jellyfin::Error::NotFound) => {
+                tracing::info!(item = %report.item_id, "the server no longer has the item; dropping its playback report");
+                continue;
+            }
+            Err(err) => {
+                tracing::warn!(item = %report.item_id, "couldn't check where the item stands: {err}");
+                blocked = true;
+                left.push(report);
+                continue;
+            }
+        };
+        let watched_at = item
+            .user_data
+            .as_ref()
+            .and_then(|data| data.last_played_date.as_deref())
+            .and_then(jellyfin::time::parse_utc);
+        if let Some(watched_at) = watched_at
+            && jellyfin::time::parse_utc(&report.played_at).is_some_and(|at| watched_at > at)
+        {
+            tracing::info!(item = %report.item_id, "the item was played again since; leaving the server's state");
+            continue;
+        }
+        let stop = PlaybackReport {
+            item_id: report.item_id.clone(),
+            media_source_id: report.media_source_id.clone(),
+            play_session_id: None,
+            position: report.position_ticks,
+            ..Default::default()
+        };
+        match client.report_playback_stopped(&stop).await {
+            Ok(()) => tracing::info!(
+                item = %report.item_id,
+                position = report.position_ticks.as_secs_f64(),
+                "reported a playback the server missed"
+            ),
+            Err(err) => {
+                tracing::warn!(item = %report.item_id, "couldn't report a playback the server missed: {err}");
+                blocked = true;
+                left.push(report);
+            }
+        }
+    }
+    let writing = path.clone();
+    let written = tokio::task::spawn_blocking(move || {
+        if left.is_empty() {
+            match std::fs::remove_file(&writing) {
+                Ok(()) => Ok(()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(err) => Err(err),
+            }
+        } else {
+            write_json(&writing, &left)
+        }
+    })
+    .await;
+    match written {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => tracing::warn!("couldn't save the playback reports still to send: {err}"),
+        Err(err) => tracing::warn!("couldn't save the playback reports still to send: {err}"),
+    }
+}
+
 /// Downloads one item. A failure is one message: the transfer's own errors are user-facing.
 async fn transfer(client: Client, item: BaseItemDto, dir: PathBuf, updates: task::Sender<Update>) {
     let item_id = item.id.clone();
@@ -710,7 +945,7 @@ async fn fetch_media(
     if local.size > 0 && offset >= local.size {
         if offset == local.size {
             // Everything arrived but the rename didn't (a crash in between): finish it now.
-            return finish(&part, &finished, local.size, updates, item_id).await;
+            return finish(&part, &finished, local.size, local.poster(dir), updates, item_id).await;
         }
         // Longer than the file can be: a corrupt leftover, not something to resume.
         offset = 0;
@@ -775,7 +1010,7 @@ async fn fetch_media(
         // The `.part` stays: the retry resumes from here.
         return Err(format!("only {done} of {total} bytes arrived"));
     }
-    finish(&part, &finished, done, updates, item_id).await
+    finish(&part, &finished, done, local.poster(dir), updates, item_id).await
 }
 
 /// Renames an all-there `.part` into place and tells the UI.
@@ -783,6 +1018,7 @@ async fn finish(
     part: &Path,
     finished: &Path,
     size: u64,
+    poster: Option<PathBuf>,
     updates: &task::Sender<Update>,
     item_id: &str,
 ) -> Result<(), String> {
@@ -792,6 +1028,7 @@ async fn finish(
     let _ = updates.send(Update::Done {
         item_id: item_id.to_owned(),
         size,
+        poster,
     });
     Ok(())
 }
@@ -902,27 +1139,37 @@ fn safe_name(value: &str) -> String {
         .collect()
 }
 
-/// `Some(size)` when the item's folder holds its finished media file; the state a done
-/// download is in, whatever `index.json` says.
-fn finished(dir: &Path) -> Option<u64> {
+/// A finished download as its folder holds it: the media file's size, and its poster when one
+/// was saved with it.
+struct Finished {
+    size: u64,
+    poster: Option<PathBuf>,
+}
+
+/// `Some` when the item's folder holds its finished media file; the state a done download is
+/// in, whatever `index.json` says.
+fn finished(dir: &Path) -> Option<Finished> {
     let local: LocalItem = read_json(&dir.join(ITEM_FILE))?;
     let meta = std::fs::metadata(dir.join(&local.file)).ok()?;
-    meta.is_file().then_some(meta.len())
+    meta.is_file().then(|| Finished {
+        size: meta.len(),
+        poster: local.poster(dir),
+    })
 }
 
 /// Every finished download in the account's folder, for an index that lost some.
-fn scan_finished(account: &Path) -> Vec<(BaseItemDto, u64)> {
+fn scan_finished(account: &Path) -> Vec<(BaseItemDto, Finished)> {
     let Ok(dir) = std::fs::read_dir(account) else {
         return Vec::new();
     };
-    let mut found: Vec<(BaseItemDto, u64)> = dir
+    let mut found: Vec<(BaseItemDto, Finished)> = dir
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| {
             let dir = entry.path();
             let local: LocalItem = read_json(&dir.join(ITEM_FILE))?;
-            let size = finished(&dir)?;
-            Some((local.item, size))
+            let finished = finished(&dir)?;
+            Some((local.item, finished))
         })
         .collect();
     found.sort_by(|(a, _), (b, _)| a.name.cmp(&b.name));
@@ -1055,15 +1302,18 @@ mod tests {
     const ITEM: &str = "0123456789abcdef0123456789abcdef";
 
     fn client(server: &MockServer) -> Client {
+        client_at(&server.uri())
+    }
+
+    /// A client for a URL, for the tests that need none of the server's answers.
+    fn client_at(url: &str) -> Client {
         let info = ClientInfo {
             client: "tabbyfin-tests".into(),
             device: "tests".into(),
             device_id: "test-device".into(),
             version: "0.1.0".into(),
         };
-        Client::new(&server.uri(), info)
-            .expect("mock server URL")
-            .with_token("token")
+        Client::new(url, info).expect("the server's URL").with_token("token")
     }
 
     /// Waits for the tokio runtime's answer, as the UI's tasks do: the runtime is the app's, and
@@ -1196,6 +1446,11 @@ mod tests {
         let saved: LocalItem = read_json(&dir(ITEM).join(ITEM_FILE)).expect("item.json");
         assert_eq!(saved.primary_image.as_deref(), Some("primary.png"));
         assert!(dir(ITEM).join("primary.png").is_file());
+        assert_eq!(
+            downloads.primary_image_path(ITEM),
+            Some(dir(ITEM).join("primary.png")),
+            "the page draws the saved poster, not the server's"
+        );
         // Done downloads are found on disk, not in the index.
         let index: Index = read_json(&account_dir(ACCOUNT).join(INDEX_FILE)).expect("index.json");
         assert!(index.entries.is_empty());
@@ -1348,5 +1603,271 @@ mod tests {
         let _config = ConfigDir::new("downloads-names");
         assert_eq!(account_dir(ACCOUNT), config::downloads_dir().join("server_user"));
         assert_eq!(safe_name("../../etc"), "______etc");
+    }
+
+    /// Writes a downloaded item's `item.json` and its media file, as a finished download leaves
+    /// them, for the tests that play one.
+    fn finished_download(item: Value) -> LocalItem {
+        std::fs::create_dir_all(dir(ITEM)).expect("the item's folder");
+        let local: LocalItem = serde_json::from_value(json!({
+            "item": item,
+            "source": {"Id": "source", "Container": "mkv", "MediaStreams": []},
+            "file": "media.mkv",
+            "size": 5,
+        }))
+        .expect("a local item");
+        write_json(&dir(ITEM).join(ITEM_FILE), &local).expect("item.json");
+        std::fs::write(dir(ITEM).join("media.mkv"), b"hello").expect("the media file");
+        local
+    }
+
+    #[test]
+    fn the_session_snapshot_round_trips() {
+        let _config = ConfigDir::new("downloads-session");
+        let auth: jellyfin::models::AuthenticationResult = crate::ui_tests::fixture_json("authenticate");
+        let info: PublicSystemInfo = crate::ui_tests::fixture_json("public_info");
+        assert_eq!(saved_session(ACCOUNT), None, "nothing saved yet");
+        save_session(ACCOUNT, &auth.user, &info);
+        let (user, server) = saved_session(ACCOUNT).expect("the saved session");
+        assert_eq!(user, auth.user);
+        assert_eq!(server, info);
+        assert_eq!(user.name, "dev");
+        assert!(user.configuration.is_some());
+        assert!(account_dir(ACCOUNT).join(SESSION_FILE).is_file());
+    }
+
+    #[test]
+    fn only_an_account_with_a_finished_download_has_downloads() {
+        let _config = ConfigDir::new("downloads-have");
+        assert!(!has_downloads(ACCOUNT));
+        std::fs::create_dir_all(dir(ITEM)).expect("the item's folder");
+        write_json(
+            &dir(ITEM).join(ITEM_FILE),
+            &serde_json::from_value::<LocalItem>(json!({
+                "item": item_json(ITEM),
+                "source": {"Id": "source", "Container": "mkv", "MediaStreams": []},
+                "file": "media.mkv",
+                "size": 5,
+            }))
+            .expect("a local item"),
+        )
+        .expect("item.json");
+        assert!(!has_downloads(ACCOUNT), "`item.json` alone isn't a download");
+        std::fs::write(dir(ITEM).join("media.mkv"), b"hello").expect("the media file");
+        assert!(has_downloads(ACCOUNT));
+    }
+
+    /// Past the last tenth, a downloaded item counts as watched: offline, its next play starts
+    /// at the beginning rather than resuming near the end.
+    #[test]
+    fn a_downloaded_files_progress_is_kept_for_offline_resume() {
+        let _config = ConfigDir::new("downloads-progress");
+        let mut value = item_json(ITEM);
+        value["RunTimeTicks"] = json!(10_000_000_000_i64); // 1000 s
+        finished_download(value);
+        let ctx = egui::Context::default();
+        // Nothing asks this server anything: the test only plays with the item's files.
+        let mut downloads = Downloads::new(client_at("http://127.0.0.1:1/"), ACCOUNT, &ctx);
+        assert!(downloads.primary_image_path(ITEM).is_none(), "no poster was saved");
+
+        record_progress(ACCOUNT, ITEM, Ticks(2_000_000_000), false); // 200 s of 1000: partway
+        let saved: LocalItem = read_json(&dir(ITEM).join(ITEM_FILE)).expect("item.json");
+        let data = saved.item.user_data.expect("the watch state");
+        assert_eq!(data.playback_position_ticks, Ticks(2_000_000_000));
+        assert!(!data.played);
+        assert_eq!(data.last_played_date, None, "only a watched item gets a date");
+        downloads.refresh_item(ITEM);
+        let entry = downloads.entries().next().expect("the entry").0;
+        assert_eq!(
+            entry.user_data.as_ref().map(|data| data.playback_position_ticks),
+            Some(Ticks(2_000_000_000)),
+            "the page's copy has the new position too"
+        );
+
+        record_progress(ACCOUNT, ITEM, Ticks(9_500_000_000), false); // 95 %: watched
+        let saved: LocalItem = read_json(&dir(ITEM).join(ITEM_FILE)).expect("item.json");
+        let data = saved.item.user_data.expect("the watch state");
+        assert!(data.played);
+        assert_eq!(data.playback_position_ticks, Ticks::ZERO, "watched items don't resume");
+        let played_at = data.last_played_date.as_deref().expect("when it was played");
+        assert!(jellyfin::time::parse_utc(played_at).is_some(), "{played_at}");
+    }
+
+    /// An item played to the end counts as watched even when the server never said how long it
+    /// is.
+    #[test]
+    fn an_item_played_to_the_end_is_watched() {
+        let _config = ConfigDir::new("downloads-finished");
+        finished_download(item_json(ITEM));
+        record_progress(ACCOUNT, ITEM, Ticks(1), true);
+        let saved: LocalItem = read_json(&dir(ITEM).join(ITEM_FILE)).expect("item.json");
+        let data = saved.item.user_data.expect("the watch state");
+        assert!(data.played);
+        assert_eq!(data.playback_position_ticks, Ticks::ZERO);
+    }
+
+    fn pending(item_id: &str, played_at: &str) -> PendingReport {
+        PendingReport {
+            item_id: item_id.to_owned(),
+            media_source_id: "source".to_owned(),
+            position_ticks: Ticks(200_000_000),
+            played_at: played_at.to_owned(),
+        }
+    }
+
+    fn write_pending(reports: &[PendingReport]) {
+        write_json(&account_dir(ACCOUNT).join(PENDING_FILE), &reports.to_vec()).expect("pending.json");
+    }
+
+    fn read_pending() -> Vec<PendingReport> {
+        read_json(&account_dir(ACCOUNT).join(PENDING_FILE)).unwrap_or_default()
+    }
+
+    /// Serves the item's own answer to `/Items/{id}` with `last_played` as its `LastPlayedDate`.
+    fn serve_user_data(server: &Arc<MockServer>, last_played: Option<&str>) {
+        let mut value = item_json(ITEM);
+        if let Some(last_played) = last_played {
+            value["UserData"] = json!({"LastPlayedDate": last_played});
+        }
+        mount(
+            server,
+            Mock::given(method("GET"))
+                .and(path(format!("/Items/{ITEM}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(&value)),
+        );
+    }
+
+    fn serve_stop(server: &Arc<MockServer>, status: u16, times: u64) {
+        mount(
+            server,
+            Mock::given(method("POST"))
+                .and(path("/Sessions/Playing/Stopped"))
+                .respond_with(ResponseTemplate::new(status))
+                .expect(times),
+        );
+    }
+
+    #[test]
+    fn a_pending_report_goes_out_once_the_server_can_be_reached() {
+        let _config = ConfigDir::new("downloads-pending-sent");
+        let server = start();
+        serve_user_data(&server, None);
+        serve_stop(&server, 204, 1);
+        write_pending(&[pending(ITEM, "2026-10-14T19:00:00.000000Z")]);
+        let api = client(&server);
+        block_on(async move { flush_pending(&api, ACCOUNT).await });
+        assert_eq!(read_pending(), [], "a sent report is dropped");
+        let server = server.clone();
+        block_on(async move { server.verify().await });
+    }
+
+    /// Watched again since (on another device, say): that watch wins over the report from here.
+    #[test]
+    fn a_pending_report_is_skipped_when_the_item_was_watched_since() {
+        let _config = ConfigDir::new("downloads-pending-skip");
+        let server = start();
+        serve_user_data(&server, Some("2026-10-15T19:00:00.000000Z"));
+        serve_stop(&server, 204, 0);
+        write_pending(&[pending(ITEM, "2026-10-14T19:00:00.000000Z")]);
+        let api = client(&server);
+        block_on(async move { flush_pending(&api, ACCOUNT).await });
+        assert_eq!(read_pending(), [], "a skipped report is dropped too");
+        let server = server.clone();
+        block_on(async move { server.verify().await });
+    }
+
+    #[test]
+    fn a_pending_report_the_server_refuses_is_kept() {
+        let _config = ConfigDir::new("downloads-pending-kept");
+        let server = start();
+        serve_user_data(&server, None);
+        serve_stop(&server, 500, 1);
+        let report = pending(ITEM, "2026-10-14T19:00:00.000000Z");
+        write_pending(std::slice::from_ref(&report));
+        let api = client(&server);
+        block_on(async move { flush_pending(&api, ACCOUNT).await });
+        assert_eq!(read_pending(), [report], "it waits for the next sign-in");
+        let server = server.clone();
+        block_on(async move { server.verify().await });
+    }
+
+    /// A report whose item the server no longer has can never be sent: it's dropped rather than
+    /// retried forever.
+    #[test]
+    fn a_pending_report_for_an_item_the_server_forgot_is_dropped() {
+        let _config = ConfigDir::new("downloads-pending-gone");
+        let server = start();
+        mount(
+            &server,
+            Mock::given(method("GET"))
+                .and(path(format!("/Items/{ITEM}")))
+                .respond_with(ResponseTemplate::new(404)),
+        );
+        serve_stop(&server, 204, 0);
+        write_pending(&[pending(ITEM, "2026-10-14T19:00:00.000000Z")]);
+        let api = client(&server);
+        block_on(async move { flush_pending(&api, ACCOUNT).await });
+        assert_eq!(read_pending(), []);
+        let server = server.clone();
+        block_on(async move { server.verify().await });
+    }
+
+    /// Signed in without the server, a queued download must not start (or fail): it waits for
+    /// the account's next online sign-in.
+    #[test]
+    fn an_offline_download_starts_no_transfer() {
+        let _config = ConfigDir::new("downloads-offline");
+        let server = start();
+        // Any request at all would be a transfer starting.
+        mount(
+            &server,
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello"))
+                .expect(0),
+        );
+        mount(
+            &server,
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(0),
+        );
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx);
+        downloads.hold();
+        downloads.request(&item(ITEM)).expect("queued");
+        for _ in 0..5 {
+            assert!(downloads.tick().is_empty(), "nothing failed either");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(downloads.state(ITEM), Some(DownloadState::Queued));
+        drop(downloads);
+        let server = server.clone();
+        block_on(async move { server.verify().await });
+    }
+
+    /// The services of a session signed in without the server connect nothing and download
+    /// nothing, however long they're ticked.
+    #[test]
+    fn offline_services_ask_the_server_nothing() {
+        let _config = ConfigDir::new("services-offline");
+        let server = crate::ui_tests::FixtureServer::start();
+        let ctx = egui::Context::default();
+        let session = crate::ui_tests::session(&server);
+        let account = session.account_key();
+        let mut services = Services::offline(session, &ctx);
+        assert!(!services.online);
+        services.downloads.request(&item(ITEM)).expect("queued");
+        for _ in 0..5 {
+            services.tick(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // A transfer would start with `PlaybackInfo`, and the websocket with `/socket`.
+        assert_eq!(server.requests("POST", &format!("/Items/{ITEM}/PlaybackInfo")), 0);
+        assert_eq!(server.requests("GET", "/socket"), 0, "no websocket to keep");
+        assert_eq!(services.downloads.state(ITEM), Some(DownloadState::Queued));
+        // The queue stays for the account's next online sign-in.
+        drop(services);
+        let downloads = Downloads::new(client_at("http://127.0.0.1:1/"), &account, &ctx);
+        assert_eq!(downloads.state(ITEM), Some(DownloadState::Queued));
     }
 }
