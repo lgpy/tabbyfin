@@ -54,6 +54,7 @@ The harness presses keys from inside the app and the UI tests click headless, so
 - **Versions**: switching to an item's second version restarts at the same position; the seek bar then shows that version's trickplay tiles, and an item without tiles shows only the time.
 - **Subtitles and delays**: subtitle delay and size on a real subtitle track and audio delay with sound; an ASS subtitle keeps its own style; the size set in Settings, during playback too, and in the player's menu agree afterwards.
 - **A reconnect** over the last frame (Back while it shows).
+- **Downloads**: a feature-length movie and a whole season from a real server; the log says `playing a downloaded file` and the file plays with its audio, embedded and external subtitles chosen as when streaming; the server shows the playback and keeps the resume point; Wi-Fi off mid-download fails it with a message, and *Retry* resumes from where it stopped (a `Range` request, not from zero); quitting mid-download and signing in again carries on; a full disk is refused before starting; a user without *Allow media downloading* gets no Download entry or button.
 
 ## 5. SyncPlay (2.10)
 
