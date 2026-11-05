@@ -14,6 +14,7 @@ pub mod focus;
 pub mod frosted;
 pub mod image;
 pub mod label;
+pub mod library_banner;
 pub mod library_tile;
 pub mod list_row;
 pub mod mascot;
