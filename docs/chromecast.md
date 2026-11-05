@@ -56,14 +56,14 @@
 
   | command | options | Notes |
   |---|---|---|
-  | `Identify` | `{}` | Sent right after `CONNECT`, with credentials. The receiver then reports its capabilities to the server. While something plays, it answers with the current state (as a `playbackstop`-typed message). |
+  | `Identify` | `{}` | Sent right after `CONNECT`, with credentials. The receiver then reports its capabilities to the server. It answers with the current state: a `playbackstop`-typed message while something plays, a `volumechange` with empty ids when idle. |
   | `PlayNow` | `{items, startIndex?, startPositionTicks?, mediaSourceId?, audioStreamIndex?, subtitleStreamIndex?}` | `items` are stubs, `{Id, ServerId, Name, Type, MediaType, IsFolder}`; the receiver fetches each item when it plays it. Positions and tracks apply only to the first item played. A single episode is extended with the rest of the series when the user has next-episode autoplay on. |
   | `PlayNext`, `PlayLast` | `{items}` | **Both append to the end of the queue.** |
   | `Shuffle` | `{items: [item]}` | The receiver picks up to 50 random items from the item. |
   | `Pause`, `Unpause`, `PlayPause`, `Stop`, `NextTrack`, `PreviousTrack` | `{}` | |
   | `Seek` | `{position}` | In seconds, not ticks. |
-  | `SetAudioStreamIndex` | `{index}` | Reloads the stream. |
-  | `SetSubtitleStreamIndex` | `{index}` | `-1` turns subtitles off. |
+  | `SetAudioStreamIndex` | `{index}` | Reloads the stream. **Not used:** see *What a real Chromecast showed*. |
+  | `SetSubtitleStreamIndex` | `{index}` | `-1` turns subtitles off. **Not used**, as above. |
   | `SetRepeatMode` | `{RepeatMode}` | Not used. After it is sent once, the receiver also sends `repeatmodechange` after every later command. |
 
   **Never send anything else.** An unknown command falls through to the receiver's play handler, which throws. Volume and mute commands on this namespace do nothing on the receiver; they go through `SET_VOLUME`.
@@ -73,6 +73,18 @@
   - There's no queue or playlist index in it.
 - **Other senders** (another phone casting to the same TV) get none of those messages. They do get the standard `urn:x-cast:com.google.cast.media` `MEDIA_STATUS`, whose `media.customData` has `itemId`, `mediaSourceId`, the stream indexes, `canClientSeek` and `startPositionTicks`. When `canClientSeek` is false (a non-HLS transcode), the real position is `currentTime + startPositionTicks`. We follow `MEDIA_STATUS` when we aren't the last sender. Seeking and track changes still go through the custom commands, since the standard ones bypass the receiver's stream logic.
 - **The token is shared with the receiver.** Signing out revokes it, and the receiver then stops working. Signing out while casting stops the cast first.
+
+### What a real Chromecast showed
+
+Seen on a Chromecast with the stable receiver (2026-11), against the dev server; the fake device in `cast::fake` now behaves the same way.
+
+- **Leaving with `CLOSE` quits the receiver.** It stops when its last sender disconnects on purpose. *Disconnect* and quitting the app only close the socket, which leaves it playing.
+- **`RECEIVER_STATUS` without `applications`.** Right after a launch and between apps the device sends statuses with only the volume. Our app is gone only when the list is there without it (usually listing the idle screen, *Backdrop*).
+- **Empty ids mean nothing plays.** An idle receiver answers `Identify` with a `volumechange` whose `ItemId` and `NowPlayingItem.Id` are `""`. The end of an item is a `playbackstop` with empty ids too.
+- **`SET_VOLUME` is answered in about 0.1 s**, even when the level doesn't change. The receiver sends progress about four times a second, so a sender that stops reading its messages while it awaits an answer stalls: the connection's message stream is unbounded for that reason, and volume requests don't block the loop.
+- **The receiver's own track changes break.** `SetAudioStreamIndex`, and `SetSubtitleStreamIndex` when it has to reload (burned-in subtitles), restart the stream from `currentTime × 10⁷`. That's fractional, and the server answers a fractional `StartTimeTicks` with HTTP 400, so the TV shows `NoCompatibleStream`. Its stop reports have the same flaw: the server keeps the TV's session "playing" after it stopped.
+- **A `PlayNow` over playback can leave *Ready to cast* on top.** Its handling of the interrupted stream can land after the new one started and show the idle screen over it for good, while the stream plays on underneath. Jellyfin's Android app does the same. So other tracks and versions are a `Stop`, then (once its `playbackstop` came, plus 1 s) a `PlayNow` from the current position in whole ticks (`Services::cast_reload`).
+- **A frame is at most 64 KB.** A `PlayNow` with about 300 episodes is 51 KB, with 400 it's 67 KB. The app cuts a longer queue to what fits; the channel refuses a bigger message with `FrameTooLarge` instead of ending the connection.
 
 ## Code
 

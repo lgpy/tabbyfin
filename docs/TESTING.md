@@ -109,14 +109,19 @@ Against `mise run dev:min` (port 8097): signing in with a password and with Quic
 
 Everything so far ran against the fake device in `crates/cast/tests/` and the app's UI tests. On a real Chromecast and a Google TV, with the dev server reached by its LAN address:
 
-- **The live check first:** `mise run cast` lists the TVs, launches the receiver and prints its answer to `Identify`; `mise run cast -- --play <item id>` plays a dev item and prints its progress. Then the heartbeat holds for an hour, and how big a `PlayNow` with a long queue can get (the limit is said to be 64 KB).
-- **The dev server's address:** the server reports a `LocalAddress` from inside Docker (`http://172.18.0.2:8096` in the fixtures), which a TV can't reach; the TV needs the host's LAN address, and `dev/setup-server.py`'s port binding may need opening beyond `localhost`. Signed in by the LAN address, the TV is given that address as is.
+- **The live check first:** `mise run cast` lists the TVs, launches the receiver and prints its answer to `Identify`; `mise run cast -- --play <item id>` plays a dev item and prints its progress. Then the heartbeat holds for an hour, and how big a `PlayNow` with a long queue can get. On a Chromecast (2026-11): a 300-episode `PlayNow` (51 KB) played and a 400-episode one (67 KB) is over the 64 KB frame; the heartbeat held for 33 minutes before the run was cut short, so the full hour is still to see.
+- **The dev server's address:** the server reports a `LocalAddress` from inside Docker (`http://172.18.0.2:8096` in the fixtures), which a TV can't reach.
+  - Set *Dashboard → Networking → Published server URIs* to `all=http://<host's LAN address>:8096`. `LocalAddress` is then that, and the app hands it to the TV in place of `localhost`.
+  - Docker Desktop on WSL with `networkingMode=mirrored`: inbound connections also need a Hyper-V firewall rule, from an admin PowerShell: `New-NetFirewallHyperVRule -Name jellyfin-dev -DisplayName "Jellyfin dev 8096" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts 8096`. The host itself can't reach its own LAN address then (only `localhost`), so test from the TV.
+  - The dev *Test Movie* is 60 s long: seeking near its end ends it, and the TV goes back to *Ready to cast*. Track and version changes are easier to judge on a longer item.
+  - `RUST_LOG=info,tabbyfin::cast=debug` logs every message to and from the receiver (without the credentials).
 - **The panel:** the TV, a cast group (shown as *Group*) and the last TV first; casting, *Disconnect* (the TV keeps playing) and *Stop casting* (back to its idle screen).
 - **Playing:** a movie and an episode (the receiver plays the next one), a transcode (the receiver's choice), another version, audio and subtitle changes (each reloads on the TV), seeking, the chapters menu, pause from the player and from the now-casting bar, and the TV's volume from the slider, the wheel and the keys.
-- **Handover:** casting while something plays here picks it up on the TV at the same spot, version and tracks, and the dashboard shows the local session stop before the TV's starts.
+- **Handover:** the player's cast button (top right, unlit, while something plays here and a TV was found) picks it up on the TV at the same spot, version and tracks, without leaving the player; the dashboard shows the local session stop before the TV's starts.
+- **Track and version changes** briefly show the receiver's *Ready to cast* (they're a `Stop`, then a `PlayNow`), then play on from the same spot. Several in a row must each come back.
 - **The dashboard's *Play on Tabbyfin*** plays on the TV while casting.
 - **SyncPlay:** the cast button is off in a group; joining one while casting asks first and stops the cast.
-- **Errors:** a launch that fails, the TV turned off mid-cast (*Lost the connection*), a server address the TV can't reach (`connectionerror`'s toast), an item the TV can't play (`playbackerror`).
+- **Errors:** a launch that fails, the TV turned off mid-cast (*Lost the connection*), a server address the TV can't reach (`connectionerror`'s toast), an item the TV can't play (`playbackerror`; turning off the dev user's transcoding and remuxing makes *Test Movie* one).
 - **The bitrate setting:** *Settings → Playback → Chromecast bitrate* caps what the TV streams.
 - **Two senders:** a phone casting to the same TV while this app casts (it follows `MEDIA_STATUS` then).
 
