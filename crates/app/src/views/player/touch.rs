@@ -21,12 +21,16 @@ use crate::views::PageCx;
 use crate::widgets::round_button;
 use crate::widgets::text::timestamp;
 
-/// Whether the video takes touch gestures rather than the mouse's clicks.
-pub(super) const TOUCH: bool = cfg!(target_os = "android");
+/// Whether the player is driven by touch (`layout::touch`: Android, or a test that says so): the
+/// video takes gestures rather than the mouse's clicks, and the controls are the phone's
+/// (`phone.rs`).
+pub(super) fn on(ctx: &egui::Context) -> bool {
+    crate::layout::touch(ctx)
+}
 
 /// What the video senses: drags too, for touch.
-pub(super) fn sense() -> Sense {
-    if TOUCH {
+pub(super) fn sense(ctx: &egui::Context) -> Sense {
+    if on(ctx) {
         Sense::CLICK | Sense::DRAG
     } else {
         Sense::CLICK

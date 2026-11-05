@@ -25,6 +25,7 @@
 //! Auto-skip and the clock's "time left" are config settings read when the page opens; the clock
 //! saves its choice when clicked.
 
+mod phone;
 mod touch;
 
 use std::time::Duration;
@@ -180,6 +181,10 @@ pub struct PlayerPage {
     subtitles: Subtitles,
     /// Taps and drags on the video, on a touch screen.
     touch: touch::Touch,
+    /// The phone's sheet that's open: the settings or the chapters (`phone.rs`).
+    sheet: Option<phone::Sheet>,
+    /// The subtitle track the phone's subtitles button last turned off, which it turns back on.
+    last_subtitle: Option<i32>,
 }
 
 impl PlayerPage {
@@ -209,6 +214,8 @@ impl PlayerPage {
                 config.subtitle_style.unwrap_or_default(),
             ),
             touch: touch::Touch::default(),
+            sheet: None,
+            last_subtitle: None,
         };
         this.show_controls();
         this
@@ -221,7 +228,8 @@ impl PlayerPage {
         ui.style_mut().visuals.override_text_color = Some(over_video::FOREGROUND);
         // Any mouse movement brings the controls (and the cursor) back. A touch screen has taps
         // for that, and a finger's movement is a gesture.
-        if !touch::TOUCH && ui.input(|input| input.pointer.delta() != Vec2::ZERO) {
+        let touch = touch::on(ui.ctx());
+        if !touch && ui.input(|input| input.pointer.delta() != Vec2::ZERO) {
             self.show_controls();
         }
         self.sync_video(cx);
@@ -234,8 +242,8 @@ impl PlayerPage {
             }
         }
         let menus = Menus {
-            chapters: egui::Popup::is_id_open(ui.ctx(), chapters_id()),
-            settings: egui::Popup::is_id_open(ui.ctx(), settings_id()),
+            chapters: egui::Popup::is_id_open(ui.ctx(), chapters_id()) || self.sheet == Some(phone::Sheet::Chapters),
+            settings: egui::Popup::is_id_open(ui.ctx(), settings_id()) || self.sheet == Some(phone::Sheet::Settings),
         };
         let view = cx
             .services
@@ -248,10 +256,19 @@ impl PlayerPage {
             self.controls_since = Some(now);
         }
 
+        // On a touch screen the video runs edge to edge, under the system's bars and the display
+        // cutout, while the controls keep to the safe area (`phone::safe_area`). Elsewhere both
+        // are the page's rectangle.
         let rect = ui.max_rect();
-        let top = Rect::from_min_size(rect.min, vec2(rect.width(), TOP_BAR_H));
+        let (window, safe) = if touch {
+            let window = ui.ctx().viewport_rect();
+            (window, phone::safe_area(window, ui.ctx().content_rect()))
+        } else {
+            (rect, rect)
+        };
+        let top = Rect::from_min_size(safe.min, vec2(safe.width(), TOP_BAR_H));
         let bottom = Rect::from_min_max(pos2(rect.left(), rect.bottom() - BOTTOM_BAR_H), rect.right_bottom());
-        let (response, has_frame, import_failed) = self.draw_video(ui);
+        let (response, has_frame, import_failed) = self.draw_video(ui, window);
         if import_failed {
             cx.services.fall_back_to_pixels();
         }
@@ -259,30 +276,39 @@ impl PlayerPage {
             && !state.cues.cues.is_empty()
         {
             let scale = state.adjustments.subtitle_scale as f32;
-            self.subtitles.show(ui, rect, &state.cues, state.cues_changed, scale);
+            self.subtitles.show(ui, safe, &state.cues, state.cues_changed, scale);
         }
         let Some(view) = view else {
             // Between sessions (a reconnect, or the next item still loading): the last frame
             // stays, with the loader over it and a bar to leave by.
-            loader(ui, rect);
+            loader(ui, window);
             self.reconnecting_bar(ui, cx, top);
+            self.sheet = None;
             self.settle(ui, false);
             return;
         };
         if view.loading || !has_frame {
-            loader(ui, rect);
+            loader(ui, window);
         }
+        let mut bars = None;
         if self.controls_visible {
             let alpha = self.controls_alpha(ui.ctx(), now);
             motion::faded(ui, alpha, |ui| {
-                self.top_bar(ui, &view, cx, top);
-                self.controls(ui, &view, cx, bottom);
+                if touch {
+                    bars = Some(self.phone_controls(ui, &view, cx, window, safe));
+                } else {
+                    self.top_bar(ui, &view, cx, top);
+                    self.controls(ui, &view, cx, bottom);
+                    bars = Some([top, bottom]);
+                }
             });
         }
-        self.touch_feedback(ui, rect, &view);
-        self.prompt(ui, &view, cx);
+        self.touch_feedback(ui, safe, &view);
+        self.prompt(ui, &view, cx, safe);
+        if touch {
+            self.phone_sheet(ui, &view, cx);
+        }
         if let Some(response) = response {
-            let bars = self.controls_visible.then_some([top, bottom]);
             self.video_input(&response, ui, &view, cx, bars);
         }
         self.settle(ui, view.paused);
@@ -305,13 +331,15 @@ impl PlayerPage {
         }
     }
 
-    /// Draws the video (or the last session's last frame), reporting whether a frame shows and
-    /// whether a GPU frame couldn't be imported.
-    fn draw_video(&mut self, ui: &mut egui::Ui) -> (Option<Response>, bool, bool) {
+    /// Draws the video (or the last session's last frame) into `window`, reporting whether a
+    /// frame shows and whether a GPU frame couldn't be imported.
+    fn draw_video(&mut self, ui: &mut egui::Ui, window: Rect) -> (Option<Response>, bool, bool) {
         let Some((_, video)) = &mut self.video else {
             return (None, false, false);
         };
-        let response = video.show(ui, touch::sense());
+        let mut area = ui.new_child(UiBuilder::new().max_rect(window));
+        area.set_clip_rect(window);
+        let response = video.show(&mut area, touch::sense(ui.ctx()));
         (Some(response), video.has_frame(), video.import_failed())
     }
 
@@ -364,6 +392,7 @@ impl PlayerPage {
         egui::Popup::close_id(ctx, settings_id());
         egui::Popup::close_id(ctx, chapters_id());
         egui::Popup::close_id(ctx, versions_id());
+        self.sheet = None;
         self.menu_open = false;
         // The settings belong to the player, not to one item: read them again for a new
         // session.
@@ -437,7 +466,8 @@ impl PlayerPage {
         let ctx = ui.ctx();
         let open = egui::Popup::is_id_open(ctx, settings_id())
             || egui::Popup::is_id_open(ctx, chapters_id())
-            || egui::Popup::is_id_open(ctx, versions_id());
+            || egui::Popup::is_id_open(ctx, versions_id())
+            || self.sheet.is_some();
         if open != self.menu_open {
             self.menu_open = open;
             self.show_controls();
@@ -464,7 +494,7 @@ impl PlayerPage {
     /// back. The wheel changes the volume, except over the bars: `bars` is `None` while they're
     /// hidden, so the whole window is the video then.
     fn video_input(&mut self, response: &Response, ui: &Ui, view: &View, cx: &mut PageCx, bars: Option<[Rect; 2]>) {
-        if touch::TOUCH {
+        if touch::on(ui.ctx()) {
             self.touch_input(response, ui, view, cx, bars);
             return;
         }
@@ -742,11 +772,7 @@ impl PlayerPage {
                     cx.services.control(UiCommand::ToggleMute);
                     self.show_controls();
                 }
-                // A touch screen sets the volume by dragging on the video (or with the phone's
-                // buttons), which leaves the row room for the rest on a phone.
-                if !touch::TOUCH {
-                    self.volume_slider(ui, view, cx);
-                }
+                self.volume_slider(ui, view, cx);
                 // The clock's own 8 points, on top of the bar's gap.
                 ui.add_space(8.);
                 let clock = ui.add(
@@ -774,22 +800,19 @@ impl PlayerPage {
                 .layout(Layout::right_to_left(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                // On a touch screen (Android) the player is always full screen.
-                if !touch::TOUCH {
-                    let fullscreen = fullscreen(ui.ctx());
-                    let icon = if fullscreen {
-                        ICON_FULLSCREEN_EXIT
-                    } else {
-                        ICON_FULLSCREEN
-                    };
-                    let tip = if fullscreen {
-                        "Exit fullscreen (F)"
-                    } else {
-                        "Fullscreen (F)"
-                    };
-                    if control(icon, CONTROL, tip).show(ui).clicked() {
-                        toggle_fullscreen(ui.ctx());
-                    }
+                let fullscreen = fullscreen(ui.ctx());
+                let icon = if fullscreen {
+                    ICON_FULLSCREEN_EXIT
+                } else {
+                    ICON_FULLSCREEN
+                };
+                let tip = if fullscreen {
+                    "Exit fullscreen (F)"
+                } else {
+                    "Fullscreen (F)"
+                };
+                if control(icon, CONTROL, tip).show(ui).clicked() {
+                    toggle_fullscreen(ui.ctx());
                 }
                 let open = egui::Popup::is_id_open(ui.ctx(), settings_id());
                 let lit = open.then(|| view.lit_button(self.settings_tab));
@@ -986,8 +1009,9 @@ impl PlayerPage {
     }
 
     /// The skip button or the up-next card, bottom right, above the controls when they show.
-    /// Each kind slides in when it appears.
-    fn prompt(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
+    /// Each kind slides in when it appears. On a touch screen it keeps to the controls' `safe`
+    /// area.
+    fn prompt(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx, safe: Rect) {
         let kind = if view.skippable.is_some() {
             PromptKind::Skip
         } else if view.show_up_next {
@@ -1014,13 +1038,18 @@ impl PlayerPage {
         } else {
             (0., 1.)
         };
-        let bottom = if self.controls_visible {
-            PROMPT_ABOVE_CONTROLS
+        let (right, bottom) = if touch::on(ui.ctx()) {
+            // The area's anchor is the content rectangle's corner.
+            let content = ui.ctx().content_rect();
+            let above = if self.controls_visible { phone::PROMPT_ABOVE } else { 0. };
+            (content.right() - safe.right(), content.bottom() - safe.bottom() + above)
+        } else if self.controls_visible {
+            (PROMPT_MARGIN, PROMPT_ABOVE_CONTROLS)
         } else {
-            PROMPT_AT_THE_EDGE
+            (PROMPT_MARGIN, PROMPT_AT_THE_EDGE)
         };
         egui::Area::new(prompt_id())
-            .anchor(Align2::RIGHT_BOTTOM, vec2(-PROMPT_MARGIN + slide, -bottom))
+            .anchor(Align2::RIGHT_BOTTOM, vec2(-right + slide, -bottom))
             .order(egui::Order::Middle)
             // The slide starts off the window's edge; without this egui holds the card on
             // screen and nothing moves.
@@ -1056,20 +1085,23 @@ impl PlayerPage {
     }
 
     /// What plays next: its name, Play now (counting down to autoplay with its ring) and Cancel.
+    /// On a phone it's one row, the name beside the buttons, low enough to fit between the
+    /// middle's buttons and the clock.
     fn up_next_card(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
         let Some(label) = &view.next_label else { return };
-        popup::over_video_frame(UP_NEXT_PAD as i8).show(ui, |ui| {
-            // The card's width with its padding included.
-            ui.set_width(UP_NEXT_W - 2. * UP_NEXT_PAD);
+        let phone = touch::on(ui.ctx());
+        let pad = if phone { phone::UP_NEXT_PAD } else { UP_NEXT_PAD };
+        popup::over_video_frame(pad as i8).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(8., 4.);
-            ui.label(label::overline(ui, "Up next").color(over_video::MUTED_FOREGROUND));
-            let name = RichText::new(label)
-                .font(theme::text::font(ui, "base"))
-                .strong()
-                .color(over_video::FOREGROUND);
-            ui.add(egui::Label::new(name).truncate().selectable(false));
-            ui.add_space(10.);
-            ui.horizontal(|ui| {
+            let names = |ui: &mut egui::Ui| {
+                ui.label(label::overline(ui, "Up next").color(over_video::MUTED_FOREGROUND));
+                let name = RichText::new(label)
+                    .font(theme::text::font(ui, "base"))
+                    .strong()
+                    .color(over_video::FOREGROUND);
+                ui.add(egui::Label::new(name).truncate().selectable(false));
+            };
+            let buttons = |ui: &mut egui::Ui, cx: &mut PageCx| {
                 if countdown_pill::show(ui, "Play now", ICON_PLAY_ARROW, view.autoplay_in, pill_colours()).clicked() {
                     cx.services.play_next();
                 }
@@ -1083,7 +1115,23 @@ impl PlayerPage {
                 {
                     state.next_cancelled = true;
                 }
-            });
+            };
+            if phone {
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(phone::UP_NEXT_NAME_W);
+                        names(ui);
+                    });
+                    ui.add_space(4.);
+                    buttons(ui, cx);
+                });
+            } else {
+                // The card's width with its padding included.
+                ui.set_width(UP_NEXT_W - 2. * UP_NEXT_PAD);
+                names(ui);
+                ui.add_space(10.);
+                ui.horizontal(|ui| buttons(ui, cx));
+            }
         });
     }
 
@@ -1144,19 +1192,9 @@ impl PlayerPage {
     /// and a size would do nothing.
     fn settings_menu(&mut self, response: &Response, view: &View, cx: &mut PageCx) {
         let Some(menu) = &view.settings else { return };
-        let tabs: &[SettingsTab] = if menu.subtitle_choices.is_empty() {
-            &[SettingsTab::Audio, SettingsTab::General]
-        } else {
-            &SettingsTab::ALL
-        };
-        // A version without subtitles can take over while their tab is the one remembered.
-        let mut tab = Some(self.settings_tab)
-            .filter(|tab| tabs.contains(tab))
-            .unwrap_or(SettingsTab::General);
-        let mut chosen_audio = None;
-        let mut chosen_subtitle = None;
-        let mut adjustments = menu.adjustments;
-        let mut adjusted = false;
+        let tabs = menu.tabs();
+        let mut tab = menu.tab(self.settings_tab);
+        let mut choice = SettingsChoice::default();
         egui::Popup::menu(response)
             .id(settings_id())
             .open_memory(None::<egui::SetOpenCommand>)
@@ -1168,104 +1206,21 @@ impl PlayerPage {
             .frame(popup::over_video_frame(12))
             .show(|ui| {
                 ui.set_width(SETTINGS_W);
-                if let Some(choice) = settings_tabs(ui, tabs, tab) {
-                    tab = choice;
-                }
-                ui.add_space(8.);
-                ui.spacing_mut().item_spacing.y = 0.;
-                match tab {
-                    SettingsTab::Audio => {
-                        chosen_audio = track_list(
-                            ui,
-                            "player-audio",
-                            "No audio tracks",
-                            &menu.audio_choices,
-                            menu.audio.or(menu.default_audio),
-                        );
-                        popup::separator_in(ui, over_video::MENU_BORDER);
-                        let delay = adjustments.audio_delay;
-                        if let Some(step) = delay_stepper(ui, None, delay) {
-                            adjustments.audio_delay = stepped_delay(delay, step);
-                            adjusted = true;
-                        }
-                    }
-                    SettingsTab::Subtitles => {
-                        let selected = match menu.subtitle {
-                            SubtitleChoice::Stream(index) => index,
-                            SubtitleChoice::Off => SUBTITLES_OFF,
-                            SubtitleChoice::Auto => menu.default_subtitle.unwrap_or(SUBTITLES_OFF),
-                        };
-                        chosen_subtitle = track_list(
-                            ui,
-                            "player-subtitles",
-                            "No subtitles",
-                            &menu.subtitle_choices,
-                            Some(selected),
-                        )
-                        .map(|value| match value {
-                            SUBTITLES_OFF => SubtitleChoice::Off,
-                            index => SubtitleChoice::Stream(index),
-                        });
-                        popup::separator_in(ui, over_video::MENU_BORDER);
-                        let delay = adjustments.subtitle_delay;
-                        if let Some(step) = delay_stepper(ui, Some("z  x"), delay) {
-                            adjustments.subtitle_delay = stepped_delay(delay, step);
-                            adjusted = true;
-                        }
-                        let scale = adjustments.subtitle_scale;
-                        let size = format!("{:.0}%", scale * 100.);
-                        let moved = (scale - 1.).abs() >= 0.005;
-                        if let Some(step) = stepper::row(ui, "Size", None, &size, moved, stepper_colours()) {
-                            match step {
-                                Step::Down => adjustments.subtitle_scale -= Adjustments::SCALE_STEP,
-                                Step::Up => adjustments.subtitle_scale += Adjustments::SCALE_STEP,
-                                Step::Reset => adjustments.subtitle_scale = 1.,
-                            }
-                            adjusted = true;
-                        }
-                    }
-                    SettingsTab::General => {
-                        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
-                        let name = ui.painter().text(
-                            pos2(rect.left() + 8., rect.center().y),
-                            Align2::LEFT_CENTER,
-                            "Speed",
-                            theme::text::font(ui, "sm"),
-                            over_video::MENU_INK,
-                        );
-                        if !menu.in_group {
-                            ui.painter().text(
-                                pos2(name.right() + 8., rect.center().y),
-                                Align2::LEFT_CENTER,
-                                "[  ]",
-                                theme::text::font(ui, "xs"),
-                                over_video::MUTED_FOREGROUND,
-                            );
-                        }
-                        if menu.in_group {
-                            ui.horizontal(|ui| {
-                                ui.add_space(8.);
-                                ui.label(
-                                    RichText::new("Normal in SyncPlay")
-                                        .font(theme::text::font(ui, "sm"))
-                                        .color(over_video::MUTED_FOREGROUND),
-                                );
-                            });
-                        } else if let Some(speed) = speed_group(ui, adjustments.speed) {
-                            adjustments.speed = speed;
-                            adjusted = true;
-                        }
-                    }
-                }
+                choice = settings_body(ui, menu, tabs, &mut tab);
             });
         self.settings_tab = tab;
-        if let Some(index) = chosen_audio {
+        self.apply_settings(choice, cx);
+    }
+
+    /// Carries out what the settings menu (or the phone's sheet) picked.
+    fn apply_settings(&mut self, choice: SettingsChoice, cx: &mut PageCx) {
+        if let Some(index) = choice.audio {
             cx.services.change_audio(index);
         }
-        if let Some(choice) = chosen_subtitle {
-            cx.services.change_subtitle(choice);
+        if let Some(subtitle) = choice.subtitle {
+            cx.services.change_subtitle(subtitle);
         }
-        if adjusted {
+        if let Some(adjustments) = choice.adjustments {
             cx.services.adjust(adjustments);
             self.show_controls();
         }
@@ -1354,6 +1309,11 @@ struct View {
     audio_button: bool,
     /// Any subtitles to choose from.
     subtitles_button: bool,
+    /// The subtitle track showing, if one is.
+    subtitle_shown: Option<i32>,
+    /// The track turning subtitles on would show without one remembered: the source's default,
+    /// or its first.
+    subtitle_default: Option<i32>,
 }
 
 struct ChaptersMenu {
@@ -1372,6 +1332,25 @@ struct SettingsMenu {
     subtitle_choices: Vec<Choice>,
     default_audio: Option<i32>,
     default_subtitle: Option<i32>,
+}
+
+impl SettingsMenu {
+    /// The tabs: no Subtitles without any, since a delay and a size would do nothing.
+    fn tabs(&self) -> &'static [SettingsTab] {
+        if self.subtitle_choices.is_empty() {
+            &[SettingsTab::Audio, SettingsTab::General]
+        } else {
+            &SettingsTab::ALL
+        }
+    }
+
+    /// The tab to show for the one remembered: a version without subtitles can take over while
+    /// their tab is it.
+    fn tab(&self, remembered: SettingsTab) -> SettingsTab {
+        Some(remembered)
+            .filter(|tab| self.tabs().contains(tab))
+            .unwrap_or(SettingsTab::General)
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1486,6 +1465,23 @@ impl View {
             }),
             audio_button: tracks::count(&state.source, MediaStreamType::Audio) > 1,
             subtitles_button: tracks::count(&state.source, MediaStreamType::Subtitle) > 0,
+            subtitle_shown: match state.subtitle {
+                SubtitleChoice::Stream(index) => Some(index),
+                SubtitleChoice::Off => None,
+                SubtitleChoice::Auto => state.source.default_subtitle_stream_index.filter(|&index| index >= 0),
+            },
+            subtitle_default: state
+                .source
+                .default_subtitle_stream_index
+                .filter(|&index| index >= 0)
+                .or_else(|| {
+                    state
+                        .source
+                        .media_streams
+                        .iter()
+                        .find(|stream| stream.kind == MediaStreamType::Subtitle)
+                        .map(|stream| stream.index)
+                }),
         }
     }
 
@@ -1700,6 +1696,123 @@ fn note_colours() -> prompt::Note {
 /// A small label in the player's bars (SyncPlay, Transcoding, the speed).
 fn label_badge(ui: &mut egui::Ui, text: &str) {
     badge::label(ui, text, over_video::SURFACE_SUBTLE, over_video::MUTED_FOREGROUND);
+}
+
+/// What the settings menu picked this frame: a track, or new adjustments.
+#[derive(Default)]
+struct SettingsChoice {
+    audio: Option<i32>,
+    subtitle: Option<SubtitleChoice>,
+    adjustments: Option<Adjustments>,
+}
+
+/// The settings menu's tabs and the open one's rows: the tracks with their delay, the subtitle
+/// size, and the speeds. The desktop's popover and the phone's sheet both hold it.
+fn settings_body(
+    ui: &mut egui::Ui,
+    menu: &SettingsMenu,
+    tabs: &[SettingsTab],
+    tab: &mut SettingsTab,
+) -> SettingsChoice {
+    let mut choice = SettingsChoice::default();
+    let mut adjustments = menu.adjustments;
+    let mut adjusted = false;
+    if let Some(picked) = settings_tabs(ui, tabs, *tab) {
+        *tab = picked;
+    }
+    ui.add_space(8.);
+    ui.spacing_mut().item_spacing.y = 0.;
+    let tab = *tab;
+    // The keys' hints, which a phone has no keyboard for.
+    let keys = !crate::layout::touch(ui.ctx());
+    match tab {
+        SettingsTab::Audio => {
+            choice.audio = track_list(
+                ui,
+                "player-audio",
+                "No audio tracks",
+                &menu.audio_choices,
+                menu.audio.or(menu.default_audio),
+            );
+            popup::separator_in(ui, over_video::MENU_BORDER);
+            let delay = adjustments.audio_delay;
+            if let Some(step) = delay_stepper(ui, None, delay) {
+                adjustments.audio_delay = stepped_delay(delay, step);
+                adjusted = true;
+            }
+        }
+        SettingsTab::Subtitles => {
+            let selected = match menu.subtitle {
+                SubtitleChoice::Stream(index) => index,
+                SubtitleChoice::Off => SUBTITLES_OFF,
+                SubtitleChoice::Auto => menu.default_subtitle.unwrap_or(SUBTITLES_OFF),
+            };
+            choice.subtitle = track_list(
+                ui,
+                "player-subtitles",
+                "No subtitles",
+                &menu.subtitle_choices,
+                Some(selected),
+            )
+            .map(|value| match value {
+                SUBTITLES_OFF => SubtitleChoice::Off,
+                index => SubtitleChoice::Stream(index),
+            });
+            popup::separator_in(ui, over_video::MENU_BORDER);
+            let delay = adjustments.subtitle_delay;
+            if let Some(step) = delay_stepper(ui, keys.then_some("z  x"), delay) {
+                adjustments.subtitle_delay = stepped_delay(delay, step);
+                adjusted = true;
+            }
+            let scale = adjustments.subtitle_scale;
+            let size = format!("{:.0}%", scale * 100.);
+            let moved = (scale - 1.).abs() >= 0.005;
+            if let Some(step) = stepper::row(ui, "Size", None, &size, moved, stepper_colours()) {
+                match step {
+                    Step::Down => adjustments.subtitle_scale -= Adjustments::SCALE_STEP,
+                    Step::Up => adjustments.subtitle_scale += Adjustments::SCALE_STEP,
+                    Step::Reset => adjustments.subtitle_scale = 1.,
+                }
+                adjusted = true;
+            }
+        }
+        SettingsTab::General => {
+            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
+            let name = ui.painter().text(
+                pos2(rect.left() + 8., rect.center().y),
+                Align2::LEFT_CENTER,
+                "Speed",
+                theme::text::font(ui, "sm"),
+                over_video::MENU_INK,
+            );
+            if keys && !menu.in_group {
+                ui.painter().text(
+                    pos2(name.right() + 8., rect.center().y),
+                    Align2::LEFT_CENTER,
+                    "[  ]",
+                    theme::text::font(ui, "xs"),
+                    over_video::MUTED_FOREGROUND,
+                );
+            }
+            if menu.in_group {
+                ui.horizontal(|ui| {
+                    ui.add_space(8.);
+                    ui.label(
+                        RichText::new("Normal in SyncPlay")
+                            .font(theme::text::font(ui, "sm"))
+                            .color(over_video::MUTED_FOREGROUND),
+                    );
+                });
+            } else if let Some(speed) = speed_group(ui, adjustments.speed) {
+                adjustments.speed = speed;
+                adjusted = true;
+            }
+        }
+    }
+    if adjusted {
+        choice.adjustments = Some(adjustments);
+    }
+    choice
 }
 
 /// The settings menu's tabs. Returns the tab clicked.

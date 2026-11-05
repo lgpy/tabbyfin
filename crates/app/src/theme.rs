@@ -1252,6 +1252,11 @@ pub mod over_video {
     pub const SCRIM_STRONG: Color32 = Color32::from_black_alpha(204);
 
     pub const CLEAR: Color32 = Color32::from_black_alpha(0);
+    /// Over the whole picture while a phone's controls show, so the ones in the middle read on
+    /// a bright frame.
+    pub const VEIL: Color32 = Color32::from_black_alpha(64);
+    /// Behind a phone's sheet, over the picture beside it.
+    pub const SHEET_BACKDROP: Color32 = Color32::from_black_alpha(140);
 
     /// Cards and labels floating on the picture: the up-next card, the seek preview's time.
     pub const SURFACE: Color32 = Color32::from_black_alpha(204);

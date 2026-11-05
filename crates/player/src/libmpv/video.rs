@@ -240,9 +240,9 @@ impl VideoOutput {
         }
     }
 
-    /// Video the player draws into a surface of its own ([`VideoOutput::draws_itself`]).
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-    pub(crate) fn external() -> Self {
+    /// Video the player draws into a surface of its own ([`VideoOutput::draws_itself`]). The
+    /// app's UI tests use it for a session with no player behind it.
+    pub fn external() -> Self {
         let (_, frames) = watch::channel(None);
         Self {
             target: Target::External,

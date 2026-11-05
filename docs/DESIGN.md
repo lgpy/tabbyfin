@@ -208,7 +208,7 @@ bottom bar (64 tall, on the floor of the window)
 
 Home leaves out *My Media* there, as Libraries is a tap away. Settings is a list of its sections instead of the menu and column: a heading per store (`overline`), then one surface of rows, each its icon in `brand`, its title in `ink` at `base` over a `sm` muted line of what it has, and a chevron in `ink_muted`, at least 64 tall with an inset hairline between them and `inset_hover` while pressed. A row opens its section on a page of its own, titled with its name.
 
-The pages keep 16 from the sides there (`layout::side`). Touch targets are 48 at least: lists and menus draw their rows that tall, and smaller controls keep their size and sense 48 round their centre.
+The pages keep 16 from the sides there (`layout::side`); the item page and the player have their own layouts there (below). Touch targets are 48 at least: lists and menus draw their rows that tall, and smaller controls keep their size and sense 48 round their centre.
 
 One main action per view holds here as elsewhere: with groups to join, each row's *Join* is the `brand` one and *New group* is `quiet`; with none, *New group* is `brand`.
 
@@ -259,6 +259,56 @@ Episodes (a season's page): a compact MediaRow per episode, in episode_columns
 Playlist (a playlist's page): a full MediaRow per entry, ↑ ↓ ✕ on the active row
 In this collection (a collection): poster cards
 Cast & crew · Extras · More like this shelves
+```
+
+The item page on a phone (`layout::Size::Compact`, `views/item/compact.rs`), laid out like a card (chosen over a poster beside the title and a tall picture with the title over it):
+
+```
+backdrop image in a 300 band, the page's colour at 55 % over it, fading into the gradient
+poster 150 × 225 (an episode's still as wide as the page), centred, 12 below the band's top,
+  with a soft shadow
+centred: series line (link) · title (26, ink) · meta (sm, ink_muted) · genres joined by · (sm)
+Play/Resume            — brand_icon_wide across the page; under Resume a 4-point brand bar of
+                         how far it is and "1h 14m left" (xs, ink_muted)
+round actions          — From start, Shuffle, Trailer, Watched, Favorite, More: a 48 circle
+                         (surface, surface_border; inset_hover with brand outline and icon
+                         while on) with its name in xs under it, 72 cells centred in a row
+synopsis               — base, 4 lines, then More / Less in brand (sm, strong)
+Director · Writers · Studio — sm rows, the name in a 76 muted column
+version                — the label in that column, the select across the rest, 40 tall
+Seasons (a series)     — a shelf of season posters (0.6 of a poster), the open one ringed in
+                         brand with its name in brand, "n to watch" (xs) under each; the next
+                         episode's season is open from the start and a tap on it keeps it open
+  Season n             — heading, then a row per episode: still 136 × 76.5 (radius 6, progress
+                         bar), "2. Name" (base, 2 lines) over the runtime (sm) beside it, the
+                         Watched toggle 36/20 at the right, two lines of overview (sm, ink_muted)
+                         under the row; no fill at rest, inset_hover while pressed; 18 apart
+Cast & crew            — round faces 64 across, the name (sm) and role (xs) centred under them
+More like this         — posters at 0.7, 12 apart
+```
+
+The player on a phone (touch, `views/player/phone.rs`), over the video edge to edge, the controls inside the safe area (the larger side inset on both sides, then 12), chosen over a centre cluster with the menus at the top and a labelled row under the seek bar:
+
+```
+veil                   — over_video::VEIL over the picture, SCRIM down from the top and
+                         SCRIM_STRONG up from the bottom
+top                    — Back 44 · title (lg) over the episode line (sm, MUTED_FOREGROUND)
+                         ……… [SyncPlay] [Transcoding] · Chapters · Subtitles (a toggle, BRAND
+                         while on; a long press opens its tracks) · Settings (tune), 44/24
+middle                 — play/pause 72 on a SURFACE_SUBTLE disc; the 10-second skips 56 at
+                         ±112; previous and next episode 48 at ±212 (closer on a narrow screen)
+bottom                 — the clock (sm, a tap switches to the time left) and the speed badge,
+                         over the seek bar in a 40 row across the safe area
+skip pill              — at the safe area's right, over the clock while the controls show, at
+                         its bottom when they don't
+up next                — in the skip pill's place, one row: "Up next" over the name (160
+                         wide) beside Play now and Cancel, 8 inside, so it fits under the
+                         middle's buttons
+side sheet             — an egui::Modal at the right, 360 wide and the full height, MENU with
+                         MENU_BORDER, 16 radius on its left corners, 16 inside, SHEET_BACKDROP
+                         beside it: the title (lg) and a close button 36, then the settings
+                         menu's tabs and rows (General with the speeds, then VERSION and the
+                         versions) or the chapters' rows
 ```
 
 The library page:
