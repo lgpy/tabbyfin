@@ -102,7 +102,21 @@ pub struct MediaRow<'a> {
     handles: Option<Handles>,
     highlighted: bool,
     compact: bool,
+    phone: bool,
 }
+
+/// A phone's row ([`MediaRow::phone`]): the image's size, the Watched toggle's, and how many
+/// lines the heading and the overview take.
+const PHONE_IMAGE_W: f32 = 136.;
+const PHONE_IMAGE_H: f32 = 76.5;
+const PHONE_WATCHED: f32 = 36.;
+const PHONE_WATCHED_ICON: f32 = 20.;
+const PHONE_HEADING_ROWS: usize = 2;
+const PHONE_OVERVIEW_ROWS: usize = 2;
+/// How far a phone row's pressed fill reaches past it.
+const PHONE_FILL_OUT: f32 = 6.;
+/// Between a phone's rows, which have no fill to set them apart.
+pub const PHONE_GAP: f32 = 18.;
 
 /// What a row's parts did this frame. `row` covers the whole row; the toggle and the handles
 /// are on top of it and take the clicks on them.
@@ -125,7 +139,16 @@ impl<'a> MediaRow<'a> {
             handles: None,
             highlighted: false,
             compact: false,
+            phone: false,
         }
+    }
+
+    /// A phone's row (`layout::Size::Compact`): no fill at rest, the image and beside it the
+    /// heading on up to two lines, the detail under it and the Watched toggle at the right; the
+    /// overview's first two lines under them across the width.
+    pub fn phone(mut self, phone: bool) -> Self {
+        self.phone = phone;
+        self
     }
 
     pub fn overview(mut self, overview: Option<&'a str>) -> Self {
@@ -158,6 +181,9 @@ impl<'a> MediaRow<'a> {
 
     /// Draws the row across `ui`'s width.
     pub fn show(self, ui: &mut Ui, images: &mut ImageCache) -> MediaRowResponse {
+        if self.phone {
+            return self.show_phone(ui, images);
+        }
         let size = if self.compact { &COMPACT } else { &FULL };
         let tokens = theme::tokens_of(ui);
         let small = text::font(ui, "sm");
@@ -249,6 +275,91 @@ impl<'a> MediaRow<'a> {
         });
         MediaRowResponse { row, watched, handle }
     }
+
+    /// [`MediaRow::phone`]'s row across `ui`'s width.
+    fn show_phone(self, ui: &mut Ui, images: &mut ImageCache) -> MediaRowResponse {
+        let tokens = theme::tokens_of(ui);
+        let width = ui.available_width();
+        let gap = 12.;
+        let text_w = (width - PHONE_IMAGE_W - gap - PHONE_WATCHED - 4.).max(1.);
+        let heading = wrapped(ui, self.heading, "base", tokens.ink, text_w, PHONE_HEADING_ROWS);
+        let detail = (!self.detail.is_empty()).then(|| wrapped(ui, self.detail, "sm", tokens.ink_muted, text_w, 1));
+        let overview = self
+            .overview
+            .map(|text| overview_galley(ui, text, width, PHONE_OVERVIEW_ROWS));
+        let text_h = heading.size().y + detail.as_ref().map_or(0., |detail| LINE_GAP + detail.size().y);
+        let top_h = PHONE_IMAGE_H.max(text_h);
+        let height = top_h + overview.as_ref().map_or(0., |galley| 6. + galley.size().y);
+        let (rect, row) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+        row.widget_info(|| WidgetInfo::labeled(Role::Button, true, self.heading));
+        let filled = rect.expand(PHONE_FILL_OUT);
+        if self.highlighted || row.is_pointer_button_down_on() {
+            ui.painter()
+                .rect_filled(filled, tokens.radius_control, tokens.inset_hover);
+        }
+        if self.highlighted {
+            focus::ring(ui, filled, tokens.radius_control as f32, Place::Inside);
+        }
+        let mut content = ui.new_child(UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)));
+        let image_rect = Rect::from_min_size(rect.min, vec2(PHONE_IMAGE_W, PHONE_IMAGE_H));
+        image::show(
+            &content,
+            images,
+            image_rect,
+            self.image.as_ref(),
+            Some(self.item),
+            IMAGE_RADIUS,
+        );
+        if let Some(fraction) = crate::widgets::card::progress(self.item) {
+            crate::widgets::card::progress_bar(&content, image_rect, fraction);
+        }
+        let text_left = image_rect.right() + gap;
+        let mut y = rect.top() + (PHONE_IMAGE_H - text_h).max(0.) / 2.;
+        let heading_h = heading.size().y;
+        content.painter().galley(pos2(text_left, y), heading, tokens.ink);
+        y += heading_h + LINE_GAP;
+        if let Some(detail) = detail {
+            content.painter().galley(pos2(text_left, y), detail, tokens.ink_muted);
+        }
+        if let Some(galley) = overview {
+            content
+                .painter()
+                .galley(pos2(rect.left(), rect.top() + top_h + 6.), galley, tokens.ink_muted);
+        }
+        let watched_center = pos2(rect.right() - PHONE_WATCHED / 2., rect.top() + PHONE_IMAGE_H / 2.);
+        let icon = if self.played {
+            ICON_CHECK_CIRCLE
+        } else {
+            ICON_CHECK.outlined()
+        };
+        let watched = RoundButton::icon(icon, "Watched (W)")
+            .size(PHONE_WATCHED, PHONE_WATCHED_ICON)
+            .on(self.played)
+            .focus(Focus::Skip)
+            .show_at(&mut content, watched_center, row.id.with("watched"));
+        MediaRowResponse {
+            row,
+            watched,
+            handle: None,
+        }
+    }
+}
+
+/// `text` at `size` wrapped to `width`, cut off after `rows` lines with an ellipsis.
+fn wrapped(ui: &Ui, text: &str, size: &str, color: Color32, width: f32, rows: usize) -> Arc<Galley> {
+    let mut job = LayoutJob::default();
+    job.append(
+        text,
+        0.,
+        TextFormat {
+            font_id: text::font(ui, size),
+            color,
+            ..Default::default()
+        },
+    );
+    job.wrap.max_width = width;
+    job.wrap.max_rows = rows;
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// `text` wrapped to `width`, cut off after `rows` lines with an ellipsis. Laid out here rather

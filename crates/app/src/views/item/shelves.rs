@@ -4,7 +4,8 @@
 use egui::{Rect, Ui};
 
 use super::{
-    Asked, BIG_CARD_GAP, BIG_CARD_SCALE, CHAPTERS, EXTRAS, ItemData, PEOPLE, SHELF_TITLE_GAP, SIMILAR, chapters,
+    Asked, BIG_CARD_GAP, BIG_CARD_SCALE, CHAPTERS, COMPACT_CARD_GAP, COMPACT_CARD_SCALE, COMPACT_FACE, EXTRAS,
+    ItemData, PEOPLE, SHELF_TITLE_GAP, SIMILAR, chapters,
 };
 use crate::browse::Cursor;
 use crate::images::ImageCache;
@@ -52,10 +53,17 @@ pub(super) fn people_shelf(
     asked: &mut Asked,
 ) -> Rect {
     let people = &data.item.people;
-    shelf::shelf_with_gaps(ui, "people", "Cast & crew", BIG_CARD_GAP, SHELF_TITLE_GAP, 0., |ui| {
+    // A phone shows round faces, more of them across.
+    let compact = crate::layout::compact(ui.ctx());
+    let gap = if compact { COMPACT_CARD_GAP / 2. } else { BIG_CARD_GAP };
+    shelf::shelf_with_gaps(ui, "people", "Cast & crew", gap, SHELF_TITLE_GAP, 0., |ui| {
         for (index, person) in people.iter().enumerate() {
             let is_selected = cursor.is_selected(PEOPLE, index);
-            let response = card::person(ui, images, person, BIG_CARD_SCALE, is_selected);
+            let response = if compact {
+                card::person_round(ui, images, person, COMPACT_FACE, is_selected)
+            } else {
+                card::person(ui, images, person, BIG_CARD_SCALE, is_selected)
+            };
             if is_selected && moved {
                 response.scroll_to_me(None);
             }
@@ -112,30 +120,27 @@ pub(super) fn similar_shelf(
     asked: &mut Asked,
 ) -> Rect {
     let similar = &data.similar;
-    shelf::shelf_with_gaps(
-        ui,
-        "similar",
-        "More like this",
-        BIG_CARD_GAP,
-        SHELF_TITLE_GAP,
-        0.,
-        |ui| {
-            for (index, item) in similar.iter().enumerate() {
-                let is_selected = cursor.is_selected(SIMILAR, index);
-                let response = card::poster_scaled(ui, images, item, BIG_CARD_SCALE, is_selected);
-                if is_selected && moved {
-                    response.scroll_to_me(None);
-                }
-                if response.hovered() {
-                    asked.hovered = Some(Route::for_item(item));
-                }
-                if response.clicked() {
-                    asked.open = Some(Route::for_item(item));
-                }
-                if let Some(action) = menu::item_menu(&response, item) {
-                    asked.menu = Some((action, item.clone()));
-                }
+    // A phone's posters are smaller, so three and a bit show across.
+    let (scale, gap) = match crate::layout::compact(ui.ctx()) {
+        true => (COMPACT_CARD_SCALE, COMPACT_CARD_GAP),
+        false => (BIG_CARD_SCALE, BIG_CARD_GAP),
+    };
+    shelf::shelf_with_gaps(ui, "similar", "More like this", gap, SHELF_TITLE_GAP, 0., |ui| {
+        for (index, item) in similar.iter().enumerate() {
+            let is_selected = cursor.is_selected(SIMILAR, index);
+            let response = card::poster_scaled(ui, images, item, scale, is_selected);
+            if is_selected && moved {
+                response.scroll_to_me(None);
             }
-        },
-    )
+            if response.hovered() {
+                asked.hovered = Some(Route::for_item(item));
+            }
+            if response.clicked() {
+                asked.open = Some(Route::for_item(item));
+            }
+            if let Some(action) = menu::item_menu(&response, item) {
+                asked.menu = Some((action, item.clone()));
+            }
+        }
+    })
 }

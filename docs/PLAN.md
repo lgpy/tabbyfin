@@ -102,7 +102,7 @@ crates/app/src/
 ├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
 ├── ui_tests/        the headless UI tests (egui_kittest)
 ├── widgets/         text (Load<T>), card, image, shelf, menu, popup, select, dialog, button, state, mascot, video, subtitles (cues a player leaves to the UI)
-└── views/           mod (Page, PageCx, open), shell, home, login, search, libraries, library, value_filters, item, settings, player (with its touch gestures), dialogs
+└── views/           mod (Page, PageCx, open), shell, home, login, search, libraries, library, value_filters, item, settings, player (with its touch gestures and phone controls), dialogs; item has its phone header in item/compact.rs
 ```
 
 **Models:** we write the serde DTOs by hand and keep them to the fields we need. Every field is `Option` or `#[serde(default)]`, and unknown fields are ignored. Generating code from the full OpenAPI spec would create a huge, churny surface. Swashbuckle v10 in 12.0 already changed the generated document once. If we later want generated code, we generate it from the 12.x spec.

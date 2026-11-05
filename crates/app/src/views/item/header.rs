@@ -17,9 +17,9 @@ use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ImageType, MediaSourceInfo};
 
 use super::{
-    ACTION_GAP, ACTIONS, Asked, BACKDROP_FILL_W, BACKDROP_H, COMPACT_BACKDROP_H, COMPACT_IMAGE_SCALE,
-    COMPACT_TITLE_SIZE, DETAIL_POSTER_H, DETAIL_POSTER_W, DETAIL_STILL_H, Fills, ItemAction, ItemData, PICKER_H,
-    PICKER_LABEL_W, PICKER_W, PICKERS, TEXT_MAX_W, TITLE_MIN_W, TITLE_SIZE, meta_line,
+    ACTION_GAP, ACTIONS, Asked, BACKDROP_FILL_W, BACKDROP_H, COMPACT_PICKER_H, COMPACT_PICKER_LABEL_W, DETAIL_POSTER_H,
+    DETAIL_POSTER_W, DETAIL_STILL_H, Fills, ItemAction, ItemData, PICKER_H, PICKER_LABEL_W, PICKER_W, PICKERS,
+    TEXT_MAX_W, TITLE_MIN_W, TITLE_SIZE, compact, meta_line,
 };
 use crate::browse::Position;
 use crate::images::ImageCache;
@@ -46,16 +46,28 @@ pub(super) fn header(
     fills: &Fills,
     images: &mut ImageCache,
     under_bar: Option<&UnderBar>,
+    overview_open: bool,
     asked: &mut Asked,
 ) -> Rect {
+    // A phone in portrait has a header of its own: beside the poster the title would be a few
+    // letters wide.
+    if layout::compact(ui.ctx()) {
+        return compact::header(
+            ui,
+            data,
+            actions,
+            selected,
+            fills,
+            images,
+            under_bar,
+            overview_open,
+            asked,
+        );
+    }
     let item = &data.item;
     let top = ui.cursor().min;
     let backdrop = item.backdrop_image();
-    // A phone in portrait stacks the header: a shorter banner, a smaller poster on it, and the
-    // title's column under them across the width, which beside the poster would be a few
-    // letters wide.
-    let compact = layout::compact(ui.ctx());
-    let backdrop_h = if compact { COMPACT_BACKDROP_H } else { BACKDROP_H };
+    let backdrop_h = BACKDROP_H;
     if let Some(backdrop) = &backdrop {
         // Full width, past the page's padding. Behind the bar it starts the bar's height
         // higher, so at rest it fills the bar too; the page's content keeps its place under the
@@ -74,16 +86,6 @@ pub(super) fn header(
             }
             None => ui.painter().extend(shapes),
         }
-    }
-    if compact {
-        ui.add_space(if backdrop.is_some() { backdrop_h - 120. } else { 16. });
-        let (request, size) = header_image(item);
-        let size = size * COMPACT_IMAGE_SCALE;
-        let (poster, _) = ui.allocate_exact_size(size, Sense::hover());
-        image::show(ui, images, poster, request.as_ref(), Some(item), image::RADIUS);
-        ui.add_space(8.);
-        info_column(ui, data, actions, selected, fills, asked);
-        return Rect::from_min_max(top, pos2(ui.max_rect().right(), ui.cursor().min.y));
     }
     ui.add_space(if backdrop.is_some() { BACKDROP_H - 160. } else { 24. });
     ui.horizontal_top(|ui| {
@@ -105,7 +107,7 @@ pub(super) fn header(
 /// The header's picture and its size: the item's poster, or for an episode its own still in a
 /// wide frame (an episode's image is a screen grab, which a tall poster would crop), and its
 /// series' poster when it has no image of its own.
-fn header_image(item: &BaseItemDto) -> (Option<ImageRequest>, egui::Vec2) {
+pub(super) fn header_image(item: &BaseItemDto) -> (Option<ImageRequest>, egui::Vec2) {
     let poster = vec2(DETAIL_POSTER_W, DETAIL_POSTER_H);
     if item.kind != BaseItemKind::Episode {
         return (item.primary_image(), poster);
@@ -163,18 +165,11 @@ fn info_column(
         .map(episode_label)
         .filter(|label| !label.is_empty());
     let actions_width = actions_width(ui, data, actions, episode.as_deref());
-    // A fixed 40-point title, so the text size setting doesn't move the header; 28 on a phone.
-    let compact = layout::compact(ui.ctx());
-    let title_size = if compact { COMPACT_TITLE_SIZE } else { TITLE_SIZE };
-    let title_font = FontId::new(title_size, text::font(ui, "base").family);
+    // A fixed 40-point title, so the text size setting doesn't move the header.
+    let title_font = FontId::new(TITLE_SIZE, text::font(ui, "base").family);
     let available = ui.available_width();
     let gap = 16.;
-    if compact {
-        // The title across the width, then the actions under it: playing it as wide as the
-        // page, the rest in a row under that.
-        ui.add(Label::new(RichText::new(&item.name).font(title_font).color(ink)).wrap());
-        actions_row(ui, data, actions, selected, episode.as_deref(), fills, asked);
-    } else if available >= TITLE_MIN_W + gap + actions_width {
+    if available >= TITLE_MIN_W + gap + actions_width {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             let title_w = available - gap - actions_width;
@@ -194,26 +189,7 @@ fn info_column(
 
     let meta = meta_line(item);
     if !meta.is_empty() {
-        let font = text::font(ui, "sm");
-        // The text font has no ★, so the rating's star is drawn from the icon font.
-        let mut job = LayoutJob::default();
-        let format = |font_id| TextFormat {
-            font_id,
-            color: weak,
-            valign: Align::Center,
-            ..Default::default()
-        };
-        for (index, part) in meta.split('★').enumerate() {
-            if index > 0 {
-                job.append(
-                    ICON_STAR.codepoint,
-                    0.,
-                    format(FontId::new(font.size, ICON_STAR.font_family())),
-                );
-            }
-            job.append(part, 0., format(font.clone()));
-        }
-        ui.label(job);
+        ui.label(meta_job(ui, &meta, weak));
     }
     if !item.genres.is_empty() {
         ui.label(
@@ -259,15 +235,39 @@ fn info_column(
     }
 }
 
-/// What an action button shows: its icon, its tooltip, and the label playing it carries.
-struct ActionLook {
-    icon: MaterialIcon,
-    tooltip: String,
-    label: Option<String>,
-    primary: bool,
+/// The meta line (`meta_line`) at `sm` in `color`. The text font has no ★, so the rating's star
+/// is drawn from the icon font.
+pub(super) fn meta_job(ui: &Ui, meta: &str, color: egui::Color32) -> LayoutJob {
+    let font = text::font(ui, "sm");
+    let mut job = LayoutJob::default();
+    let format = |font_id| TextFormat {
+        font_id,
+        color,
+        valign: Align::Center,
+        ..Default::default()
+    };
+    for (index, part) in meta.split('★').enumerate() {
+        if index > 0 {
+            job.append(
+                ICON_STAR.codepoint,
+                0.,
+                format(FontId::new(font.size, ICON_STAR.font_family())),
+            );
+        }
+        job.append(part, 0., format(font.clone()));
+    }
+    job
 }
 
-fn action_look(action: ItemAction, item: &BaseItemDto, episode: Option<&str>) -> ActionLook {
+/// What an action button shows: its icon, its tooltip, and the label playing it carries.
+pub(super) struct ActionLook {
+    pub icon: MaterialIcon,
+    pub tooltip: String,
+    pub label: Option<String>,
+    pub primary: bool,
+}
+
+pub(super) fn action_look(action: ItemAction, item: &BaseItemDto, episode: Option<&str>) -> ActionLook {
     let labelled = |verb: &str| {
         Some(match episode {
             Some(episode) => format!("{verb} {episode}"),
@@ -370,39 +370,9 @@ fn actions_row(
     let now = ui.input(|input| input.time);
     // With the animations setting off the icons are drawn at their size, at once.
     let animations = theme::animations(ui.ctx());
-    let compact = layout::compact(ui.ctx());
-    let full_width = ui.available_width();
-    // On a phone the `brand` button has a row of its own; the others follow it in the next.
-    let primary = actions
-        .iter()
-        .position(|&action| {
-            let look = action_look(action, item, episode);
-            look.primary && look.label.is_some()
-        })
-        .filter(|_| compact);
-    let mut primary_row = None;
-    if let Some(index) = primary {
-        let action = actions[index];
-        let look = action_look(action, item, episode);
-        let ringed = selected
-            == Some(Position {
-                section: ACTIONS,
-                index,
-            });
-        let label = look.label.clone().unwrap_or_default();
-        let response = button::brand_icon_wide(ui, look.icon, &label, ringed, full_width);
-        if response.clicked() {
-            asked.action = Some(action);
-        }
-        primary_row = Some(index);
-    }
-    let row = |ui: &mut Ui| {
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(ACTION_GAP, ACTION_GAP);
         for (index, &action) in actions.iter().enumerate() {
-            if primary_row == Some(index) {
-                continue;
-            }
-
             let ringed = selected
                 == Some(Position {
                     section: ACTIONS,
@@ -445,13 +415,7 @@ fn actions_row(
                 asked.action = Some(action);
             }
         }
-    };
-    // The desktop keeps one row, which the title beside it was measured for; a phone wraps.
-    if compact {
-        ui.horizontal_wrapped(row);
-    } else {
-        ui.horizontal(row);
-    }
+    });
     if animations && (fills.played.popping(now) || fills.favorite.popping(now)) {
         // The icons are still growing into place: keep the frames coming.
         ui.ctx().request_repaint();
@@ -469,9 +433,16 @@ pub(super) fn pickers_row(
     let top = ui.cursor().min;
     let sources = &data.item.media_sources;
     let current = version.min(sources.len() - 1);
+    // A phone's picker runs across the rest of the row, as tall as a finger.
+    let compact = layout::compact(ui.ctx());
+    let (label_w, height) = if compact {
+        (COMPACT_PICKER_LABEL_W, COMPACT_PICKER_H)
+    } else {
+        (PICKER_LABEL_W, PICKER_H)
+    };
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 16.;
-        let (cell, _) = ui.allocate_exact_size(vec2(PICKER_LABEL_W, PICKER_H), Sense::hover());
+        ui.spacing_mut().item_spacing.x = if compact { 0. } else { 16. };
+        let (cell, _) = ui.allocate_exact_size(vec2(label_w, height), Sense::hover());
         let mut cell = ui.new_child(
             UiBuilder::new()
                 .max_rect(cell)
@@ -485,7 +456,8 @@ pub(super) fn pickers_row(
                 index: 0,
             });
         let name = version_label(&sources[current], current);
-        let response = picker(ui, &name, ringed);
+        let width = if compact { ui.available_width() } else { PICKER_W };
+        let response = picker(ui, &name, ringed, vec2(width, height));
         asked.version_picker = Some(response);
     });
     Rect::from_min_max(top, pos2(ui.max_rect().right(), ui.cursor().min.y))
@@ -493,10 +465,10 @@ pub(super) fn pickers_row(
 
 /// The version select (`widgets::select`), with the cursor's ring round it. Clicking it opens
 /// the list of versions; the keyboard changes the choice on the cursor instead.
-fn picker(ui: &mut Ui, name: &str, ringed: bool) -> Response {
-    // No wider than what's left of the row, which on a phone is less than its width.
-    let width = PICKER_W.min(ui.available_width());
-    let response = select::button(ui, vec2(width, PICKER_H), name, "Version", false);
+fn picker(ui: &mut Ui, name: &str, ringed: bool, size: egui::Vec2) -> Response {
+    // No wider than what's left of the row.
+    let size = vec2(size.x.min(ui.available_width()), size.y);
+    let response = select::button(ui, size, name, "Version", false);
     if ringed {
         focus::ring_widget(ui, &response);
     }
@@ -514,7 +486,7 @@ pub(super) fn version_label(source: &MediaSourceInfo, index: usize) -> String {
 /// [`WASH_UNDER_BAR`] at the bar's bottom, then gone [`WASH_TAIL`] points lower. It stays with
 /// the bar as the page scrolls, and over the plain backdrop it's the backdrop's own colour, so
 /// it only shows on the picture.
-fn bar_wash(ui: &Ui, bar: Rect) -> [egui::Shape; 2] {
+pub(super) fn bar_wash(ui: &Ui, bar: Rect) -> [egui::Shape; 2] {
     let (window, tokens) = (ui.ctx().content_rect(), theme::tokens_of(ui));
     let tail = Rect::from_min_size(bar.left_bottom(), vec2(bar.width(), WASH_TAIL));
     [
@@ -530,7 +502,7 @@ const WASH_UNDER_BAR: f32 = 0.6;
 /// How far below the bar [`bar_wash`] fades out.
 const WASH_TAIL: f32 = 64.;
 
-fn fade_to_background(ui: &Ui, band: Rect) -> egui::Shape {
+pub(super) fn fade_to_background(ui: &Ui, band: Rect) -> egui::Shape {
     // The first stop: the background at 30 %, so the image shows through at the top.
     let window = ui.ctx().content_rect();
     backdrop::fade_into(band, window, 77. / 255., theme::tokens_of(ui))

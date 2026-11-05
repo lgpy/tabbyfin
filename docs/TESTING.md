@@ -115,6 +115,9 @@ Built with `mise run android:install`, and tried on the emulator and one phone (
 - The player's gestures with real fingers (they were tried with `adb shell input`): a double tap's timing, a drag that starts diagonally, and a second finger during a drag.
 - Typing with Gboard, Samsung Keyboard, SwiftKey and FUTO (on the phone; the emulator only had FUTO typing an address): suggestions and autocorrect, swipe typing, Backspace held down, and a password field getting the password keyboard.
 - The status bar, gesture bar and a display cutout keep clear of the app, in portrait and landscape.
+- The player under a real display cutout, landscape either way up: the video reaches under it while the controls stay clear of it and centred, on Android 15 or newer and on 9 to 14 (where `SHORT_EDGES` is asked for), and the pages after the player closes keep clear of it again.
+- The phone player's controls with real fingers: the middle's buttons against the double tap on a side third (a tap near a skip button), the subtitles toggle and a long press on it on Media3 and on mpv, and the side sheet closing on Back with gesture navigation and on a tap beside it.
+- The phone item page with a real library: long titles and synopses, a series with many seasons and Specials on the shelf, an episode without a still of its own, and a person's photo in the round faces.
 - The keyboard per field: the server address's has the URL layout, the user name's suggests and learns nothing, a search box's (the top bar's, and the library's genres and tags) action key says Search and still submits, and the playlist name's suggests nothing.
 - The sign-in form taller than the room the keyboard leaves, in portrait: the field the keyboard opens over scrolls into view above it.
 - The status and navigation bar icons are dark on the light theme and light on the dark one, and still so after the player closes and its bars come back.

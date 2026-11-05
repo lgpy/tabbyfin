@@ -9,21 +9,27 @@
 //! their handles showing on the row under the pointer or the cursor. A collection keeps its
 //! poster cards.
 
-use egui::{Layout, Rect, Ui, pos2, vec2};
+use egui::accesskit::Role;
+use egui::{Layout, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 
-use super::{Asked, BIG_CARD_GAP, BIG_CARD_SCALE, CHILDREN, EPISODES, EntryAction, ItemData, OpenSeason, SECTION_GAP};
+use super::{
+    Asked, BIG_CARD_GAP, BIG_CARD_SCALE, CHILDREN, COMPACT_CARD_GAP, COMPACT_SEASON_SCALE, EPISODES, EntryAction,
+    ItemData, OpenSeason, SECTION_GAP,
+};
 use crate::browse::Cursor;
 use crate::images::ImageCache;
 use crate::item_menu::is_played;
 use crate::nav::Route;
+use crate::theme::text;
+use crate::widgets::focus::{self, Place};
 use crate::widgets::list_row::{Handle, Handles};
 use crate::widgets::media_row::{self, MediaRow};
 use crate::widgets::text::{
-    LANDSCAPE_H, Load, POSTER_W, card_text, episode_label, is_placeholder_episode_name, landscape_image, poster_image,
-    runtime_text,
+    LANDSCAPE_H, Load, POSTER_H, POSTER_W, card_text, episode_label, is_placeholder_episode_name, landscape_image,
+    poster_image, runtime_text,
 };
-use crate::widgets::{card, label, menu, state};
+use crate::widgets::{card, image, label, menu, shelf, state};
 use crate::{motion, theme};
 
 /// Between a list's heading and its first row.
@@ -198,7 +204,9 @@ pub(super) fn rows(
     asked: &mut Asked,
 ) -> Rows {
     let columns = if playlist { 1 } else { columns.max(1) };
-    let gap = media_row::GAP;
+    // A phone's rows have no fill, so they sit further apart.
+    let phone = !playlist && crate::layout::compact(ui.ctx());
+    let gap = if phone { media_row::PHONE_GAP } else { media_row::GAP };
     let width = (ui.available_width() - gap * (columns - 1) as f32) / columns as f32;
     let mut drawn = Rows::default();
     let now = ui.input(|input| input.time);
@@ -248,12 +256,14 @@ fn row(
 ) {
     let len = items.len();
     let selected = cursor.is_selected(section, index);
-    let (heading, detail) = row_text(item);
+    let phone = !playlist && crate::layout::compact(ui.ctx());
+    let (heading, detail) = if phone { phone_row_text(item) } else { row_text(item) };
     let mut row = MediaRow::new(item, landscape_image(item), &heading, &detail)
         .overview(item.overview.as_deref())
         .played(is_played(item))
         .highlighted(selected)
-        .compact(!playlist);
+        .compact(!playlist)
+        .phone(phone);
     if playlist {
         row = row.handles(Handles {
             up: index > 0,
@@ -317,6 +327,122 @@ fn row_text(item: &BaseItemDto) -> (String, String) {
     .collect::<Vec<_>>()
     .join(" · ");
     (heading, detail)
+}
+
+/// A phone row's heading and detail: an episode's number and name ("2. The Long Tide", or just
+/// "Episode 3" when Jellyfin only numbered it) over its runtime, as the season around it already
+/// says which season it is.
+fn phone_row_text(item: &BaseItemDto) -> (String, String) {
+    if item.kind != BaseItemKind::Episode {
+        return row_text(item);
+    }
+    let heading = match item.index_number {
+        Some(number) if !is_placeholder_episode_name(&item.name) => format!("{number}. {}", item.name),
+        _ => item.name.clone(),
+    };
+    (heading, item.run_time_ticks.map(runtime_text).unwrap_or_default())
+}
+
+/// A phone's seasons: a shelf of their posters, the open one ringed in `brand` with its name in
+/// `brand`, each with how many episodes are left under its name. A tap opens a season's
+/// episodes under the shelf; a long press gives the item menu. Returns the shelf's rectangle.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn season_shelf(
+    ui: &mut Ui,
+    data: &ItemData,
+    open: Option<&str>,
+    moved: bool,
+    cursor: &mut Cursor,
+    images: &mut ImageCache,
+    asked: &mut Asked,
+) -> Rect {
+    let size = vec2(POSTER_W, POSTER_H) * COMPACT_SEASON_SCALE;
+    shelf::shelf_with_gaps(ui, "seasons", "Seasons", COMPACT_CARD_GAP, HEADING_GAP, 0., |ui| {
+        for (index, season) in data.children.iter().enumerate() {
+            let selected = cursor.is_selected(CHILDREN, index);
+            let response = season_card(ui, images, season, size, open == Some(season.id.as_str()), selected);
+            if selected && moved {
+                response.scroll_to_me(None);
+            }
+            if response.clicked() {
+                asked.season = Some(season.clone());
+            }
+            if let Some(action) = menu::item_menu(&response, season) {
+                asked.menu = Some((action, season.clone()));
+            }
+        }
+    })
+}
+
+/// Room round a season's poster for its ring, which the shelf would otherwise clip.
+const SEASON_RING_ROOM: f32 = 4.;
+
+/// One of [`season_shelf`]'s cards: the poster `size`, then the name and the line under it,
+/// centred.
+fn season_card(
+    ui: &mut Ui,
+    images: &mut ImageCache,
+    season: &BaseItemDto,
+    size: egui::Vec2,
+    open: bool,
+    selected: bool,
+) -> egui::Response {
+    let tokens = theme::tokens_of(ui);
+    let room = SEASON_RING_ROOM;
+    // One short line under a narrow card: what's left, or how many there are.
+    let line = match season.user_data.as_ref().and_then(|data| data.unplayed_item_count) {
+        Some(0) => "Watched".to_owned(),
+        Some(left) => format!("{left} to watch"),
+        None => season
+            .child_count
+            .filter(|&count| count > 0)
+            .map(|count| format!("{count} episode{}", if count == 1 { "" } else { "s" }))
+            .unwrap_or_default(),
+    };
+    let cell = vec2(size.x + 2. * room, size.y + 2. * room + 44.);
+    let (rect, response) = ui.allocate_exact_size(cell, Sense::click());
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, open, &season.name));
+    let poster = Rect::from_min_size(rect.min + vec2(room, room), size);
+    image::show(
+        ui,
+        images,
+        poster,
+        poster_image(season).as_ref(),
+        Some(season),
+        image::RADIUS,
+    );
+    if response.is_pointer_button_down_on() {
+        image::dim(ui, poster, image::RADIUS);
+    }
+    if open {
+        ui.painter().rect_stroke(
+            poster.expand(2.),
+            image::RADIUS + 2,
+            Stroke::new(2., tokens.brand),
+            StrokeKind::Outside,
+        );
+    } else if selected {
+        focus::ring(ui, poster, image::RADIUS as f32, Place::Inside);
+    }
+    let center = rect.center().x;
+    let name_color = if open { tokens.brand } else { tokens.ink };
+    let name = ui
+        .painter()
+        .layout_no_wrap(season.name.clone(), text::font(ui, "sm"), name_color);
+    let y = poster.bottom() + room + 6.;
+    let name_h = name.size().y;
+    ui.painter()
+        .galley(pos2(center - name.size().x / 2., y), name, name_color);
+    if !line.is_empty() {
+        ui.painter().text(
+            pos2(center, y + name_h + 2.),
+            egui::Align2::CENTER_TOP,
+            line,
+            text::font(ui, "xs"),
+            tokens.ink_muted,
+        );
+    }
+    response
 }
 
 /// Where the open season's episodes went: their top (the heading and the first row, which

@@ -80,7 +80,9 @@ final class VideoSurface implements SurfaceHolder.Callback {
                 activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
                 bars.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
                 bars.hide(WindowInsetsCompat.Type.systemBars());
+                cutout(window, WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES);
             } else {
+                cutout(window, WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT);
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
                 // The icons' own light or dark appearance (MainActivity.setLightSystemBars) is
@@ -89,6 +91,19 @@ final class VideoSurface implements SurfaceHolder.Callback {
                 applyBrightness(window, WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE);
             }
         });
+    }
+
+    /**
+     * Whether the window draws into the display cutout: the player's video runs under it in
+     * landscape (`SHORT_EDGES`), while its controls keep to the insets Rust is told of. Android
+     * 15 and newer always draw there at this target SDK; 9 to 14 need asking, and 8 has no
+     * cutouts.
+     */
+    private static void cutout(Window window, int mode) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.P) return;
+        WindowManager.LayoutParams attributes = window.getAttributes();
+        attributes.layoutInDisplayCutoutMode = mode;
+        window.setAttributes(attributes);
     }
 
     /**

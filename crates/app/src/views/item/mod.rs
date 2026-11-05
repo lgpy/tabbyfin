@@ -24,6 +24,7 @@
 //! opens its menu with the first entry highlighted.
 
 mod children;
+mod compact;
 mod header;
 pub mod prefetch;
 mod shelves;
@@ -227,11 +228,27 @@ const BIG_CARD_GAP: f32 = 24.;
 const SHELF_TITLE_GAP: f32 = 16.;
 /// The item's title: a fixed 40-point size, which doesn't follow the text size.
 const TITLE_SIZE: f32 = 40.;
-/// A phone's header (`layout::Size::Compact`): a banner about 16:9 of its width, the poster
-/// at 60 % of the desktop's on it, and a smaller title across the width under them.
-const COMPACT_BACKDROP_H: f32 = 240.;
-const COMPACT_IMAGE_SCALE: f32 = 0.6;
-const COMPACT_TITLE_SIZE: f32 = 28.;
+/// A phone's header (`layout::Size::Compact`): the backdrop dimmed in a band this tall, the
+/// poster (or an episode's still, as wide as the page) centred on it this far below its top, and
+/// the title centred under it at this size.
+const COMPACT_BAND_H: f32 = 300.;
+const COMPACT_IMAGE_TOP: f32 = 12.;
+const COMPACT_POSTER_W: f32 = 150.;
+const COMPACT_POSTER_H: f32 = 225.;
+const COMPACT_TITLE_SIZE: f32 = 26.;
+/// How many lines of the synopsis a phone shows until *More* opens the rest.
+const COMPACT_OVERVIEW_ROWS: usize = 4;
+/// A phone's version row: the label's column and the select's height.
+const COMPACT_PICKER_LABEL_W: f32 = 76.;
+const COMPACT_PICKER_H: f32 = 40.;
+/// A phone's "More like this" posters: 105 wide, so three and a bit show across.
+const COMPACT_CARD_SCALE: f32 = 0.7;
+/// A phone's season posters, smaller again: they're a picker more than cards.
+const COMPACT_SEASON_SCALE: f32 = 0.6;
+/// Between a phone's shelf cards.
+const COMPACT_CARD_GAP: f32 = 12.;
+/// A phone's cast: round faces this wide.
+const COMPACT_FACE: f32 = 64.;
 /// Between the action buttons: room for the cursor's ring outside each (`focus::GAP` and its
 /// width) with a little to spare.
 const ACTION_GAP: f32 = 10.;
@@ -356,6 +373,8 @@ pub struct ItemPage {
     reveal_band: Option<BandReveal>,
     /// The open season's episodes request; the next season's replaces it, which cancels it.
     episodes: Option<Task<jellyfin::Result<Vec<BaseItemDto>>>>,
+    /// A phone shows the whole synopsis rather than its first lines (*More*).
+    overview_open: bool,
     /// The More menu was asked for this frame, by the button or by Enter on the cursor (which
     /// starts its highlight on the first entry): its popup opens before the frame draws it.
     more_requested: Option<Opened>,
@@ -389,6 +408,7 @@ impl ItemPage {
             closing_season: None,
             reveal_band: None,
             episodes: None,
+            overview_open: false,
             more_requested: None,
             marks_seen,
             add_to_playlist: None,
@@ -499,6 +519,27 @@ impl ItemPage {
         }
         cx.ctx.request_repaint();
         opened
+    }
+
+    /// A phone's series has a season open from the start, as its shelf of seasons is a picker:
+    /// the one its next episode is in, or the first.
+    fn open_first_season(&mut self, cx: &mut PageCx) {
+        let Load::Loaded(data) = &self.data else {
+            return;
+        };
+        if data.item.kind != BaseItemKind::Series || self.open_season.is_some() || self.closing_season.is_some() {
+            return;
+        }
+        let next_season = data.up_next.as_ref().and_then(|episode| episode.season_id.as_deref());
+        let season = data
+            .children
+            .iter()
+            .find(|season| Some(season.id.as_str()) == next_season)
+            .or_else(|| data.children.first())
+            .cloned();
+        if let Some(season) = season {
+            self.toggle_season(&season, cx);
+        }
     }
 
     /// Fetches the open season's episodes, unless another season opens meanwhile (its request
@@ -776,7 +817,13 @@ impl ItemPage {
         // which the padded content area has; the keys then use the layout the page last showed.
         let padding = crate::layout::side(ui.ctx());
         let width = (ui.available_width() - 2. * padding).max(1.);
-        let columns = children::grid_columns(data.item.kind, width);
+        // A phone's seasons are one shelf: a single row as long as there are seasons.
+        let compact = crate::layout::compact(ui.ctx());
+        let season_shelf = compact && data.item.kind == BaseItemKind::Series;
+        let columns = match season_shelf {
+            true => data.children.len().max(1),
+            false => children::grid_columns(data.item.kind, width),
+        };
         self.columns = columns;
         let episode_columns = media_row::episode_columns(width);
         self.episode_columns = episode_columns;
@@ -795,6 +842,7 @@ impl ItemPage {
         let under_bar = cx.under_bar.as_ref();
         let cursor = &mut self.cursor;
         let fills = &self.fills;
+        let overview_open = self.overview_open;
         let mut asked = Asked::default();
         // The page's own scroll target, set once every shelf is drawn: the next scroll area to
         // finish takes a target, and a shelf's row shouldn't be it.
@@ -812,7 +860,17 @@ impl ItemPage {
                     bottom: 0,
                 })
                 .show(ui, |ui| {
-                    let header = header::header(ui, data, &actions, selected, fills, images, under_bar, &mut asked);
+                    let header = header::header(
+                        ui,
+                        data,
+                        &actions,
+                        selected,
+                        fills,
+                        images,
+                        under_bar,
+                        overview_open,
+                        &mut asked,
+                    );
                     let mut pickers = None;
                     if data.item.media_sources.len() > 1 {
                         ui.add_space(SECTION_GAP);
@@ -825,7 +883,18 @@ impl ItemPage {
                     }
                     let mut children_title = None;
                     let mut children_row = None;
-                    if let Some(title) = children::children_heading(data) {
+                    if season_shelf && !data.children.is_empty() {
+                        ui.add_space(SECTION_GAP);
+                        children_row = Some(children::season_shelf(
+                            ui,
+                            data,
+                            open.as_deref(),
+                            moved,
+                            cursor,
+                            images,
+                            &mut asked,
+                        ));
+                    } else if let Some(title) = children::children_heading(data) {
                         ui.add_space(SECTION_GAP);
                         children_title = Some(children::heading(ui, title));
                         ui.add_space(children::HEADING_GAP);
@@ -984,8 +1053,15 @@ impl ItemPage {
         }
         if let Some(season) = asked.season {
             // A click leaves the band where it opens: only the keyboard's Enter scrolls to it,
-            // and a click that moved the page under the pointer would surprise.
-            self.toggle_season(&season, cx);
+            // and a click that moved the page under the pointer would surprise. A phone's shelf
+            // always has a season open, so its open one stays open.
+            let is_open = self.open_season.as_ref().is_some_and(|open| open.id == season.id);
+            if !(season_shelf && is_open) {
+                self.toggle_season(&season, cx);
+            }
+        }
+        if asked.toggle_overview {
+            self.overview_open = !self.overview_open;
         }
         if let Some((index, action)) = asked.entry {
             self.edit_entry(index, action, cx);
@@ -1047,6 +1123,8 @@ struct Asked {
     more: Option<Response>,
     /// The version picker's response, which its menu hangs from.
     version_picker: Option<Response>,
+    /// A phone's *More* (or *Less*) under the synopsis was tapped.
+    toggle_overview: bool,
 }
 
 /// A More menu row. Deleting a playlist can't be taken back, so it's set apart and in red.
@@ -1152,6 +1230,9 @@ impl Page for ItemPage {
                 }
             }
             Load::Loaded(_) => {}
+        }
+        if crate::layout::compact(ui.ctx()) {
+            self.open_first_season(cx);
         }
         if matches!(self.data, Load::Loaded(_)) {
             self.show_content(ui, cx);

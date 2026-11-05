@@ -501,6 +501,47 @@ impl PlaybackManager {
         self.now_playing.as_mut()
     }
 
+    /// A session as if `item` had started playing `source`, with no player behind it, for the
+    /// player page's tests: 12 minutes into 48, playing. Returns what the page sends it.
+    #[cfg(test)]
+    pub fn start_for_test(&mut self, item: BaseItemDto, source: MediaSourceInfo) -> mpsc::UnboundedReceiver<UiCommand> {
+        let (commands, received) = mpsc::unbounded_channel();
+        self.generation += 1;
+        self.active = true;
+        self.now_playing = Some(NowPlaying {
+            session: self.generation,
+            item,
+            source,
+            video: VideoOutput::external(),
+            position: Duration::from_secs(12 * 60),
+            position_at: Instant::now(),
+            duration: Some(Duration::from_secs(48 * 60)),
+            paused: false,
+            loading: false,
+            audio: None,
+            subtitle: SubtitleChoice::Auto,
+            volume: self.volume,
+            muted: false,
+            adjustments: self.adjustments,
+            versions: Vec::new(),
+            trickplay: TrickplayTiles::new(),
+            previous: None,
+            next: None,
+            next_cancelled: false,
+            autoplay: false,
+            chapters: Vec::new(),
+            segments: Vec::new(),
+            stream: StreamInfo::default(),
+            group_item: None,
+            resumed_from: None,
+            restarts: 0,
+            cues: Cues::default(),
+            cues_changed: 0,
+            commands,
+        });
+        received
+    }
+
     /// The state of the current session, not of one being replaced: commands sent to it reach
     /// a session that's still going.
     fn current(&self) -> Option<&NowPlaying> {

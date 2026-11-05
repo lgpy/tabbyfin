@@ -246,6 +246,91 @@ pub fn person(ui: &mut Ui, cache: &mut ImageCache, person: &BaseItemPerson, scal
     response
 }
 
+/// A cast or crew member as a phone shows them: their photo in a circle `diameter` across (or
+/// their initials on their avatar's pastel), their name and role centred under it.
+pub fn person_round(
+    ui: &mut Ui,
+    cache: &mut ImageCache,
+    person: &BaseItemPerson,
+    diameter: f32,
+    selected: bool,
+) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let width = diameter + 20.;
+    let heights = line_heights(ui, "sm", "xs");
+    let (rect, response) = ui.allocate_exact_size(vec2(width, diameter + lines_height(&heights)), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, &person.name));
+    let face = Rect::from_center_size(pos2(rect.center().x, rect.top() + diameter / 2.), Vec2::splat(diameter));
+    let radius = (diameter / 2.) as u8;
+    let request = person
+        .primary_image_tag
+        .clone()
+        .map(|tag| ImageRequest::new(&person.id, ImageType::Primary, Some(tag)));
+    if request.is_some() {
+        image::show(ui, cache, face, request.as_ref(), None, radius);
+    } else {
+        ui.painter()
+            .circle_filled(face.center(), diameter / 2., avatar::colour(tokens, &person.name));
+        let initials: String = person
+            .name
+            .split_whitespace()
+            .filter_map(|word| word.chars().next())
+            .take(2)
+            .collect();
+        ui.painter().text(
+            face.center(),
+            Align2::CENTER_CENTER,
+            initials,
+            text::font(ui, "xl"),
+            tokens.avatar_foreground,
+        );
+    }
+    if response.is_pointer_button_down_on() {
+        image::dim(ui, face, radius);
+    }
+    if selected {
+        focus::ring(ui, face, diameter / 2., focus::Place::Outside);
+    }
+    let detail = match (&person.role, person.kind.as_deref()) {
+        (Some(role), _) if !role.is_empty() => role.clone(),
+        (_, Some("Actor")) | (_, None) => String::new(),
+        (_, Some(kind)) => kind_label(kind),
+    };
+    let mut y = face.bottom() + GAP;
+    for (text, size, color) in [
+        (person.name.as_str(), "sm", tokens.ink),
+        (detail.as_str(), "xs", tokens.ink_muted),
+    ] {
+        let galley = ui
+            .painter()
+            .layout(text.to_owned(), text::font(ui, size), color, f32::INFINITY);
+        let galley = truncate(ui, galley, text, size, color, width);
+        let h = galley.size().y;
+        ui.painter()
+            .galley(pos2(rect.center().x - galley.size().x / 2., y), galley, color);
+        y += h + GAP;
+    }
+    response
+}
+
+/// `galley` cut to `width` with an ellipsis when it's wider.
+fn truncate(
+    ui: &Ui,
+    galley: std::sync::Arc<egui::Galley>,
+    text: &str,
+    size: &str,
+    color: egui::Color32,
+    width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    if galley.size().x <= width {
+        return galley;
+    }
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), text::font(ui, size), color);
+    job.wrap.max_width = width;
+    job.wrap.max_rows = 1;
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
 /// Grey card used while a grid page is still loading. It takes a real card's place without
 /// asking for anything.
 ///
@@ -375,7 +460,7 @@ fn cursor_ring(ui: &Ui, image: Rect, selected: bool) {
 }
 
 /// How far through it is, for the bar along the bottom of its card.
-fn progress(item: &BaseItemDto) -> Option<f32> {
+pub(crate) fn progress(item: &BaseItemDto) -> Option<f32> {
     let percentage = item.user_data.as_ref()?.played_percentage?;
     (percentage > 0. && percentage < 100.).then_some((percentage / 100.) as f32)
 }
@@ -384,7 +469,7 @@ fn progress(item: &BaseItemDto) -> Option<f32> {
 /// track over a dark wash up from the edge, so its full length shows on bright pictures and
 /// dark ones alike. The fill is the player's lavender in both themes: it sits on the picture,
 /// where the light theme's deep `brand` would sink into a dark one.
-fn progress_bar(ui: &Ui, image: Rect, fraction: f32) {
+pub(crate) fn progress_bar(ui: &Ui, image: Rect, fraction: f32) {
     scrim(ui, image);
     let bar = Rect::from_min_max(
         pos2(image.left() + BAR_INSET, image.bottom() - BAR_INSET - BAR_H),
