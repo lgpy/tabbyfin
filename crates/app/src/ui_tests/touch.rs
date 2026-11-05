@@ -336,7 +336,9 @@ fn a_phones_genres_and_tags_are_a_page_of_the_filters() {
         ui.step();
     }
     assert!(
-        ui.harness().query_by_role_and_label(Role::ComboBox, "Progress").is_none(),
+        ui.harness()
+            .query_by_role_and_label(Role::ComboBox, "Progress")
+            .is_none(),
         "the page in place of the filters"
     );
     assert_eq!(
