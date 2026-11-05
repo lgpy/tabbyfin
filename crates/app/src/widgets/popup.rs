@@ -20,6 +20,10 @@
 //! reads its keys itself), and each tells AccessKit what it is. Lists that aren't menus (a
 //! dialog's playlists, the player's tracks) draw the same rows with [`row`] and move their
 //! highlight with [`step`], so they look and move like a menu.
+//!
+//! With touch, a menu or [`panel`] opens as a bottom sheet instead ([`sheet`]), with its rows a
+//! finger's height and its title over them: the same calls, the same open state. The top bar's
+//! (the account menu, SyncPlay) stay hung from their buttons, with the sheet's larger rows.
 
 use std::borrow::Cow;
 
@@ -36,7 +40,7 @@ use crate::keys;
 use crate::motion;
 use crate::theme::{self, text};
 use crate::widgets::focus;
-use crate::widgets::{badge, label};
+use crate::widgets::{badge, label, sheet};
 
 /// A menu's width unless the caller sets one.
 pub const WIDTH: f32 = 220.;
@@ -59,6 +63,14 @@ const SLIDE: f32 = 4.;
 const OPEN: f64 = 0.120;
 /// Past this height the rows scroll.
 const MAX_H: f32 = 420.;
+/// On a sheet: the room either side of the rows, a row's height at the default text size, the
+/// room left and right of its contents, and its icon's slot.
+const SHEET_PAD: f32 = 8.;
+const SHEET_ROW_H: f32 = 56.;
+const SHEET_ROW_INSET: f32 = 16.;
+const SHEET_SLOT_W: f32 = 24.;
+/// The least a menu hung from its button is wide with touch, for its larger rows.
+const HUNG_TOUCH_W: f32 = 280.;
 
 /// How a menu was opened, which decides where its highlight starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,15 +176,17 @@ struct State {
 /// A popup menu under `id`, opened with [`PopupMenu::open`] or [`PopupMenu::toggle`] (or
 /// [`PopupMenu::opening_at_pointer`] for a right-click) and drawn every frame with
 /// [`PopupMenu::show`], which does nothing while it's closed.
-pub struct PopupMenu {
+pub struct PopupMenu<'a> {
     id: Id,
     align: RectAlign,
     width: f32,
     at_pointer: bool,
     opening: bool,
+    title: Option<&'a str>,
+    hung: bool,
 }
 
-impl PopupMenu {
+impl<'a> PopupMenu<'a> {
     pub fn new(id: Id) -> Self {
         Self {
             id,
@@ -180,7 +194,24 @@ impl PopupMenu {
             width: WIDTH,
             at_pointer: false,
             opening: false,
+            title: None,
+            hung: false,
         }
+    }
+
+    /// Hung from its button with touch too, rather than a sheet: for a button in the top bar,
+    /// where a sheet rising from the other end of the screen would seem to come from nowhere. Its
+    /// rows are a sheet's, for a finger.
+    pub fn hung(mut self) -> Self {
+        self.hung = true;
+        self
+    }
+
+    /// What the menu is for, over its rows when it opens as a sheet (with touch), where no
+    /// button points at it.
+    pub fn title(mut self, title: &'a str) -> Self {
+        self.title = Some(title);
+        self
     }
 
     /// Where the panel goes against what it hangs from, when it fits there; egui tries the
@@ -282,58 +313,85 @@ impl PopupMenu {
             out.chosen = Some(index);
         }
 
-        let anchor_at = if self.at_pointer {
-            PopupAnchor::PointerFixed
-        } else {
-            PopupAnchor::from(anchor)
-        };
-        let open_memory = if self.opening {
-            Some(SetOpenCommand::Bool(true))
-        } else {
-            None
-        };
         let slot = entries.iter().any(Entry::has_slot);
-        let width = self.width;
-        show_panel(id, anchor, anchor_at, open_memory, self.align, width, PAD, |ui| {
+        let touch = crate::layout::touch(&ctx);
+        let on_sheet = touch && !self.hung;
+        // The rows, in a menu's panel or on a sheet. With touch they're a finger's size, and a
+        // row is filled while a finger is on it, not by hover: the pointer stays where the last
+        // tap left it.
+        let mut rows = |ui: &mut Ui| {
             let inner = ui.available_width();
-            egui::ScrollArea::vertical().max_height(MAX_H).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.;
-                let pointer_moved = ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO);
-                let mut hovered = None;
-                for (index, entry) in entries.iter().enumerate() {
-                    if entry.separated && index > 0 {
+            let pointer_moved = ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO);
+            let mut hovered = None;
+            for (index, entry) in entries.iter().enumerate() {
+                if entry.separated && index > 0 {
+                    if on_sheet {
+                        sheet::separator(ui, SHEET_PAD, theme::tokens_of(ui).surface_border);
+                    } else {
                         separator(ui);
                     }
-                    let height = row_height(ui);
-                    let (rect, response) = ui.allocate_exact_size(vec2(inner, height), Sense::CLICK);
-                    if response.hovered() {
-                        hovered = Some(index);
-                        if pointer_moved {
-                            state.highlight = Some(index);
-                            state.by_pointer = true;
-                        }
-                    }
-                    let highlighted = state.highlight == Some(index);
-                    if highlighted && moved {
-                        ui.scroll_to_rect(rect, None);
-                    }
-                    paint_row(
-                        ui,
-                        rect,
-                        entry,
-                        slot,
-                        highlighted.then(|| theme::tokens_of(ui).inset_hover),
-                    );
-                    response.widget_info(|| row_info(entry, true));
-                    if response.clicked() {
-                        out.chosen = Some(index);
+                }
+                let height = if touch { sheet_row_height(ui) } else { row_height(ui) };
+                let (rect, response) = ui.allocate_exact_size(vec2(inner, height), Sense::CLICK);
+                if response.hovered() && !touch {
+                    hovered = Some(index);
+                    if pointer_moved {
+                        state.highlight = Some(index);
+                        state.by_pointer = true;
                     }
                 }
-                if hovered.is_none() && pointer_moved && state.by_pointer {
-                    state.highlight = None;
+                let highlighted = state.highlight == Some(index) || (touch && response.is_pointer_button_down_on());
+                if highlighted && moved {
+                    ui.scroll_to_rect(rect, None);
                 }
+                paint_row(
+                    ui,
+                    rect,
+                    entry,
+                    slot,
+                    highlighted.then(|| theme::tokens_of(ui).inset_hover),
+                    touch,
+                );
+                response.widget_info(|| row_info(entry, true));
+                if response.clicked() {
+                    out.chosen = Some(index);
+                }
+            }
+            if hovered.is_none() && pointer_moved && state.by_pointer {
+                state.highlight = None;
+            }
+        };
+
+        if on_sheet {
+            if self.opening {
+                egui::Popup::open_id(&ctx, id);
+            }
+            let inset = SHEET_PAD + SHEET_ROW_INSET;
+            sheet::show(&ctx, id, self.title, SHEET_PAD, inset, rows);
+        } else {
+            // Larger rows need more room, though never more than the window has.
+            let width = if touch {
+                self.width.max(HUNG_TOUCH_W).min(ctx.content_rect().width() - 2. * GAP)
+            } else {
+                self.width
+            };
+            let anchor_at = if self.at_pointer {
+                PopupAnchor::PointerFixed
+            } else {
+                PopupAnchor::from(anchor)
+            };
+            let open_memory = if self.opening {
+                Some(SetOpenCommand::Bool(true))
+            } else {
+                None
+            };
+            show_panel(id, anchor, anchor_at, open_memory, self.align, width, PAD, |ui| {
+                egui::ScrollArea::vertical().max_height(MAX_H).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.;
+                    rows(ui);
+                });
             });
-        });
+        }
 
         if out.chosen.is_some() {
             Self::close(&ctx, id);
@@ -347,18 +405,26 @@ impl PopupMenu {
 /// laid out like a small surface (headings, inset rows, buttons): for a popup that is more
 /// than a list of rows (the SyncPlay panel). It has the menu's frame, placement and opening
 /// motion, with [`PANEL_PAD`] of room inside, closes on Esc or a click outside, and `content`
-/// gets a `Ui` of the panel's inner width with no room between rows. Opening, closing and keys
-/// are the caller's (egui's `Popup::open_id` and friends). Returns what `content` returned, or
-/// `None` while it's closed.
+/// gets a `Ui` of the panel's inner width with no room between rows. `touch` says how it opens
+/// with touch. Opening, closing and keys are the caller's (egui's `Popup::open_id` and friends).
+/// Returns what `content` returned, or `None` while it's closed.
 pub fn panel<R>(
     id: Id,
     anchor: &Response,
     align: RectAlign,
     width: f32,
+    touch: OnTouch,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
     if !egui::Popup::is_id_open(&anchor.ctx, id) {
         return None;
+    }
+    let mut width = width;
+    if crate::layout::touch(&anchor.ctx) {
+        match touch {
+            OnTouch::Sheet(title) => return sheet::show(&anchor.ctx, id, title, PANEL_PAD, PANEL_PAD, content),
+            OnTouch::Hung => width = width.min(anchor.ctx.content_rect().width() - 2. * GAP),
+        }
     }
     show_panel(
         id,
@@ -370,6 +436,16 @@ pub fn panel<R>(
         PANEL_PAD,
         content,
     )
+}
+
+/// How a [`panel`] opens with touch.
+#[derive(Clone, Copy, Debug)]
+pub enum OnTouch<'a> {
+    /// As a bottom sheet, titled when it has no heading of its own.
+    Sheet(Option<&'a str>),
+    /// Hung from its button as on the desktop: for a button in the top bar, where a sheet rising
+    /// from the other end of the screen would seem to come from nowhere.
+    Hung,
 }
 
 /// The room inside a [`panel`]: a surface's padding scaled down to a popup.
@@ -512,7 +588,7 @@ pub fn row(ui: &mut Ui, entry: &Entry, slot: bool, highlighted: bool, fill: Colo
     let height = row_height(ui);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::CLICK);
     let highlight = (highlighted || response.hovered()).then_some(fill);
-    paint_row(ui, rect, entry, slot || entry.has_slot(), highlight);
+    paint_row(ui, rect, entry, slot || entry.has_slot(), highlight, false);
     response.widget_info(|| row_info(entry, false));
     response
 }
@@ -527,6 +603,11 @@ pub fn row_height(ui: &Ui) -> f32 {
     } else {
         height
     }
+}
+
+/// A sheet's row: a list row's height on a phone, taller with larger text.
+fn sheet_row_height(ui: &Ui) -> f32 {
+    SHEET_ROW_H.max(text::font(ui, "base").size + 32.)
 }
 
 /// Up and Down wrap round. In a menu opened with a click, Down starts at the top and Up at the
@@ -560,21 +641,32 @@ pub fn separator_in(ui: &mut Ui, colour: Color32) {
         .hline((rect.left() - PAD)..=(rect.right() + PAD), y, Stroke::new(1., colour));
 }
 
-/// `highlight` is the row's fill while it's highlighted (a danger row has its own).
-fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlight: Option<Color32>) {
+/// `highlight` is the row's fill while it's highlighted (a danger row has its own). `on_sheet`
+/// draws it a size up, for a finger: larger text and icon, more room.
+fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlight: Option<Color32>, on_sheet: bool) {
     let tokens = theme::tokens_of(ui);
     let painter = ui.painter();
     let color = if entry.danger { tokens.danger } else { tokens.ink };
+    let (inset, slot_w, radius) = if on_sheet {
+        (SHEET_ROW_INSET, SHEET_SLOT_W, tokens.radius_control)
+    } else {
+        (ROW_INSET, SLOT_W, RADIUS - PAD as u8)
+    };
+    let (label_font, detail_font) = if on_sheet {
+        (text::font(ui, "base"), text::font(ui, "sm"))
+    } else {
+        (text::font(ui, "sm"), text::font(ui, "xs"))
+    };
     if let Some(fill) = highlight {
         let fill = if entry.danger {
             tokens.danger.gamma_multiply(0.14)
         } else {
             fill
         };
-        painter.rect_filled(rect, CornerRadius::same(RADIUS - PAD as u8), fill);
+        painter.rect_filled(rect, CornerRadius::same(radius), fill);
     }
 
-    let mut x = rect.left() + ROW_INSET;
+    let mut x = rect.left() + inset;
     if slot {
         let icon = if entry.has_check() {
             Some(ICON_CHECK)
@@ -582,34 +674,44 @@ fn paint_row(ui: &Ui, rect: Rect, entry: &Entry, slot: bool, highlight: Option<C
             entry.icon
         };
         if let Some(icon) = icon {
+            let mut font = text::icon(ui, icon.font_family());
+            if on_sheet {
+                font.size = text::font(ui, "xl").size;
+            }
+            // On a sheet the chosen one's tick is the brand's, so it reads at a glance.
+            let tint = match entry.tint {
+                Some(tint) => tint,
+                None if on_sheet && entry.has_check() && !entry.danger => tokens.brand,
+                None => color,
+            };
             painter.text(
-                pos2(x + SLOT_W / 2., rect.center().y),
+                pos2(x + slot_w / 2., rect.center().y),
                 Align2::CENTER_CENTER,
                 icon.codepoint,
-                text::icon(ui, icon.font_family()),
-                entry.tint.unwrap_or(color),
+                font,
+                tint,
             );
         }
-        x += SLOT_W + ROW_INSET;
+        x += slot_w + inset;
     }
 
-    let mut right = rect.right() - ROW_INSET;
+    let mut right = rect.right() - inset;
     if let Some(detail) = &entry.detail {
-        let galley = painter.layout_no_wrap(detail.to_string(), text::font(ui, "xs"), tokens.ink_muted);
+        let galley = painter.layout_no_wrap(detail.to_string(), detail_font, tokens.ink_muted);
         right -= galley.size().x;
         painter.galley(
             pos2(right, rect.center().y - galley.size().y / 2.),
             galley,
             tokens.ink_muted,
         );
-        right -= ROW_INSET;
+        right -= inset;
     }
 
     // A label too long for the row ends in an ellipsis.
     let mut job = LayoutJob::single_section(
         entry.label.to_string(),
         TextFormat {
-            font_id: text::font(ui, "sm"),
+            font_id: label_font,
             color,
             ..Default::default()
         },

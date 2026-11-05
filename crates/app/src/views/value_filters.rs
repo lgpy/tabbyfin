@@ -75,8 +75,8 @@ impl ValueFilters {
     /// and `view` what's chosen; a click changes `view` and returns true.
     pub fn show(&mut self, anchor: &Response, values: &FilterValues, view: &mut LibraryView) -> bool {
         let mut cycled: Option<(ValueKind, String, bool)> = None;
-        let title = Some("Genres and tags");
-        popup::panel(Self::id(), anchor, RectAlign::BOTTOM_START, WIDTH, title, |ui| {
+        let touch = popup::OnTouch::Sheet(Some("Genres and tags"));
+        popup::panel(Self::id(), anchor, RectAlign::BOTTOM_START, WIDTH, touch, |ui| {
             // A frame, not a `horizontal`, which would cap the scroll area's room at one row.
             egui::Frame::new()
                 .inner_margin(egui::Margin::same(PAD as i8))
