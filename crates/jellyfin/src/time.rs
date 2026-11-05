@@ -1,5 +1,6 @@
 //! The server's clock, estimated NTP-style from `GET /GetUtcTime`. SyncPlay schedules commands
-//! in server time, so members whose clocks disagree still act together.
+//! in server time, so members whose clocks disagree still act together. [`parse_utc`] and
+//! [`format_utc`] read and write the timestamps the server sends (playback dates, among others).
 
 use std::collections::VecDeque;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

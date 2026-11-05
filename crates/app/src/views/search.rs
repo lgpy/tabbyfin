@@ -94,7 +94,7 @@ impl SearchPage {
             include_item_types: vec![BaseItemKind::Movie, BaseItemKind::Series, BaseItemKind::Episode],
             recursive: true,
             sort_by: vec![ItemSortBy::SortName],
-            fields: vec![ItemField::PrimaryImageAspectRatio],
+            fields: vec![ItemField::PrimaryImageAspectRatio, ItemField::CanDownload],
             limit: Some(LIMIT),
             ..Default::default()
         };
@@ -314,7 +314,7 @@ fn show_results(
                         if response.clicked() {
                             asked.open = Some(Route::for_item(item));
                         }
-                        if let Some(action) = menu::item_menu(&response, item) {
+                        if let Some(action) = menu::item_menu(&response, item, &cx.services.downloads) {
                             asked.menu = Some((action, (*item).clone()));
                         }
                     }

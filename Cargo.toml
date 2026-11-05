@@ -35,6 +35,8 @@ tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "time"] 
 url = "2"
 
 directories = "6"
+# Free space before a download starts (`downloads.rs`).
+fs4 = "0.13"
 gethostname = "1"
 keyring = "4"
 toml = "1"

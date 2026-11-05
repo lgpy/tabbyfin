@@ -8,7 +8,7 @@
 
 use std::collections::VecDeque;
 
-use jellyfin::models::{BaseItemDto, BaseItemKind};
+use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField};
 use jellyfin::{Client, Ticks};
 
 use crate::services::Services;
@@ -88,13 +88,15 @@ pub fn first_unwatched(episodes: &[BaseItemDto]) -> Option<&BaseItemDto> {
         .copied()
 }
 
-/// All of a series' episodes in order, or a season's.
+/// All of a series' episodes in order, or a season's. The list endpoint only sends
+/// `CanDownload` when it's asked for it, and downloads need it to tell which episodes may go.
 pub async fn episodes_of(client: &Client, item: &BaseItemDto) -> jellyfin::Result<Vec<BaseItemDto>> {
+    let fields = [ItemField::CanDownload];
     Ok(match item.kind {
-        BaseItemKind::Series => client.episodes(&item.id, None, &[]).await?.items,
+        BaseItemKind::Series => client.episodes(&item.id, None, &fields).await?.items,
         BaseItemKind::Season => {
             let series_id = item.series_id.as_deref().unwrap_or_default();
-            client.episodes(series_id, Some(&item.id), &[]).await?.items
+            client.episodes(series_id, Some(&item.id), &fields).await?.items
         }
         _ => Vec::new(),
     })

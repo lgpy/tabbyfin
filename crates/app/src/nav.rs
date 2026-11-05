@@ -30,6 +30,8 @@ pub enum Route {
     /// The user's libraries, the phone's bottom bar's second place.
     Libraries,
     Search,
+    /// What's downloaded and on its way, from the account menu.
+    Downloads,
     Settings,
     /// One section of Settings on a page of its own: a phone's Settings is a list of them.
     SettingsSection(crate::views::settings::Section),
