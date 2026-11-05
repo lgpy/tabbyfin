@@ -48,6 +48,10 @@ pub struct Config {
     /// The player on Android: Media3 or mpv. `None` means Media3. mpv everywhere else.
     #[serde(default)]
     pub android_player: Option<AndroidPlayer>,
+    /// Android: downloads wait while the phone has no unmetered network (Wi-Fi, Ethernet).
+    /// `None` means yes. Never on elsewhere, where the network isn't known to be metered.
+    #[serde(default)]
+    pub download_wifi_only: Option<bool>,
     /// Bits per second; the server transcodes anything above it. `None` means no limit.
     #[serde(default)]
     pub max_streaming_bitrate: Option<u64>,
@@ -284,11 +288,16 @@ pub fn cache_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".tabbyfin/cache"))
 }
 
-/// Downloaded media, per account (`downloads.rs`). Under the config folder when
-/// `TABBYFIN_CONFIG_DIR` is set, so test runs keep their downloads to themselves; otherwise the
-/// platform's local data dir. Not [`cache_dir`]: a download is the user's file, kept until they
-/// remove it, while anything may delete the cache.
+/// Downloaded media, per account (`downloads.rs`). `TABBYFIN_DOWNLOADS_DIR` when it's set, which
+/// on Android `android_main` sets to the app's external files dir (big files belong on shared
+/// storage, not in the app's internal data; they still go with the app). Otherwise under the
+/// config folder when `TABBYFIN_CONFIG_DIR` is set, so test runs keep their downloads to
+/// themselves, and the platform's local data dir without it. Not [`cache_dir`]: a download is
+/// the user's file, kept until they remove it, while anything may delete the cache.
 pub fn downloads_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("TABBYFIN_DOWNLOADS_DIR") {
+        return PathBuf::from(dir);
+    }
     if let Some(dir) = std::env::var_os("TABBYFIN_CONFIG_DIR") {
         return PathBuf::from(dir).join("downloads");
     }
@@ -302,6 +311,11 @@ fn path() -> PathBuf {
 }
 
 impl Config {
+    /// Whether downloads wait for Wi-Fi: the setting on Android, never elsewhere.
+    pub fn download_wifi_only(&self) -> bool {
+        cfg!(target_os = "android") && self.download_wifi_only.unwrap_or(true)
+    }
+
     /// Loads the config, creating it (with a fresh device id) if missing or unreadable.
     pub fn load() -> Self {
         let mut config = match std::fs::read_to_string(path()) {

@@ -18,6 +18,7 @@ import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
 import androidx.media3.common.text.Cue;
 import androidx.media3.common.text.CueGroup;
+import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
@@ -146,7 +147,10 @@ public final class Media3Bridge {
         player = new ExoPlayer.Builder(context, new Renderers(context))
                 .setTrackSelector(selector)
                 .setLooper(thread.getLooper())
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(http))
+                // The server's files come over HTTP, with the headers the "load" op sets; a
+                // downloaded one plays from file://, its external subtitles too, and HTTP
+                // sources can't open those, so DefaultDataSource picks by the URL's scheme.
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(new DefaultDataSource.Factory(context, http)))
                 // Pauses when another app takes the audio, and when headphones are unplugged.
                 .setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA)

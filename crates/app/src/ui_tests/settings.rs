@@ -32,7 +32,7 @@ fn serve_the_users_settings(server: &FixtureServer) {
 /// Tabs past every menu entry to the first control of what's shown, from nothing focused (the
 /// search box is the top bar's, outside the page).
 fn tab_past_the_menu(ui: &mut PageHarness) {
-    for _ in 0..Section::ALL.len() + 1 {
+    for _ in 0..Section::shown().count() + 1 {
         ui.press(Key::Tab);
     }
 }

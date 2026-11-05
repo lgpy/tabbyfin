@@ -178,6 +178,13 @@ fn android_main(android_app: winit::platform::android::activity::AndroidApp) {
             std::env::set_var("FONTCONFIG_FILE", &fonts);
         }
     }
+    // Downloads go in the app's external files dir (`getExternalFilesDir`): shared storage,
+    // which has the room for films, still the app's own and gone with it. Internal storage
+    // when there's none mounted.
+    if let Some(dir) = android_app.external_data_path() {
+        // SAFETY: as above.
+        unsafe { std::env::set_var("TABBYFIN_DOWNLOADS_DIR", dir.join("downloads")) };
+    }
     android::env_from_property();
     let _log_guard = init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting tabbyfin");

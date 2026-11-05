@@ -3,6 +3,10 @@ package io.github.lgpy.tabbyfin;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.PixelFormat;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.Selection;
@@ -44,6 +48,12 @@ public class MainActivity extends GameActivity {
     /** Back was pressed, and the app takes it. */
     private static native void nativeBack();
 
+    /** Whether an unmetered network (Wi-Fi, Ethernet) is there, for downloads over Wi-Fi only. */
+    private static native void nativeUnmetered(boolean unmetered);
+
+    private ConnectivityManager connectivity;
+    private ConnectivityManager.NetworkCallback networks;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -65,6 +75,36 @@ public class MainActivity extends GameActivity {
             }
         });
         mSurfaceView.setOnKeyListener(this::onSurfaceKey);
+
+        // The network downloads may use: reported now, then as it changes (a phone that drops
+        // Wi-Fi for mobile data mid-download).
+        connectivity = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        nativeUnmetered(unmeteredNow());
+        networks = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
+                nativeUnmetered(unmetered(caps));
+            }
+
+            @Override
+            public void onLost(Network network) {
+                nativeUnmetered(false);
+            }
+        };
+        connectivity.registerDefaultNetworkCallback(networks);
+    }
+
+    /** Whether the network in use is unmetered now; no network counts as metered. */
+    private boolean unmeteredNow() {
+        Network network = connectivity.getActiveNetwork();
+        return network != null && unmetered(connectivity.getNetworkCapabilities(network));
+    }
+
+    /** Whether `caps` is a network downloads may use when they're allowed only over Wi-Fi. */
+    private static boolean unmetered(NetworkCapabilities caps) {
+        return caps != null && (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+                || (Build.VERSION.SDK_INT >= 30
+                        && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED)));
     }
 
     /**
@@ -116,6 +156,8 @@ public class MainActivity extends GameActivity {
      */
     @Override
     protected void onDestroy() {
+        if (networks != null) connectivity.unregisterNetworkCallback(networks);
+        networks = null;
         System.exit(0);
     }
 

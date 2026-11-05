@@ -21,14 +21,23 @@
 //! the item's watch state goes back into its `item.json` ([`record_progress`]), and a stop
 //! report that couldn't reach the server waits in `pending.json` ([`flush_pending`]).
 //!
-//! Transfers run on tokio, at most [`MAX_TRANSFERS`] at a time, each with an abort handle that
-//! dropping [`Downloads`] fires, leaving its `.part` for the next sign-in. They report through a
-//! [`task::channel`] that [`Downloads::tick`] drains; the UI reads [`Downloads::state`] and
-//! [`Downloads::entries`], never the disk.
+//! Transfers run on tokio, in at most [`MAX_TRANSFERS`] workers. Each worker takes the next
+//! waiting item from the [`Queue`] it shares with [`Downloads`] itself, so the queue moves on
+//! with no frame drawn: an Android app in the background draws none, and its downloads carry on
+//! under a foreground service, which the platform's notice ([`Activity`]) starts and stops.
+//! Dropping [`Downloads`] aborts the workers, leaving each `.part` for the next sign-in. They
+//! report through a [`task::channel`] that [`Downloads::tick`] drains; the UI reads
+//! [`Downloads::state`] and [`Downloads::entries`], never the disk.
+//!
+//! With *Download over Wi-Fi only* (Android), a worker waits while there's no unmetered
+//! network, and one that's downloading when the phone leaves Wi-Fi stops and puts its item back
+//! at the front of the queue, to resume from its `.part`.
 
+use std::collections::VecDeque;
 use std::io::SeekFrom;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use futures_util::FutureExt;
@@ -41,6 +50,7 @@ use jellyfin::{Client, ImageRequest, PlaybackInfoRequest, PlaybackReport, Ticks}
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::watch;
 use url::Url;
 
 use crate::config;
@@ -56,6 +66,13 @@ const MAX_TRANSFERS: usize = 2;
 /// How often a transfer may report its progress. Four a second keeps the bar moving without
 /// repainting the window for every chunk.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+/// How often the platform's notice of the downloads (Android's notification) is told of their
+/// progress; a notification updated faster than this is throttled by the system anyway.
+const NOTICE_INTERVAL: Duration = Duration::from_secs(1);
+/// How long a transfer that failed with Wi-Fi only on waits for the phone to say the network
+/// changed: leaving Wi-Fi breaks the connection a moment before it's reported (about 250 ms on
+/// the emulator).
+const NETWORK_SETTLE: Duration = Duration::from_secs(3);
 /// Image widths kept for offline pages: a poster for a card, a backdrop for a header (twice
 /// what's drawn, as `images.rs` asks for).
 const PRIMARY_WIDTH: u32 = 600;
@@ -193,13 +210,17 @@ pub struct Downloads {
     /// The queue in the order it was asked for, finished items included, so a page can draw it
     /// without a server call.
     entries: Vec<Entry>,
-    /// The transfers running now, at most [`MAX_TRANSFERS`].
-    running: Vec<Running>,
+    /// What the workers share with this: the items waiting for one, and the workers running.
+    queue: Arc<Mutex<Queue>>,
     /// Series and season expansions being fetched.
     expanding: Vec<task::Task<()>>,
     /// [`Downloads::pause`] ran: the queue stays where it is until this account signs in again
     /// (a new `Downloads`), even if a frame still ticks this one.
     stopped: bool,
+    /// *Download over Wi-Fi only*, which the workers watch.
+    wifi_only: watch::Sender<bool>,
+    /// Whether an unmetered network is there: [`UNMETERED`]'s, or a test's own.
+    unmetered: watch::Receiver<bool>,
     updates: task::Receiver<Update>,
     updates_from: task::Sender<Update>,
 }
@@ -211,15 +232,195 @@ struct Entry {
     poster: Option<PathBuf>,
 }
 
-struct Running {
-    item_id: String,
-    /// Fires when it's dropped, aborting the transfer and leaving its `.part` for a retry.
-    abort: tokio::task::AbortHandle,
+/// Whether an unmetered network (Wi-Fi, Ethernet) is there, as the platform last said:
+/// Android's `MainActivity` reports it ([`set_unmetered`]); elsewhere nothing does, and it stays
+/// true. Process-wide, since it's the device's.
+static UNMETERED: LazyLock<watch::Sender<bool>> = LazyLock::new(|| watch::Sender::new(true));
+
+/// Whether an unmetered network is there now, from the platform's network callback. Workers
+/// held for Wi-Fi wake on it, with or without a frame.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn set_unmetered(unmetered: bool) {
+    UNMETERED.send_replace(unmetered);
 }
 
-impl Drop for Running {
+/// What the workers share with [`Downloads`]. Each worker takes its next item from `waiting`
+/// itself, so the queue moves on while the UI draws nothing; the UI adds and removes items, and
+/// spawns workers while there's work and room for one ([`Downloads::start_transfers`]).
+#[derive(Default)]
+struct Queue {
+    /// Queued items no worker has taken, in the order they were asked for.
+    waiting: VecDeque<BaseItemDto>,
+    /// At most [`MAX_TRANSFERS`].
+    workers: Vec<Worker>,
+    next_worker: usize,
+    /// The workers are waiting for an unmetered network.
+    held: bool,
+    /// When the platform's notice last heard of the downloads, to tell it at most every
+    /// [`NOTICE_INTERVAL`] of mere progress.
+    told: Option<Instant>,
+}
+
+struct Worker {
+    id: usize,
+    /// Aborts the worker and its transfer, leaving the `.part` for a retry. `None` for the
+    /// moment between spawning it and keeping its handle.
+    abort: Option<tokio::task::AbortHandle>,
+    /// What it's downloading now.
+    current: Option<Current>,
+}
+
+struct Current {
+    item_id: String,
+    title: String,
+    done: u64,
+    total: Option<u64>,
+}
+
+/// What the platform's notice of the downloads says while any worker runs: Android's
+/// notification, which comes with the foreground service that keeps the process alive.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Activity {
+    pub title: String,
+    pub text: String,
+    /// How far along the first transfer is, from 0 to 1; `None` while that isn't known.
+    pub progress: Option<f32>,
+}
+
+fn lock(queue: &Mutex<Queue>) -> MutexGuard<'_, Queue> {
+    queue.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl Queue {
+    /// What the notice says, or `None` once no worker runs.
+    fn activity(&self) -> Option<Activity> {
+        if self.workers.is_empty() {
+            return None;
+        }
+        let current: Vec<&Current> = self
+            .workers
+            .iter()
+            .filter_map(|worker| worker.current.as_ref())
+            .collect();
+        let to_come = current.len() + self.waiting.len();
+        let first = current.first().filter(|_| !self.held);
+        let Some(first) = first else {
+            let title = if self.held { "Waiting for Wi-Fi" } else { "Downloading" };
+            let text = match to_come {
+                1 => "1 download to come".to_owned(),
+                count => format!("{count} downloads to come"),
+            };
+            return Some(Activity {
+                title: title.to_owned(),
+                text,
+                progress: None,
+            });
+        };
+        let total = first.total.filter(|&total| total > 0);
+        let mut text = match total {
+            Some(total) => format!("{} of {}", bytes(first.done), bytes(total)),
+            None => format!("{} so far", bytes(first.done)),
+        };
+        if to_come > 1 {
+            text.push_str(&format!(" · {} more to come", to_come - 1));
+        }
+        Some(Activity {
+            title: first.title.clone(),
+            text,
+            progress: total.map(|total| (first.done as f64 / total as f64).clamp(0., 1.) as f32),
+        })
+    }
+
+    /// Tells the platform's notice where the downloads stand: always when `force`, otherwise
+    /// at most every [`NOTICE_INTERVAL`]. Under the queue's lock, so a worker's stale progress
+    /// can't land after the last one's "nothing left" and bring the notice back.
+    fn tell(&mut self, force: bool) {
+        if !force && self.told.is_some_and(|told| told.elapsed() < NOTICE_INTERVAL) {
+            return;
+        }
+        self.told = Some(Instant::now());
+        notice(self.activity().as_ref());
+    }
+
+    fn worker(&mut self, id: usize) -> Option<&mut Worker> {
+        self.workers.iter_mut().find(|worker| worker.id == id)
+    }
+
+    /// The next item for worker `id`, or `None` when nothing waits, in which case the worker
+    /// is gone from the list at once: [`Downloads::start_transfers`] counting it while it
+    /// winds down would leave an item queued after it with no worker.
+    fn take(&mut self, id: usize) -> Option<BaseItemDto> {
+        let Some(item) = self.waiting.pop_front() else {
+            self.workers.retain(|worker| worker.id != id);
+            self.tell(true);
+            return None;
+        };
+        if let Some(worker) = self.worker(id) {
+            worker.current = Some(Current {
+                item_id: item.id.clone(),
+                title: playback::title(&item),
+                done: 0,
+                total: source_size(&item),
+            });
+        }
+        self.tell(true);
+        Some(item)
+    }
+}
+
+/// The platform's notice: Android's notification and foreground service. Nothing elsewhere,
+/// where a process isn't stopped for being in the background.
+fn notice(activity: Option<&Activity>) {
+    #[cfg(target_os = "android")]
+    crate::android::downloads_notice(activity);
+    #[cfg(not(target_os = "android"))]
+    let _ = activity;
+}
+
+/// The size the item's own sources give, until `PlaybackInfo` says more precisely.
+fn source_size(item: &BaseItemDto) -> Option<u64> {
+    item.media_sources
+        .first()
+        .and_then(|source| source.size)
+        .map(|size| size as u64)
+}
+
+/// What a transfer reports, to the UI and to the queue it's from (for the notice).
+struct Reporter {
+    updates: task::Sender<Update>,
+    queue: Arc<Mutex<Queue>>,
+    worker: usize,
+}
+
+impl Reporter {
+    fn send(&self, update: Update) {
+        if let Update::Progress { done, total, .. } = &update {
+            let mut queue = lock(&self.queue);
+            if let Some(current) = queue.worker(self.worker).and_then(|worker| worker.current.as_mut()) {
+                current.done = *done;
+                current.total = *total;
+            }
+            queue.tell(false);
+        }
+        let _ = self.updates.send(update);
+    }
+}
+
+/// Takes worker `id` off the queue's list however it ends (out of work, aborted, a panic), and
+/// tells the notice: the last one gone takes the notice and the service with it.
+struct WorkerGuard {
+    id: usize,
+    queue: Arc<Mutex<Queue>>,
+}
+
+impl Drop for WorkerGuard {
     fn drop(&mut self) {
-        self.abort.abort();
+        let mut queue = lock(&self.queue);
+        queue.workers.retain(|worker| worker.id != self.id);
+        if queue.workers.is_empty() {
+            queue.held = false;
+        }
+        queue.tell(true);
     }
 }
 
@@ -227,6 +428,15 @@ impl Drop for Running {
 enum Update {
     /// A series' or season's episodes, fetched for the queue.
     Expanded(Vec<BaseItemDto>),
+    /// A worker took the item.
+    Started {
+        item_id: String,
+    },
+    /// The network went metered under it, with Wi-Fi only on: it's back at the front of the
+    /// queue, its `.part` kept.
+    Waiting {
+        item_id: String,
+    },
     Progress {
         item_id: String,
         done: u64,
@@ -270,21 +480,43 @@ enum SavedState {
 }
 
 impl Downloads {
-    pub fn new(client: Client, account_key: &str, ctx: &egui::Context) -> Self {
+    /// `wifi_only` is the *Download over Wi-Fi only* setting as it is now
+    /// ([`Downloads::set_wifi_only`] follows its changes).
+    pub fn new(client: Client, account_key: &str, ctx: &egui::Context, wifi_only: bool) -> Self {
         let (updates_from, updates) = task::channel(ctx);
         let mut downloads = Self {
             client,
             account: account_key.to_owned(),
             ctx: ctx.clone(),
             entries: Vec::new(),
-            running: Vec::new(),
+            queue: Arc::default(),
             expanding: Vec::new(),
             stopped: false,
+            wifi_only: watch::Sender::new(wifi_only),
+            unmetered: UNMETERED.subscribe(),
             updates,
             updates_from,
         };
         downloads.load();
         downloads
+    }
+
+    /// A network of the test's own in place of the device's, which is process-wide.
+    #[cfg(test)]
+    fn with_network(mut self, unmetered: watch::Receiver<bool>) -> Self {
+        self.unmetered = unmetered;
+        self
+    }
+
+    /// *Download over Wi-Fi only* changed: the workers hold, or carry on, at once.
+    pub fn set_wifi_only(&mut self, wifi_only: bool) {
+        self.wifi_only.send_replace(wifi_only);
+    }
+
+    /// Whether the queue is waiting for an unmetered network, for a page to say so. Not while
+    /// it's stopped (offline, or signed out), when Wi-Fi wouldn't start it.
+    pub fn waiting_for_wifi(&self) -> bool {
+        !self.stopped && *self.wifi_only.borrow() && !*self.unmetered.borrow()
     }
 
     /// Keeps the queue where it is until this account signs in again (`stopped`): for a session
@@ -303,9 +535,18 @@ impl Downloads {
         let index: Index = read_json(&dir.join(INDEX_FILE)).unwrap_or_default();
         for entry in index.entries {
             let item_dir = item_dir(&self.account, &entry.item.id);
-            let (state, poster) = match finished(&item_dir) {
-                Some(finished) => (DownloadState::Done { size: finished.size }, finished.poster),
+            // A finished download's own `item.json` over the index's copy, which is the item as
+            // it was queued: one that finished with no frame to save the index after it (an
+            // Android app in the background) is still in it, and only `item.json` has what its
+            // playback since wrote there (`record_progress`).
+            let (item, state, poster) = match finished(&item_dir) {
+                Some(finished) => (
+                    finished.item,
+                    DownloadState::Done { size: finished.size },
+                    finished.poster,
+                ),
                 None => (
+                    entry.item,
                     match entry.state {
                         SavedState::Queued => DownloadState::Queued,
                         SavedState::Paused => DownloadState::Paused,
@@ -314,11 +555,7 @@ impl Downloads {
                     None,
                 ),
             };
-            self.entries.push(Entry {
-                item: entry.item,
-                state,
-                poster,
-            });
+            self.entries.push(Entry { item, state, poster });
         }
         // Finished downloads the index doesn't know (one it forgot, or one copied in).
         for (item, finished) in scan_finished(&dir) {
@@ -330,6 +567,12 @@ impl Downloads {
                 });
             }
         }
+        lock(&self.queue).waiting = self
+            .entries
+            .iter()
+            .filter(|entry| entry.state == DownloadState::Queued)
+            .map(|entry| entry.item.clone())
+            .collect();
     }
 
     /// Queues `item` for download: a movie, episode or video straight away, a series or season
@@ -382,6 +625,7 @@ impl Downloads {
             if self.entries.iter().any(|entry| entry.item.id == item.id) {
                 continue;
             }
+            lock(&self.queue).waiting.push_back(item.clone());
             self.entries.push(Entry {
                 item,
                 state: DownloadState::Queued,
@@ -397,7 +641,21 @@ impl Downloads {
     /// Stops a transfer and deletes what it wrote. For a finished download that's
     /// [`Downloads::remove`].
     pub fn cancel(&mut self, item_id: &str) {
-        self.stop(item_id);
+        let abort = {
+            let mut queue = lock(&self.queue);
+            queue.waiting.retain(|item| item.id != item_id);
+            let running = queue.workers.iter().position(|worker| {
+                worker
+                    .current
+                    .as_ref()
+                    .is_some_and(|current| current.item_id == item_id)
+            });
+            running.and_then(|index| queue.workers.remove(index).abort)
+        };
+        // Outside the lock: the worker's guard takes it when the worker goes.
+        if let Some(abort) = abort {
+            abort.abort();
+        }
         self.entries.retain(|entry| entry.item.id != item_id);
         delete_dir(item_dir(&self.account, item_id));
         self.save();
@@ -415,6 +673,7 @@ impl Downloads {
         };
         if matches!(entry.state, DownloadState::Failed(_)) {
             entry.state = DownloadState::Queued;
+            lock(&self.queue).waiting.push_back(entry.item.clone());
             self.save();
         }
     }
@@ -513,13 +772,23 @@ impl Downloads {
         for update in updates {
             match update {
                 Update::Expanded(items) => self.queue(items),
+                Update::Started { item_id } => {
+                    if let Some(entry) = self.entry_mut(&item_id) {
+                        let total = source_size(&entry.item);
+                        entry.state = DownloadState::Downloading { done: 0, total };
+                    }
+                }
+                Update::Waiting { item_id } => {
+                    if let Some(entry) = self.entry_mut(&item_id) {
+                        entry.state = DownloadState::Queued;
+                    }
+                }
                 Update::Progress { item_id, done, total } => {
                     if let Some(entry) = self.entry_mut(&item_id) {
                         entry.state = DownloadState::Downloading { done, total };
                     }
                 }
                 Update::Done { item_id, size, poster } => {
-                    self.running.retain(|run| run.item_id != item_id);
                     let Some(entry) = self.entry_mut(&item_id) else {
                         continue;
                     };
@@ -531,7 +800,6 @@ impl Downloads {
                     settled = true;
                 }
                 Update::Failed { item_id, message } => {
-                    self.running.retain(|run| run.item_id != item_id);
                     let Some(entry) = self.entry_mut(&item_id) else {
                         continue;
                     };
@@ -558,7 +826,16 @@ impl Downloads {
     /// starts it again, from its `.part` when there is one.
     pub fn pause(&mut self) {
         self.stopped = true;
-        self.running.clear();
+        let aborts: Vec<_> = lock(&self.queue)
+            .workers
+            .drain(..)
+            .filter_map(|worker| worker.abort)
+            .collect();
+        // Outside the lock, which each worker's guard takes as it goes (and tells the notice
+        // there's nothing left).
+        for abort in aborts {
+            abort.abort();
+        }
         let mut stopped = false;
         for entry in &mut self.entries {
             if matches!(entry.state, DownloadState::Downloading { .. }) {
@@ -577,40 +854,42 @@ impl Downloads {
         self.entries.iter_mut().find(|entry| entry.item.id == item_id)
     }
 
-    /// Forgets a running transfer: dropping its task aborts it.
-    fn stop(&mut self, item_id: &str) {
-        self.running.retain(|run| run.item_id != item_id);
-    }
-
-    /// Starts transfers until [`MAX_TRANSFERS`] are running, each taking the first queued item
-    /// that isn't already.
+    /// Spawns workers while items wait and fewer than [`MAX_TRANSFERS`] run. Each takes items
+    /// until none wait, so the UI only has to do this when it queued something.
     fn start_transfers(&mut self) {
         if self.stopped {
             return;
         }
-        while self.running.len() < MAX_TRANSFERS {
-            let next = self.entries.iter().position(|entry| {
-                matches!(entry.state, DownloadState::Queued)
-                    && !self.running.iter().any(|run| run.item_id == entry.item.id)
-            });
-            let Some(index) = next else {
-                break;
+        loop {
+            let id = {
+                let mut queue = lock(&self.queue);
+                // Workers with nothing yet (just spawned, or held for Wi-Fi) will take what waits.
+                let idle = queue.workers.iter().filter(|worker| worker.current.is_none()).count();
+                if queue.workers.len() >= MAX_TRANSFERS || idle >= queue.waiting.len() {
+                    return;
+                }
+                let id = queue.next_worker;
+                queue.next_worker += 1;
+                queue.workers.push(Worker {
+                    id,
+                    abort: None,
+                    current: None,
+                });
+                id
             };
-            let item = self.entries[index].item.clone();
-            // The size the item's own sources have, until `PlaybackInfo` says more precisely.
-            let total = item
-                .media_sources
-                .first()
-                .and_then(|source| source.size)
-                .map(|size| size as u64);
-            self.entries[index].state = DownloadState::Downloading { done: 0, total };
-            let dir = item_dir(&self.account, &item.id);
-            let (client, updates) = (self.client.clone(), self.updates_from.clone());
-            let abort = crate::runtime::start(transfer(client, item.clone(), dir, updates)).abort_handle();
-            self.running.push(Running {
-                item_id: item.id,
-                abort,
-            });
+            let worker = work(
+                id,
+                self.queue.clone(),
+                self.client.clone(),
+                self.account.clone(),
+                self.updates_from.clone(),
+                self.wifi_only.subscribe(),
+                self.unmetered.clone(),
+            );
+            let abort = crate::runtime::start(worker).abort_handle();
+            if let Some(worker) = lock(&self.queue).worker(id) {
+                worker.abort = Some(abort);
+            }
         }
     }
 
@@ -760,6 +1039,9 @@ pub struct PendingReport {
 pub fn add_pending(account_key: &str, report: PendingReport) {
     let path = account_dir(account_key).join(PENDING_FILE);
     let mut pending: Vec<PendingReport> = read_json(&path).unwrap_or_default();
+    // Only the item's latest stop says where it stands; sent after an earlier one, it would
+    // look older than the playback that one recorded and be skipped.
+    pending.retain(|earlier| earlier.item_id != report.item_id);
     pending.push(report);
     if let Err(err) = write_json(&path, &pending) {
         tracing::warn!("couldn't save the playback reports waiting for the server: {err}");
@@ -785,6 +1067,14 @@ pub async fn flush_pending(client: &Client, account_key: &str) {
     if pending.is_empty() {
         return;
     }
+    // Each item's last report only, as `add_pending` keeps them: the server would take an
+    // earlier one's stop as a playback newer than the later one.
+    let pending: Vec<PendingReport> = pending
+        .iter()
+        .enumerate()
+        .filter(|(index, report)| !pending[index + 1..].iter().any(|later| later.item_id == report.item_id))
+        .map(|(_, report)| report.clone())
+        .collect();
     tracing::info!(count = pending.len(), "sending the playback reports the server missed");
     let mut left: Vec<PendingReport> = Vec::new();
     let mut blocked = false;
@@ -857,29 +1147,139 @@ pub async fn flush_pending(client: &Client, account_key: &str) {
     }
 }
 
-/// Downloads one item. A failure is one message: the transfer's own errors are user-facing.
-async fn transfer(client: Client, item: BaseItemDto, dir: PathBuf, updates: task::Sender<Update>) {
-    let item_id = item.id.clone();
+/// One worker: takes the queue's next item and downloads it, until nothing waits. With Wi-Fi
+/// only on it waits for an unmetered network first, and stops a transfer the network turns
+/// metered under, putting its item back at the front of the queue.
+async fn work(
+    id: usize,
+    queue: Arc<Mutex<Queue>>,
+    client: Client,
+    account: String,
+    updates: task::Sender<Update>,
+    mut wifi_only: watch::Receiver<bool>,
+    mut unmetered: watch::Receiver<bool>,
+) {
+    let _guard = WorkerGuard {
+        id,
+        queue: queue.clone(),
+    };
+    loop {
+        if held(&mut wifi_only, &mut unmetered) {
+            tracing::info!("downloads are waiting for Wi-Fi");
+            set_held(&queue, true);
+            if until_held(false, &mut wifi_only, &mut unmetered).await.is_err() {
+                return;
+            }
+            set_held(&queue, false);
+        }
+        let Some(item) = lock(&queue).take(id) else {
+            return;
+        };
+        let _ = updates.send(Update::Started {
+            item_id: item.id.clone(),
+        });
+        let reporter = Reporter {
+            updates: updates.clone(),
+            queue: queue.clone(),
+            worker: id,
+        };
+        let dir = item_dir(&account, &item.id);
+        let failed = tokio::select! {
+            failed = transfer(client.clone(), item.clone(), dir, &reporter) => failed,
+            Ok(()) = until_held(true, &mut wifi_only, &mut unmetered) => Some(Failure::OffWifi),
+        };
+        let off_wifi = match failed {
+            None => false,
+            Some(Failure::OffWifi) => true,
+            // Leaving Wi-Fi breaks the connection a moment before the phone says the network
+            // changed: a failure with Wi-Fi only on waits that moment out, and is the queue
+            // waiting for Wi-Fi rather than a failure if the network turns out metered.
+            Some(Failure::Error(message)) => {
+                let left_wifi = *wifi_only.borrow()
+                    && matches!(
+                        tokio::time::timeout(NETWORK_SETTLE, until_held(true, &mut wifi_only, &mut unmetered)).await,
+                        Ok(Ok(()))
+                    );
+                if !left_wifi {
+                    reporter.send(Update::Failed {
+                        item_id: item.id.clone(),
+                        message,
+                    });
+                }
+                left_wifi
+            }
+        };
+        if off_wifi {
+            tracing::info!(item = %item.name, "off Wi-Fi: the download waits");
+            let item_id = item.id.clone();
+            lock(&queue).waiting.push_front(item);
+            let _ = updates.send(Update::Waiting { item_id });
+        }
+        let mut queue = lock(&queue);
+        if let Some(worker) = queue.worker(id) {
+            worker.current = None;
+        }
+        queue.tell(true);
+    }
+}
+
+/// Whether downloads wait now: Wi-Fi only is on and there's no unmetered network. Marks both
+/// values seen, so [`until_held`] waits for the next change.
+fn held(wifi_only: &mut watch::Receiver<bool>, unmetered: &mut watch::Receiver<bool>) -> bool {
+    let wifi_only = *wifi_only.borrow_and_update();
+    let unmetered = *unmetered.borrow_and_update();
+    wifi_only && !unmetered
+}
+
+/// Waits until [`held`] is `want`. An error once [`Downloads`] is gone (its setting's sender
+/// with it); the network's sender never goes.
+async fn until_held(
+    want: bool,
+    wifi_only: &mut watch::Receiver<bool>,
+    unmetered: &mut watch::Receiver<bool>,
+) -> Result<(), watch::error::RecvError> {
+    loop {
+        if held(wifi_only, unmetered) == want {
+            return Ok(());
+        }
+        tokio::select! {
+            changed = wifi_only.changed() => changed?,
+            changed = unmetered.changed() => changed?,
+        }
+    }
+}
+
+fn set_held(queue: &Mutex<Queue>, held: bool) {
+    let mut queue = lock(queue);
+    queue.held = held;
+    queue.tell(true);
+}
+
+/// Why a worker's transfer ended without the file.
+enum Failure {
+    /// The network went metered under it, with Wi-Fi only on.
+    OffWifi,
+    /// What went wrong, for the user.
+    Error(String),
+}
+
+/// Downloads one item; `None` once it's done. A failure is one message: the transfer's own
+/// errors are user-facing.
+async fn transfer(client: Client, item: BaseItemDto, dir: PathBuf, updates: &Reporter) -> Option<Failure> {
     // A panic in the transfer would otherwise leave the item downloading forever; the UI hears
     // about it like any other failure.
-    let result = AssertUnwindSafe(download(&client, &item, &dir, &updates))
+    let result = AssertUnwindSafe(download(&client, &item, &dir, updates))
         .catch_unwind()
         .await;
-    let message = match result {
-        Ok(Ok(())) => return,
-        Ok(Err(message)) => message,
-        Err(_) => "the download stopped unexpectedly".to_owned(),
-    };
-    let _ = updates.send(Update::Failed { item_id, message });
+    match result {
+        Ok(Ok(())) => None,
+        Ok(Err(message)) => Some(Failure::Error(message)),
+        Err(_) => Some(Failure::Error("the download stopped unexpectedly".to_owned())),
+    }
 }
 
 /// `item.json`, its subtitles and images, then the media file, resuming where a `.part` stopped.
-async fn download(
-    client: &Client,
-    item: &BaseItemDto,
-    dir: &Path,
-    updates: &task::Sender<Update>,
-) -> Result<(), String> {
+async fn download(client: &Client, item: &BaseItemDto, dir: &Path, updates: &Reporter) -> Result<(), String> {
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|err| format!("couldn't make its folder: {err}"))?;
@@ -931,12 +1331,7 @@ async fn download(
 
 /// The media file itself: from the end of an unfinished `.part` when there is one, and renamed
 /// into place once all of its bytes are here.
-async fn fetch_media(
-    client: &Client,
-    local: &LocalItem,
-    dir: &Path,
-    updates: &task::Sender<Update>,
-) -> Result<(), String> {
+async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &Reporter) -> Result<(), String> {
     let item_id = &local.item.id;
     let part = dir.join(format!("{}.part", local.file));
     let finished = dir.join(&local.file);
@@ -982,7 +1377,7 @@ async fn fetch_media(
             .await
             .map_err(|err| format!("couldn't continue the file: {err}"))?;
     }
-    let _ = updates.send(Update::Progress {
+    updates.send(Update::Progress {
         item_id: item_id.clone(),
         done,
         total,
@@ -995,7 +1390,7 @@ async fn fetch_media(
         done += chunk.len() as u64;
         if reported.elapsed() >= PROGRESS_INTERVAL {
             reported = Instant::now();
-            let _ = updates.send(Update::Progress {
+            updates.send(Update::Progress {
                 item_id: item_id.clone(),
                 done,
                 total,
@@ -1019,13 +1414,13 @@ async fn finish(
     finished: &Path,
     size: u64,
     poster: Option<PathBuf>,
-    updates: &task::Sender<Update>,
+    updates: &Reporter,
     item_id: &str,
 ) -> Result<(), String> {
     tokio::fs::rename(part, finished)
         .await
         .map_err(|err| format!("couldn't finish the file: {err}"))?;
-    let _ = updates.send(Update::Done {
+    updates.send(Update::Done {
         item_id: item_id.to_owned(),
         size,
         poster,
@@ -1139,9 +1534,10 @@ fn safe_name(value: &str) -> String {
         .collect()
 }
 
-/// A finished download as its folder holds it: the media file's size, and its poster when one
-/// was saved with it.
+/// A finished download as its folder holds it: the item as `item.json` has it, the media
+/// file's size, and its poster when one was saved with it.
 struct Finished {
+    item: BaseItemDto,
     size: u64,
     poster: Option<PathBuf>,
 }
@@ -1154,6 +1550,7 @@ fn finished(dir: &Path) -> Option<Finished> {
     meta.is_file().then(|| Finished {
         size: meta.len(),
         poster: local.poster(dir),
+        item: local.item,
     })
 }
 
@@ -1166,10 +1563,8 @@ fn scan_finished(account: &Path) -> Vec<(BaseItemDto, Finished)> {
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| {
-            let dir = entry.path();
-            let local: LocalItem = read_json(&dir.join(ITEM_FILE))?;
-            let finished = finished(&dir)?;
-            Some((local.item, finished))
+            let finished = finished(&entry.path())?;
+            Some((finished.item.clone(), finished))
         })
         .collect();
     found.sort_by(|(a, _), (b, _)| a.name.cmp(&b.name));
@@ -1425,7 +1820,7 @@ mod tests {
                 .expect(1),
         );
         let ctx = egui::Context::default();
-        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx);
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
         downloads.request(&item(ITEM)).expect("queued");
 
         let notices = tick_until(&mut downloads, |downloads| {
@@ -1483,7 +1878,7 @@ mod tests {
                 .expect(1),
         );
         let ctx = egui::Context::default();
-        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx);
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
         downloads.request(&item(ITEM)).expect("queued");
         tick_until(&mut downloads, |downloads| {
             matches!(downloads.state(ITEM), Some(DownloadState::Done { .. }))
@@ -1509,7 +1904,7 @@ mod tests {
                 .expect(1),
         );
         let ctx = egui::Context::default();
-        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx);
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
         downloads.request(&item(ITEM)).expect("queued");
         tick_until(&mut downloads, |downloads| {
             matches!(downloads.state(ITEM), Some(DownloadState::Done { .. }))
@@ -1535,7 +1930,7 @@ mod tests {
                 ),
         );
         let ctx = egui::Context::default();
-        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx);
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
         downloads.request(&item(ITEM)).expect("queued");
         tick_until(&mut downloads, |downloads| {
             matches!(downloads.state(ITEM), Some(DownloadState::Downloading { .. }))
@@ -1548,7 +1943,7 @@ mod tests {
         drop(downloads);
 
         // The next sign-in finds the queue and carries on with it.
-        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx);
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
         assert_eq!(downloads.state(ITEM), Some(DownloadState::Queued));
         tick_until(&mut downloads, |downloads| {
             matches!(downloads.state(ITEM), Some(DownloadState::Done { .. }))
@@ -1561,7 +1956,7 @@ mod tests {
         let _config = ConfigDir::new("downloads-refused");
         let server = start();
         let ctx = egui::Context::default();
-        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx);
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
         let mut movie = item(ITEM);
         movie.can_download = false;
         let refused = downloads.request(&movie);
@@ -1667,7 +2062,7 @@ mod tests {
         finished_download(value);
         let ctx = egui::Context::default();
         // Nothing asks this server anything: the test only plays with the item's files.
-        let mut downloads = Downloads::new(client_at("http://127.0.0.1:1/"), ACCOUNT, &ctx);
+        let mut downloads = Downloads::new(client_at("http://127.0.0.1:1/"), ACCOUNT, &ctx, false);
         assert!(downloads.primary_image_path(ITEM).is_none(), "no poster was saved");
 
         record_progress(ACCOUNT, ITEM, Ticks(2_000_000_000), false); // 200 s of 1000: partway
@@ -1691,6 +2086,35 @@ mod tests {
         assert_eq!(data.playback_position_ticks, Ticks::ZERO, "watched items don't resume");
         let played_at = data.last_played_date.as_deref().expect("when it was played");
         assert!(jellyfin::time::parse_utc(played_at).is_some(), "{played_at}");
+    }
+
+    /// A download that finished with no frame to save the queue after it is still queued in
+    /// `index.json`, as the item was when it was asked for: the next sign-in takes the item from
+    /// its `item.json`, where its offline playback left the resume point.
+    #[test]
+    fn a_finished_download_still_in_the_index_keeps_its_resume_point() {
+        let _config = ConfigDir::new("downloads-stale-index");
+        let mut value = item_json(ITEM);
+        value["RunTimeTicks"] = json!(10_000_000_000_i64);
+        finished_download(value);
+        let index = Index {
+            entries: vec![IndexEntry {
+                item: item(ITEM),
+                state: SavedState::Queued,
+            }],
+        };
+        write_json(&account_dir(ACCOUNT).join(INDEX_FILE), &index).expect("index.json");
+        record_progress(ACCOUNT, ITEM, Ticks(2_000_000_000), false);
+
+        let ctx = egui::Context::default();
+        let downloads = Downloads::new(client_at("http://127.0.0.1:1/"), ACCOUNT, &ctx, false);
+        let (entry, state) = downloads.entries().next().expect("the entry");
+        assert_eq!(state, &DownloadState::Done { size: 5 });
+        assert_eq!(
+            entry.user_data.as_ref().map(|data| data.playback_position_ticks),
+            Some(Ticks(2_000_000_000))
+        );
+        assert_eq!(downloads.entries().count(), 1, "listed once");
     }
 
     /// An item played to the end counts as watched even when the server never said how long it
@@ -1757,6 +2181,38 @@ mod tests {
         let api = client(&server);
         block_on(async move { flush_pending(&api, ACCOUNT).await });
         assert_eq!(read_pending(), [], "a sent report is dropped");
+        let server = server.clone();
+        block_on(async move { server.verify().await });
+    }
+
+    /// An item played twice offline sends only its last stop: the first one, once sent, would
+    /// make the server's last played date newer than the second and have it skipped.
+    #[test]
+    fn only_an_items_last_pending_report_goes_out() {
+        let _config = ConfigDir::new("downloads-pending-last");
+        add_pending(ACCOUNT, pending(ITEM, "2026-10-14T19:00:00.000000Z"));
+        let mut later = pending(ITEM, "2026-10-14T19:05:00.000000Z");
+        later.position_ticks = Ticks(300_000_000);
+        add_pending(ACCOUNT, later.clone());
+        assert_eq!(read_pending(), [later.clone()], "the later stop replaces the earlier");
+
+        // A file written before that, holding both: still only the last goes out.
+        write_pending(&[pending(ITEM, "2026-10-14T19:00:00.000000Z"), later]);
+        let server = start();
+        serve_user_data(&server, None);
+        mount(
+            &server,
+            Mock::given(method("POST"))
+                .and(path("/Sessions/Playing/Stopped"))
+                .and(wiremock::matchers::body_partial_json(
+                    json!({"PositionTicks": 300_000_000}),
+                ))
+                .respond_with(ResponseTemplate::new(204))
+                .expect(1),
+        );
+        let api = client(&server);
+        block_on(async move { flush_pending(&api, ACCOUNT).await });
+        assert_eq!(read_pending(), []);
         let server = server.clone();
         block_on(async move { server.verify().await });
     }
@@ -1832,7 +2288,9 @@ mod tests {
                 .expect(0),
         );
         let ctx = egui::Context::default();
-        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx);
+        // Offline on a phone with no network at all: it's the server it waits for, not Wi-Fi.
+        let (_network, unmetered) = watch::channel(false);
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, true).with_network(unmetered);
         downloads.hold();
         downloads.request(&item(ITEM)).expect("queued");
         for _ in 0..5 {
@@ -1840,6 +2298,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(downloads.state(ITEM), Some(DownloadState::Queued));
+        assert!(!downloads.waiting_for_wifi());
         drop(downloads);
         let server = server.clone();
         block_on(async move { server.verify().await });
@@ -1867,7 +2326,205 @@ mod tests {
         assert_eq!(services.downloads.state(ITEM), Some(DownloadState::Queued));
         // The queue stays for the account's next online sign-in.
         drop(services);
-        let downloads = Downloads::new(client_at("http://127.0.0.1:1/"), &account, &ctx);
+        let downloads = Downloads::new(client_at("http://127.0.0.1:1/"), &account, &ctx, false);
         assert_eq!(downloads.state(ITEM), Some(DownloadState::Queued));
+    }
+
+    const OTHERS: [&str; 2] = ["11111111111111111111111111111111", "22222222222222222222222222222222"];
+
+    /// `id`'s media file, "hello", after `delay`.
+    fn serve_download(server: &Arc<MockServer>, id: &str, delay: Duration) {
+        mount(
+            server,
+            Mock::given(method("GET"))
+                .and(path(format!("/Items/{id}/Download")))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello").set_delay(delay)),
+        );
+    }
+
+    /// The workers take the queue's next items themselves: three downloads, one more than run
+    /// at once, all finish after a single tick, as they must on Android in the background,
+    /// where no frame is drawn.
+    #[test]
+    fn the_queue_moves_on_without_frames() {
+        let _config = ConfigDir::new("downloads-no-frames");
+        let server = start();
+        let ids = [ITEM, OTHERS[0], OTHERS[1]];
+        for id in ids {
+            serve_item(&server, id);
+            serve_download(&server, id, Duration::ZERO);
+        }
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
+        for id in ids {
+            downloads.request(&item(id)).expect("queued");
+        }
+        downloads.tick();
+        let start = Instant::now();
+        while !ids.iter().all(|id| find_local(ACCOUNT, id).is_some()) {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "the queue stopped without frames"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // The page catches up on its next frame, and nothing is left running.
+        tick_until(&mut downloads, |downloads| {
+            ids.iter()
+                .all(|id| matches!(downloads.state(id), Some(DownloadState::Done { .. })))
+        });
+        let start = Instant::now();
+        while !lock(&downloads.queue).workers.is_empty() {
+            assert!(start.elapsed() < Duration::from_secs(5), "a worker outlived the queue");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(lock(&downloads.queue).activity(), None, "no notice once it's done");
+    }
+
+    /// With Wi-Fi only, nothing is fetched on a metered network, and the queue says what it's
+    /// waiting for; an unmetered network starts it.
+    #[test]
+    fn wifi_only_waits_for_an_unmetered_network() {
+        let _config = ConfigDir::new("downloads-wifi-only");
+        let server = start();
+        serve_item(&server, ITEM);
+        serve_download(&server, ITEM, Duration::ZERO);
+        let (network, unmetered) = watch::channel(false);
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, true).with_network(unmetered);
+        downloads.request(&item(ITEM)).expect("queued");
+        for _ in 0..10 {
+            assert!(downloads.tick().is_empty(), "nothing failed");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(downloads.state(ITEM), Some(DownloadState::Queued));
+        assert!(downloads.waiting_for_wifi());
+        // `item.json` is the first thing a transfer writes.
+        assert!(!dir(ITEM).join(ITEM_FILE).exists(), "nothing was fetched");
+        let notice = lock(&downloads.queue).activity().expect("a notice while it waits");
+        assert_eq!(notice.title, "Waiting for Wi-Fi");
+        assert_eq!(notice.text, "1 download to come");
+
+        network.send_replace(true);
+        tick_until(&mut downloads, |downloads| {
+            matches!(downloads.state(ITEM), Some(DownloadState::Done { .. }))
+        });
+        assert!(!downloads.waiting_for_wifi());
+    }
+
+    /// Turning Wi-Fi only off lets a held queue go on the metered network.
+    #[test]
+    fn turning_wifi_only_off_releases_the_queue() {
+        let _config = ConfigDir::new("downloads-wifi-off");
+        let server = start();
+        serve_item(&server, ITEM);
+        serve_download(&server, ITEM, Duration::ZERO);
+        let (_network, unmetered) = watch::channel(false);
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, true).with_network(unmetered);
+        downloads.request(&item(ITEM)).expect("queued");
+        downloads.tick();
+        assert!(downloads.waiting_for_wifi());
+        downloads.set_wifi_only(false);
+        tick_until(&mut downloads, |downloads| {
+            matches!(downloads.state(ITEM), Some(DownloadState::Done { .. }))
+        });
+    }
+
+    /// Leaving Wi-Fi stops a transfer under way and puts it back at the front of the queue, its
+    /// `.part` kept; it starts again once Wi-Fi is back.
+    #[test]
+    fn leaving_wifi_puts_a_transfer_back_in_the_queue() {
+        let _config = ConfigDir::new("downloads-left-wifi");
+        let server = start();
+        serve_item(&server, ITEM);
+        serve_download(&server, ITEM, Duration::from_millis(500));
+        let (network, unmetered) = watch::channel(true);
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, true).with_network(unmetered);
+        downloads.request(&item(ITEM)).expect("queued");
+        tick_until(&mut downloads, |downloads| {
+            matches!(downloads.state(ITEM), Some(DownloadState::Downloading { .. }))
+        });
+        network.send_replace(false);
+        tick_until(&mut downloads, |downloads| {
+            downloads.state(ITEM) == Some(DownloadState::Queued)
+        });
+        assert_eq!(
+            lock(&downloads.queue)
+                .waiting
+                .front()
+                .map(|item| item.id.clone())
+                .as_deref(),
+            Some(ITEM)
+        );
+        assert!(find_local(ACCOUNT, ITEM).is_none());
+
+        network.send_replace(true);
+        tick_until(&mut downloads, |downloads| {
+            matches!(downloads.state(ITEM), Some(DownloadState::Done { .. }))
+        });
+        assert_eq!(find_dir_contents(&dir(ITEM)), b"hello");
+    }
+
+    /// Leaving Wi-Fi breaks the connection a moment before the phone says so: a transfer that
+    /// fails just before the network turns metered waits for Wi-Fi rather than failing.
+    #[test]
+    fn a_failure_as_the_phone_leaves_wifi_waits_for_it() {
+        let _config = ConfigDir::new("downloads-wifi-race");
+        let server = start();
+        serve_item(&server, ITEM);
+        mount(
+            &server,
+            Mock::given(method("GET"))
+                .and(path(format!("/Items/{ITEM}/Download")))
+                .respond_with(ResponseTemplate::new(503)),
+        );
+        let (network, unmetered) = watch::channel(true);
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, true).with_network(unmetered);
+        downloads.request(&item(ITEM)).expect("queued");
+        tick_until(&mut downloads, |downloads| {
+            matches!(downloads.state(ITEM), Some(DownloadState::Downloading { .. }))
+        });
+        // After the transfer failed, as the callback arrives after the connection broke.
+        std::thread::sleep(Duration::from_millis(300));
+        network.send_replace(false);
+        let notices = tick_until(&mut downloads, |downloads| {
+            downloads.state(ITEM) == Some(DownloadState::Queued)
+        });
+        assert!(notices.is_empty(), "no failure toast: {notices:?}");
+        assert!(downloads.waiting_for_wifi());
+    }
+
+    /// The notice names the transfer and how far along it is, and how many are still to come.
+    #[test]
+    fn the_notice_says_how_far_along_the_downloads_are() {
+        let current = |done, total| Current {
+            item_id: ITEM.into(),
+            title: "Film".into(),
+            done,
+            total,
+        };
+        let mut queue = Queue::default();
+        assert_eq!(queue.activity(), None);
+        queue.workers.push(Worker {
+            id: 0,
+            abort: None,
+            current: Some(current(500_000_000, Some(2_000_000_000))),
+        });
+        queue.waiting.push_back(item(OTHERS[0]));
+        assert_eq!(
+            queue.activity(),
+            Some(Activity {
+                title: "Film".into(),
+                text: "500.0 MB of 2.0 GB · 1 more to come".into(),
+                progress: Some(0.25),
+            })
+        );
+        queue.workers[0].current = Some(current(1_000, None));
+        queue.waiting.clear();
+        let notice = queue.activity().expect("a notice");
+        assert_eq!((notice.text.as_str(), notice.progress), ("1.0 kB so far", None));
     }
 }

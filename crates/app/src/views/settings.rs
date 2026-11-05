@@ -40,8 +40,8 @@ use std::path::Path;
 use egui::{Align, Align2, Rect, RichText, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ACCOUNT_CIRCLE, ICON_CHEVRON_RIGHT, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_HOME, ICON_INFO,
-    ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
+    ICON_ACCOUNT_CIRCLE, ICON_CHEVRON_RIGHT, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_DOWNLOAD, ICON_HOME,
+    ICON_INFO, ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
@@ -157,6 +157,8 @@ pub(crate) enum Section {
     Appearance,
     Playback,
     Subtitles,
+    /// Android only ([`Section::shown`]).
+    Downloads,
     Storage,
     About,
     Account,
@@ -165,11 +167,13 @@ pub(crate) enum Section {
 }
 
 impl Section {
-    /// In the menu's order: the device's, then the server's.
-    pub(crate) const ALL: [Section; 8] = [
+    /// In the menu's order: the device's, then the server's. Not all of them are on every
+    /// platform: [`Section::shown`] has the ones this one has.
+    pub(crate) const ALL: [Section; 9] = [
         Section::Appearance,
         Section::Playback,
         Section::Subtitles,
+        Section::Downloads,
         Section::Storage,
         Section::About,
         Section::Account,
@@ -177,11 +181,22 @@ impl Section {
         Section::Home,
     ];
 
+    /// The sections this platform has, in the menu's order: *Downloads* holds only Android's
+    /// settings.
+    pub(crate) fn shown() -> impl Iterator<Item = Section> {
+        Self::ALL
+            .into_iter()
+            .filter(|&section| section != Section::Downloads || cfg!(target_os = "android"))
+    }
+
     fn store(self) -> Store {
         match self {
-            Section::Appearance | Section::Playback | Section::Subtitles | Section::Storage | Section::About => {
-                Store::Device
-            }
+            Section::Appearance
+            | Section::Playback
+            | Section::Subtitles
+            | Section::Downloads
+            | Section::Storage
+            | Section::About => Store::Device,
             Section::Account | Section::Languages | Section::Home => Store::Server,
         }
     }
@@ -191,6 +206,7 @@ impl Section {
             Section::Appearance => "Appearance",
             Section::Playback => "Playback",
             Section::Subtitles => "Subtitles",
+            Section::Downloads => "Downloads",
             Section::Storage => "Storage",
             Section::About => "About",
             Section::Account => "Account",
@@ -205,6 +221,7 @@ impl Section {
             Section::Appearance => "Theme, text size and animations",
             Section::Playback => "Next episode, intros, quality and the player",
             Section::Subtitles => "Colour, style and size",
+            Section::Downloads => "Wi-Fi only, and where they're kept",
             Section::Storage => "Image cache and logs",
             Section::About => "Version and updates",
             Section::Account => "Who's signed in, and the server",
@@ -218,6 +235,7 @@ impl Section {
             Section::Appearance => ICON_PALETTE,
             Section::Playback => ICON_PLAY_CIRCLE,
             Section::Subtitles => ICON_SUBTITLES,
+            Section::Downloads => ICON_DOWNLOAD,
             Section::Storage => ICON_STORAGE,
             Section::About => ICON_INFO,
             Section::Account => ICON_ACCOUNT_CIRCLE,
@@ -356,6 +374,23 @@ const SUBTITLE_SIZE: Row = Row {
     unset: "100 %",
 };
 
+const WIFI_ONLY: Row = Row {
+    section: Section::Downloads,
+    label: "Download over Wi-Fi only",
+    description: "On mobile data, downloads wait for Wi-Fi, and one under way stops and carries on from where \
+                  it was once Wi-Fi is back. Applies at once.",
+    key: "download_wifi_only",
+    unset: "on",
+};
+/// Its smaller line shows the folder, as the storage rows do.
+const DOWNLOADS_FOLDER: Row = Row {
+    section: Section::Downloads,
+    label: "Downloads folder",
+    description: "The app's own folder on the phone's shared storage. Uninstalling the app deletes it.",
+    key: "",
+    unset: "",
+};
+
 /// The storage rows' smaller line shows the folder, which [`SettingsPage::storage`] fills in.
 const IMAGE_CACHE: Row = Row {
     section: Section::Storage,
@@ -460,7 +495,7 @@ const HOME_SECTIONS_NOTE: Row = Row {
 
 /// Every row, for the search. A row left out of here still shows in its section, but a search
 /// would only find it through another row of the same section.
-const ROWS: [Row; 34] = [
+const ROWS: [Row; 36] = [
     THEME,
     TEXT_SIZE,
     ANIMATIONS,
@@ -475,6 +510,8 @@ const ROWS: [Row; 34] = [
     SUBTITLE_COLOR,
     SUBTITLE_STYLE,
     SUBTITLE_SIZE,
+    WIFI_ONLY,
+    DOWNLOADS_FOLDER,
     IMAGE_CACHE,
     LOGS,
     VERSION,
@@ -795,7 +832,7 @@ impl SettingsPage {
                                 ui.add_space(SPACE.xl);
                             }
                             menu_heading(ui, store);
-                            for section in Section::ALL.into_iter().filter(|section| section.store() == store) {
+                            for section in Section::shown().filter(|section| section.store() == store) {
                                 let searching = self.search.active();
                                 let matches = searching.then(|| self.search.matches(section));
                                 let selected = !searching && self.section == section;
@@ -830,7 +867,7 @@ impl SettingsPage {
                             surface::frame(ui).inner_margin(egui::Margin::ZERO).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
                                 ui.spacing_mut().item_spacing.y = 0.;
-                                for section in Section::ALL.into_iter().filter(|section| section.store() == store) {
+                                for section in Section::shown().filter(|section| section.store() == store) {
                                     if section_entry(ui, section).clicked() {
                                         cx.nav.push(NavRequest::Push(Route::SettingsSection(section)));
                                     }
@@ -892,8 +929,7 @@ impl SettingsPage {
     /// what keeping them there means. Returns where each section starts: the page's padding
     /// above the first one, otherwise the gap above its title.
     fn sections(&mut self, ui: &mut Ui, cx: &mut PageCx) -> Vec<(Section, f32)> {
-        let found: Vec<Section> = Section::ALL
-            .into_iter()
+        let found: Vec<Section> = Section::shown()
             .filter(|&section| self.only.is_none_or(|only| only == section))
             .filter(|&section| self.search.matches(section) > 0)
             .collect();
@@ -966,6 +1002,7 @@ impl SettingsPage {
             Section::Appearance => self.appearance(ui, cx),
             Section::Playback => self.playback(ui),
             Section::Subtitles => self.subtitles(ui, cx),
+            Section::Downloads => self.downloads(ui, cx),
             Section::Storage => self.storage(ui, cx),
             Section::About => self.about(ui),
             Section::Account => self.account(ui, cx),
@@ -1132,6 +1169,19 @@ impl SettingsPage {
             let scale = edit.or_unset().unwrap_or(1.);
             self.save(|config| config.subtitle_scale = Some(scale).filter(|&scale| scale != 1.));
             cx.services.playback.set_subtitle_scale(scale);
+        }
+    }
+
+    fn downloads(&mut self, ui: &mut Ui, cx: &mut PageCx) {
+        let current = self.config.download_wifi_only.unwrap_or(true);
+        if let Some(edit) = toggle(ui, &self.search, WIFI_ONLY, current, Some(true)) {
+            let wifi_only = edit.or_unset();
+            self.save(|config| config.download_wifi_only = wifi_only);
+            cx.services.downloads.set_wifi_only(wifi_only.unwrap_or(true));
+        }
+        if self.search.shows(&DOWNLOADS_FOLDER) {
+            let folder = config::downloads_dir().display().to_string();
+            row_with_folder(ui, DOWNLOADS_FOLDER, Some(&folder), None, |_| {});
         }
     }
 
@@ -2064,8 +2114,7 @@ mod tests {
     /// The sections a search finds, in the menu's order.
     fn found(text: &str) -> Vec<Section> {
         let search = search(text);
-        Section::ALL
-            .into_iter()
+        Section::shown()
             .filter(|&section| search.matches(section) > 0)
             .collect()
     }
@@ -2104,8 +2153,7 @@ mod tests {
                 .filter(|row| row.section == Section::Storage)
                 .all(|row| storage.shows(row))
         );
-        let server: Vec<Section> = Section::ALL
-            .into_iter()
+        let server: Vec<Section> = Section::shown()
             .filter(|section| section.store() == Store::Server)
             .collect();
         assert_eq!(found("jellyfin server"), server);
