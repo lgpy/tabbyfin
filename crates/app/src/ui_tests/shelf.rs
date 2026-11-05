@@ -251,6 +251,59 @@ fn a_drag_up_or_down_scrolls_the_page_and_holds_the_row() {
 }
 
 #[test]
+fn a_page_pulled_past_its_top_and_flung_springs_back() {
+    // A page with shelves, as Home is on a phone: with touch, its flings are `Coast`s.
+    let mut ui = Harness::builder()
+        .with_size(SIZE)
+        .with_step_dt(1. / 60.)
+        .allow_missing_glyphs()
+        .with_accessibility_check(false)
+        .with_context_setup(|ctx| {
+            egui_material_icons::initialize(ctx);
+            crate::theme::apply(ctx, &crate::config::Config::default());
+            crate::layout::set_touch(ctx, true);
+        })
+        .build_ui(|ui| {
+            // egui drags a page with touch only once it has seen a touch event; the harness's
+            // pointer is a mouse, so the drag is on for it here.
+            let area = egui::ScrollArea::vertical().scroll_source(egui::scroll_area::ScrollSource::ALL);
+            crate::smooth_scroll::page(ui, area, |ui| {
+                for line in 0..80 {
+                    ui.label(format!("line {line}"));
+                }
+            });
+        });
+    ui.step();
+    ui.step();
+    let top = |ui: &Harness<'static>| ui.get_by_label("line 0").rect().top();
+    let start = top(&ui);
+
+    // At the top, a quick pull down: the page stretches past its top, and the release flings.
+    let from = ui.get_by_label("line 3").rect().center();
+    ui.hover_at(from);
+    ui.step();
+    ui.drag_at(from);
+    ui.step();
+    for step in 1..=4 {
+        ui.hover_at(from + vec2(0., 40. * step as f32));
+        ui.step();
+    }
+    ui.drop_at(from + vec2(0., 160.));
+    ui.step();
+
+    // The fling doesn't carry the page further past its top, and the page springs back.
+    let mut furthest = top(&ui) - start;
+    for _ in 0..120 {
+        ui.step();
+        furthest = furthest.max(top(&ui) - start);
+    }
+    // The pull itself stretched it about 115 points; a coast that kept going took it over 1000.
+    assert!(furthest < 160., "the fling pulled the page {furthest} past its top");
+    let gap = top(&ui) - start;
+    assert!(gap.abs() < 0.5, "the page stayed {gap} past its top");
+}
+
+#[test]
 fn the_wheel_leaves_the_row_to_the_page() {
     let mut ui = row(30);
     let start = ui.get_by_label("card 0").rect().left();
