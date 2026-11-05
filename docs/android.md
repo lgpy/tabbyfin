@@ -2,7 +2,7 @@
 
 **Goal:** Tabbyfin on Android phones and tablets, driven by touch. It's the same Rust and egui app as on the desktop, started through eframe's Android backend, so the API client, the pages, the cozy look (`DESIGN.md`), SyncPlay and remote control come along. There's no separate Kotlin UI.
 
-**Status:** the app runs in the desktop layout: sign-in by touch and the soft keyboard, Home, libraries and item pages, the system Back, and the session kept across restarts (A0 and A1 below), on the emulator and a Honor phone. Playback works on the phone with both players (A3, below): Media3 by default and mpv as a setting, drawing into a SurfaceView under the app's surface, with a touch player page. The touch layout (A4) is done on the phone: a bottom bar on compact screens, the pages fitted to a phone's width, 48-point touch targets and long-press menus. The release build (A5) makes release-signed APKs, but nothing is published until the touch UI has been refined.
+**Status:** the app runs in the desktop layout: sign-in by touch and the soft keyboard, Home, libraries and item pages, the system Back, and the session kept across restarts (A0 and A1 below), on the emulator and a Honor phone. Playback works on the phone with both players (A3, below): Media3 by default and mpv as a setting, drawing into a SurfaceView under the app's surface, with a touch player page. The touch layout (A4) is done on the phone: a bottom bar on compact screens, the pages fitted to a phone's width, 48-point touch targets and long-press menus. Downloads work as on the desktop, carrying on in the background (below). The release build (A5) makes release-signed APKs, but nothing is published until the touch UI has been refined.
 
 - **Phones and tablets first.** Android TV comes later; the keyboard cursor (`browse::Browse`, `keys.rs`) already suits a D-pad, so most of TV is a launcher entry and a 10-foot layout.
 - **Devices:** Android 8 (API 26) and newer, where AHardwareBuffer and Vulkan 1.0 are available. arm64-v8a first, x86_64 for the emulator.
@@ -19,7 +19,7 @@ Both players, as [Findroid](https://github.com/jarnedemeulemeester/findroid) has
 
 **First release:** sign-in (password and Quick Connect, several accounts), Home, libraries, search, item pages, playback with server reporting, resume, audio and subtitle tracks, and Settings. Portrait and landscape on phones and tablets.
 
-**Later:** SyncPlay and remote control (they compile as-is, but need care around the app going to the background), Android TV, picture-in-picture, background audio, downloads for offline viewing (on every platform, not only Android), Chromecast.
+**Later:** SyncPlay and remote control (they compile as-is, but need care around the app going to the background), Android TV, picture-in-picture, background audio, Chromecast.
 
 **Chromecast** comes next, through Jellyfin's own receiver app (the one the web client and Jellyfin's Android app cast to) rather than Google's Default Media Receiver: the receiver negotiates, transcodes and reports to the server itself. It's driven over the cast channel only (it opens no websocket, so the server can't forward remote control to it), with the same Rust sender as the desktop. Plan in [`chromecast.md`](chromecast.md). It needs a Chromecast or Google TV on the network to test against.
 
@@ -47,6 +47,16 @@ Both players, as [Findroid](https://github.com/jarnedemeulemeester/findroid) has
 - CI's `android` job builds the `--release` APK on every push and uploads it. The GitHub release doesn't carry the Android APKs yet: that's a `--sign` step on `v*` tags, with the key from the secrets above, added to the release job's `needs` once the touch UI is ready to ship.
 - **Stores, later:** the main F-Droid repository builds everything from source, and the APK holds prebuilt native code (mpv-android's libmpv and ffmpeg, Jellyfin's ffmpeg extension for Media3), so it would need libmpv built with mpv-android's buildscripts first. IzzyOnDroid takes the GitHub release's APKs as they are. The Play Store wants an app bundle and its own upload key.
 
+## Downloads
+
+The desktop's downloads (`docs/PLAN.md`, *Downloads*) with what a phone adds:
+- **In the background:** Android stops drawing an app's frames once it's in the background, so nothing in the queue may wait for a frame: the transfers run in two workers on tokio that take the next item themselves. While any runs, `DownloadService.java`, a `dataSync` foreground service with a partial wake lock, keeps the process alive; the workers start, update and stop it (`android::downloads_notice`), and its notification shows the first transfer's progress and how many more are to come. A tap on it opens the app. Android 13 and newer ask for the notification permission when the first download starts; without it the service still runs, with no notification. Swiping the app away ends the process (the Rust app runs once per process, above), and the next launch carries on from the `.part`.
+- **Wi-Fi only:** *Download over Wi-Fi only* (Settings › Downloads, Android only, on by default). `MainActivity` reports whether an unmetered network is there (`nativeUnmetered`, from a default network callback); without one the workers wait, and a transfer under way stops and goes back to the front of the queue, to resume from its `.part`. Leaving Wi-Fi breaks the connection about a quarter of a second before the callback says so (on the emulator), so a transfer that fails with Wi-Fi only on waits up to 3 s for the network to settle, and waits for Wi-Fi rather than failing if it turns metered. The notification and the Downloads page say "Waiting for Wi-Fi".
+- **What waits for the app in front:** toasts, saving the queue, and an offline session's retry of the server (`App::tick_reconnect`) run on frames, so they happen when the app is opened again; the transfers don't wait for them.
+- **Storage:** the app's external files dir, which the Settings section shows.
+- **Playing:** Media3 reads the `file://` URL and the external subtitles' files through a `DefaultDataSource` (`Media3Bridge`), mpv as it does on the desktop.
+- **Touch:** the Downloads page's round buttons sit 48 points apart with touch, so each answers its own 48-point target.
+
 ## What the desktop code assumes
 
 Android is `target_os = "android"`, not `"linux"`. Code gated on `target_os = "linux"` (`ash`, `zbus`, the EGL video path) drops out, while code gated on `not(any(windows, target_os = "macos"))` applies and has to be checked case by case.
@@ -56,6 +66,7 @@ Android is `target_os = "android"`, not `"linux"`. Code gated on `target_os = "l
 | Player process (`player::is_host_process`, `host.rs`) | libmpv in a player host process, the same executable re-run | In-process, always (`Player::spawn`): Media3 by default (`media3.rs`, `Media3Bridge.java`), mpv-android's libmpv as the *Player* setting; both draw into `VideoSurface.java`, placed by `android.rs` |
 | wgpu backends (`lib.rs`, `BACKENDS`) | Vulkan with GL fallback on Linux | Vulkan with GLES fallback (works on the emulator's SwiftShader Vulkan) |
 | Config and logs (`config.rs`, `ProjectDirs`) | Platform config dir | `android_main` sets `TABBYFIN_CONFIG_DIR` to `internal_data_path()`, so config, logs and image cache all go there; the image cache belongs in the cache dir, which the OS may clear |
+| Downloads (`config::downloads_dir`) | Platform local data dir | `android_main` sets `TABBYFIN_DOWNLOADS_DIR` to `external_data_path()` (`getExternalFilesDir`): shared storage with the room for films, still the app's own and deleted with it |
 | Tokens (`credentials.rs`) | System keychain, `tokens/` file fallback | keyring has no Android store, so the `tokens/` fallback in app-private storage; Android Keystore through JNI later |
 | Theme (`theme.rs`) | XDG portal on Linux | The activity's night mode, as egui's system theme (`android.rs`) |
 | Update check (`update.rs`) | Checks GitHub releases | Off, and its Settings row hidden; the store updates the app |
@@ -188,7 +199,7 @@ Three runs each, alternating the players. A fourth round stalled on Wi-Fi (Media
 | A4 | **Touch layout** | L | Layout sizes, the bottom bar, touch targets, long-press menus, insets and the soft keyboard. Done on the phone. |
 | A5 | **Release** | M | A release-signed APK per ABI on each GitHub release. `build.sh --sign` makes them; left: refining the touch UI, then the real key in CI's secrets, CI signing on tags, and the first release. Stores (above) after that. |
 
-After that: Android TV, picture-in-picture, background audio, downloads.
+After that: Android TV, picture-in-picture, background audio.
 
 ## Testing
 
