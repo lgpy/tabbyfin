@@ -147,7 +147,8 @@ impl Services {
         let (up_next_from, up_next) = task::channel(ctx);
         let (shuffle_from, shuffles) = task::channel(ctx);
         let account = session.account_key();
-        let mut downloads = Downloads::new(session.client.clone(), &account, ctx);
+        let wifi_only = crate::config::Config::load().download_wifi_only();
+        let mut downloads = Downloads::new(session.client.clone(), &account, ctx, wifi_only);
         let mut playback = PlaybackManager::new(ctx, session.client.clone(), account);
         if !online {
             downloads.hold();

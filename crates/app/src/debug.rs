@@ -227,6 +227,7 @@ impl Start {
         let mut parts = value.split(':');
         match (parts.next()?, parts.next()) {
             ("settings", _) => Some(Start::Open(Route::Settings)),
+            ("downloads", _) => Some(Start::Open(Route::Downloads)),
             ("item", Some(id)) => Some(Start::Open(Route::Item {
                 id: id.into(),
                 name: "Item".into(),
@@ -352,6 +353,7 @@ mod tests {
     fn routes_parse() {
         assert_eq!(Start::parse("search:test"), Some(Start::Search("test".into())));
         assert_eq!(Start::parse("settings"), Some(Start::Open(Route::Settings)));
+        assert_eq!(Start::parse("downloads"), Some(Start::Open(Route::Downloads)));
         assert_eq!(
             Start::parse("play:abc::-1"),
             Some(Start::Play {

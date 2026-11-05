@@ -1,7 +1,8 @@
 //! What winit 0.30 drops on Android, passed on to egui: the window insets (status bar, gesture
 //! bar, cutouts and the soft keyboard), as egui's safe area, and the soft keyboard's text, as
 //! IME events and its action key as Enter, and the system's Back, as Escape. `MainActivity.java`
-//! reports them; [`raw_input`] applies them each frame.
+//! reports them; [`raw_input`] applies them each frame. Also whether the network is metered,
+//! for the downloads, and their notification ([`downloads_notice`]).
 //!
 //! The state is process-wide because Java calls in through plain functions with no handle to the
 //! app. It's set once, by `android_main`, before eframe starts.
@@ -284,6 +285,40 @@ pub fn env_from_property() {
     }
 }
 
+/// The downloads' notification and the foreground service that comes with it
+/// (`DownloadService.java`), which keeps the process going while the app is in the background:
+/// shown or updated while `activity` is `Some`, gone with `None`. Called from the download
+/// workers on tokio, under their queue's lock, so the calls arrive in order.
+pub fn downloads_notice(activity: Option<&crate::downloads::Activity>) {
+    /// Whether the service was last told to show, so `None` after `None` isn't another call.
+    static SHOWN: AtomicBool = AtomicBool::new(false);
+    let result = match activity {
+        Some(activity) => {
+            SHOWN.store(true, Ordering::Relaxed);
+            // The bar in thousandths, -1 for one with no end yet.
+            let progress = activity.progress.map_or(-1, |share| (share * 1000.).round() as i32);
+            player::android::call_with_context(
+                c"io.github.lgpy.tabbyfin.DownloadService",
+                c"show",
+                c"(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;I)V",
+                &[activity.title.as_str(), activity.text.as_str()],
+                &[progress],
+            )
+        }
+        None if SHOWN.swap(false, Ordering::Relaxed) => player::android::call_with_context(
+            c"io.github.lgpy.tabbyfin.DownloadService",
+            c"hide",
+            c"(Landroid/content/Context;)V",
+            &[],
+            &[],
+        ),
+        None => return,
+    };
+    if let Err(err) = result {
+        tracing::warn!("couldn't update the downloads' notification: {err}");
+    }
+}
+
 /// The phone's model ("Pixel 7"), which Jellyfin shows as the device's name.
 pub fn device_name() -> Option<String> {
     android_system_properties::AndroidSystemProperties::new()
@@ -356,6 +391,19 @@ extern "system" fn Java_io_github_lgpy_tabbyfin_MainActivity_nativeGoesBack(
     _class: *mut std::ffi::c_void,
 ) -> u8 {
     GOES_BACK.load(Ordering::Relaxed).into()
+}
+
+/// Whether an unmetered network (Wi-Fi, Ethernet) is there, from the activity's network
+/// callback: what *Download over Wi-Fi only* waits for.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_lgpy_tabbyfin_MainActivity_nativeUnmetered(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    unmetered: u8,
+) {
+    tracing::info!(unmetered = unmetered != 0, "network");
+    crate::downloads::set_unmetered(unmetered != 0);
+    repaint();
 }
 
 #[unsafe(no_mangle)]

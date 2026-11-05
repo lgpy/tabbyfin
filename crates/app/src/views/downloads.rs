@@ -1,6 +1,8 @@
 //! The account's downloads, one row each in the order they were asked for: the item's picture,
 //! its title, where the download stands (waiting, how far along with a bar, its size once it's
 //! here, or why it failed), and round buttons at the right end for what can be done about it.
+//! With touch the buttons sit a finger's [`layout::TARGET`] apart, so each one's 48-point target
+//! is its own.
 //! Clicking a row opens the item's page, while online. Offline (`Services::online`) it's the
 //! shell's only page.
 //!
@@ -34,6 +36,8 @@ const IMAGE_H: f32 = ROW_H - 2. * PAD;
 const BUTTON: f32 = 36.;
 const BUTTON_ICON: f32 = 20.;
 const BUTTON_GAP: f32 = 4.;
+/// With touch, far enough apart that the targets the buttons grow to don't overlap.
+const TOUCH_BUTTON_GAP: f32 = layout::TARGET - BUTTON;
 /// The widest the list gets, so a row's buttons stay near its title on a wide window.
 const MAX_W: f32 = 880.;
 
@@ -67,6 +71,7 @@ impl Page for DownloadsPage {
             );
         }
         let side = layout::side(ui.ctx());
+        let wifi = cx.services.downloads.waiting_for_wifi();
         let mut asked = None;
         let area = egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::NONE
@@ -87,7 +92,8 @@ impl Page for DownloadsPage {
                     for (item, state) in &entries {
                         let poster = cx.services.downloads.primary_image_path(&item.id);
                         let images = &mut cx.services.images;
-                        if let Some(row_asked) = row(ui, images, item, poster.as_deref(), state, width) {
+                        let shown = Shown { state, wifi, width };
+                        if let Some(row_asked) = row(ui, images, item, poster.as_deref(), shown) {
                             asked = Some(row_asked);
                         }
                     }
@@ -139,8 +145,10 @@ fn summary(entries: &[(BaseItemDto, DownloadState)]) -> String {
 }
 
 /// Where a download stands, for the line under its title, and how far along its bar is.
-fn status(state: &DownloadState) -> (String, Option<f32>) {
+/// `wifi`: the queue waits for an unmetered network (*Download over Wi-Fi only*).
+fn status(state: &DownloadState, wifi: bool) -> (String, Option<f32>) {
     match state {
+        DownloadState::Queued if wifi => ("Waiting for Wi-Fi".to_owned(), Some(0.)),
         DownloadState::Queued => ("Waiting to download".to_owned(), Some(0.)),
         DownloadState::Paused => ("Paused".to_owned(), None),
         DownloadState::Downloading { done, total } => match total.filter(|&total| total > 0) {
@@ -179,15 +187,23 @@ fn buttons(state: &DownloadState) -> Vec<(MaterialIcon, &'static str, Option<Off
     }
 }
 
-/// One download as a sunk row `width` wide.
+/// How a row shows its download: where it stands, whether the queue waits for Wi-Fi, and the
+/// row's width.
+struct Shown<'a> {
+    state: &'a DownloadState,
+    wifi: bool,
+    width: f32,
+}
+
+/// One download as a sunk row.
 fn row(
     ui: &mut Ui,
     images: &mut crate::images::ImageCache,
     item: &BaseItemDto,
     poster: Option<&std::path::Path>,
-    state: &DownloadState,
-    width: f32,
+    shown: Shown,
 ) -> Option<Asked> {
+    let Shown { state, wifi, width } = shown;
     let tokens = theme::tokens_of(ui);
     let title = playback::title(item);
     let (rect, response) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click());
@@ -216,7 +232,12 @@ fn row(
     }
 
     let buttons = buttons(state);
-    let buttons_w = buttons.len() as f32 * (BUTTON + BUTTON_GAP);
+    let gap = if layout::touch(ui.ctx()) {
+        TOUCH_BUTTON_GAP
+    } else {
+        BUTTON_GAP
+    };
+    let buttons_w = buttons.len() as f32 * (BUTTON + gap);
     let text_left = picture.right() + 12.;
     let text_w = (rect.right() - PAD - buttons_w - 8. - text_left).max(0.);
     let line = |text: String, size: &str, color| {
@@ -227,7 +248,7 @@ fn row(
             egui::TextStyle::Body,
         )
     };
-    let (status, progress) = status(state);
+    let (status, progress) = status(state, wifi);
     let failed = matches!(state, DownloadState::Failed(_));
     let heading = line(title.clone(), "base", tokens.ink);
     let detail = line(status, "sm", if failed { tokens.danger } else { tokens.ink_muted });
@@ -259,7 +280,7 @@ fn row(
                 None => Asked::Play(item.clone()),
             });
         }
-        center.x -= BUTTON + BUTTON_GAP;
+        center.x -= BUTTON + gap;
     }
     if asked.is_none() && response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
         asked = Some(Asked::Open(item.clone()));
@@ -293,11 +314,20 @@ mod tests {
 
     #[test]
     fn a_transfer_shows_how_far_along_it_is() {
-        let (line, bar) = status(&DownloadState::Downloading {
-            done: 500_000_000,
-            total: Some(2_000_000_000),
-        });
+        let (line, bar) = status(
+            &DownloadState::Downloading {
+                done: 500_000_000,
+                total: Some(2_000_000_000),
+            },
+            false,
+        );
         assert_eq!(line, "500.0 MB of 2.0 GB · 25%");
         assert_eq!(bar, Some(0.25));
+    }
+
+    #[test]
+    fn a_queued_download_says_when_it_waits_for_wifi() {
+        assert_eq!(status(&DownloadState::Queued, false).0, "Waiting to download");
+        assert_eq!(status(&DownloadState::Queued, true).0, "Waiting for Wi-Fi");
     }
 }
