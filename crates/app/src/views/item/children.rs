@@ -18,6 +18,7 @@ use super::{
     ItemData, OpenSeason, SECTION_GAP,
 };
 use crate::browse::Cursor;
+use crate::downloads::Downloads;
 use crate::images::ImageCache;
 use crate::item_menu::is_played;
 use crate::nav::Route;
@@ -84,6 +85,7 @@ pub(super) fn band_reveal(row: Option<Rect>, band: Rect, visible: f32) -> Rect {
 /// A series' seasons as inset rows in rows of `columns`, the open one marked. A row opens or
 /// closes its episodes under the seasons; right-clicking one gives the item menu.
 /// Returns the row holding the cursor, for the page to scroll into view with its heading.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn seasons(
     ui: &mut Ui,
     data: &ItemData,
@@ -91,6 +93,7 @@ pub(super) fn seasons(
     open: Option<&str>,
     cursor: &mut Cursor,
     images: &mut ImageCache,
+    downloads: &Downloads,
     asked: &mut Asked,
 ) -> Option<Rect> {
     let columns = columns.max(1);
@@ -122,7 +125,7 @@ pub(super) fn seasons(
                 if response.clicked() {
                     asked.season = Some(season.clone());
                 }
-                if let Some(action) = menu::item_menu(&response, season) {
+                if let Some(action) = menu::item_menu(&response, season, downloads) {
                     asked.menu = Some((action, season.clone()));
                 }
             }
@@ -154,6 +157,7 @@ pub(super) fn posters(
     columns: usize,
     cursor: &mut Cursor,
     images: &mut ImageCache,
+    downloads: &Downloads,
     asked: &mut Asked,
 ) -> Option<Rect> {
     let columns = columns.max(1);
@@ -174,7 +178,7 @@ pub(super) fn posters(
                 if response.clicked() {
                     asked.open = Some(Route::for_item(child));
                 }
-                if let Some(action) = menu::item_menu(&response, child) {
+                if let Some(action) = menu::item_menu(&response, child, downloads) {
                     asked.menu = Some((action, child.clone()));
                 }
             }
@@ -201,6 +205,7 @@ pub(super) fn rows(
     stagger: Option<f64>,
     cursor: &mut Cursor,
     images: &mut ImageCache,
+    downloads: &Downloads,
     asked: &mut Asked,
 ) -> Rows {
     let columns = if playlist { 1 } else { columns.max(1) };
@@ -227,7 +232,7 @@ pub(super) fn rows(
                     ui.allocate_ui(vec2(width, 0.), |ui| {
                         ui.set_width(width);
                         row(
-                            ui, items, index, item, section, playlist, cursor, images, asked, &mut drawn,
+                            ui, items, index, item, section, playlist, cursor, images, downloads, asked, &mut drawn,
                         );
                     });
                 }
@@ -251,6 +256,7 @@ fn row(
     playlist: bool,
     cursor: &mut Cursor,
     images: &mut ImageCache,
+    downloads: &Downloads,
     asked: &mut Asked,
     drawn: &mut Rows,
 ) {
@@ -292,7 +298,7 @@ fn row(
     } else if response.row.clicked() {
         asked.open = Some(Route::for_item(item));
     }
-    if let Some(action) = menu::item_menu(&response.row, item) {
+    if let Some(action) = menu::item_menu(&response.row, item, downloads) {
         asked.menu = Some((action, item.clone()));
     }
 }
@@ -354,6 +360,7 @@ pub(super) fn season_shelf(
     moved: bool,
     cursor: &mut Cursor,
     images: &mut ImageCache,
+    downloads: &Downloads,
     asked: &mut Asked,
 ) -> Rect {
     let size = vec2(POSTER_W, POSTER_H) * COMPACT_SEASON_SCALE;
@@ -367,7 +374,7 @@ pub(super) fn season_shelf(
             if response.clicked() {
                 asked.season = Some(season.clone());
             }
-            if let Some(action) = menu::item_menu(&response, season) {
+            if let Some(action) = menu::item_menu(&response, season, downloads) {
                 asked.menu = Some((action, season.clone()));
             }
         }
@@ -461,6 +468,7 @@ pub(super) fn episodes_band(
     columns: usize,
     cursor: &mut Cursor,
     images: &mut ImageCache,
+    downloads: &Downloads,
     asked: &mut Asked,
 ) -> Band {
     let top = ui.cursor().min;
@@ -480,7 +488,9 @@ pub(super) fn episodes_band(
     let (first, selected) = match &open.episodes {
         Load::Loaded(episodes) if !episodes.is_empty() => {
             let stagger = animations.then(|| motion::appear(&ctx, ("season-rows", open.id.as_str())));
-            let drawn = rows(ui, episodes, EPISODES, false, columns, stagger, cursor, images, asked);
+            let drawn = rows(
+                ui, episodes, EPISODES, false, columns, stagger, cursor, images, downloads, asked,
+            );
             (drawn.first, drawn.selected)
         }
         Load::Loaded(_) => (Some(band_note(ui, "No episodes in this season.", false)), None),

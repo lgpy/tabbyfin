@@ -8,6 +8,7 @@ use jellyfin::models::{
     QueryResult, SubtitleMode,
 };
 use jellyfin::{GroupInfo, PlaybackInfoResponse};
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 const VERSIONS: [&str; 2] = ["12.2", "10.11"];
@@ -63,6 +64,90 @@ fn every_fixture_parses() {
     }
 }
 
+/// What a download saves must read back as what the server sent: the same PascalCase names,
+/// and every value the fixtures hold (enums included) going through JSON unchanged. `item.json`
+/// keeps these types, and a round trip that lost a field would lose it in offline playback.
+#[test]
+fn the_downloaded_models_round_trip_through_json() {
+    for version in VERSIONS {
+        let movie: BaseItemDto = load(version, "item_movie");
+        round_trips(&movie, &fixture_value(version, "item_movie"), version, "item_movie");
+        // A download keeps one media source (its streams are what the player's track mapping
+        // reads), and the segments beside it.
+        let direct: PlaybackInfoResponse = load(version, "playback_info_direct");
+        let original = fixture_value(version, "playback_info_direct");
+        for (index, source) in direct.media_sources.iter().enumerate() {
+            round_trips(
+                source,
+                &original["MediaSources"][index],
+                version,
+                "playback_info_direct.MediaSources",
+            );
+        }
+        let segments: QueryResult<MediaSegmentDto> = load(version, "media_segments");
+        let original = fixture_value(version, "media_segments");
+        for (index, segment) in segments.items.iter().enumerate() {
+            round_trips(segment, &original["Items"][index], version, "media_segments.Items");
+        }
+        let chapters = &movie.chapters;
+        let original = &fixture_value(version, "item_movie")["Chapters"];
+        for (index, chapter) in chapters.iter().enumerate() {
+            round_trips(chapter, &original[index], version, "item_movie.Chapters");
+        }
+        let data = movie.user_data.as_ref().expect("the user's data");
+        round_trips(
+            data,
+            &fixture_value(version, "item_movie")["UserData"],
+            version,
+            "item_movie.UserData",
+        );
+    }
+}
+
+/// A fixture's raw JSON, to compare the models' output with what the server sends.
+fn fixture_value(version: &str, name: &str) -> serde_json::Value {
+    let path = dir(version).join(format!("{name}.json"));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|err| panic!("{version}/{name}.json: {err}"))
+}
+
+/// Serializes `value`, reads it back and serializes it again: both must be the same JSON, named
+/// the way the server names its fields, with nothing it sent left as `null`.
+fn round_trips<T>(value: &T, original: &serde_json::Value, version: &str, name: &str)
+where
+    T: Serialize + DeserializeOwned,
+{
+    let json = serde_json::to_value(value).unwrap_or_else(|err| panic!("{version}/{name}: {err}"));
+    let again: T = serde_json::from_value(json.clone()).unwrap_or_else(|err| panic!("{version}/{name}: {err}"));
+    let twice = serde_json::to_value(&again).expect("serializes again");
+    assert_eq!(twice, json, "{version}/{name}: the second round trip differs");
+    let object = json
+        .as_object()
+        .unwrap_or_else(|| panic!("{version}/{name}: not an object"));
+    for (key, value) in object {
+        assert!(
+            key.starts_with(char::is_uppercase),
+            "{version}/{name}: `{key}` isn't PascalCase"
+        );
+        let sent = original.get(key);
+        if value.is_null() {
+            // A field the server filled that came back null wasn't decoded: a wrong name or type.
+            assert!(
+                sent.is_none_or(serde_json::Value::is_null),
+                "{version}/{name}: the server sent `{key}` but it read as null"
+            );
+        } else {
+            // An empty collection may be one the server leaves out; a filled one it can't.
+            let empty = match value {
+                serde_json::Value::Array(items) => items.is_empty(),
+                serde_json::Value::Object(map) => map.is_empty(),
+                _ => false,
+            };
+            assert!(empty || sent.is_some(), "{version}/{name}: the server sends no `{key}`");
+        }
+    }
+}
+
 #[test]
 fn item_details() {
     for version in VERSIONS {
@@ -74,6 +159,8 @@ fn item_details() {
             movie.media_sources.iter().all(|s| s.media_streams.len() >= 3),
             "{version}"
         );
+        // The server sends `CanDownload` with `/Items/{id}`; downloads depend on it.
+        assert!(movie.can_download, "{version}");
         // Intro / Episode / Credits from dev/make-media.sh.
         let chapters: Vec<_> = movie.chapters.iter().filter_map(|c| c.name.as_deref()).collect();
         assert_eq!(chapters, ["Intro", "Episode", "Credits"], "{version}");

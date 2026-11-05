@@ -10,6 +10,7 @@ mod config;
 mod credentials;
 #[cfg(debug_assertions)]
 mod debug;
+mod downloads;
 mod images;
 mod item_menu;
 mod keyboard;

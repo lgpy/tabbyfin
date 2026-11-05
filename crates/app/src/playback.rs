@@ -1215,6 +1215,26 @@ fn mpv_subtitle_id(source: &MediaSourceInfo, index: i32) -> Option<usize> {
     Some(subtitles(false).count() + position + 1)
 }
 
+/// The downloaded copy of `item`, when the account has one and the version asked for is the
+/// one that was downloaded. The lookup reads the disk, so it goes to a blocking thread.
+async fn local_media(
+    account: &str,
+    item: &BaseItemDto,
+    media_source_id: Option<&str>,
+) -> Option<crate::downloads::LocalMedia> {
+    let (account, item_id) = (account.to_owned(), item.id.clone());
+    let local = tokio::task::spawn_blocking(move || crate::downloads::find_local(&account, &item_id))
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!("couldn't look for a downloaded copy: {err}");
+            None
+        })?;
+    match media_source_id {
+        Some(id) if id != local.source.id => None,
+        _ => Some(local),
+    }
+}
+
 /// The original file when the server allows direct play, else its HLS transcode.
 fn stream_url(
     client: &Client,
@@ -1458,30 +1478,51 @@ async fn run_session(
     import: VideoImport,
     mut channels: Channels,
 ) -> Result<Ended, String> {
-    let info = client
-        .playback_info(
-            &item.id,
-            &PlaybackInfoRequest {
-                media_source_id: options.media_source_id.clone(),
-                start_position: options.start,
-                audio_stream_index: options.audio_stream_index,
-                subtitle_stream_index: subtitle_index(options.subtitle),
-                max_streaming_bitrate: max_bitrate(&client).await,
-                prefer_hevc: Config::load().prefer_hevc.unwrap_or(false),
-            },
-        )
-        .await
-        .map_err(|err| describe_error(&err))?;
-    if let Some(code) = info.error_code {
-        return Err(format!("The server won't play this item ({code})."));
-    }
-    let source = match &options.media_source_id {
-        Some(id) => info.media_sources.into_iter().find(|s| &s.id == id),
-        None => info.media_sources.into_iter().next(),
-    }
-    .ok_or("The server returned no playable media.")?;
-    let (url, method) = stream_url(&client, &item.id, &source, info.play_session_id.as_deref())?;
-    let subtitle_files = subtitle_files(&client, &item.id, &source, method);
+    // A downloaded copy plays from disk, with no negotiation and no auth header; the server
+    // still hears about the playback, since the reports below are the same.
+    let local = local_media(&account, &item, options.media_source_id.as_deref()).await;
+    let from_disk = local.is_some();
+    let (source, url, method, subtitle_files, play_session_id) = match local {
+        Some(local) => {
+            tracing::info!(item = %item.name, path = %local.path.display(), "playing a downloaded file");
+            let url = Url::from_file_path(&local.path)
+                .map_err(|()| format!("The downloaded file's path isn't valid: {}", local.path.display()))?;
+            (
+                local.source.clone(),
+                url,
+                PlayMethod::DirectPlay,
+                local.subtitle_files(),
+                None,
+            )
+        }
+        None => {
+            let info = client
+                .playback_info(
+                    &item.id,
+                    &PlaybackInfoRequest {
+                        media_source_id: options.media_source_id.clone(),
+                        start_position: options.start,
+                        audio_stream_index: options.audio_stream_index,
+                        subtitle_stream_index: subtitle_index(options.subtitle),
+                        max_streaming_bitrate: max_bitrate(&client).await,
+                        prefer_hevc: Config::load().prefer_hevc.unwrap_or(false),
+                    },
+                )
+                .await
+                .map_err(|err| describe_error(&err))?;
+            if let Some(code) = info.error_code {
+                return Err(format!("The server won't play this item ({code})."));
+            }
+            let source = match &options.media_source_id {
+                Some(id) => info.media_sources.into_iter().find(|s| &s.id == id),
+                None => info.media_sources.into_iter().next(),
+            }
+            .ok_or("The server returned no playable media.")?;
+            let (url, method) = stream_url(&client, &item.id, &source, info.play_session_id.as_deref())?;
+            let subtitle_files = subtitle_files(&client, &item.id, &source, method);
+            (source, url, method, subtitle_files, info.play_session_id)
+        }
+    };
     // Tracks not chosen explicitly (autoplay, the next episode, SyncPlay) follow the server's
     // defaults, which apply the user's language preferences and subtitle mode; mpv on its own
     // would go by the file's default flags. A transcode names its audio track in the URL.
@@ -1581,7 +1622,12 @@ async fn run_session(
             url: url.to_string(),
             title: Some(title(&item)),
             start: options.start.map(Duration::from),
-            http_headers: vec![format!("Authorization: {}", client.authorization_header())],
+            // The local file needs no auth; the server's stream does.
+            http_headers: if from_disk {
+                Vec::new()
+            } else {
+                vec![format!("Authorization: {}", client.authorization_header())]
+            },
         })
         .await
         .map_err(|err| format!("The player couldn't open the stream: {err}"))?;
@@ -1604,7 +1650,7 @@ async fn run_session(
     let mut report = PlaybackReport {
         item_id: item.id.clone(),
         media_source_id: source.id.clone(),
-        play_session_id: info.play_session_id.clone(),
+        play_session_id: play_session_id.clone(),
         position: options.start.unwrap_or_default(),
         audio_stream_index: audio,
         subtitle_stream_index: subtitle_index(subtitle),
@@ -1689,7 +1735,7 @@ async fn run_session(
         report_or_log(client.report_playback_stopped(&report).await, "stop");
         save_unfinished(None, &account);
     }
-    if let (PlayMethod::Transcode, Some(id)) = (method, &info.play_session_id) {
+    if let (PlayMethod::Transcode, Some(id)) = (method, &play_session_id) {
         report_or_log(client.stop_transcoding(id).await, "transcode stop");
     }
     tracing::info!(item = %item.name, position = report.position.as_secs_f64(), "playback ended");

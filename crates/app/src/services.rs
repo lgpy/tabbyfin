@@ -8,6 +8,7 @@
 //! control's in `remote.rs`).
 
 use crate::config::SavedServer;
+use crate::downloads::Downloads;
 use crate::images::ImageCache;
 use crate::item_menu::{Mark, PlaylistEdits};
 use crate::live::Live;
@@ -66,6 +67,9 @@ pub struct Services {
     /// `tick_remote` places them (playing and the controls are methods on `Services`,
     /// `remote.rs`).
     pub remote: Remote,
+    /// The account's downloaded files, their queue and the transfers running now
+    /// (`downloads.rs`); `tick_downloads` turns what they did into toasts.
+    pub downloads: Downloads,
 }
 
 /// A watched or favorite change, as its request finishes: what was asked for, on which item,
@@ -118,6 +122,7 @@ impl Services {
             live: Live::connect(session.client.clone(), ctx),
             remote: Remote::new(session.client.clone(), ctx),
             playlist_edits: PlaylistEdits::new(ctx),
+            downloads: Downloads::new(session.client.clone(), &session.account_key(), ctx),
             session,
             user_data: 0,
             prefetch: Prefetch::default(),
@@ -141,6 +146,7 @@ impl Services {
         self.prefetch.tick(ctx, &self.session.client, self.user_data);
         self.apply_menu_requests();
         self.tick_playlist_edits();
+        self.tick_downloads();
         self.tick_playback();
         self.tick_live();
         self.tick_remote();
@@ -154,6 +160,8 @@ impl Services {
     /// group still goes out.
     pub fn end(&mut self) {
         self.stop_playback();
+        // Unfinished downloads stay queued, and start again at this account's next sign-in.
+        self.downloads.pause();
         if self.in_group() {
             self.syncplay.leave();
         }

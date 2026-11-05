@@ -8,6 +8,7 @@ use super::{
     ItemData, PEOPLE, SHELF_TITLE_GAP, SIMILAR, chapters,
 };
 use crate::browse::Cursor;
+use crate::downloads::Downloads;
 use crate::images::ImageCache;
 use crate::nav::Route;
 use crate::widgets::text::CARD_GAP;
@@ -117,6 +118,7 @@ pub(super) fn similar_shelf(
     moved: bool,
     cursor: &mut Cursor,
     images: &mut ImageCache,
+    downloads: &Downloads,
     asked: &mut Asked,
 ) -> Rect {
     let similar = &data.similar;
@@ -138,7 +140,7 @@ pub(super) fn similar_shelf(
             if response.clicked() {
                 asked.open = Some(Route::for_item(item));
             }
-            if let Some(action) = menu::item_menu(&response, item) {
+            if let Some(action) = menu::item_menu(&response, item, downloads) {
                 asked.menu = Some((action, item.clone()));
             }
         }

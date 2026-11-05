@@ -125,6 +125,12 @@ impl Client {
         Ok(())
     }
 
+    /// The HTTP client, for a request that sets its own timeout or headers (`download.rs`: a
+    /// download outlives the shared 30 s limit, and a resume adds a `Range`).
+    pub(crate) fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
     pub(crate) async fn get_bytes(&self, url: Url) -> Result<Vec<u8>> {
         let resp = self.send(self.http.get(url)).await?;
         Ok(resp.bytes().await?.to_vec())
@@ -138,7 +144,7 @@ impl Client {
         }
     }
 
-    async fn send(&self, req: RequestBuilder) -> Result<Response> {
+    pub(crate) async fn send(&self, req: RequestBuilder) -> Result<Response> {
         let resp = req
             .header(header::AUTHORIZATION, self.authorization_header())
             .send()

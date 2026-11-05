@@ -4,9 +4,9 @@
 
 use std::time::Duration;
 
-use jellyfin::{Client, ClientInfo, Error, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
+use jellyfin::{Client, ClientInfo, Download, Error, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
 use serde_json::{Value, json};
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
@@ -263,4 +263,85 @@ async fn a_configuration_update_keeps_the_fields_it_doesnt_change() {
             "AudioLanguagePreference": "jpn",
         })
     );
+}
+
+/// Reads a download's whole body.
+async fn body_of(mut download: Download) -> Vec<u8> {
+    let mut body = Vec::new();
+    while let Some(chunk) = download.chunk().await.expect("a chunk") {
+        body.extend_from_slice(&chunk);
+    }
+    body
+}
+
+/// The original file: its URL carries no token (the auth header does), and a range request gets
+/// the rest of the file, with the total from `Content-Range`.
+#[tokio::test]
+async fn a_download_resumes_with_a_range_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .and(header("range", "bytes=3-"))
+        .respond_with(
+            ResponseTemplate::new(206)
+                .insert_header("content-range", "bytes 3-4/5")
+                .set_body_bytes(b"lo"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    assert_eq!(
+        client.download_url("item").as_str(),
+        format!("{}/Items/item/Download", server.uri())
+    );
+    let download = client
+        .download(client.download_url("item"), 3)
+        .await
+        .expect("a download");
+    assert!(download.partial);
+    assert_eq!(download.total, Some(5));
+    assert_eq!(body_of(download).await, b"lo");
+    let requests = server.received_requests().await.expect("recording is on");
+    assert_eq!(
+        requests[0].headers.get("authorization").unwrap().to_str().unwrap(),
+        format!(
+            r#"MediaBrowser Client="tabbyfin-tests", Device="tests", DeviceId="test-device", Version="0.1.0", Token="{TOKEN}""#
+        )
+    );
+    assert!(!requests[0].url.as_str().contains(TOKEN), "no token in the URL");
+}
+
+/// A server that ignores the range answers `200` with the whole file: the caller sees
+/// `partial == false` and starts its file over.
+#[tokio::test]
+async fn a_server_ignoring_the_range_answers_with_the_whole_file() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello"))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    let download = client
+        .download(client.download_url("item"), 3)
+        .await
+        .expect("a download");
+    assert!(!download.partial);
+    assert_eq!(download.total, Some(5));
+    assert_eq!(body_of(download).await, b"hello");
+}
+
+/// A download maps its failures like any other request, so a revoked token is `Unauthorized`.
+#[tokio::test]
+async fn a_failed_download_maps_to_the_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    let err = client.download(client.download_url("item"), 0).await.err();
+    assert!(matches!(err, Some(Error::Unauthorized)), "{err:?}");
 }
