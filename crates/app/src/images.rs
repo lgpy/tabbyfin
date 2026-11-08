@@ -39,13 +39,13 @@ pub struct ImageCache {
     client: Client,
     dir: PathBuf,
     ctx: egui::Context,
-    entries: Lru<ImageRequest, Entry>,
+    entries: Lru<Key, Entry>,
     /// Decoded blurhashes, by hash.
     placeholders: Lru<String, Option<TextureHandle>>,
     /// A trim waiting for recently used images to age, while over the budget.
     trim: Deadline,
     /// Images waiting to load, with when each was last asked for.
-    queue: HashMap<ImageRequest, Instant>,
+    queue: HashMap<Key, Instant>,
     /// When any image was last asked for: queued ones asked for well before it are stale.
     newest_want: Instant,
     /// Loads in progress.
@@ -89,10 +89,39 @@ enum Entry {
     Failed,
 }
 
+/// What a texture is held for: a server image (with its disk cache), or a file on disk, such as
+/// a download's poster, which the server may not be reachable for.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Key {
+    Server(ImageRequest),
+    /// Its path is the key: the file's bytes are already the cache, so only the decoded texture
+    /// is kept here. The offline pages draw downloaded posters this way.
+    File(PathBuf),
+}
+
+impl Key {
+    /// A short name for the logs.
+    fn label(&self) -> String {
+        match self {
+            Self::Server(req) => format!("{}:{}", req.item_id, req.image_type.as_str().unwrap_or("Other")),
+            Self::File(path) => path.display().to_string(),
+        }
+    }
+
+    /// The texture's name, for debugging (egui's texture manager shows it).
+    fn texture_name(&self) -> String {
+        let path = match self {
+            Self::Server(req) => cache_path(Path::new(""), req),
+            Self::File(path) => path.clone(),
+        };
+        format!("image:{}", path.file_name().unwrap_or_default().to_string_lossy())
+    }
+}
+
 /// A finished load: what was asked for, the texture's name for debugging, and the pixels or the
 /// error. The pixels travel rather than a texture so that `tick`, on the UI thread, creates every
 /// texture the cache holds.
-type Loaded = (ImageRequest, String, anyhow::Result<ColorImage>);
+type Loaded = (Key, String, anyhow::Result<ColorImage>);
 
 impl ImageCache {
     /// The cache for a signed-in session. Dropping it stops the loads: a download in flight is
@@ -139,12 +168,25 @@ impl ImageCache {
     /// Returns the image if it's loaded, otherwise queues it (or keeps it near the front of the
     /// queue) and returns `None`.
     pub fn get(&mut self, req: &ImageRequest) -> Option<TextureHandle> {
+        self.get_key(Key::Server(req.clone()))
+    }
+
+    /// The same for a file on disk, as a downloaded poster: decoded on the same queue, held in
+    /// the same memory budget and dropped like the server's images (keyed by its path). The
+    /// server isn't asked for it.
+    ///
+    /// What draws a download's poster where the server can't be reached calls this.
+    pub fn get_file(&mut self, path: &Path) -> Option<TextureHandle> {
+        self.get_key(Key::File(path.to_path_buf()))
+    }
+
+    fn get_key(&mut self, key: Key) -> Option<TextureHandle> {
         let now = Instant::now();
         self.newest_want = now;
-        match self.entries.get(req) {
+        match self.entries.get(&key) {
             Some(Entry::Ready(texture)) => return Some(texture.clone()),
             Some(Entry::Loading) => {
-                if let Some(wanted) = self.queue.get_mut(req) {
+                if let Some(wanted) = self.queue.get_mut(&key) {
                     *wanted = now;
                 }
                 return None;
@@ -153,8 +195,8 @@ impl ImageCache {
             None => {}
         }
         // What this evicts drops here, and its textures go with it.
-        self.entries.insert(req.clone(), Entry::Loading, 0);
-        self.queue.insert(req.clone(), now);
+        self.entries.insert(key.clone(), Entry::Loading, 0);
+        self.queue.insert(key, now);
         self.schedule_pump();
         None
     }
@@ -171,7 +213,7 @@ impl ImageCache {
     pub fn tick(&mut self) {
         let completed: Vec<Loaded> = self.loaded.drain().collect();
         let finished = !completed.is_empty();
-        for (req, name, result) in completed {
+        for (key, name, result) in completed {
             self.running -= 1;
             let (entry, size) = match result {
                 Ok(image) => {
@@ -179,12 +221,12 @@ impl ImageCache {
                     (Entry::Ready(self.ctx.load_texture(name, image, TEXTURE_OPTIONS)), size)
                 }
                 Err(err) => {
-                    tracing::warn!(item = %req.item_id, "image load failed: {err:#}");
+                    tracing::warn!(image = %key.label(), "image load failed: {err:#}");
                     (Entry::Failed, 0)
                 }
             };
             // What this evicts drops here, and its textures go with it.
-            self.entries.insert(req, entry, size);
+            self.entries.insert(key, entry, size);
             self.trim_later();
         }
         // A slot freed up, so the next queued images can start. The queue is pumped in two
@@ -231,17 +273,20 @@ impl ImageCache {
         }
     }
 
-    fn start_load(&mut self, req: ImageRequest) {
+    fn start_load(&mut self, key: Key) {
         self.running += 1;
-        let client = self.client.clone();
-        let path = cache_path(&self.dir, &req);
-        let name = format!("image:{}", path.file_name().unwrap_or_default().to_string_lossy());
+        let name = key.texture_name();
         // The device's largest texture, read on the UI thread, which is the one that knows it:
         // the loader fits the image into it.
         let max_side = self.ctx.input(|input| input.max_texture_side);
+        let client = self.client.clone();
+        let path = match &key {
+            Key::Server(req) => cache_path(&self.dir, req),
+            Key::File(path) => path.clone(),
+        };
         let sender = self.loading_from.clone();
         let closed = sender.clone();
-        let requested = req.clone();
+        let requested = key.clone();
         runtime::detach(async move {
             let work = async {
                 tokio::select! {
@@ -305,22 +350,28 @@ fn decode_blurhash(hash: &str) -> Option<ColorImage> {
     ))
 }
 
-/// Reads the image from the disk cache, or downloads and caches it, then decodes it, fitted
-/// into a texture `max_side` pixels wide and tall at most.
-async fn load(client: &Client, req: &ImageRequest, path: &Path, max_side: usize) -> anyhow::Result<ColorImage> {
-    let bytes = match tokio::fs::read(path).await {
-        Ok(bytes) if sniff_format(&bytes).is_some() => bytes,
-        _ => {
-            let bytes = client.image(req).await?;
-            sniff_format(&bytes).context("unrecognized image format")?;
-            if let Some(dir) = path.parent() {
-                let _ = tokio::fs::create_dir_all(dir).await;
+/// Reads the image from the disk cache, or downloads and caches it; or reads a file on disk (a
+/// download's poster). Then decodes it, fitted into a texture `max_side` pixels wide and tall at
+/// most.
+async fn load(client: &Client, key: &Key, path: &Path, max_side: usize) -> anyhow::Result<ColorImage> {
+    let bytes = match key {
+        Key::Server(req) => match tokio::fs::read(path).await {
+            Ok(bytes) if sniff_format(&bytes).is_some() => bytes,
+            _ => {
+                let bytes = client.image(req).await?;
+                sniff_format(&bytes).context("unrecognized image format")?;
+                if let Some(dir) = path.parent() {
+                    let _ = tokio::fs::create_dir_all(dir).await;
+                }
+                if let Err(err) = tokio::fs::write(path, &bytes).await {
+                    tracing::debug!("couldn't cache image at {}: {err}", path.display());
+                }
+                bytes
             }
-            if let Err(err) = tokio::fs::write(path, &bytes).await {
-                tracing::debug!("couldn't cache image at {}: {err}", path.display());
-            }
-            bytes
-        }
+        },
+        Key::File(_) => tokio::fs::read(path)
+            .await
+            .with_context(|| format!("couldn't read {}", path.display()))?,
     };
     tokio::task::spawn_blocking(move || decode(&bytes, max_side)).await?
 }
@@ -486,11 +537,16 @@ mod tests {
     use jellyfin::Client;
     use jellyfin::models::ImageType;
 
-    use super::{Entry, ImageCache, KEEP_RECENT, Lru, MEMORY_BUDGET, STALE, TEXTURE_OPTIONS, decode, next_load};
+    use super::{Entry, ImageCache, KEEP_RECENT, Key, Lru, MEMORY_BUDGET, STALE, TEXTURE_OPTIONS, decode, next_load};
     use crate::session::client_info;
 
     fn request(item_id: &str) -> jellyfin::ImageRequest {
         jellyfin::ImageRequest::new(item_id, ImageType::Primary, Some("tag".into()))
+    }
+
+    /// A server image's key in the cache.
+    fn key(item_id: &str) -> Key {
+        Key::Server(request(item_id))
     }
 
     /// A cache whose entry budget is small enough for the tests' images to cross it.
@@ -534,17 +590,63 @@ mod tests {
     fn a_finished_load_is_uploaded() {
         let ctx = egui::Context::default();
         let mut cache = cache(&ctx, MEMORY_BUDGET);
-        let req = request("a");
-        cache.entries.insert(req.clone(), Entry::Loading, 0);
+        let key = key("a");
+        cache.entries.insert(key.clone(), Entry::Loading, 0);
         cache.running = 1;
         let pixels = ColorImage::filled([2, 2], Color32::WHITE);
         cache
             .loading_from
-            .send((req.clone(), "test".into(), Ok(pixels)))
+            .send((key.clone(), "test".into(), Ok(pixels)))
             .expect("the cache is listening");
         cache.tick();
         assert_eq!(cache.running, 0, "the slot is free again");
-        assert!(matches!(cache.entries.get(&req), Some(Entry::Ready(_))));
+        assert!(matches!(cache.entries.get(&key), Some(Entry::Ready(_))));
+    }
+
+    #[test]
+    fn a_poster_file_loads_from_disk() {
+        let _config = crate::ui_tests::ConfigDir::new("images-file");
+        let ctx = egui::Context::default();
+        let mut cache = cache(&ctx, MEMORY_BUDGET);
+        let dir = std::env::temp_dir().join(format!("tabbyfin-image-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a temporary folder");
+        // A red and a blue pixel, as a download's poster is on disk.
+        let path = dir.join("primary.png");
+        let pixels = image::RgbaImage::from_raw(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).expect("2x1");
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(pixels.as_raw(), 2, 1, image::ExtendedColorType::Rgba8)
+            .expect("encode");
+        std::fs::write(&path, &png).expect("the poster");
+
+        assert!(cache.get_file(&path).is_none(), "the first frame queues it");
+        let texture = load_until(&mut cache, &Key::File(path.clone()));
+        assert_eq!(texture.size(), [2, 1]);
+        assert!(matches!(cache.entries.get(&Key::File(path)), Some(Entry::Ready(_))));
+
+        // A file that isn't there fails like a broken image, without asking the server.
+        let missing = dir.join("gone.png");
+        assert!(cache.get_file(&missing).is_none());
+        let start = Instant::now();
+        while !matches!(cache.entries.get(&Key::File(missing.clone())), Some(Entry::Failed)) {
+            cache.tick();
+            assert!(start.elapsed() < std::time::Duration::from_secs(10), "it never failed");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Ticks the cache as frames would until `key` has a texture.
+    fn load_until(cache: &mut ImageCache, key: &Key) -> egui::TextureHandle {
+        let start = Instant::now();
+        loop {
+            cache.tick();
+            if let Some(Entry::Ready(texture)) = cache.entries.get(key) {
+                return texture.clone();
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(10), "it never loaded");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -554,11 +656,11 @@ mod tests {
         let long_ago = Instant::now() - KEEP_RECENT * 2;
         // Two images loaded a while ago, together over the budget.
         for (index, id) in ["a", "b"].into_iter().enumerate() {
-            let req = request(id);
-            cache.entries.insert(req.clone(), Entry::Loading, 0);
+            let key = key(id);
+            cache.entries.insert(key.clone(), Entry::Loading, 0);
             cache
                 .entries
-                .insert_at(req, Entry::Ready(texture(&ctx, &format!("t{index}"))), 40, long_ago);
+                .insert_at(key, Entry::Ready(texture(&ctx, &format!("t{index}"))), 40, long_ago);
         }
         assert_eq!(cache.entries.total, 80);
         cache.trim_later();
@@ -580,11 +682,11 @@ mod tests {
         let mut cache = cache(&ctx, usize::MAX);
         let long_ago = Instant::now() - KEEP_RECENT * 2;
         for (id, size, used) in [("a", 40, long_ago), ("b", 80, Instant::now())] {
-            let req = request(id);
-            cache.entries.insert(req.clone(), Entry::Loading, 0);
+            let key = key(id);
+            cache.entries.insert(key.clone(), Entry::Loading, 0);
             cache
                 .entries
-                .insert_at(req, Entry::Ready(texture(&ctx, id)), size, used);
+                .insert_at(key, Entry::Ready(texture(&ctx, id)), size, used);
         }
         // Over the budget: the aged one can go, the recent one can't yet.
         cache.entries.budget = 50;

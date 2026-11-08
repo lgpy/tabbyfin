@@ -141,6 +141,31 @@ fn call_app_static(class: &CStr, method: &CStr, signature: &CStr, args: &[jvalue
     })
 }
 
+/// Calls a static `void` method of one of the app's Java classes with the activity (as its
+/// `Context`), then `strings`, then `ints`, in that order: for the app's own Java outside the
+/// player (the downloads' notification, `DownloadService.java`), so JNI stays in this module.
+/// Callable from any thread.
+pub fn call_with_context(class: &CStr, method: &CStr, signature: &CStr, strings: &[&str], ints: &[i32]) -> Result<()> {
+    with_env(|env, activity| unsafe {
+        let f = &**env;
+        // UTF-16 rather than `NewStringUTF`, whose modified UTF-8 doesn't take what's outside
+        // the BMP (an emoji in a title) the way Rust writes it.
+        let mut locals = Vec::with_capacity(strings.len());
+        for text in strings {
+            let units: Vec<u16> = text.encode_utf16().collect();
+            locals.push((f.v1_1.NewString)(env, units.as_ptr(), units.len() as jint));
+        }
+        let mut args = vec![jvalue { l: activity }];
+        args.extend(locals.iter().map(|&l| jvalue { l }));
+        args.extend(ints.iter().map(|&i| jvalue { i }));
+        let result = call_app_static(class, method, signature, &args);
+        for local in locals {
+            (f.v1_1.DeleteLocalRef)(env, local);
+        }
+        result
+    })
+}
+
 /// The status and navigation bar icons: dark over the app's light theme, light over the dark one.
 /// `MainActivity` sets them on the UI thread, and keeps them while the player hides the bars.
 pub fn light_system_bars(light: bool) {

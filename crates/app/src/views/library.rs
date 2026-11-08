@@ -360,7 +360,7 @@ impl LibraryPage {
             }
         };
         let base_query = ItemsQuery {
-            fields: vec![ItemField::PrimaryImageAspectRatio],
+            fields: vec![ItemField::PrimaryImageAspectRatio, ItemField::CanDownload],
             limit: Some(PAGE_SIZE as u32),
             ..base_query
         };
@@ -1350,7 +1350,9 @@ impl LibraryPage {
                                             if response.clicked() {
                                                 opened = Some(Route::for_item(item));
                                             }
-                                            if let Some(action) = menu::item_menu(&response, item) {
+                                            if let Some(action) =
+                                                menu::item_menu(&response, item, &cx.services.downloads)
+                                            {
                                                 chosen = Some((action, item.clone()));
                                             }
                                         }

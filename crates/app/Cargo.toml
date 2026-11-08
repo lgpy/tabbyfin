@@ -28,6 +28,8 @@ lyon_tessellation.workspace = true
 
 anyhow.workspace = true
 directories.workspace = true
+# Checking the free space before a download starts (`downloads.rs`).
+fs4.workspace = true
 gethostname.workspace = true
 keyring.workspace = true
 # The update check (`update.rs`).

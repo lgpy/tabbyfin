@@ -7,6 +7,7 @@
 
 mod auth;
 mod client;
+mod download;
 mod error;
 mod images;
 mod items;
@@ -17,9 +18,10 @@ mod socket;
 mod syncplay;
 mod system;
 mod ticks;
-mod time;
+pub mod time;
 
 pub use client::{Client, ClientInfo, parse_server_url};
+pub use download::Download;
 pub use error::{Error, Result};
 pub use images::ImageRequest;
 pub use items::{ItemsQuery, SortOrder};
