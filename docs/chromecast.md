@@ -2,7 +2,7 @@
 
 **Goal:** cast to a Chromecast or Google TV from the desktop and Android. We cast to Jellyfin's own receiver app ([jellyfin-chromecast](https://github.com/jellyfin/jellyfin-chromecast), the one the web client casts to), not to Google's Default Media Receiver. The receiver does the Jellyfin work itself: it calls `PlaybackInfo` with its own device profile, chooses direct play or a transcode, reports start, progress and stop to the server with our token, and plays the next episode. The app is only the remote: it finds devices, launches the receiver, sends it commands and draws what it reports.
 
-**Status:** milestones 1 to 4 are built (`crates/cast`, `crates/app/src/cast.rs`, `views/casting.rs` and the player's casting view) and tested against the fake device, but nothing has been tried against a device yet. Staying connected and Android are left. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
+**Status:** milestones 1 to 4 are built (`crates/cast`, `crates/app/src/cast.rs`, `views/casting.rs` and the player's casting view) and tested against the fake device and a real Chromecast (below, *What a real Chromecast showed*). Staying connected and Android are left, and the rest of `TESTING.md`'s checks on a device. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
 
 ## Decision
 
@@ -172,12 +172,11 @@ The look below was settled with mockups.
 
 - **Unit tests:** the codec against frames captured from a device; `Envelope`, `PlayRequest` and `ReceiverEvent` against JSON taken from the receiver's source and from a device; and the `UiCommand` → `Command` mapping.
 - **A fake device** for tests: `crates/cast/tests/` runs a TLS server with a self-signed certificate that speaks the connection, heartbeat and receiver namespaces and records the custom messages. It answers `PlayNow` with scripted `playbackprogress`. The app's UI tests drive the casting player page and the redirects against it, with no network beyond loopback.
-- **Real hardware** (to `TESTING.md` once built): a Chromecast and a Google TV, a cast group, the dev server reached by its LAN address, a transcode (the receiver's choice), track changes, next episode, two senders, the TV turned off mid-cast, and Android in the background.
-- **The dev server** must listen on the LAN, not only `localhost`, for the TV to reach it. `dev/setup-server.py`'s Docker port binding needs checking.
+- **Real hardware:** the checks are in `TESTING.md`, with how to reach the dev server from the TV.
 
 ## Risks
 
-- **No device on hand yet.** Everything here is from reading source; heartbeat timeouts, message size limits (about 64 KB) and mixed content (an HTTP server from the HTTPS receiver page) are unconfirmed.
+- **Only one Chromecast tried.** The frame limit and an HTTP server played from the HTTPS receiver page are confirmed on it; a Google TV, a cast group and a heartbeat held for an hour are not.
 - **Receiver quirks we can't fix:**
   - `PlayNext` appends to the end of the queue.
   - Only the last sender gets the custom messages.

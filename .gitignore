@@ -5,6 +5,7 @@ mise.local.toml
 
 # Claude Code keeps local, machine-specific settings here.
 /.claude/settings.local.json
+/.claude/worktrees/
 
 # Python bytecode from the dev scripts.
 __pycache__/
