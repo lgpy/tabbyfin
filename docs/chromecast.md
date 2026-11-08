@@ -2,7 +2,7 @@
 
 **Goal:** cast to a Chromecast or Google TV from the desktop and Android. We cast to Jellyfin's own receiver app ([jellyfin-chromecast](https://github.com/jellyfin/jellyfin-chromecast), the one the web client casts to), not to Google's Default Media Receiver. The receiver does the Jellyfin work itself: it calls `PlaybackInfo` with its own device profile, chooses direct play or a transcode, reports start, progress and stop to the server with our token, and plays the next episode. The app is only the remote: it finds devices, launches the receiver, sends it commands and draws what it reports.
 
-**Status:** milestones 1 to 5 are built (`crates/cast`, `crates/app/src/cast.rs`, `views/casting.rs` and the player's casting view) and tested against the fake device and a real Chromecast (below, *What a real Chromecast showed*). Android is left, and the rest of `TESTING.md`'s checks on a device. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
+**Status:** milestones 1 to 6 are built (`crates/cast`, `crates/app/src/cast.rs`, `views/casting.rs`, the player's casting view, and Android's glue in `android.rs` and `MainActivity.java`), and tested against the fake device, a real Chromecast and the Android emulator (below, *What a real Chromecast showed*). Left: the rest of `TESTING.md`'s checks on a device — a phone casting to a real TV, and a Google TV. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
 
 ## Decision
 
@@ -151,9 +151,10 @@ The look below was settled with mockups.
 
 ### Android
 
-- Add `CHANGE_WIFI_MULTICAST_STATE` to the manifest. The Java `MainActivity` holds a `WifiManager.MulticastLock` while discovery runs, called through JNI (`jni-sys`, as the player crate does). If `mdns-sd` proves unreliable on phones, `NsdManager` takes its place behind `discovery.rs`.
-- In the background the cast keeps playing on the TV. Our connection may be dropped, so returning to the app reconnects (below).
-- The volume keys set the TV's volume while casting.
+- Add `CHANGE_WIFI_MULTICAST_STATE` to the manifest. The Java `MainActivity` holds a `WifiManager.MulticastLock` (`tabbyfin-cast`, not reference counted) while discovery runs, called through JNI (`jni-sys`, as the player crate does): `android.rs` has the calls, and a guard in `cast.rs` takes the lock before the mDNS browse starts and lets it go when the browse is dropped (sign-out, an offline session, quitting). Both are logged (`cast: multicast lock held=true`), since a phone that finds no TV is usually a lock that wasn't held. If `mdns-sd` proves unreliable on phones, `NsdManager` takes its place behind `discovery.rs`.
+- **The volume keys set the TV's volume while casting**, a step a press (5 %, as the player's own keys), and Android's own volume UI has them when nothing is casting. `MainActivity.dispatchKeyEvent` asks Rust first: `nativeCastVolume(direction)` answers whether the app is casting (a flag the app updates each frame, like Back's) and, if it is, queues the step, which `App::logic` drains into the `UiCommand::SetVolume` the casting player's volume keys send. A held key's repeats each count as a press, and the press's release is taken with it. Each key is logged at debug level with whether the app was casting. There's no toast; the casting player's volume bar shows the TV's level as the receiver reports it.
+- **In the background the cast keeps playing on the TV.** The connection runs on tokio, detached from frames: the heartbeat is the channel's own task, commands go into an unbounded channel, and updates into an unbounded `task::channel` that `Services::tick` drains in `App::logic`. Android stops drawing an app's frames once it's in the background, so `tick` may not run at all; nothing the connection does waits for it, and the reports that piled up are taken in one frame when the app comes back. Our connection may still be dropped there, so returning to the app reconnects (below).
+- **When the cast ends while the app is backgrounded** — the receiver stopped, or the retries ran out — that shows when the app comes back: the same toast (*<TV> stopped casting*, or *Lost the connection*) and the player closes, which is the ended state the foreground would have shown.
 
 ## Staying connected
 

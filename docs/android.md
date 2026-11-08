@@ -19,9 +19,9 @@ Both players, as [Findroid](https://github.com/jarnedemeulemeester/findroid) has
 
 **First release:** sign-in (password and Quick Connect, several accounts), Home, libraries, search, item pages, playback with server reporting, resume, audio and subtitle tracks, and Settings. Portrait and landscape on phones and tablets.
 
-**Later:** SyncPlay and remote control (they compile as-is, but need care around the app going to the background), Android TV, picture-in-picture, background audio, Chromecast.
+**Later:** SyncPlay and remote control (they compile as-is, but need care around the app going to the background), Android TV, picture-in-picture, background audio.
 
-**Chromecast** comes next, through Jellyfin's own receiver app (the one the web client and Jellyfin's Android app cast to) rather than Google's Default Media Receiver: the receiver negotiates, transcodes and reports to the server itself. It's driven over the cast channel only (it opens no websocket, so the server can't forward remote control to it), with the same Rust sender as the desktop. Plan in [`chromecast.md`](chromecast.md). It needs a Chromecast or Google TV on the network to test against.
+**Chromecast** is built, through Jellyfin's own receiver app (the one the web client and Jellyfin's Android app cast to) rather than Google's Default Media Receiver: the receiver negotiates, transcodes and reports to the server itself. It's driven over the cast channel only (it opens no websocket, so the server can't forward remote control to it), with the same Rust sender as the desktop. On a phone that means a Wi-Fi multicast lock while mDNS discovery runs, the hardware volume keys for the TV while casting, and a connection that carries on while the app is in the background. Plan in [`chromecast.md`](chromecast.md). A phone casting to a real Chromecast or Google TV is still to be tried.
 
 ## Build and packaging
 
