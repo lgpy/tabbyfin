@@ -172,7 +172,7 @@ impl Services {
                 Live::disconnected(session.client.clone(), ctx)
             },
             remote: Remote::new(session.client.clone(), ctx),
-            cast: Cast::new(&session, ctx),
+            cast: Cast::new(&session, ctx, online),
             playlist_edits: PlaylistEdits::new(ctx),
             downloads,
             session,

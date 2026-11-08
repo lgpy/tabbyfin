@@ -26,6 +26,12 @@ struct Casting {
 
 impl Casting {
     fn new() -> Self {
+        Self::with_running_app(None)
+    }
+
+    /// Signed-in services with the fake device found; `running_app` is what its ad says it runs
+    /// (`rs`), which is where a reconnect offer comes from.
+    fn with_running_app(running_app: Option<&str>) -> Self {
         let server = FixtureServer::start();
         let ctx = egui::Context::default();
         let mut services = Services::new(session(&server), &ctx);
@@ -36,7 +42,7 @@ impl Casting {
             model: "Chromecast".into(),
             address: device.addr().ip(),
             port: device.addr().port(),
-            running_app: None,
+            running_app: running_app.map(str::to_owned),
         });
         services.tick(&ctx);
         Self {
@@ -60,15 +66,40 @@ impl Casting {
         }
     }
 
+    /// Ticks the services for `period`, whatever happens.
+    fn tick_for(&mut self, period: std::time::Duration) {
+        let start = Instant::now();
+        while start.elapsed() < period {
+            self.services.tick(&self.ctx);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// Which reconnect attempt is on its way, while the connection is being retried.
+    fn reconnecting(&self) -> Option<u32> {
+        self.services
+            .cast
+            .session
+            .as_ref()
+            .and_then(|session| session.reconnecting)
+    }
+
+    fn connected(&self) -> bool {
+        self.services
+            .cast
+            .session
+            .as_ref()
+            .is_some_and(|session| session.connected)
+    }
+
+    /// The item the TV is reported to play.
+    fn item_id(&self) -> Option<String> {
+        self.services.cast.casting().and_then(|casting| casting.item_id.clone())
+    }
+
     fn connect(&mut self) {
         self.services.start_cast("fake-tv");
-        self.until("the receiver to connect", |this| {
-            this.services
-                .cast
-                .session
-                .as_ref()
-                .is_some_and(|session| session.connected)
-        });
+        self.until("the receiver to connect", |this| this.connected());
     }
 
     /// The commands the receiver app got, in order.
@@ -445,16 +476,172 @@ fn disconnecting_leaves_the_tv_playing() {
 }
 
 #[test]
-fn a_device_that_drops_ends_the_cast_with_a_notice() {
-    let _config = ConfigDir::new("cast-drop");
+fn a_dropped_connection_reconnects_and_keeps_playing() {
+    let _config = ConfigDir::new("cast-reconnect");
     let mut casting = Casting::new();
     casting.connect();
+    let movie = movie();
+    casting.services.play(&movie, PlayOptions::default());
+    casting.until("the receiver's progress", |this| {
+        this.connected() && this.item_id().is_some()
+    });
     casting.events();
+    // The TV's connection drops, as a Wi-Fi hiccup would; the receiver keeps playing.
     casting.device.close();
+    casting.until("the reconnect", |this| this.reconnecting().is_some());
+    casting.until("the cast to be back", |this| {
+        this.connected() && this.reconnecting().is_none()
+    });
+    assert!(casting.device.connections() >= 2, "a second connection to the TV");
+    // `Identify`'s answer restored the state: the same item, still playing, from where the TV
+    // is rather than from the start.
+    let state = casting.services.cast.casting().expect("still casting");
+    assert_eq!(state.item_id.as_deref(), Some(movie.id.as_str()));
+    assert!(state.playing);
+    assert!(
+        state.position() >= std::time::Duration::from_secs(1),
+        "the position came back rather than starting over: {:?}",
+        state.position()
+    );
+    assert!(casting.events().is_empty(), "a reconnect isn't worth a notice");
+}
+
+#[test]
+fn a_tv_that_stays_away_gives_the_cast_up() {
+    let _config = ConfigDir::new("cast-reconnect-lost");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.play(&movie(), PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    casting.events();
+    // Off the network for good: the retries all fail.
+    casting.device.stop();
+    casting.until("the reconnect", |this| this.reconnecting().is_some());
     casting.until("the cast to end", |this| !this.services.is_casting());
     let events = casting.events();
-    assert!(events.iter().any(|event| matches!(event, AppEvent::Toast(_))));
-    assert!(events.iter().any(|event| matches!(event, AppEvent::PlaybackEnded)));
+    assert!(
+        events.iter().any(|event| matches!(event, AppEvent::Toast(_))),
+        "the lost connection is a notice"
+    );
+    assert!(
+        events.iter().any(|event| matches!(event, AppEvent::PlaybackEnded)),
+        "the player closes with it"
+    );
+}
+
+#[test]
+fn stopping_while_reconnecting_ends_the_cast() {
+    let _config = ConfigDir::new("cast-reconnect-stop");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.play(&movie(), PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    casting.events();
+    casting.device.stop();
+    casting.until("the reconnect", |this| this.reconnecting().is_some());
+    casting.services.stop_cast();
+    assert!(!casting.services.is_casting());
+    // Nothing goes on in the background, and no retry's notice arrives later.
+    casting.tick_for(std::time::Duration::from_millis(900));
+    assert!(!casting.services.is_casting());
+    assert!(
+        !casting.events().iter().any(|event| matches!(event, AppEvent::Toast(_))),
+        "stopping isn't losing the connection"
+    );
+}
+
+#[test]
+fn signing_out_stops_a_reconnecting_cast() {
+    let _config = ConfigDir::new("cast-reconnect-signout");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.play(&movie(), PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    casting.events();
+    // The TV is still there, so the cast would reconnect; signing out revokes the token the
+    // receiver plays with, so it must not.
+    casting.device.close();
+    casting.until("the reconnect", |this| this.reconnecting().is_some());
+    let connections = casting.device.connections();
+    casting.services.end();
+    casting.tick_for(std::time::Duration::from_millis(900));
+    assert!(!casting.services.is_casting());
+    assert_eq!(
+        casting.device.connections(),
+        connections,
+        "no reconnect after signing out"
+    );
+    assert!(
+        !casting.events().iter().any(|event| matches!(event, AppEvent::Toast(_))),
+        "no notice after signing out"
+    );
+}
+
+#[test]
+fn another_sender_is_followed_through_the_media_status() {
+    let _config = ConfigDir::new("cast-other-sender");
+    let mut casting = Casting::new();
+    casting.connect();
+    let movie = movie();
+    casting.services.play(&movie, PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    // A phone casts something else: the receiver answers it now, so all that reaches us is the
+    // device's own status.
+    casting.device.send_media_status("phone-item", 300., false);
+    casting.until("the other sender's item", |this| {
+        this.item_id().as_deref() == Some("phone-item")
+    });
+    let state = casting.services.cast.casting().expect("still casting");
+    assert!(state.playing);
+    assert!(
+        state.position() >= std::time::Duration::from_secs(299),
+        "the other sender's position: {:?}",
+        state.position()
+    );
+    // It keeps following: the phone pauses, ten minutes in.
+    casting.device.send_media_status("phone-item", 330., true);
+    casting.until("the other sender's pause", |this| {
+        this.services
+            .cast
+            .casting()
+            .is_some_and(|casting| casting.paused && casting.position() >= std::time::Duration::from_secs(329))
+    });
+    // Our next command makes the receiver answer us again, and our item comes back with it.
+    casting.services.control(UiCommand::TogglePause);
+    casting.wait_for("PlayPause");
+    casting.device.send_app_event(serde_json::json!({
+        "type": "playbackprogress",
+        "data": {
+            "ItemId": movie.id,
+            "PlayState": {"PositionTicks": 42_000_000_000i64, "IsPaused": false, "CanSeek": true},
+            "NowPlayingItem": {"Id": movie.id, "Name": movie.name, "Type": "Movie", "RunTimeTicks": 1_440_000_000i64}
+        }
+    }));
+    casting.until("our own item again", |this| {
+        this.item_id().as_deref() == Some(movie.id.as_str())
+    });
+}
+
+#[test]
+fn casting_is_off_offline() {
+    let _config = ConfigDir::new("cast-offline");
+    let server = FixtureServer::start();
+    let ctx = egui::Context::default();
+    let mut services = Services::offline(session(&server), &ctx);
+    assert!(!services.cast.is_online(), "an offline session finds no devices");
+    // Even with a device listed, there's no server for the TV to play from.
+    services.cast.add_device(Device {
+        id: "fake-tv".into(),
+        name: "Living room TV".into(),
+        model: "Chromecast".into(),
+        address: [127, 0, 0, 1].into(),
+        port: 8009,
+        running_app: Some("Jellyfin".into()),
+    });
+    services.tick(&ctx);
+    assert!(services.cast.has_devices(), "the device is listed");
+    services.start_cast("fake-tv");
+    assert!(!services.is_casting(), "a cast needs the server");
 }
 
 #[test]
@@ -474,18 +661,26 @@ struct ShellRun {
     services: Option<Services>,
     shell: Option<crate::views::shell::Shell>,
     device: Option<FakeDevice>,
+    /// What the device's ad says it runs (`rs`): the reconnect offer's signal.
+    running_app: Option<String>,
     /// Kept for the session's requests.
     _server: FixtureServer,
 }
 
 impl ShellRun {
     fn new() -> Self {
+        Self::with_running_app(None)
+    }
+
+    /// The shell with the fake device on the network, its ad saying it runs `running_app`.
+    fn with_running_app(running_app: Option<&str>) -> Self {
         let server = FixtureServer::start();
         Self {
             session: Some(session(&server)),
             services: None,
             shell: None,
             device: Some(block_on(FakeDevice::start()).expect("the fake device starts")),
+            running_app: running_app.map(str::to_owned),
             _server: server,
         }
     }
@@ -506,7 +701,7 @@ impl ShellRun {
                 model: "Chromecast".into(),
                 address: addr.ip(),
                 port: addr.port(),
-                running_app: None,
+                running_app: self.running_app.clone(),
             });
             self.services = Some(services);
         }
@@ -539,7 +734,11 @@ impl ShellRun {
 }
 
 fn shell() -> egui_kittest::Harness<'static, ShellRun> {
-    let mut harness = super::build_harness(egui::vec2(1200., 800.), ShellRun::new(), |ui, run| run.show(ui));
+    shell_with(ShellRun::new())
+}
+
+fn shell_with(run: ShellRun) -> egui_kittest::Harness<'static, ShellRun> {
+    let mut harness = super::build_harness(egui::vec2(1200., 800.), run, |ui, run| run.show(ui));
     harness.step();
     harness
 }
@@ -620,5 +819,62 @@ fn the_player_draws_the_cast_and_back_leaves_it_for_the_now_casting_bar() {
     harness.get_by_label(&bar).click();
     super::step_until(&mut harness, "the player again", |harness| {
         harness.query_by_label(&bar).is_none() && harness.query_by_label("Back").is_some()
+    });
+}
+
+#[test]
+fn a_tv_whose_receiver_is_running_offers_to_reconnect() {
+    let _config = ConfigDir::new("cast-reconnect-offer");
+    let mut harness = shell_with(ShellRun::with_running_app(Some("Jellyfin")));
+    super::step_until(&mut harness, "the cast button", |harness| {
+        harness.query_by_label("Cast to a TV").is_some()
+    });
+    harness.get_by_label("Cast to a TV").click();
+    super::step_until(&mut harness, "the reconnect offer", |harness| {
+        harness.query_by_label("Reconnect to Living room TV").is_some()
+    });
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::MenuItem, "Reconnect to Living room TV")
+        .click();
+    // Picking it up is the same launch: the receiver is already up, and `Identify` restores it.
+    sent(&mut harness, "Identify");
+}
+
+#[test]
+fn the_now_casting_bar_says_when_the_cast_is_reconnecting() {
+    let _config = ConfigDir::new("cast-reconnect-bar");
+    let mut harness = shell();
+    harness.step();
+    harness.state_mut().services().start_cast("fake-tv");
+    super::step_until(&mut harness, "the receiver to connect", |harness| {
+        harness
+            .state()
+            .services
+            .as_ref()
+            .and_then(|services| services.cast.session.as_ref())
+            .is_some_and(|session| session.connected)
+    });
+    let movie = movie();
+    harness.state_mut().services().play(&movie, PlayOptions::default());
+    sent(&mut harness, "PlayNow");
+    super::step_until(&mut harness, "the casting player", |harness| {
+        harness.query_by_label("Pause").is_some()
+    });
+    harness.get_by_label("Back").click();
+    super::step_until(&mut harness, "the now-casting bar", |harness| {
+        harness
+            .query_by_label(&format!("{}, on Living room TV", movie.name))
+            .is_some()
+    });
+    // The connection drops: the bar says so until the TV answers again.
+    harness.state().device().close();
+    let reconnecting = format!("{}, reconnecting to Living room TV", movie.name);
+    super::step_until(&mut harness, "the bar to say it's reconnecting", |harness| {
+        harness.query_by_label(&reconnecting).is_some()
+    });
+    super::step_until(&mut harness, "the bar to say it's back", |harness| {
+        harness
+            .query_by_label(&format!("{}, on Living room TV", movie.name))
+            .is_some()
     });
 }

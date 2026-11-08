@@ -76,7 +76,15 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
     let width = ui.available_width();
     let radius = tokens.radius_control as f32;
     let casting_on = cast.session.as_ref().map(|session| session.device.id.as_str());
-    let status = casting_on.map(|_| ("Casting", tokens.success));
+    let reconnecting = cast
+        .session
+        .as_ref()
+        .is_some_and(|session| session.reconnecting.is_some());
+    let status = match casting_on {
+        Some(_) if reconnecting => Some(("Reconnecting", tokens.warning)),
+        Some(_) => Some(("Casting", tokens.success)),
+        None => None,
+    };
     popup::panel_heading(
         ui,
         "Cast to a TV",
@@ -102,8 +110,13 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
                     Leading::Icon(ICON_TV, tokens.ink_muted)
                 };
                 // mDNS doesn't say how many TVs a group has.
-                let detail = if in_use {
+                let detail = if in_use && reconnecting {
+                    "Reconnecting"
+                } else if in_use {
                     "Casting"
+                } else if device.runs_receiver() {
+                    // Its own ad says the receiver is up: what it plays can be picked up again.
+                    "Jellyfin is running"
                 } else if device.is_group() {
                     "Group"
                 } else {
@@ -111,6 +124,8 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
                 };
                 let label = if in_use {
                     format!("{}, casting", device.name)
+                } else if device.runs_receiver() {
+                    format!("Reconnect to {}", device.name)
                 } else {
                     format!("Cast to {}", device.name)
                 };
@@ -235,6 +250,7 @@ pub fn bar(ui: &mut Ui, services: &mut Services, compact: bool, floor: f32) -> O
     }
     let casting = session.casting.clone();
     let device = session.device.name.clone();
+    let reconnecting = session.reconnecting.is_some();
     let window = ui.ctx().content_rect();
     let rect = if compact {
         Rect::from_min_max(
@@ -253,7 +269,7 @@ pub fn bar(ui: &mut Ui, services: &mut Services, compact: bool, floor: f32) -> O
         .order(egui::Order::Middle)
         .fixed_pos(rect.min)
         .show(ui.ctx(), |ui| {
-            clicked = draw_bar(ui, services, rect, &casting, &device, compact);
+            clicked = draw_bar(ui, services, rect, &casting, &device, reconnecting, compact);
         });
     clicked
 }
@@ -264,6 +280,7 @@ fn draw_bar(
     rect: Rect,
     casting: &Casting,
     device: &str,
+    reconnecting: bool,
     compact: bool,
 ) -> Option<BarClick> {
     let tokens = theme::tokens_of(ui);
@@ -273,7 +290,12 @@ fn draw_bar(
     painter.add(frame.paint(rect));
     let response = ui.interact(rect, Id::unique("now_casting_bar_open"), Sense::CLICK);
     let name = bar_title(casting);
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, format!("{name}, on {device}")));
+    let label = if reconnecting {
+        format!("{name}, reconnecting to {device}")
+    } else {
+        format!("{name}, on {device}")
+    };
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label.clone()));
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -329,9 +351,13 @@ fn draw_bar(
         mark,
         tokens.brand,
     );
-    let place = match (&casting.series_name, compact) {
-        (Some(series), false) => format!("{series} · on {device}"),
-        _ => format!("on {device}"),
+    let place = if reconnecting {
+        format!("Reconnecting to {device}…")
+    } else {
+        match (&casting.series_name, compact) {
+            (Some(series), false) => format!("{series} · on {device}"),
+            _ => format!("on {device}"),
+        }
     };
     let place_galley = painter.layout_no_wrap(place, text::font(ui, "xs"), tokens.ink_muted);
     painter
