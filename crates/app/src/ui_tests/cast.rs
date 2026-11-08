@@ -507,6 +507,26 @@ fn a_dropped_connection_reconnects_and_keeps_playing() {
 }
 
 #[test]
+fn every_outage_gets_its_own_tries() {
+    let _config = ConfigDir::new("cast-reconnect-again");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.play(&movie(), PlayOptions::default());
+    casting.until("the receiver's progress", |this| {
+        this.connected() && this.item_id().is_some()
+    });
+    // More drops than one outage's tries, each recovered before the next: the cast carries on.
+    for _ in 0..4 {
+        casting.device.close();
+        casting.until("the reconnect", |this| this.reconnecting().is_some());
+        casting.until("the cast to be back", |this| {
+            this.connected() && this.reconnecting().is_none()
+        });
+    }
+    assert!(casting.services.is_casting());
+}
+
+#[test]
 fn a_tv_that_stays_away_gives_the_cast_up() {
     let _config = ConfigDir::new("cast-reconnect-lost");
     let mut casting = Casting::new();
