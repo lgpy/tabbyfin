@@ -378,6 +378,81 @@ async fn a_closed_connection_ends_the_stream_and_fails_requests() {
 }
 
 #[tokio::test]
+async fn a_reconnect_finds_the_receiver_still_playing() {
+    let device = FakeDevice::start().await.unwrap();
+    let (channel, mut messages) = connect(&device).await;
+    let app = receiver::launch(&channel, jf::STABLE_APP_ID).await.unwrap();
+    channel.connect_app(&app.transport_id).await.unwrap();
+    let credentials = credentials();
+    let request = PlayRequest {
+        items: vec![item()],
+        ..PlayRequest::default()
+    };
+    channel
+        .send(
+            jf::NAMESPACE,
+            &app.transport_id,
+            Envelope::new(&credentials, Command::PlayNow(request)).to_value(),
+        )
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        assert!(matches!(
+            next_event(&mut messages).await,
+            ReceiverEvent::PlaybackProgress(_)
+        ));
+    }
+
+    // The connection drops as a lost Wi-Fi would: the receiver stays up and playing.
+    device.close();
+    wait_for(|| device.disconnects() >= 1).await;
+    assert!(device.is_running());
+
+    // A new connection sees it, and `Identify` answers with what it plays.
+    let (channel, mut messages) = connect(&device).await;
+    let status = receiver::get_status(&channel).await.unwrap();
+    assert!(status.application(jf::STABLE_APP_ID).is_some());
+    channel.connect_app(&app.transport_id).await.unwrap();
+    channel
+        .send(
+            jf::NAMESPACE,
+            &app.transport_id,
+            Envelope::new(&credentials, Command::Identify).to_value(),
+        )
+        .await
+        .unwrap();
+    match next_event(&mut messages).await {
+        // A real receiver answers a `playbackstop`-typed message carrying the state.
+        ReceiverEvent::PlaybackStop(event) => {
+            assert_eq!(event.data.item_id.as_deref(), Some("item-1"));
+            let state = event.data.play_state.as_ref().expect("a play state");
+            assert_eq!(state.position_ticks, Some(20_000_000));
+            assert_eq!(state.media_source_id.as_deref(), None);
+        }
+        other => panic!("expected the state as a playbackstop, got {other:?}"),
+    }
+
+    // Another sender's item reaches us the way the device broadcasts it.
+    device.send_media_status("other-item", 12., true);
+    let message = timeout(Duration::from_secs(2), async {
+        loop {
+            let message = messages.recv().await.expect("the stream is still open");
+            if message.namespace == cast::NS_MEDIA {
+                return message;
+            }
+        }
+    })
+    .await
+    .expect("a media status from the device");
+    assert_eq!(message.source, "receiver-0");
+    let status = jf::MediaStatus::from_value(&message.payload).unwrap();
+    let entry = status.entry().unwrap();
+    assert_eq!(entry.item_id(), Some("other-item"));
+    assert_eq!(entry.player_state.as_deref(), Some("PAUSED"));
+    assert_eq!(entry.position_seconds(), Some(12.0));
+}
+
+#[tokio::test]
 async fn a_silent_device_times_the_channel_out() {
     let device = FakeDevice::start().await.unwrap();
     device.silence();

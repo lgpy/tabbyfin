@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 use tokio_rustls::TlsAcceptor;
 
-use crate::channel::{NS_CONNECTION, NS_HEARTBEAT, NS_RECEIVER};
+use crate::channel::{NS_CONNECTION, NS_HEARTBEAT, NS_MEDIA, NS_RECEIVER};
 use crate::codec::{self, CastMessage};
 use crate::jellyfin::{NAMESPACE as APP_NAMESPACE, STABLE_APP_ID, UNSTABLE_APP_ID};
 use crate::{Error, Result};
@@ -121,9 +121,10 @@ impl FakeDevice {
     }
 
     /// Whether the receiver app is running: launched, and neither stopped nor left by its sender
-    /// with a `CLOSE`.
+    /// with a `CLOSE`. It stays running while a sender only drops the connection, as a real
+    /// receiver does, which is what a reconnect finds.
     pub fn is_running(&self) -> bool {
-        self.state.lock().unwrap().launched.is_some()
+        self.state.lock().unwrap().running.is_some()
     }
 
     /// Sends a PING to the client, the way a device checks the sender is alive.
@@ -136,9 +137,45 @@ impl FakeDevice {
         self.control(Control::AppEvent(event));
     }
 
+    /// The device's own `MEDIA_STATUS` in the media namespace, as it broadcasts when a sender
+    /// loads, pauses or seeks: what another sender casting to the TV looks like from here
+    /// (docs/chromecast.md, *Staying connected*).
+    pub fn send_media_status(&self, item_id: &str, position_seconds: f64, paused: bool) {
+        self.control(Control::Media(json!({
+            "type": "MEDIA_STATUS",
+            "requestId": 0,
+            "status": [{
+                "currentTime": position_seconds,
+                "playerState": if paused { "PAUSED" } else { "PLAYING" },
+                "media": {
+                    "duration": 1_440.,
+                    "customData": {
+                        "itemId": item_id,
+                        "mediaSourceId": "another-source",
+                        "audioStreamIndex": 1,
+                        "subtitleStreamIndex": -1,
+                        "canClientSeek": true
+                    }
+                }
+            }]
+        })));
+    }
+
     /// Closes the current connection.
     pub fn close(&self) {
         self.control(Control::Close);
+    }
+
+    /// Takes the device off the network: it stops listening, and the current connection goes
+    /// with it. A dropped connection it can't be reached on again is what gives up the cast.
+    pub fn stop(&mut self) {
+        if let Some(control) = self.control.lock().unwrap().as_ref() {
+            let _ = control.send(Control::Close);
+        }
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        self.accept.abort();
     }
 
     /// Stops answering the client's PINGs, so the client's idle timeout can be tested.
@@ -174,6 +211,7 @@ impl Drop for FakeDevice {
 enum Control {
     Ping,
     AppEvent(Value),
+    Media(Value),
     Close,
 }
 
@@ -190,8 +228,24 @@ struct State {
     muted: bool,
     answer_pings: bool,
     launch_delay: Duration,
-    /// The app that's running, if any.
-    launched: Option<String>,
+    /// The app that's running, if any, and what it plays.
+    running: Option<Running>,
+}
+
+/// The fake receiver app. It keeps what it plays so that an `Identify` after a reconnect answers
+/// as a real receiver does: a `playbackstop`-typed message carrying the current state.
+struct Running {
+    app_id: String,
+    playing: Option<Playing>,
+}
+
+struct Playing {
+    id: String,
+    name: String,
+    position_ticks: i64,
+    media_source_id: Value,
+    audio: Value,
+    subtitle: Value,
 }
 
 impl Default for State {
@@ -208,7 +262,7 @@ impl Default for State {
             muted: false,
             answer_pings: true,
             launch_delay: Duration::ZERO,
-            launched: None,
+            running: None,
         }
     }
 }
@@ -274,6 +328,13 @@ async fn serve(
                 Some(Control::AppEvent(event)) => {
                     let Some(sender) = state.lock().unwrap().sender_id.clone() else { continue };
                     let message = CastMessage::json(APP_TRANSPORT_ID, &sender, APP_NAMESPACE, &event.to_string());
+                    if codec::write_frame(&mut writer, &message).await.is_err() {
+                        break;
+                    }
+                }
+                Some(Control::Media(status)) => {
+                    let Some(sender) = state.lock().unwrap().sender_id.clone() else { continue };
+                    let message = CastMessage::json("receiver-0", &sender, NS_MEDIA, &status.to_string());
                     if codec::write_frame(&mut writer, &message).await.is_err() {
                         break;
                     }
@@ -355,7 +416,10 @@ fn handle(frame: CastMessage, state: &Arc<Mutex<State>>) -> Vec<(Option<Instant>
                     let app_id = payload.get("appId").and_then(Value::as_str).unwrap_or_default();
                     let launched = app_id == STABLE_APP_ID || app_id == UNSTABLE_APP_ID;
                     let reply = if launched {
-                        state.launched = Some(app_id.to_string());
+                        state.running = Some(Running {
+                            app_id: app_id.to_string(),
+                            playing: None,
+                        });
                         let status = status_of(&state);
                         receiver_reply(&sender, "RECEIVER_STATUS", request_id, status)
                     } else {
@@ -378,7 +442,7 @@ fn handle(frame: CastMessage, state: &Arc<Mutex<State>>) -> Vec<(Option<Instant>
                     }
                 }
                 Some("STOP") => {
-                    state.launched = None;
+                    state.running = None;
                     let status = status_of(&state);
                     replies.push((None, receiver_reply(&sender, "RECEIVER_STATUS", request_id, status)));
                 }
@@ -401,10 +465,10 @@ fn handle(frame: CastMessage, state: &Arc<Mutex<State>>) -> Vec<(Option<Instant>
                 if frame.destination_id == APP_TRANSPORT_ID
                     && payload.get("type").and_then(Value::as_str) == Some("CLOSE") =>
             {
-                state.launched = None;
+                state.running = None;
             }
             APP_NAMESPACE => {
-                replies.extend(app_events(&payload, &sender, &state));
+                replies.extend(app_events(&payload, &sender, &mut state));
             }
             _ => {}
         }
@@ -415,41 +479,74 @@ fn handle(frame: CastMessage, state: &Arc<Mutex<State>>) -> Vec<(Option<Instant>
 
 /// What the fake app answers: `Identify` with the current state, `PlayNow` with a few progress
 /// events. Anything else just gets recorded.
-fn app_events(payload: &Value, sender: &str, state: &State) -> Vec<(Option<Instant>, CastMessage)> {
+fn app_events(payload: &Value, sender: &str, state: &mut State) -> Vec<(Option<Instant>, CastMessage)> {
     let event = |body: Value| {
         let message = CastMessage::json(APP_TRANSPORT_ID, sender, APP_NAMESPACE, &body.to_string());
         (None, message)
     };
     match payload.get("command").and_then(Value::as_str) {
-        // What a real idle receiver answers (seen on a Chromecast): a `volumechange` about an
-        // item with empty ids.
-        Some("Identify") => vec![event(json!({
-            "type": "volumechange",
-            "data": {
-                "ItemId": "",
-                "NowPlayingItem": {"Id": "", "RunTimeTicks": 0},
-                "PlayState": {
-                    "PositionTicks": 0,
-                    "IsPaused": false,
-                    "IsMuted": state.muted,
-                    "VolumeLevel": (state.level * 100.0).round(),
-                    "CanSeek": false,
-                    "ItemId": "",
-                    "MediaSourceId": "",
-                    "PlaySessionId": "",
-                    "RepeatMode": "RepeatNone"
+        // What a real receiver answers: `playbackstop`-typed with the state while something
+        // plays, and a `volumechange` about an item with empty ids when it's idle (seen on a
+        // Chromecast). A reconnect's `Identify` is how the state comes back.
+        Some("Identify") => match state.running.as_ref().and_then(|running| running.playing.as_ref()) {
+            Some(playing) => vec![event(json!({
+                "type": "playbackstop",
+                "data": {
+                    "ItemId": playing.id,
+                    "NowPlayingItem": {
+                        "Id": playing.id,
+                        "Name": playing.name,
+                        "Type": "Episode",
+                        "RunTimeTicks": 1_440_000_000i64,
+                        "MediaType": "Video"
+                    },
+                    "PlayState": {
+                        "PositionTicks": playing.position_ticks,
+                        "IsPaused": false,
+                        "IsMuted": state.muted,
+                        "VolumeLevel": (state.level * 100.0).round(),
+                        "AudioStreamIndex": playing.audio,
+                        "SubtitleStreamIndex": playing.subtitle,
+                        "MediaSourceId": playing.media_source_id,
+                        "PlayMethod": "Transcode",
+                        "CanSeek": true
+                    }
                 }
+            }))],
+            None => vec![event(json!({
+                "type": "volumechange",
+                "data": {
+                    "ItemId": "",
+                    "NowPlayingItem": {"Id": "", "RunTimeTicks": 0},
+                    "PlayState": {
+                        "PositionTicks": 0,
+                        "IsPaused": false,
+                        "IsMuted": state.muted,
+                        "VolumeLevel": (state.level * 100.0).round(),
+                        "CanSeek": false,
+                        "ItemId": "",
+                        "MediaSourceId": "",
+                        "PlaySessionId": "",
+                        "RepeatMode": "RepeatNone"
+                    }
+                }
+            }))],
+        },
+        // A real receiver reports the stop of what played (here, nothing in particular), and
+        // keeps running.
+        Some("Stop") => {
+            if let Some(running) = &mut state.running {
+                running.playing = None;
             }
-        }))],
-        // A real receiver reports the stop of what played (here, nothing in particular).
-        Some("Stop") => vec![event(json!({
-            "type": "playbackstop",
-            "data": {
-                "ItemId": "",
-                "NowPlayingItem": {"Id": ""},
-                "PlayState": {"PositionTicks": 0, "IsPaused": false}
-            }
-        }))],
+            vec![event(json!({
+                "type": "playbackstop",
+                "data": {
+                    "ItemId": "",
+                    "NowPlayingItem": {"Id": ""},
+                    "PlayState": {"PositionTicks": 0, "IsPaused": false}
+                }
+            }))]
+        }
         Some("PlayNow") => {
             let options = &payload["options"];
             let item_id = options["items"][0]
@@ -459,6 +556,18 @@ fn app_events(payload: &Value, sender: &str, state: &State) -> Vec<(Option<Insta
             let media_source_id = options.get("mediaSourceId").cloned().unwrap_or(Value::Null);
             let audio = options.get("audioStreamIndex").cloned().unwrap_or(Value::Null);
             let subtitle = options.get("subtitleStreamIndex").cloned().unwrap_or(json!(-1));
+            if let Some(running) = &mut state.running {
+                running.playing = Some(Playing {
+                    id: item_id.to_owned(),
+                    name: "Fake item".into(),
+                    // Where the scripted progress leaves it (2 s), which a later `Identify`
+                    // reports.
+                    position_ticks: 20_000_000,
+                    media_source_id: media_source_id.clone(),
+                    audio: audio.clone(),
+                    subtitle: subtitle.clone(),
+                });
+            }
             (0..3)
                 .map(|step| {
                     event(json!({
@@ -493,9 +602,9 @@ fn app_events(payload: &Value, sender: &str, state: &State) -> Vec<(Option<Insta
 }
 
 fn status_of(state: &State) -> Value {
-    let applications = match &state.launched {
-        Some(app_id) => json!([{
-            "appId": app_id,
+    let applications = match &state.running {
+        Some(running) => json!([{
+            "appId": running.app_id,
             "displayName": APP_DISPLAY_NAME,
             "namespaces": [
                 {"name": APP_NAMESPACE},

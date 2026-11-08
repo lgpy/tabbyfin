@@ -44,6 +44,16 @@ impl Device {
     pub fn socket_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.port)
     }
+
+    /// Whether the app the device advertises (`rs`) is Jellyfin's receiver: the cast panel then
+    /// offers to reconnect to what it plays. The name is all the ad carries, and it's there
+    /// from discovery, where asking each device would cost it a TLS connection
+    /// (docs/chromecast.md, *Staying connected*).
+    pub fn runs_receiver(&self) -> bool {
+        self.running_app
+            .as_deref()
+            .is_some_and(|app| app.to_ascii_lowercase().contains("jellyfin"))
+    }
 }
 
 /// What changed in the network's devices. One event per device, not a snapshot: a page keeps its
@@ -209,5 +219,30 @@ mod tests {
         let device = device_from("Whole house._googlecast._tcp.local.", &properties, &[ipv4], 41013).unwrap();
         assert!(device.is_group());
         assert_eq!(device.port, 41013);
+    }
+
+    #[test]
+    fn the_running_app_says_when_the_receiver_is_up() {
+        let ipv4: IpAddr = "192.168.1.20".parse().unwrap();
+        let device = |rs: Option<&'static str>| {
+            let pairs: Vec<(&'static str, &'static str)> = match rs {
+                Some(rs) => vec![("id", "abc123"), ("fn", "Living Room TV"), ("rs", rs)],
+                None => vec![("id", "abc123"), ("fn", "Living Room TV")],
+            };
+            device_from(
+                "Living Room TV._googlecast._tcp.local.",
+                &pairs.into_iter().collect(),
+                &[ipv4],
+                8009,
+            )
+            .unwrap()
+        };
+        // What the device advertises while the receiver runs, in either receiver.
+        assert!(device(Some("Jellyfin")).runs_receiver());
+        assert!(device(Some("jellyfin (unstable)")).runs_receiver());
+        // The idle screen, another app, or nothing said at all.
+        assert!(!device(Some("Backdrop")).runs_receiver());
+        assert!(!device(Some("YouTube")).runs_receiver());
+        assert!(!device(None).runs_receiver());
     }
 }

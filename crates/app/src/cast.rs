@@ -49,15 +49,70 @@ struct Reload {
     due: Deadline,
 }
 /// How long the custom messages may go quiet before `MEDIA_STATUS` is followed instead: another
-/// sender cast to the TV, and the receiver now answers that one only.
-const FOLLOW_MEDIA_AFTER: Duration = Duration::from_secs(3);
+/// sender cast to the TV, and the receiver now answers that one only. Tests use a short one, so
+/// they needn't wait seconds for the switch.
+fn follow_media_after() -> Duration {
+    if cfg!(test) {
+        Duration::from_millis(300)
+    } else {
+        const FOLLOW_MEDIA_AFTER: Duration = Duration::from_secs(3);
+        FOLLOW_MEDIA_AFTER
+    }
+}
 /// How long quitting waits for the TV to hear that we're leaving.
 const EXIT_WAIT: Duration = Duration::from_secs(2);
+
+/// How a dropped connection is retried: `GET_STATUS`, and if the receiver still runs, `CONNECT`
+/// and `Identify`, which answers with what it plays (docs/chromecast.md, *Staying connected*).
+#[derive(Debug, Clone)]
+pub struct Reconnect {
+    /// The wait before the first attempt; each later one doubles it.
+    pub initial: Duration,
+    /// The longest wait between attempts.
+    pub max: Duration,
+    /// How many attempts before the cast is given up. Stopping or disconnecting ends it sooner.
+    pub attempts: u32,
+}
+
+impl Default for Reconnect {
+    fn default() -> Self {
+        Self {
+            initial: Duration::from_secs(1),
+            max: Duration::from_secs(16),
+            attempts: 5,
+        }
+    }
+}
+
+impl Reconnect {
+    /// The wait before attempt `attempt`, from 1: 1 s, 2 s, 4 s… up to `max`.
+    fn delay(&self, attempt: u32) -> Duration {
+        let doublings = attempt.saturating_sub(1).min(8);
+        (self.initial * (1 << doublings)).min(self.max)
+    }
+}
+
+/// The policy the app runs with. Tests retry in milliseconds, so giving up is quick enough to
+/// watch.
+fn reconnect_policy() -> Reconnect {
+    if cfg!(test) {
+        Reconnect {
+            initial: Duration::from_millis(250),
+            max: Duration::from_millis(500),
+            attempts: 3,
+        }
+    } else {
+        Reconnect::default()
+    }
+}
 
 /// The cast part of [`Services`]: the devices on the network and the cast in progress.
 pub struct Cast {
     ctx: egui::Context,
     client: Client,
+    /// Whether the session is online (`Services::online`): an offline one can't discover or
+    /// cast, since the receiver would need the server.
+    online: bool,
     /// Devices found on this network, the one cast to last first.
     pub devices: Vec<Device>,
     /// The mDNS browse, while signed in. Dropping it stops discovering.
@@ -72,6 +127,8 @@ pub struct Cast {
     app_id: String,
     /// What every message to the receiver carries, but its name (the device's).
     credentials: Credentials,
+    /// How a dropped connection is retried.
+    reconnect: Reconnect,
 }
 
 /// A cast in progress: the device, the connection and what it reports.
@@ -101,8 +158,17 @@ pub struct CastSession {
     pub(crate) starting: bool,
     /// A reload waiting for the receiver to finish stopping (see `Services::cast_reload`).
     reload: Option<Reload>,
-    /// When the receiver's own messages last came, to tell when another sender took over.
+    /// The connection dropped and is being retried: which attempt is next, from 1. The player
+    /// and the now-casting bar say so while it's set.
+    pub reconnecting: Option<u32>,
+    /// When the receiver's own messages last came, or ours last went out (a command makes it
+    /// answer us again), to tell when another sender took over.
     pub(crate) last_event: Option<Instant>,
+    /// The last standard `MEDIA_STATUS`, and when it came: kept so the switch to following
+    /// another sender happens even if no newer one arrives after the custom messages go quiet.
+    media: Option<(Instant, MediaStatus)>,
+    /// The standard status is being followed: the receiver answers another sender now.
+    following: bool,
     /// The playing item's details (versions, chapters, images), fetched as it changes.
     fetching: Option<(String, Task<jellyfin::Result<BaseItemDto>>)>,
 }
@@ -253,7 +319,9 @@ impl Casting {
 }
 
 impl Cast {
-    pub fn new(session: &Session, ctx: &egui::Context) -> Self {
+    /// The cast part of `session`'s services. `online` decides whether devices are looked for:
+    /// offline there's no server for the receiver to play from.
+    pub fn new(session: &Session, ctx: &egui::Context, online: bool) -> Self {
         let (found_from, found) = task::channel(ctx);
         let config = Config::load();
         let client = session.client.clone();
@@ -278,6 +346,7 @@ impl Cast {
         let mut cast = Self {
             ctx: ctx.clone(),
             client,
+            online,
             devices: Vec::new(),
             discovery: None,
             found,
@@ -286,12 +355,19 @@ impl Cast {
             session: None,
             app_id,
             credentials,
+            reconnect: reconnect_policy(),
         };
         // The UI tests have no network beyond loopback; they add their devices by hand.
-        if !cfg!(test) {
+        if online && !cfg!(test) {
             cast.discover();
         }
         cast
+    }
+
+    /// Whether this session can find devices and cast: an offline one can't, since the receiver
+    /// plays from the server.
+    pub fn is_online(&self) -> bool {
+        self.online
     }
 
     /// Starts browsing for devices, forwarding what's found to the UI.
@@ -368,6 +444,7 @@ impl Cast {
             app_id: self.app_id.clone(),
             credentials: self.credentials_for(&device),
             config: ChannelConfig::default(),
+            reconnect: self.reconnect.clone(),
         };
         // Not a `Task`: leaving or stopping the receiver has to reach the TV after
         // the services that started it are gone.
@@ -393,7 +470,10 @@ impl Cast {
             stopped: Deadline::default(),
             starting: false,
             reload: None,
+            reconnecting: None,
             last_event: None,
+            media: None,
+            following: false,
             fetching: None,
         });
     }
@@ -412,14 +492,17 @@ impl Cast {
     }
 
     /// Sends `command` to the receiver, once it's connected.
-    fn send(&self, command: Command) {
-        if let Some(session) = &self.session {
-            let _ = session.commands.send(Outgoing::Command(command));
-        }
+    fn send(&mut self, command: Command) {
+        self.send_outgoing(Outgoing::Command(command));
     }
 
-    fn send_outgoing(&self, outgoing: Outgoing) {
-        if let Some(session) = &self.session {
+    fn send_outgoing(&mut self, outgoing: Outgoing) {
+        if let Some(session) = &mut self.session {
+            // The receiver answers the sender of the last custom message, so this counts as
+            // our own traffic: a `MEDIA_STATUS` in hand is older than what we just asked for.
+            session.last_event = Some(Instant::now());
+            session.following = false;
+            session.media = None;
             let _ = session.commands.send(outgoing);
         }
     }
@@ -595,6 +678,10 @@ impl Services {
     /// Casts to the device with this id. Something playing here is handed over: it stops here
     /// and plays on the TV from the same spot, with the same version, tracks and queue.
     pub fn start_cast(&mut self, device_id: &str) {
+        // Offline there's no server for the TV to play from, and the cast panel isn't offered.
+        if !self.cast.is_online() {
+            return;
+        }
         if self.in_group() {
             self.toast(Toast::info("Leave the SyncPlay group to cast to a TV."));
             return;
@@ -869,12 +956,30 @@ impl Services {
             match update {
                 Update::Connected(status) => {
                     session.connected = true;
+                    session.reconnecting = None;
                     session.casting.apply_volume(&status);
                     toasts.push(Toast::success(format!("Casting to {}", session.device.name)));
+                }
+                // The receiver was still running: `Identify`'s answer restores what it plays,
+                // so only the connection's state changes here.
+                Update::Reconnected(status) => {
+                    session.connected = true;
+                    session.reconnecting = None;
+                    session.casting.apply_volume(&status);
+                }
+                Update::Reconnecting(attempt) => {
+                    // A launch isn't due, and a handover has nowhere to go until it's back.
+                    session.connected = false;
+                    session.reconnecting = Some(attempt);
+                    // The new `Identify` answers with the state, rather than a stop.
+                    session.identifying = true;
                 }
                 Update::Status(status) => session.casting.apply_volume(&status),
                 Update::Event(event) => {
                     session.last_event = Some(Instant::now());
+                    // The receiver answers this sender again, so the standard status isn't
+                    // what it plays any more.
+                    session.following = false;
                     let identifying = std::mem::take(&mut session.identifying);
                     let casting = &mut session.casting;
                     match &*event {
@@ -892,6 +997,11 @@ impl Services {
                             // An idle TV reports its volume too, about no item.
                             if reported_item(data).is_some() {
                                 casting.playing = true;
+                            } else if identifying && casting.item_id.is_some() {
+                                // `Identify`'s answer after a reconnect, with nothing playing:
+                                // what it played ended while the connection was gone.
+                                casting.playing = false;
+                                session.stopped.set(STOPPED_FOR);
                             }
                             if casting.apply(data) {
                                 fetch = casting.item_id.clone();
@@ -902,6 +1012,9 @@ impl Services {
                             casting.playing = reported_item(data).is_some();
                             if casting.apply(data) {
                                 fetch = casting.item_id.clone();
+                            }
+                            if !casting.playing && casting.item_id.is_some() {
+                                session.stopped.set(STOPPED_FOR);
                             }
                         }
                         // What played before stops ahead of what was just played from here.
@@ -943,14 +1056,31 @@ impl Services {
                     }
                 }
                 Update::Media(status) => {
-                    // Another sender took over: its messages go to it, so follow the TV's
-                    // standard status until we send something again.
-                    let quiet = session.last_event.is_none_or(|at| at.elapsed() >= FOLLOW_MEDIA_AFTER);
-                    if quiet && session.casting.apply_media(&status) {
+                    // Another sender's item, as the device itself describes it: followed once
+                    // the custom messages go quiet (`Services::tick_cast` does the switch, so
+                    // a status that came while ours still flowed isn't mistaken for it).
+                    if session.following && session.casting.apply_media(&status) {
                         fetch = session.casting.item_id.clone();
                     }
+                    session.media = Some((Instant::now(), status));
                 }
                 Update::Ended(end) => ended = Some(end),
+            }
+        }
+        // Another sender took over: the receiver answers only it now, so follow the TV's own
+        // status (kept from above) until our messages flow again, which `send` also starts.
+        // The status must be newer than the last custom message to be the other sender's.
+        if let Some(session) = &mut self.cast.session
+            && !session.following
+            && session
+                .last_event
+                .is_none_or(|last| last.elapsed() >= follow_media_after())
+            && let Some((at, status)) = &session.media
+            && session.last_event.is_none_or(|last| last <= *at)
+        {
+            session.following = true;
+            if session.casting.apply_media(status) {
+                fetch = session.casting.item_id.clone();
             }
         }
         if let Some(id) = fetch {
@@ -1036,8 +1166,13 @@ enum Outgoing {
 /// What the connection reports.
 #[derive(Debug)]
 enum Update {
-    /// The receiver is up and listening; the device's status at that point.
+    /// The receiver is launched and listening; the device's status at that point.
     Connected(ReceiverStatus),
+    /// The connection came back and the receiver was joined again: its status, and what the
+    /// `Identify` after it reports, follow as the usual updates.
+    Reconnected(ReceiverStatus),
+    /// The connection dropped; `attempt` is the one about to be tried, from 1.
+    Reconnecting(u32),
     Status(ReceiverStatus),
     Event(Box<ReceiverEvent>),
     Media(MediaStatus),
@@ -1049,7 +1184,7 @@ enum Update {
 enum End {
     /// It never got going: the device couldn't be reached or the receiver didn't launch.
     Failed(String),
-    /// The device dropped the connection or stopped answering.
+    /// The device dropped the connection or stopped answering, and the retries ran out.
     Dropped,
     /// The receiver app went away: stopped from the TV or another sender.
     AppGone,
@@ -1063,68 +1198,196 @@ struct Target {
     app_id: String,
     credentials: Credentials,
     config: ChannelConfig,
+    reconnect: Reconnect,
+}
+
+/// An attempt that got the receiver up: the connection, its messages and the app.
+struct Joined {
+    channel: Channel,
+    incoming: mpsc::UnboundedReceiver<cast::Message>,
+    app: cast::Application,
+}
+
+/// How an attempt to reach the receiver went.
+enum Attempt {
+    Joined(Box<Joined>),
+    /// A message for the user; no retry.
+    Failed(String),
+    /// The receiver isn't running any more (a reconnect found it stopped).
+    Gone,
+    /// It answered, then dropped before it was up.
+    Dropped,
+    /// Nobody is watching any more (the services went): end quietly.
+    Ended(End),
 }
 
 /// The connection to a device, from connecting until it ends: launches the receiver, sends what
-/// the UI asks and reports what comes back.
+/// the UI asks and reports what comes back. A connection that drops is retried with backoff,
+/// joining the receiver again if it's still running (docs/chromecast.md, *Staying connected*).
 async fn run(target: Target, mut commands: mpsc::UnboundedReceiver<Outgoing>, updates: &task::Sender<Update>) -> End {
     let Target {
         addr,
         app_id,
         mut credentials,
         config,
+        reconnect,
     } = target;
+    // The first attempt launches the receiver; every later one asks what the device runs and
+    // joins the receiver, which is how a cast survives a dropped connection.
+    let mut joined = false;
+    let mut losses = 0;
+    loop {
+        match join(addr, &app_id, &mut credentials, &config, joined, updates).await {
+            Attempt::Joined(established) => {
+                joined = true;
+                let Joined {
+                    channel,
+                    mut incoming,
+                    app,
+                } = *established;
+                match drive(&channel, &app, &mut credentials, &mut incoming, &mut commands, updates).await {
+                    Exit::Stop => {
+                        if let Err(err) = receiver::stop(&channel, &app.session_id).await {
+                            tracing::warn!("cast: stopping the receiver failed: {err}");
+                        }
+                        channel.shutdown(EXIT_WAIT).await;
+                        return End::Stopped;
+                    }
+                    // Leaving, or the services that drove this are gone (signed out, quit). Only
+                    // the socket closes: Jellyfin's receiver quits when its last sender leaves
+                    // with a `CLOSE` (seen on a Chromecast), while a dropped connection leaves it
+                    // playing.
+                    Exit::Leave => {
+                        channel.shutdown(EXIT_WAIT).await;
+                        return End::Disconnected;
+                    }
+                    Exit::Ended(End::Dropped) => {}
+                    Exit::Ended(end) => return end,
+                }
+                drop(channel);
+                losses += 1;
+                if let Some(end) = wait_to_retry(losses, &reconnect, &mut commands, updates).await {
+                    return end;
+                }
+            }
+            Attempt::Failed(message) => return End::Failed(message),
+            Attempt::Gone => return End::AppGone,
+            Attempt::Ended(end) => return end,
+            Attempt::Dropped => {
+                losses += 1;
+                if let Some(end) = wait_to_retry(losses, &reconnect, &mut commands, updates).await {
+                    return end;
+                }
+            }
+        }
+    }
+}
+
+/// Connects to the device and gets the receiver up. The first time that's a launch; afterwards
+/// it asks what the device runs and joins the receiver where it is, sending `Identify` so that
+/// its answer can restore the state. `resumed` says which.
+async fn join(
+    addr: SocketAddr,
+    app_id: &str,
+    credentials: &mut Credentials,
+    config: &ChannelConfig,
+    resumed: bool,
+    updates: &task::Sender<Update>,
+) -> Attempt {
     let name = credentials.receiver_name.clone();
-    let (channel, mut incoming) = match Channel::connect_with(addr, config).await {
+    let (channel, incoming) = match Channel::connect_with(addr, config.clone()).await {
         Ok(connected) => connected,
         Err(err) => {
             tracing::warn!("cast: couldn't connect to {addr}: {err}");
-            return End::Failed(format!("Couldn't connect to {name}."));
+            return if resumed {
+                Attempt::Dropped
+            } else {
+                Attempt::Failed(format!("Couldn't connect to {name}."))
+            };
         }
     };
-    let app = match receiver::launch(&channel, &app_id).await {
-        Ok(app) => app,
-        Err(err) => {
-            tracing::warn!("cast: launching {app_id} failed: {err}");
-            return End::Failed(format!("{name} couldn't start Jellyfin."));
+    let app = if resumed {
+        // It may still be playing: ask before launching anything over it. Only the app still
+        // being listed means the cast can carry on; anything else is the TV's idle screen.
+        let status = match receiver::get_status(&channel).await {
+            Ok(status) => status,
+            Err(err) => {
+                tracing::warn!("cast: asking {name} what it runs failed: {err}");
+                return Attempt::Dropped;
+            }
+        };
+        match status.application(app_id) {
+            Some(app) if app.has_namespace(receiver_app::NAMESPACE) => app.clone(),
+            _ => {
+                tracing::info!("cast: {name} isn't running the receiver any more");
+                return Attempt::Gone;
+            }
         }
+    } else {
+        let app = match receiver::launch(&channel, app_id).await {
+            Ok(app) => app,
+            Err(err) => {
+                tracing::warn!("cast: launching {app_id} failed: {err}");
+                return Attempt::Failed(format!("{name} couldn't start Jellyfin."));
+            }
+        };
+        if !app.has_namespace(receiver_app::NAMESPACE) {
+            tracing::warn!(?app, "cast: the receiver doesn't listen on {}", receiver_app::NAMESPACE);
+            return Attempt::Failed(format!("{name} started an app that isn't Jellyfin's receiver."));
+        }
+        app
     };
-    if !app.has_namespace(receiver_app::NAMESPACE) {
-        tracing::warn!(?app, "cast: the receiver doesn't listen on {}", receiver_app::NAMESPACE);
-        return End::Failed(format!("{name} started an app that isn't Jellyfin's receiver."));
-    }
     let transport = app.transport_id.clone();
-    let send = async |channel: &Channel, credentials: &Credentials, command: Command| {
-        let envelope = receiver_app::Envelope::new(credentials, command).to_value();
-        channel.send(receiver_app::NAMESPACE, &transport, envelope).await
-    };
-    if channel.connect_app(&transport).await.is_err() || send(&channel, &credentials, Command::Identify).await.is_err()
+    let envelope = receiver_app::Envelope::new(credentials, Command::Identify).to_value();
+    if channel.connect_app(&transport).await.is_err()
+        || channel
+            .send(receiver_app::NAMESPACE, &transport, envelope)
+            .await
+            .is_err()
     {
-        return End::Dropped;
+        return Attempt::Dropped;
     }
     let status = receiver::get_status(&channel).await.unwrap_or_default();
-    if updates.send(Update::Connected(status)).is_err() {
+    let update = if resumed {
+        Update::Reconnected(status)
+    } else {
+        Update::Connected(status)
+    };
+    if updates.send(update).is_err() {
         // Nobody listens: the services went while connecting. Leave it as `Exit::Leave` does.
         channel.shutdown(EXIT_WAIT).await;
-        return End::Disconnected;
+        return Attempt::Ended(End::Disconnected);
     }
-    let exit = drive(&channel, &app, &mut credentials, &mut incoming, &mut commands, updates).await;
-    match exit {
-        Exit::Stop => {
-            if let Err(err) = receiver::stop(&channel, &app.session_id).await {
-                tracing::warn!("cast: stopping the receiver failed: {err}");
-            }
-            channel.shutdown(EXIT_WAIT).await;
-            End::Stopped
+    Attempt::Joined(Box::new(Joined { channel, incoming, app }))
+}
+
+/// Waits out the backoff before attempt `attempt`, telling the UI. Returns the end instead when
+/// the cast should stop: the tries ran out, or Stop or Disconnect came while waiting.
+async fn wait_to_retry(
+    attempt: u32,
+    reconnect: &Reconnect,
+    commands: &mut mpsc::UnboundedReceiver<Outgoing>,
+    updates: &task::Sender<Update>,
+) -> Option<End> {
+    if attempt > reconnect.attempts {
+        return Some(End::Dropped);
+    }
+    if updates.send(Update::Reconnecting(attempt)).is_err() {
+        return Some(End::Disconnected);
+    }
+    let deadline = tokio::time::Instant::now() + reconnect.delay(attempt);
+    loop {
+        tokio::select! {
+            command = commands.recv() => match command {
+                Some(Outgoing::Stop) => return Some(End::Stopped),
+                // The session went (stopped, disconnected, signed out): nothing left to keep.
+                Some(Outgoing::Disconnect) | None => return Some(End::Disconnected),
+                // Anything about the connection that's gone is stale: the `Identify` after the
+                // reconnect answers with what the TV does now.
+                Some(_) => {}
+            },
+            _ = tokio::time::sleep_until(deadline) => return None,
         }
-        // Leaving, or the services that drove this are gone (signed out, quit). Only the socket
-        // closes: Jellyfin's receiver quits when its last sender leaves with a `CLOSE` (seen on a
-        // Chromecast), while a dropped connection leaves it playing.
-        Exit::Leave => {
-            channel.shutdown(EXIT_WAIT).await;
-            End::Disconnected
-        }
-        Exit::Ended(end) => end,
     }
 }
 
@@ -1288,6 +1551,17 @@ mod tests {
     use jellyfin::models::BaseItemKind;
 
     use super::*;
+
+    #[test]
+    fn the_backoff_doubles_up_to_its_cap() {
+        let policy = Reconnect {
+            initial: Duration::from_secs(1),
+            max: Duration::from_secs(8),
+            attempts: 6,
+        };
+        let delays: Vec<u64> = (1..=6).map(|attempt| policy.delay(attempt).as_secs()).collect();
+        assert_eq!(delays, [1, 2, 4, 8, 8, 8]);
+    }
 
     #[test]
     fn a_loopback_server_is_given_as_its_lan_address() {

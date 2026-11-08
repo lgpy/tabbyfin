@@ -341,7 +341,13 @@ impl PlayerPage {
         let Some(session) = cx.services.cast.session.as_ref() else {
             return;
         };
-        let view = View::read_cast(&session.casting, &session.device, menus, self.show_remaining);
+        let view = View::read_cast(
+            &session.casting,
+            &session.device,
+            session.reconnecting.is_some(),
+            menus,
+            self.show_remaining,
+        );
         let cast = view.cast.clone().unwrap_or_default();
         let now = ui.input(|input| input.time);
         if std::mem::take(&mut self.controls_appeared) || self.controls_since.is_none() {
@@ -1524,6 +1530,8 @@ struct CastView {
     backdrop: Option<ImageRequest>,
     /// The casting item, for its backdrop's blurhash.
     item: Option<jellyfin::models::BaseItemDto>,
+    /// The connection dropped and is being retried.
+    reconnecting: bool,
 }
 
 struct ChaptersMenu {
@@ -1713,7 +1721,13 @@ impl View {
 
     /// The view of a cast: what the TV reported, with the item's versions, tracks and chapters
     /// once it's fetched from the server.
-    fn read_cast(casting: &Casting, device: &cast::Device, menus: Menus, show_remaining: bool) -> Self {
+    fn read_cast(
+        casting: &Casting,
+        device: &cast::Device,
+        reconnecting: bool,
+        menus: Menus,
+        show_remaining: bool,
+    ) -> Self {
         let item = casting.item.as_ref();
         let position = casting.position();
         let title = item.map_or_else(|| casting.name.clone(), |item| item.name.clone());
@@ -1833,6 +1847,7 @@ impl View {
                 model: device.model.clone(),
                 backdrop: item.and_then(|item| item.backdrop_image()),
                 item: item.cloned(),
+                reconnecting,
             }),
         }
     }
@@ -2018,10 +2033,15 @@ fn casting_mark(ui: &egui::Ui, center: egui::Pos2, cast: &CastView) {
     painter.circle_filled(circle, CAST_MARK / 2., over_video::SURFACE);
     round_button::glyph(ui, circle, ICON_CAST_CONNECTED, CAST_MARK_ICON, over_video::FOREGROUND);
     let line = circle.y + CAST_MARK / 2. + 28.;
+    let title = if cast.reconnecting {
+        format!("Reconnecting to {}…", cast.device)
+    } else {
+        format!("Playing on {}", cast.device)
+    };
     painter.text(
         pos2(center.x, line),
         Align2::CENTER_CENTER,
-        format!("Playing on {}", cast.device),
+        title,
         theme::text::font(ui, "xl"),
         over_video::FOREGROUND,
     );
