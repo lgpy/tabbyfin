@@ -11,8 +11,7 @@ When a check has been done, delete it, noting the hardware, OS and server versio
 - **The AppImage** on real Linux desktops (GNOME, KDE; Wayland and X11), from the file manager, on a distribution other than Ubuntu, and on a 2022-era one (Ubuntu 22.04, Debian 12) with a real GPU. In a 22.04 container the window was black (old software Vulkan).
 - **The Flatpak** on a real desktop with a GPU: GPU video and hardware decoding through `--device=dri`, sign-in kept in the keychain across restarts (Secret Service from the sandbox), audio through PulseAudio/PipeWire, the menu entry and icon.
 - **macOS** on Apple silicon and Intel: the app starts, signs in and plays with `brew install mpv` at a reasonable CPU use at 1080p (software video), and the Dock and Finder show the icon.
-- **Playback from the packaged builds**: the container checks only opened the sign-in screen.
-- **The CI jobs on GitHub Actions**, the `integration` job included (the same steps passed locally).
+- **Playback from the Linux packages**: the container checks only opened the sign-in screen (the Windows zip plays).
 
 ## 2. Video and GPUs (2.6, 2.7, 2.9)
 
