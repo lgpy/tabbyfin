@@ -132,6 +132,13 @@ Everything so far ran against the fake device in `crates/cast/tests/` and the ap
   - A phone casting to the same TV while this app casts: the app follows the phone's item and position (`MEDIA_STATUS`), and its own player's controls take the cast back.
   - Signing out while it's reconnecting leaves nothing retrying in the background.
   - Offline (the server unreachable, with downloads), the cast button and panel are absent and no devices are browsed for.
+- **On a phone** (`mise run android:install`, `docs/android.md`), with the dev server reached by its LAN address and a Chromecast or Google TV on the same network:
+  - After sign-in the log says `cast: multicast lock held=true` (`adb logcat -s tabbyfin`) and the cast panel lists the TVs; signing out logs `held=false` and the panel opens with nothing in it.
+  - Casting from the phone plays on the TV with its progress and the now-casting bar, as on the desktop.
+  - While casting, the phone's hardware volume keys move the TV's volume, a step a press, up and down, and held down counts each repeat; the casting player's volume follows. With nothing casting they show Android's own volume UI and change the phone's volume.
+  - Casting, then the app in the background with the screen off for 10 minutes or more: the TV keeps playing, and coming back shows the item at its position. Taking the phone off Wi-Fi for a few seconds meanwhile gives *Reconnecting to <TV>…* and then carries on.
+  - Casting, then the TV's Wi-Fi off while the app is backgrounded: coming back gives *Lost the connection* after the retries (or *<TV> stopped casting* if the receiver went), and the player is closed.
+  - Swiping the app away while casting: the TV keeps playing, and the next launch's panel offers *Reconnect to <TV>*.
 
 ## 13. Android
 
