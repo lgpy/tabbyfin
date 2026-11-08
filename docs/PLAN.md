@@ -345,6 +345,7 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 - **Handover:** casting while something plays here stops it and, once its stop is reported, plays it on the TV at its position, version and tracks, with the queue after it.
 - **Casting and SyncPlay don't mix:** the cast button is off in a group, and joining or starting one while casting asks to stop the cast first.
 - **Ending:** *Stop casting* stops the receiver; *Disconnect* and quitting leave it playing; signing out stops it, since the receiver holds the session's token.
+- **Staying connected:** a dropped connection is retried on tokio inside the connection task, with the command channel kept, so the session and its UI carry on: 1 s, 2 s, 4 s, 8 s and 16 s waits, five tries, and *Stop* or *Disconnect* ends it at once. Each try asks the device's `GET_STATUS` and, if the receiver still runs, joins it and sends `Identify`, whose answer restores the item and position; a receiver that's gone ends the cast as stopped, and exhausted tries use the *Lost the connection* error. The bar and the casting player say *Reconnecting to <TV>…* meanwhile. A device whose mDNS `rs` names Jellyfin gets *Reconnect* in the panel instead of *Cast to* (no connection per device, and nothing reconnects by itself). When another sender takes over, the standard `MEDIA_STATUS` is followed once the custom messages have been quiet for 3 s, and until our own flow again. Offline sessions start no discovery and offer no casting.
 
 ### 5.6 Downloads
 

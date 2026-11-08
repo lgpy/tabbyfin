@@ -123,9 +123,15 @@ Everything so far ran against the fake device in `crates/cast/tests/` and the ap
 - **Track and version changes** briefly show the receiver's *Ready to cast* (they're a `Stop`, then a `PlayNow`), then play on from the same spot. Several in a row must each come back.
 - **The dashboard's *Play on Tabbyfin*** plays on the TV while casting.
 - **SyncPlay:** the cast button is off in a group; joining one while casting asks first and stops the cast.
-- **Errors:** a launch that fails, the TV turned off mid-cast (*Lost the connection*), a server address the TV can't reach (`connectionerror`'s toast), an item the TV can't play (`playbackerror`; turning off the dev user's transcoding and remuxing makes *Test Movie* one).
+- **Errors:** a launch that fails, the TV turned off mid-cast (*Lost the connection*, after the retries), a server address the TV can't reach (`connectionerror`'s toast), an item the TV can't play (`playbackerror`; turning off the dev user's transcoding and remuxing makes *Test Movie* one).
 - **The bitrate setting:** *Settings → Playback → Chromecast bitrate* caps what the TV streams.
-- **Two senders:** a phone casting to the same TV while this app casts (it follows `MEDIA_STATUS` then).
+- **Staying connected:**
+  - The TV's Wi-Fi drops for a few seconds mid-playback (pull the TV's network, or switch its Wi-Fi off and on): the bar says *Reconnecting to <TV>…*, then playback carries on from the same spot, and the dashboard's session picks up again. The TV turned off for good gives up after the five tries with *Lost the connection*.
+  - *Stop casting* and *Disconnect* during a reconnect end it at once, with no notice about the lost connection.
+  - The app restarted while the TV plays the receiver: at launch the cast panel offers *Reconnect to <TV>*, and picking it brings back the item and its position. Nothing reconnects on its own.
+  - A phone casting to the same TV while this app casts: the app follows the phone's item and position (`MEDIA_STATUS`), and its own player's controls take the cast back.
+  - Signing out while it's reconnecting leaves nothing retrying in the background.
+  - Offline (the server unreachable, with downloads), the cast button and panel are absent and no devices are browsed for.
 
 ## 13. Android
 

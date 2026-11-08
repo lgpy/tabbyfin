@@ -2,7 +2,7 @@
 
 **Goal:** cast to a Chromecast or Google TV from the desktop and Android. We cast to Jellyfin's own receiver app ([jellyfin-chromecast](https://github.com/jellyfin/jellyfin-chromecast), the one the web client casts to), not to Google's Default Media Receiver. The receiver does the Jellyfin work itself: it calls `PlaybackInfo` with its own device profile, chooses direct play or a transcode, reports start, progress and stop to the server with our token, and plays the next episode. The app is only the remote: it finds devices, launches the receiver, sends it commands and draws what it reports.
 
-**Status:** milestones 1 to 4 are built (`crates/cast`, `crates/app/src/cast.rs`, `views/casting.rs` and the player's casting view) and tested against the fake device and a real Chromecast (below, *What a real Chromecast showed*). Staying connected and Android are left, and the rest of `TESTING.md`'s checks on a device. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
+**Status:** milestones 1 to 5 are built (`crates/cast`, `crates/app/src/cast.rs`, `views/casting.rs` and the player's casting view) and tested against the fake device and a real Chromecast (below, *What a real Chromecast showed*). Android is left, and the rest of `TESTING.md`'s checks on a device. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
 
 ## Decision
 
@@ -101,8 +101,9 @@ Seen on a Chromecast with the stable receiver (2026-11), against the dev server;
 ### `crates/app`
 
 - `cast.rs`: `Cast` in `Services`.
-  - Discovery runs while signed in, and its results come back through a `task::channel` drained in `Services::tick`.
-  - `CastSession` holds the device, the connection, the app's `transportId`, and `Casting`, the state the UI draws: item, position (extrapolated between reports, as `NowPlaying` is), paused, duration, streams, the chosen audio and subtitle, and volume and mute (from `RECEIVER_STATUS` and `volumechange`).
+  - Discovery runs while signed in, and its results come back through a `task::channel` drained in `Services::tick`. An offline session discovers nothing and casts nothing.
+  - `CastSession` holds the device, the connection, the app's `transportId`, and `Casting`, the state the UI draws: item, position (extrapolated between reports, as `NowPlaying` is), paused, duration, streams, the chosen audio and subtitle, and volume and mute (from `RECEIVER_STATUS` and `volumechange`). `reconnecting` is set while a dropped connection is being retried.
+  - The connection's task (`run`/`join`) launches the receiver, then relays until it ends; a lost connection retries with backoff (`Reconnect`), and the `Identify` after each rejoin restores the state. Another sender's `MEDIA_STATUS` is followed once the custom messages go quiet.
   - It also holds the credentials it sends: the token, `serverAddress` with the loopback fix, and the receiver id from `/Users/Me`.
 - `impl Services`: casting redirects the existing entry points, the same way SyncPlay does with `in_group()`.
   - `play`, `play_all_with`, `enqueue` and `play_now` become `PlayNow` or `PlayLast`. Items become stubs; `PlayOptions`' start, version, audio and subtitle go in the `PlayRequest`.
@@ -136,6 +137,7 @@ The look below was settled with mockups.
   - **Its panel** is built like SyncPlay's (`popup::panel`). Its heading is *Cast to a TV*, with a *Casting* status dot while casting, and a line saying what the panel does.
   - **The devices** are listed under an *On this network* overline, as one `list_row::block` of `ListRow`s. Each row has a TV icon (a group's is `speaker_group`), the device's name, and its model or *Group* at the right (mDNS doesn't say how many TVs a group has).
   - **The TV in use** is highlighted, with a `brand` `cast_connected` icon and *Casting*.
+  - **A TV whose ad says Jellyfin's receiver is running** says *Reconnect to <name>* rather than *Cast to <name>*, with *Jellyfin is running* where the model goes: picking it brings back what the TV plays.
   - **While casting**, a quiet *Disconnect* and a quiet-danger *Stop casting* sit under the list.
 - **While casting**, the player page draws `Casting` instead of `NowPlaying`.
   - **It keeps today's player layout.** Where the video was, it shows the item's backdrop, dimmed (`over_video::VEIL`). In the middle, a `cast_connected` mark in a dark circle sits over *Playing on <TV>* (`xl`) and the TV's model (`sm`, muted).
@@ -155,9 +157,11 @@ The look below was settled with mockups.
 
 ## Staying connected
 
-- **A dropped connection reconnects with backoff.** We `GET_STATUS`; if the receiver is still running, we `CONNECT` to its `transportId` and send `Identify`, which answers with the state.
-- **At launch**, a found device whose `rs` or status shows the Jellyfin receiver offers *Reconnect* in the cast panel. Reconnecting doesn't happen on its own.
-- **Another sender takes over** when the custom messages stop and `MEDIA_STATUS` shows another item. We keep following through `MEDIA_STATUS` until we send a command again.
+- **A dropped connection is retried with backoff.** The connection task keeps the command channel, so the UI and the session go on as before: after a loss it waits 1 s, then 2 s, 4 s, 8 s and 16 s (capped, five tries, or until *Stop casting* or *Disconnect* comes in, which ends it at once). Each try connects to the device and asks `GET_STATUS`; if the Jellyfin receiver is still listed, it `CONNECT`s to that app's `transportId` and sends `Identify`, whose answer restores the item, position and pause state. If the receiver isn't running any more, the cast ends as *<TV> stopped casting*; if the tries run out, with the usual *Lost the connection* toast. While it retries, the now-casting bar and the casting player say *Reconnecting to <TV>…* and the cast panel's status dot says *Reconnecting*. Commands made in the meantime (volume, pause) aren't replayed: the `Identify` answer is the truth. A reconnect doesn't launch anything over a running receiver.
+- **At launch, a device whose ad says the receiver is running offers *Reconnect*.** The signal is mDNS's `rs` TXT field, the app the device advertises, which flow discovery already carries: no extra connection per device, and the device re-announces it when its app changes. A device whose `rs` names Jellyfin gets a *Reconnect to <name>* row (detail *Jellyfin is running*) in the cast panel, in place of *Cast to*. Picking it is the same connect as casting from idle — the receiver is joined rather than launched, and `Identify` brings back what it plays. Nothing reconnects on its own: at launch it's an offer, and in a running cast it's the retry above.
+- **Another sender takes over** when the custom messages stop: the receiver answers only the sender of the last custom message. Once 3 s pass without one, the app follows the TV's own `MEDIA_STATUS` instead (the item and its `customData`, the position, paused and playing), kept from the last broadcast so the switch needs no new message; a status that arrived before the last custom one isn't mistaken for it. It keeps following, including an item that isn't ours, until the receiver answers this sender again — either a custom message arrives or we send a command, which makes us the last sender again.
+- **Signing out stops the cast and any retry**: the receiver plays with this session's token, which signing out revokes.
+- **Offline there's no casting.** Discovery doesn't start, the panel and the button aren't shown, and a cast can't be started; the session that replaces an offline one when the server comes back discovers normally.
 
 ## Milestones
 
@@ -171,7 +175,7 @@ The look below was settled with mockups.
 ## Testing
 
 - **Unit tests:** the codec against frames captured from a device; `Envelope`, `PlayRequest` and `ReceiverEvent` against JSON taken from the receiver's source and from a device; and the `UiCommand` → `Command` mapping.
-- **A fake device** for tests: `crates/cast/tests/` runs a TLS server with a self-signed certificate that speaks the connection, heartbeat and receiver namespaces and records the custom messages. It answers `PlayNow` with scripted `playbackprogress`. The app's UI tests drive the casting player page and the redirects against it, with no network beyond loopback.
+- **A fake device** for tests: `crates/cast/tests/` runs a TLS server with a self-signed certificate that speaks the connection, heartbeat and receiver namespaces and records the custom messages. It answers `PlayNow` with scripted `playbackprogress`, keeps the receiver running across a dropped connection and answers the next `Identify` with what it plays, can be taken off the network, and broadcasts the device's own `MEDIA_STATUS` for another sender. The app's UI tests drive the casting player page and the redirects against it, with no network beyond loopback.
 - **Real hardware:** the checks are in `TESTING.md`, with how to reach the dev server from the TV.
 
 ## Risks
