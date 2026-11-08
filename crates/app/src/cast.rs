@@ -1240,6 +1240,9 @@ async fn run(target: Target, mut commands: mpsc::UnboundedReceiver<Outgoing>, up
         match join(addr, &app_id, &mut credentials, &config, joined, updates).await {
             Attempt::Joined(established) => {
                 joined = true;
+                // The tries are per outage: a cast that came back starts its next one afresh,
+                // rather than a long cast being given up on its fifth drop.
+                losses = 0;
                 let Joined {
                     channel,
                     mut incoming,
