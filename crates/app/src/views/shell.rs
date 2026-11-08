@@ -14,6 +14,12 @@
 //! state, its members and the group's queue, which the keyboard can play, move, remove and
 //! toggle.
 //!
+//! The cast button sits just left of SyncPlay once a Chromecast has been found (or while
+//! casting). Its panel lists the TVs on the network, and while casting offers *Disconnect* and
+//! *Stop casting*; the keyboard walks it as it does the SyncPlay panel. While a cast goes on and
+//! the player is closed, the now-casting bar floats over the pages and brings the player back
+//! (`views::casting`).
+//!
 //! The search box is the bar's only text field: typing opens the results page (or comes back
 //! to it from a page opened from them), clearing it closes them, and Enter or Down moves into
 //! the results, which hand Up and Shift+Tab back to the box; Esc gives the keyboard back to the
@@ -31,8 +37,8 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_CLOSE, ICON_CLOUD_OFF, ICON_GROUPS, ICON_HOME, ICON_REPEAT, ICON_REPEAT_ONE, ICON_SEARCH,
-    ICON_SETTINGS, ICON_SHUFFLE, ICON_VIDEO_LIBRARY,
+    ICON_ARROW_BACK, ICON_CAST, ICON_CAST_CONNECTED, ICON_CLOSE, ICON_CLOUD_OFF, ICON_GROUPS, ICON_HOME, ICON_REPEAT,
+    ICON_REPEAT_ONE, ICON_SEARCH, ICON_SETTINGS, ICON_SHUFFLE, ICON_VIDEO_LIBRARY,
 };
 use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 
@@ -51,6 +57,7 @@ use crate::task::Task;
 use crate::theme::{self, over_video, text};
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
+use crate::views::casting::{self, CastEntry, GroupAction, StopCastFirst};
 use crate::views::{self, Page, PageCx, UnderBar, player};
 use crate::widgets::avatar_row::{self, AvatarRow};
 use crate::widgets::button::{self, Focus, State};
@@ -92,6 +99,8 @@ const SYNCPLAY_PANEL: &str = "syncplay_panel";
 /// How tall the group's queue may grow before it scrolls: the panel hangs from the bar, so a
 /// long queue would otherwise run off the bottom of the window.
 const SYNCPLAY_QUEUE_H: f32 = 320.;
+/// The cast panel's id in egui's popup memory.
+const CAST_PANEL: &str = "cast_panel";
 /// The queue's shuffle and repeat toggles and their icons.
 const QUEUE_TOGGLE: f32 = 30.;
 const QUEUE_ICON: f32 = 18.;
@@ -134,32 +143,35 @@ impl Highlight {
 enum BarItem {
     Back,
     Search,
+    /// Only once a Chromecast has been found, or while casting.
+    Cast,
     SyncPlay,
     Settings,
     Account,
 }
 
-/// The bar's items; Back only while there's a page to go back to.
-const BAR: [BarItem; 5] = [
+/// The bar's items, in order; Back only while there's a page to go back to, Cast only while
+/// there's a TV to cast to.
+const BAR: [BarItem; 6] = [
     BarItem::Back,
     BarItem::Search,
+    BarItem::Cast,
     BarItem::SyncPlay,
     BarItem::Settings,
     BarItem::Account,
 ];
-const BAR_WITHOUT_BACK: [BarItem; 4] = [BarItem::Search, BarItem::SyncPlay, BarItem::Settings, BarItem::Account];
-/// Offline there's nothing to search and no group to join.
-const BAR_OFFLINE: [BarItem; 3] = [BarItem::Back, BarItem::Settings, BarItem::Account];
-const BAR_OFFLINE_WITHOUT_BACK: [BarItem; 2] = [BarItem::Settings, BarItem::Account];
 
-/// The bar's items on a page that can go back or not, online or not.
-fn bar_items(can_go_back: bool, online: bool) -> &'static [BarItem] {
-    match (can_go_back, online) {
-        (true, true) => &BAR,
-        (false, true) => &BAR_WITHOUT_BACK,
-        (true, false) => &BAR_OFFLINE,
-        (false, false) => &BAR_OFFLINE_WITHOUT_BACK,
-    }
+/// The bar's items on a page that can go back or not, online or not, with the cast button or
+/// not. Offline there's nothing to search, no group to join and nothing to cast.
+fn bar_items(can_go_back: bool, online: bool, cast: bool) -> Vec<BarItem> {
+    BAR.into_iter()
+        .filter(|item| match item {
+            BarItem::Back => can_go_back,
+            BarItem::Search | BarItem::SyncPlay => online,
+            BarItem::Cast => online && cast,
+            _ => true,
+        })
+        .collect()
 }
 
 /// Where `item` sits among `items`: its own place, or the place of the first item to its right
@@ -224,6 +236,10 @@ pub struct Shell {
     /// keyboard moves the highlight, so the highlighted row is on screen (a `scroll_to_me` on
     /// every frame would stop the pointer scrolling the queue itself).
     syncplay_scroll: bool,
+    /// The cast panel's keyboard highlight, as the SyncPlay panel's.
+    cast_highlight: Option<CastEntry>,
+    /// The question before joining a SyncPlay group while casting.
+    stop_cast_first: Option<StopCastFirst>,
     /// The app icon at the start of the bar.
     logo: Option<egui::TextureHandle>,
     /// The compact layout's bottom bar, hidden while the page scrolls down.
@@ -319,6 +335,8 @@ impl Shell {
             search_focused: false,
             syncplay_highlight: None,
             syncplay_scroll: false,
+            cast_highlight: None,
+            stop_cast_first: None,
             logo: load_logo(cx.ctx),
             bottom_bar: BottomBar::default(),
         };
@@ -357,6 +375,8 @@ impl Shell {
         // A popup left open while its button isn't drawn would keep egui's keyboard from the
         // player.
         egui::Popup::close_id(ctx, syncplay_panel_id());
+        egui::Popup::close_id(ctx, cast_panel_id());
+        self.cast_highlight = None;
         ctx.memory_mut(|memory| memory.surrender_focus(Id::unique(SEARCH_ID)));
         // The player takes every key: nothing else may keep egui's focus, or egui would keep
         // the keyboard (`keys.rs`) while the player's keys are needed.
@@ -459,6 +479,13 @@ impl Shell {
                 });
             });
             cx.under_bar = None;
+            // Just above the bottom bar on a phone, where it is now.
+            let floor = if compact {
+                ui.ctx().content_rect().bottom() - NAV_H * shown
+            } else {
+                ui.ctx().content_rect().bottom()
+            };
+            self.casting_overlays(ui, compact, floor, cx);
         }
         self.navigate(cx);
     }
@@ -467,10 +494,9 @@ impl Shell {
     /// the page, then the shell's own.
     fn on_key(&mut self, press: Press, cx: &mut PageCx) {
         // An item the bar lost with a page (Back on the first page) can't keep the keyboard.
-        if self
-            .bar_key
-            .is_some_and(|item| !bar_items(self.can_go_back(), self.online).contains(&item))
-        {
+        if self.bar_key.is_some_and(|item| {
+            !bar_items(self.can_go_back(), self.online, cx.services.cast.has_devices()).contains(&item)
+        }) {
             self.bar_key = None;
         }
         if let Some(player) = &mut self.player {
@@ -511,7 +537,7 @@ impl Shell {
                 }
                 // Up past the page's first row moves into the top bar.
                 Action::Move(Move::Up) => {
-                    self.enter_top_bar();
+                    self.enter_top_bar(cx.services.cast.has_devices());
                     return;
                 }
                 _ => {}
@@ -553,7 +579,8 @@ impl Shell {
     /// A key in the top bar (`keys.rs`'s `Scope::Browse`, which the bar borrows): along it,
     /// pressing what it's on, or back down to the page.
     fn bar_key_action(&mut self, action: Action, cx: &mut PageCx) {
-        let items = bar_items(self.can_go_back(), self.online);
+        let items = bar_items(self.can_go_back(), self.online, cx.services.cast.has_devices());
+        let items = items.as_slice();
         match action {
             Action::Move(Move::Left) => self.bar_key = bar_step(items, self.bar_key, -1),
             Action::Move(Move::Right) => self.bar_key = bar_step(items, self.bar_key, 1),
@@ -571,8 +598,8 @@ impl Shell {
     }
 
     /// Moves the keyboard into the top bar, from Up past the page's first row.
-    fn enter_top_bar(&mut self) {
-        self.bar_key = bar_step(bar_items(self.can_go_back(), self.online), self.bar_key, 0);
+    fn enter_top_bar(&mut self, cast: bool) {
+        self.bar_key = bar_step(&bar_items(self.can_go_back(), self.online, cast), self.bar_key, 0);
     }
 
     /// Back to the page from the bar or the search box, with its cursor shown where it was:
@@ -593,6 +620,7 @@ impl Shell {
                 cx.nav.push(NavRequest::Back);
             }
             BarItem::Search => self.focus_search(cx),
+            BarItem::Cast => self.open_cast_panel(true, cx),
             BarItem::SyncPlay => self.open_syncplay_panel(true, cx),
             BarItem::Settings => self.toggle_settings(cx),
             BarItem::Account => self.open_account_menu(cx.ctx),
@@ -726,6 +754,13 @@ impl Shell {
             self.leave_top_bar(cx);
         }
         match entry {
+            MenuEntry::JoinGroup(id) if cx.services.is_casting() => {
+                self.stop_cast_first = Some(StopCastFirst::new(GroupAction::Join(id)));
+            }
+            MenuEntry::NewGroup if cx.services.is_casting() => {
+                let name = new_group_name(&cx.services.session);
+                self.stop_cast_first = Some(StopCastFirst::new(GroupAction::Create(name)));
+            }
             MenuEntry::JoinGroup(id) => cx.services.syncplay.join(id),
             MenuEntry::NewGroup => {
                 let name = new_group_name(&cx.services.session);
@@ -734,6 +769,126 @@ impl Shell {
             MenuEntry::QueueEntry(id) => cx.services.syncplay.play_entry(id),
             MenuEntry::LeaveGroup => cx.services.syncplay.leave(),
             MenuEntry::ToggleShuffle | MenuEntry::CycleRepeat => {}
+        }
+    }
+
+    /// The cast panel's keys, read before anything in the bar draws as the SyncPlay panel's are:
+    /// Up and Down move the highlight, Enter picks, Backspace and Alt+Left close it like Esc.
+    fn cast_panel_keys(&mut self, cx: &mut PageCx) {
+        if !egui::Popup::is_id_open(cx.ctx, cast_panel_id()) {
+            self.cast_highlight = None;
+            return;
+        }
+        let ctx = cx.ctx;
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Tab) | keys::take_exact(ctx, Modifiers::SHIFT, Key::Tab) {
+            cancel_focus(ctx);
+        }
+        take_horizontal_keys(ctx);
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Backspace)
+            | keys::take_exact(ctx, Modifiers::ALT, Key::ArrowLeft)
+        {
+            self.close_cast_panel(ctx);
+            return;
+        }
+        let entries = casting::entries(&cx.services.cast);
+        let position = self
+            .cast_highlight
+            .as_ref()
+            .and_then(|entry| entries.iter().position(|candidate| candidate == entry));
+        let down = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowDown);
+        let up = keys::take_exact(ctx, Modifiers::NONE, Key::ArrowUp);
+        if down | up {
+            let step = if down { 1 } else { -1 };
+            self.cast_highlight =
+                highlight_step(position, step, entries.len()).and_then(|index| entries.get(index).cloned());
+            cancel_focus(ctx);
+        }
+        if keys::take_exact(ctx, Modifiers::NONE, Key::Enter)
+            && let Some(entry) = position.and_then(|index| entries.get(index).cloned())
+        {
+            self.choose_cast_entry(entry, true, cx);
+        }
+    }
+
+    /// Opens the cast panel under its button. From the keyboard the first entry is highlighted.
+    fn open_cast_panel(&mut self, from_keyboard: bool, cx: &mut PageCx) {
+        self.cast_highlight = if from_keyboard {
+            casting::entries(&cx.services.cast).into_iter().next()
+        } else {
+            None
+        };
+        egui::Popup::open_id(cx.ctx, cast_panel_id());
+        cx.ctx.request_repaint();
+    }
+
+    fn close_cast_panel(&mut self, ctx: &egui::Context) {
+        egui::Popup::close_id(ctx, cast_panel_id());
+        self.cast_highlight = None;
+        ctx.request_repaint();
+    }
+
+    fn toggle_cast_panel(&mut self, cx: &mut PageCx) {
+        if egui::Popup::is_id_open(cx.ctx, cast_panel_id()) {
+            self.close_cast_panel(cx.ctx);
+        } else {
+            self.open_cast_panel(false, cx);
+        }
+    }
+
+    /// Does what a cast entry says, closing the panel; a choice made with the keyboard gives the
+    /// keyboard back to the page.
+    fn choose_cast_entry(&mut self, entry: CastEntry, from_keyboard: bool, cx: &mut PageCx) {
+        self.close_cast_panel(cx.ctx);
+        if from_keyboard {
+            self.leave_top_bar(cx);
+        }
+        casting::choose(entry, cx.services);
+    }
+
+    /// The cast button, while there's a TV to cast to: lit while casting, and off (saying why)
+    /// in a SyncPlay group. Its panel hangs from it.
+    fn cast_button(&mut self, ui: &mut egui::Ui, cx: &mut PageCx, highlighted: bool) {
+        if !cx.services.cast.has_devices() {
+            return;
+        }
+        let casting = cx.services.is_casting();
+        let icon = if casting { ICON_CAST_CONNECTED } else { ICON_CAST };
+        let label = casting::button_label(cx.services);
+        let button = bar_button(icon, label, highlighted)
+            .on(casting)
+            .enabled(casting || !cx.services.in_group())
+            .show(ui);
+        if button.clicked() {
+            self.bar_key = None;
+            self.toggle_cast_panel(cx);
+        }
+        let chosen = popup::panel(
+            cast_panel_id(),
+            &button,
+            RectAlign::BOTTOM_END,
+            casting::PANEL_W,
+            popup::OnTouch::Hung,
+            |ui| casting::panel_content(ui, cx.services, self.cast_highlight.as_ref()),
+        )
+        .flatten();
+        if let Some(entry) = chosen {
+            self.choose_cast_entry(entry, false, cx);
+        }
+    }
+
+    /// The now-casting bar over the pages, while a cast goes on with the player closed, and the
+    /// question before joining a SyncPlay group while casting.
+    fn casting_overlays(&mut self, ui: &mut egui::Ui, compact: bool, floor: f32, cx: &mut PageCx) {
+        if let Some(question) = &mut self.stop_cast_first
+            && !question.show(cx.services, cx.ctx)
+        {
+            self.stop_cast_first = None;
+        }
+        if !casting::has_bar(cx.services) {
+            return;
+        }
+        if let Some(casting::BarClick::Open) = casting::bar(ui, cx.services, compact, floor) {
+            self.player_started(cx.ctx);
         }
     }
 
@@ -921,6 +1076,7 @@ impl Shell {
         self.sync_own_search();
         self.search_box_keys(cx);
         self.syncplay_panel_keys(cx);
+        self.cast_panel_keys(cx);
         if layout::compact(ui.ctx()) {
             self.compact_top_bar(ui, cx);
             return;
@@ -933,8 +1089,9 @@ impl Shell {
         let gap = ui.spacing().item_spacing.x;
 
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), BAR_H), Sense::hover());
-        // The right-hand side: the account, Settings and SyncPlay.
-        let buttons_w = 3. * BAR_BUTTON + 2. * gap;
+        // The right-hand side: the account, Settings, SyncPlay and the cast button.
+        let buttons = if cx.services.cast.has_devices() { 4. } else { 3. };
+        let buttons_w = buttons * BAR_BUTTON + (buttons - 1.) * gap;
         // Both sides grow alike, which keeps the box in the middle of the bar. It shrinks when the window or the zoom leaves no room for one next to the icon, Back
         // and a title on the left and the buttons on the right.
         let icon_and_back = LOGO + BAR_BUTTON + 2. * gap;
@@ -1001,6 +1158,7 @@ impl Shell {
                     self.toggle_syncplay_panel(cx);
                 }
                 self.syncplay_panel(&syncplay, cx);
+                self.cast_button(ui, cx, keyboard == Some(BarItem::Cast));
             },
         );
 
@@ -1062,7 +1220,8 @@ impl Shell {
                     self.search_box(ui, rect, false, cx);
                     return;
                 }
-                let buttons = 3. * BAR_BUTTON + 3. * ui.spacing().item_spacing.x;
+                let count = if cx.services.cast.has_devices() { 4. } else { 3. };
+                let buttons = count * (BAR_BUTTON + ui.spacing().item_spacing.x);
                 let room = (ui.available_width() - buttons).max(0.);
                 ui.scope(|ui| {
                     ui.set_max_width(room);
@@ -1082,6 +1241,7 @@ impl Shell {
                         self.toggle_syncplay_panel(cx);
                     }
                     self.syncplay_panel(&syncplay, cx);
+                    self.cast_button(ui, cx, false);
                     if bar_button(ICON_SEARCH, "Search", false).show(ui).clicked() {
                         self.open_search(cx);
                     }
@@ -1636,6 +1796,11 @@ fn syncplay_panel_id() -> Id {
     Id::unique(SYNCPLAY_PANEL)
 }
 
+/// The cast panel's id in egui's popup memory.
+fn cast_panel_id() -> Id {
+    Id::unique(CAST_PANEL)
+}
+
 /// The name *New group* gives the group: `"{user}'s group"`.
 fn new_group_name(session: &Session) -> String {
     format!("{}'s group", session.user.name)
@@ -2013,17 +2178,17 @@ mod tests {
 
     #[test]
     fn the_bar_starts_on_back_or_search() {
-        let items = bar_items(true, true);
+        let items = &bar_items(true, true, false);
         assert_eq!(items.first(), Some(&BarItem::Back));
         assert_eq!(bar_step(items, None, 0), Some(BarItem::Back));
         // With nowhere to go back to, Back isn't there.
-        let items = bar_items(false, true);
+        let items = &bar_items(false, true, false);
         assert_eq!(bar_step(items, None, 0), Some(BarItem::Search));
     }
 
     #[test]
     fn left_and_right_stop_at_the_ends() {
-        let items = bar_items(true, true);
+        let items = &bar_items(true, true, false);
         assert_eq!(bar_step(items, Some(BarItem::Back), -1), Some(BarItem::Back));
         assert_eq!(bar_step(items, Some(BarItem::Account), 1), Some(BarItem::Account));
         assert_eq!(bar_step(items, Some(BarItem::Search), 1), Some(BarItem::SyncPlay));
@@ -2031,9 +2196,21 @@ mod tests {
     }
 
     #[test]
+    fn the_cast_button_sits_between_search_and_syncplay_once_there_is_a_tv() {
+        let items = &bar_items(false, true, true);
+        assert_eq!(bar_step(items, Some(BarItem::Search), 1), Some(BarItem::Cast));
+        assert_eq!(bar_step(items, Some(BarItem::Cast), 1), Some(BarItem::SyncPlay));
+        // The TV went away under the keyboard: it steps on from where the button was.
+        let items = &bar_items(false, true, false);
+        assert_eq!(bar_step(items, Some(BarItem::Cast), 0), Some(BarItem::SyncPlay));
+        // Offline there's no cast button even with a TV found.
+        assert!(!bar_items(false, false, true).contains(&BarItem::Cast));
+    }
+
+    #[test]
     fn a_missing_item_steps_from_its_nearest_place() {
         // Back left the bar with the first page; Search is where it was.
-        let without_back = bar_items(false, true);
+        let without_back = &bar_items(false, true, false);
         assert_eq!(bar_step(without_back, Some(BarItem::Back), 0), Some(BarItem::Search));
         // A hole in the middle (not possible today, but the bar's order decides): Settings
         // gone, Account is the nearest place, not the bar's first item.

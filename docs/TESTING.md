@@ -107,7 +107,40 @@ Library sort and filters against a 10.11 library bigger than the dev server's.
 
 *Download* on the update notice opens the release page in the browser.
 
-## 12. Android
+## 12. Chromecast (2.11)
+
+Everything so far ran against the fake device in `crates/cast/tests/` and the app's UI tests. On a real Chromecast and a Google TV, with the dev server reached by its LAN address:
+
+- **The live check first:** `mise run cast` lists the TVs, launches the receiver and prints its answer to `Identify`; `mise run cast -- --play <item id>` plays a dev item and prints its progress. Then the heartbeat holds for an hour, and how big a `PlayNow` with a long queue can get. On a Chromecast (2026-11): a 300-episode `PlayNow` (51 KB) played and a 400-episode one (67 KB) is over the 64 KB frame; the heartbeat held for 33 minutes before the run was cut short, so the full hour is still to see.
+- **The dev server's address:** the server reports a `LocalAddress` from inside Docker (`http://172.18.0.2:8096` in the fixtures), which a TV can't reach.
+  - Set *Dashboard → Networking → Published server URIs* to `all=http://<host's LAN address>:8096`. `LocalAddress` is then that, and the app hands it to the TV in place of `localhost`.
+  - Docker Desktop on WSL with `networkingMode=mirrored`: inbound connections also need a Hyper-V firewall rule, from an admin PowerShell: `New-NetFirewallHyperVRule -Name jellyfin-dev -DisplayName "Jellyfin dev 8096" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts 8096`. The host itself can't reach its own LAN address then (only `localhost`), so test from the TV.
+  - The dev *Test Movie* is 60 s long: seeking near its end ends it, and the TV goes back to *Ready to cast*. Track and version changes are easier to judge on a longer item.
+  - `RUST_LOG=info,tabbyfin::cast=debug` logs every message to and from the receiver (without the credentials).
+- **The panel:** the TV, a cast group (shown as *Group*) and the last TV first; casting, *Disconnect* (the TV keeps playing) and *Stop casting* (back to its idle screen).
+- **Playing:** a movie and an episode (the receiver plays the next one), a transcode (the receiver's choice), another version, audio and subtitle changes (each reloads on the TV), seeking, the chapters menu, pause from the player and from the now-casting bar, and the TV's volume from the slider, the wheel and the keys.
+- **Handover:** the player's cast button (top right, unlit, while something plays here and a TV was found) picks it up on the TV at the same spot, version and tracks, without leaving the player; the dashboard shows the local session stop before the TV's starts.
+- **Track and version changes** briefly show the receiver's *Ready to cast* (they're a `Stop`, then a `PlayNow`), then play on from the same spot. Several in a row must each come back.
+- **The dashboard's *Play on Tabbyfin*** plays on the TV while casting.
+- **SyncPlay:** the cast button is off in a group; joining one while casting asks first and stops the cast.
+- **Errors:** a launch that fails, the TV turned off mid-cast (*Lost the connection*, after the retries), a server address the TV can't reach (`connectionerror`'s toast), an item the TV can't play (`playbackerror`; turning off the dev user's transcoding and remuxing makes *Test Movie* one).
+- **The bitrate setting:** *Settings → Playback → Chromecast bitrate* caps what the TV streams.
+- **Staying connected:**
+  - The TV's Wi-Fi drops for a few seconds mid-playback (pull the TV's network, or switch its Wi-Fi off and on): the bar says *Reconnecting to <TV>…*, then playback carries on from the same spot, and the dashboard's session picks up again. The TV turned off for good gives up after the five tries with *Lost the connection*.
+  - *Stop casting* and *Disconnect* during a reconnect end it at once, with no notice about the lost connection.
+  - The app restarted while the TV plays the receiver: at launch the cast panel offers *Reconnect to <TV>*, and picking it brings back the item and its position. Nothing reconnects on its own.
+  - A phone casting to the same TV while this app casts: the app follows the phone's item and position (`MEDIA_STATUS`), and its own player's controls take the cast back.
+  - Signing out while it's reconnecting leaves nothing retrying in the background.
+  - Offline (the server unreachable, with downloads), the cast button and panel are absent and no devices are browsed for.
+- **On a phone** (`mise run android:install`, `docs/android.md`), with the dev server reached by its LAN address and a Chromecast or Google TV on the same network:
+  - After sign-in the log says `cast: multicast lock held=true` (`adb logcat -s tabbyfin`) and the cast panel lists the TVs; signing out logs `held=false` and the panel opens with nothing in it.
+  - Casting from the phone plays on the TV with its progress and the now-casting bar, as on the desktop.
+  - While casting, the phone's hardware volume keys move the TV's volume, a step a press, up and down, and held down counts each repeat; the casting player's volume follows. With nothing casting they show Android's own volume UI and change the phone's volume.
+  - Casting, then the app in the background with the screen off for 10 minutes or more: the TV keeps playing, and coming back shows the item at its position. Taking the phone off Wi-Fi for a few seconds meanwhile gives *Reconnecting to <TV>…* and then carries on.
+  - Casting, then the TV's Wi-Fi off while the app is backgrounded: coming back gives *Lost the connection* after the retries (or *<TV> stopped casting* if the receiver went), and the player is closed.
+  - Swiping the app away while casting: the TV keeps playing, and the next launch's panel offers *Reconnect to <TV>*.
+
+## 13. Android
 
 Built with `mise run android:install`, and tried on the emulator and one phone (a Honor with Android 16; `docs/android.md`).
 
