@@ -312,7 +312,7 @@ const BITRATE: Row = Row {
     label: "Max streaming bitrate",
     description: "Videos above this bitrate are transcoded by the server. Lower it for slow connections. \
                   Automatic measures the connection before playing (at most every 10 minutes) and uses 80% of \
-                  it, saving automatic_bitrate and keeping the cap for when it's turned off. Read when the next \
+                  it, keeping the cap for when it's turned off. Read when the next \
                   item starts.",
     key: "max_streaming_bitrate",
     unset: "no limit",
