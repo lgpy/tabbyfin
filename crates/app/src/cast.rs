@@ -117,6 +117,9 @@ pub struct Cast {
     pub devices: Vec<Device>,
     /// The mDNS browse, while signed in. Dropping it stops discovering.
     discovery: Option<cast::Discovery>,
+    /// Android's Wi-Fi multicast lock, held while `discovery` is: the system drops the multicast
+    /// packets a browse needs without one. Nothing to hold on other platforms.
+    lock: Option<MulticastLock>,
     found: task::Receiver<DiscoveryEvent>,
     found_from: task::Sender<DiscoveryEvent>,
     /// The device cast to last ([`Config::cast_device`]).
@@ -349,6 +352,7 @@ impl Cast {
             online,
             devices: Vec::new(),
             discovery: None,
+            lock: None,
             found,
             found_from,
             last_device: config.cast_device,
@@ -372,6 +376,9 @@ impl Cast {
 
     /// Starts browsing for devices, forwarding what's found to the UI.
     fn discover(&mut self) {
+        // Android drops multicast packets unless the lock is held, so it's taken before the
+        // browse and given back if the browse doesn't start (docs/chromecast.md, *Android*).
+        let lock = MulticastLock::acquire();
         let (discovery, mut events) = match cast::Discovery::start() {
             Ok(started) => started,
             Err(err) => {
@@ -379,6 +386,7 @@ impl Cast {
                 return;
             }
         };
+        self.lock = Some(lock);
         self.discovery = Some(discovery);
         let found = self.found_from.clone();
         runtime::detach(async move {
@@ -556,6 +564,40 @@ fn sort_devices(devices: &mut [Device], last: Option<&str>) {
             .cmp(&last_a)
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
+}
+
+/// Android's Wi-Fi multicast lock, held for as long as discovery runs. A guard rather than a call
+/// pair, so the lock goes whether discovery ends with a sign-out, an offline session or the app
+/// quitting.
+struct MulticastLock;
+
+impl MulticastLock {
+    /// Takes the lock; a no-op where a browse needs none.
+    fn acquire() -> Self {
+        lock_multicast(true);
+        Self
+    }
+}
+
+impl Drop for MulticastLock {
+    fn drop(&mut self) {
+        lock_multicast(false);
+    }
+}
+
+/// Holds or lets go of the multicast lock through `android.rs` on Android, where the system drops
+/// the multicast packets mDNS is made of without one. Other platforms find devices anyway.
+fn lock_multicast(held: bool) {
+    #[cfg(target_os = "android")]
+    crate::android::multicast_lock(held);
+    #[cfg(not(target_os = "android"))]
+    let _ = held;
+}
+
+/// The volume `steps` presses of the phone's volume keys move from `volume`, kept within 0 to
+/// 100: the same step the player's own volume keys take.
+fn stepped_volume(volume: f64, steps: i32) -> f64 {
+    (volume + f64::from(steps) * crate::views::player::VOLUME_STEP).clamp(0., 100.)
 }
 
 /// The server address to give the TV. A loopback address means this computer to the TV, so the
@@ -853,6 +895,18 @@ impl Services {
         } else {
             Command::PreviousTrack
         });
+    }
+
+    /// The phone's volume keys while casting, as steps: +1 for up and -1 for down, a press each.
+    /// Java takes the keys before the app's next frame and hands the steps over (`android.rs`),
+    /// so they're applied here with the same control the player's own volume keys send.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) fn cast_volume_step(&mut self, steps: i32) {
+        let Some(casting) = self.cast.casting() else {
+            return;
+        };
+        let volume = stepped_volume(casting.volume, steps);
+        self.control(UiCommand::SetVolume(volume));
     }
 
     /// Plays the casting item again from where it is: in another version, or with other tracks.
@@ -1732,5 +1786,16 @@ mod tests {
         sort_devices(&mut devices, Some("c"));
         let names: Vec<_> = devices.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["Living room", "bedroom", "Kitchen"]);
+    }
+
+    #[test]
+    fn the_volume_keys_step_the_tvs_volume() {
+        assert_eq!(stepped_volume(50., 1), 55.);
+        assert_eq!(stepped_volume(50., -1), 45.);
+        // A burst of presses between frames steps once each.
+        assert_eq!(stepped_volume(50., 3), 65.);
+        // The ends hold, as the player's own volume does.
+        assert_eq!(stepped_volume(97., 2), 100.);
+        assert_eq!(stepped_volume(3., -2), 0.);
     }
 }

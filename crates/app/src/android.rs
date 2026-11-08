@@ -2,7 +2,9 @@
 //! bar, cutouts and the soft keyboard), as egui's safe area, and the soft keyboard's text, as
 //! IME events and its action key as Enter, and the system's Back, as Escape. `MainActivity.java`
 //! reports them; [`raw_input`] applies them each frame. Also whether the network is metered,
-//! for the downloads, and their notification ([`downloads_notice`]).
+//! for the downloads, and their notification ([`downloads_notice`]); the Wi-Fi multicast lock
+//! discovery needs ([`multicast_lock`]); and the volume keys while casting, which go to the TV
+//! ([`take_volume_steps`]).
 //!
 //! The state is process-wide because Java calls in through plain functions with no handle to the
 //! app. It's set once, by `android_main`, before eframe starts.
@@ -31,6 +33,12 @@ static ENTER: AtomicBool = AtomicBool::new(false);
 static GOES_BACK: AtomicBool = AtomicBool::new(false);
 /// Set when Back was passed on, which the app takes as Escape.
 static BACK: AtomicBool = AtomicBool::new(false);
+/// Whether the app was casting as of the last frame: Java asks before giving it the volume keys,
+/// which are the TV's while casting and Android's own otherwise.
+static CASTING: AtomicBool = AtomicBool::new(false);
+/// The volume steps the hardware keys asked for since the last frame, +1 for each press of up
+/// and -1 for each of down, taken by the frame that moves the TV's volume.
+static VOLUME_STEPS: AtomicI32 = AtomicI32::new(0);
 /// The keyboard's height as of the last frame, in pixels, and whether it grew since: a focused
 /// field the keyboard now covers scrolls itself into view (`keyboard::reveal`).
 static KEYBOARD_HEIGHT: AtomicI32 = AtomicI32::new(0);
@@ -188,10 +196,12 @@ pub fn keyboard_grew() -> bool {
     KEYBOARD_GREW.load(Ordering::Relaxed)
 }
 
-/// Takes what a frame decided: whether Back has somewhere to go (`goes_back`), the keyboard's kind
-/// for the focused field, and the status bar icons' colour for the theme.
-pub fn after_frame(ctx: &egui::Context, goes_back: bool) {
+/// Takes what a frame decided: whether Back has somewhere to go (`goes_back`), whether the app
+/// is casting (the volume keys are the TV's then), the keyboard's kind for the focused field,
+/// and the status bar icons' colour for the theme.
+pub fn after_frame(ctx: &egui::Context, goes_back: bool, casting: bool) {
     GOES_BACK.store(goes_back, Ordering::Relaxed);
+    CASTING.store(casting, Ordering::Relaxed);
     keyboard_kind(ctx);
     bar_icons(ctx.theme() == egui::Theme::Light);
     // The fields have scrolled themselves by now: the keyboard's growth is news for one frame.
@@ -319,6 +329,36 @@ pub fn downloads_notice(activity: Option<&crate::downloads::Activity>) {
     }
 }
 
+/// Holds or lets go of the Wi-Fi multicast lock that a browse for cast devices needs: without it
+/// the system drops the multicast packets mDNS is made of, so no TV is ever found
+/// (docs/chromecast.md, *Android*). Called from `cast.rs` as discovery starts and stops.
+pub fn multicast_lock(held: bool) {
+    let method = if held {
+        c"acquireMulticastLock"
+    } else {
+        c"releaseMulticastLock"
+    };
+    let result = player::android::call_with_context(
+        c"io.github.lgpy.tabbyfin.MainActivity",
+        method,
+        c"(Landroid/app/Activity;)V",
+        &[],
+        &[],
+    );
+    match result {
+        // Logged because a TV that's never found is usually a lock that wasn't held.
+        Ok(()) => tracing::info!(held, "cast: multicast lock"),
+        Err(err) => tracing::warn!("couldn't set the multicast lock: {err}"),
+    }
+}
+
+/// The volume steps the hardware keys asked for since the last frame, taken: +1 for each press
+/// of volume up while casting, -1 for each of down. Java takes the keys before the app's next
+/// frame, so they wait here; `App::logic` moves the TV's volume with them.
+pub fn take_volume_steps() -> i32 {
+    VOLUME_STEPS.swap(0, Ordering::Relaxed)
+}
+
 /// The phone's model ("Pixel 7"), which Jellyfin shows as the device's name.
 pub fn device_name() -> Option<String> {
     android_system_properties::AndroidSystemProperties::new()
@@ -391,6 +431,25 @@ extern "system" fn Java_io_github_lgpy_tabbyfin_MainActivity_nativeGoesBack(
     _class: *mut std::ffi::c_void,
 ) -> u8 {
     GOES_BACK.load(Ordering::Relaxed).into()
+}
+
+/// A volume key pressed while casting: `direction` is 1 for up and -1 for down, and a held key's
+/// repeats each come as a press. Answers whether the app took it, so Java knows whether to show
+/// its own volume UI.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_lgpy_tabbyfin_MainActivity_nativeCastVolume(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    direction: i32,
+) -> u8 {
+    // Java hands every volume key here, whether or not it's casting; the answer decides.
+    tracing::debug!(direction, casting = CASTING.load(Ordering::Relaxed), "cast: volume key");
+    if !CASTING.load(Ordering::Relaxed) {
+        return 0;
+    }
+    VOLUME_STEPS.fetch_add(direction.signum(), Ordering::Relaxed);
+    repaint();
+    1
 }
 
 /// Whether an unmetered network (Wi-Fi, Ethernet) is there, from the activity's network

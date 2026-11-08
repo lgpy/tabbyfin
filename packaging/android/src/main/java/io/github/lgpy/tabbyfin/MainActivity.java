@@ -6,6 +6,7 @@ import android.graphics.PixelFormat;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
@@ -51,8 +52,16 @@ public class MainActivity extends GameActivity {
     /** Whether an unmetered network (Wi-Fi, Ethernet) is there, for downloads over Wi-Fi only. */
     private static native void nativeUnmetered(boolean unmetered);
 
+    /**
+     * A volume key pressed while casting, `direction` 1 for up and -1 for down: the TV's volume
+     * moves a step. Answers whether the app took the press, which is also whether it's casting.
+     */
+    private static native boolean nativeCastVolume(int direction);
+
     private ConnectivityManager connectivity;
     private ConnectivityManager.NetworkCallback networks;
+    /** Whether a volume key's press went to the TV, so its release goes there too. */
+    private boolean castVolume;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -149,6 +158,32 @@ public class MainActivity extends GameActivity {
     }
 
     /**
+     * The volume keys while casting: they move the TV's volume instead of the phone's, and the
+     * casting player's volume bar follows what the TV reports. Otherwise Android's own volume UI
+     * has them, as it does for every other app.
+     */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        if (keyCode != KeyEvent.KEYCODE_VOLUME_UP && keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) {
+            return super.dispatchKeyEvent(event);
+        }
+        if (event.getAction() == KeyEvent.ACTION_UP) {
+            if (!castVolume) {
+                return super.dispatchKeyEvent(event);
+            }
+            castVolume = false;
+            return true;
+        }
+        if (event.getAction() != KeyEvent.ACTION_DOWN) {
+            return super.dispatchKeyEvent(event);
+        }
+        // Held keys arrive as repeated presses: each one is a step, as on the player's volume.
+        castVolume = nativeCastVolume(keyCode == KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1);
+        return castVolume || super.dispatchKeyEvent(event);
+    }
+
+    /**
      * The Rust app runs once per process: eframe can't start its event loop twice, and winit
      * doesn't end it when the activity goes, so a new activity in this process would never draw.
      * The process ends with the activity instead; the config and the session are saved as they
@@ -188,6 +223,37 @@ public class MainActivity extends GameActivity {
     public void onEditorAction(int action) {
         super.onEditorAction(action);
         nativeEditorAction();
+    }
+
+    /** The Wi-Fi multicast lock discovery holds; null until the first browse. */
+    private static WifiManager.MulticastLock multicast;
+
+    /**
+     * Takes the Wi-Fi multicast lock while the app browses for cast devices: without it Android
+     * drops the multicast packets mDNS is made of, so no TV is ever found. Called by Rust when
+     * discovery starts, and released when it ends (sign-in, sign-out, quitting).
+     */
+    static void acquireMulticastLock(Activity activity) {
+        if (multicast == null) {
+            WifiManager wifi = (WifiManager) activity.getApplicationContext()
+                    .getSystemService(Context.WIFI_SERVICE);
+            if (wifi == null) {
+                return;
+            }
+            multicast = wifi.createMulticastLock("tabbyfin-cast");
+            // Rust takes one hold at a time, and a release always ends it rather than counting.
+            multicast.setReferenceCounted(false);
+        }
+        if (!multicast.isHeld()) {
+            multicast.acquire();
+        }
+    }
+
+    /** Lets the lock go: nothing is discovering any more. */
+    static void releaseMulticastLock(Activity activity) {
+        if (multicast != null && multicast.isHeld()) {
+            multicast.release();
+        }
     }
 
     /**
