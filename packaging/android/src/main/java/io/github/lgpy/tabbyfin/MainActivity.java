@@ -241,15 +241,14 @@ public class MainActivity extends GameActivity {
                 return;
             }
             multicast = wifi.createMulticastLock("tabbyfin-cast");
-            // Rust takes one hold at a time, and a release always ends it rather than counting.
-            multicast.setReferenceCounted(false);
+            // Counted: each signed-in session holds it once, and two overlap while an account
+            // is added or a session goes back online, so one letting go mustn't end the other's.
+            multicast.setReferenceCounted(true);
         }
-        if (!multicast.isHeld()) {
-            multicast.acquire();
-        }
+        multicast.acquire();
     }
 
-    /** Lets the lock go: nothing is discovering any more. */
+    /** Gives back one session's hold; the lock goes when no session is discovering any more. */
     static void releaseMulticastLock(Activity activity) {
         if (multicast != null && multicast.isHeld()) {
             multicast.release();

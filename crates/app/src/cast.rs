@@ -568,7 +568,8 @@ fn sort_devices(devices: &mut [Device], last: Option<&str>) {
 
 /// Android's Wi-Fi multicast lock, held for as long as discovery runs. A guard rather than a call
 /// pair, so the lock goes whether discovery ends with a sign-out, an offline session or the app
-/// quitting.
+/// quitting. Each guard is one count of a counted lock: a parked session and the account being
+/// added both discover, and the first to go mustn't take the other's lock with it.
 struct MulticastLock;
 
 impl MulticastLock {
