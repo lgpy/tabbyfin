@@ -6,15 +6,24 @@
 //! out and an expired session. Adding an account keeps the signed-in screen (and its session,
 //! playback included) alive in [`App::parked`], so *Back to your account* returns to it
 //! untouched.
+//!
+//! Offline mode: when the saved account's server can't be reached at launch but the account has
+//! downloads, the signed-in screen opens anyway, offline ([`Services::offline`], the shell with
+//! only its Downloads), with the session the account had last time. The restore is tried again
+//! on a timer ([`Reconnect`]), and once the server answers the screen is swapped for an online
+//! one, after any playback ends.
+
+use std::time::Duration;
 
 use jellyfin::Client;
 
 use crate::config::{Config, SavedServer};
+use crate::downloads;
 use crate::keys::{self, Press};
 use crate::services::{AppEvent, Services};
 use crate::session::{Session, client_info, describe_error};
-use crate::task::Task;
-use crate::toasts::{ToastAction, Toasts};
+use crate::task::{Deadline, Task};
+use crate::toasts::{Toast, ToastAction, Toasts};
 use crate::views::PageCx;
 use crate::views::login::{Login, LoginEvent, Prefill};
 use crate::views::shell::Shell;
@@ -27,7 +36,74 @@ const RESTORING_MASCOT: f32 = 160.;
 const RESTORING_GLOW: f32 = 360.;
 
 /// Restoring fails with the request's error, or none when there's no stored token.
-type Restored = Result<Session, Option<jellyfin::Error>>;
+type Restored = Result<Session, RestoreFailed>;
+
+struct RestoreFailed {
+    error: Option<jellyfin::Error>,
+    /// The client with the stored token, once it was built: an offline session keeps it, so its
+    /// reports carry the token once the server is back.
+    client: Option<Client>,
+}
+
+/// The first wait before an offline session asks the server again, doubled after each miss up
+/// to [`RECONNECT_MAX`].
+const RECONNECT_FIRST: Duration = Duration::from_secs(10);
+const RECONNECT_MAX: Duration = Duration::from_secs(60);
+
+/// An offline session's way back: the saved account's restore, tried again on a timer.
+struct Reconnect {
+    saved: SavedServer,
+    due: Deadline,
+    task: Option<Task<Restored>>,
+    wait: Duration,
+    /// The server answered while something played: the online session waits for it to end, as
+    /// swapping the screen would stop it.
+    back: Option<Session>,
+}
+
+/// What [`Reconnect::tick`] found.
+enum Reconnected {
+    Online(Box<Session>),
+    /// The server is back but no longer takes the token.
+    Expired,
+}
+
+impl Reconnect {
+    fn new(saved: SavedServer) -> Self {
+        let mut due = Deadline::default();
+        due.set(RECONNECT_FIRST);
+        Self {
+            saved,
+            due,
+            task: None,
+            wait: RECONNECT_FIRST,
+            back: None,
+        }
+    }
+
+    fn tick(&mut self, ctx: &egui::Context, device_id: &str, playing: bool) -> Option<Reconnected> {
+        if self.task.is_none() && self.back.is_none() && self.due.fire(ctx) {
+            self.task = Some(restore(ctx, self.saved.clone(), device_id.to_owned()));
+        }
+        if let Some(result) = self.task.as_mut().and_then(Task::poll) {
+            self.task = None;
+            match result {
+                Ok(session) => self.back = Some(session),
+                Err(failed) if matches!(failed.error, Some(jellyfin::Error::Unauthorized)) => {
+                    return Some(Reconnected::Expired);
+                }
+                Err(_) => {
+                    self.wait = (self.wait * 2).min(RECONNECT_MAX);
+                    self.due.set(self.wait);
+                }
+            }
+        }
+        if playing {
+            return None;
+        }
+        self.back.take().map(|session| Reconnected::Online(Box::new(session)))
+    }
+}
 
 enum Screen {
     /// Signing back in with the saved account's token. `allow_reconnect` leaves the token in
@@ -45,6 +121,8 @@ enum Screen {
 struct SignedIn {
     services: Services,
     shell: Shell,
+    /// Offline: asking the server again until it answers.
+    reconnect: Option<Reconnect>,
 }
 
 pub struct App {
@@ -160,7 +238,7 @@ impl App {
                 self.remember(&session);
                 self.show_signed_in(ctx, frame, session);
             }
-            Err(err) => {
+            Err(RestoreFailed { error: err, client }) => {
                 if let Some(err) = &err {
                     tracing::warn!("couldn't restore session: {err}");
                 }
@@ -169,6 +247,19 @@ impl App {
                     self.forget_token();
                 }
                 let unreachable = matches!(&err, Some(jellyfin::Error::Http(_) | jellyfin::Error::ServerStarting));
+                if allow_reconnect
+                    && unreachable
+                    && let (Some(client), Some(saved)) = (client, self.saved.clone())
+                    && let Some(session) = offline_session(client, &saved)
+                {
+                    tracing::info!(user = %session.user.name, "server unreachable; opening the downloads offline");
+                    self.screen = Some(Screen::SignedIn(Box::new(signed_in(ctx, frame, session, false))));
+                    if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
+                        signed_in.reconnect = Some(Reconnect::new(saved));
+                    }
+                    ctx.request_repaint();
+                    return;
+                }
                 let prefill = self.saved.as_ref().map(|saved| Prefill {
                     url: saved.url.clone(),
                     username: saved.username.clone(),
@@ -204,8 +295,36 @@ impl App {
     }
 
     fn show_signed_in(&mut self, ctx: &egui::Context, frame: &eframe::Frame, session: Session) {
-        self.screen = Some(Screen::SignedIn(Box::new(signed_in(ctx, frame, session))));
+        self.screen = Some(Screen::SignedIn(Box::new(signed_in(ctx, frame, session, true))));
         ctx.request_repaint();
+    }
+
+    /// An offline session's restore: back online once it answers (the offline screen goes, its
+    /// page stack with it), or to sign-in when the server no longer takes the token.
+    fn tick_reconnect(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        let outcome = match self.screen.as_mut() {
+            Some(Screen::SignedIn(signed_in)) => {
+                let playing = signed_in.services.playback.is_active();
+                signed_in
+                    .reconnect
+                    .as_mut()
+                    .and_then(|reconnect| reconnect.tick(ctx, &self.device_id, playing))
+            }
+            _ => None,
+        };
+        match outcome {
+            None => {}
+            Some(Reconnected::Online(session)) => {
+                tracing::info!(user = %session.user.name, "the server is back; going online");
+                if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
+                    signed_in.services.end();
+                }
+                self.remember(&session);
+                self.show_signed_in(ctx, frame, *session);
+                self.toasts.push(Toast::success("You're back online."));
+            }
+            Some(Reconnected::Expired) => self.session_expired(ctx),
+        }
     }
 
     /// Makes the session's account the current one in the config, first in the list.
@@ -521,19 +640,45 @@ fn restore(ctx: &egui::Context, saved: SavedServer, device_id: String) -> Task<R
             .ok()
             .flatten();
         let Some(token) = token else {
-            return Err(None);
+            return Err(RestoreFailed {
+                error: None,
+                client: None,
+            });
         };
         let client = Client::new(&saved.url, client_info(&device_id))
-            .map_err(Some)?
+            .map_err(|err| RestoreFailed {
+                error: Some(err),
+                client: None,
+            })?
             .with_token(token);
-        let server = client.public_info().await.map_err(Some)?;
-        let user = client.current_user().await.map_err(Some)?;
+        let failed = |err| RestoreFailed {
+            error: Some(err),
+            client: Some(client.clone()),
+        };
+        let server = client.public_info().await.map_err(failed)?;
+        let user = client.current_user().await.map_err(failed)?;
         Ok(Session { client, user, server })
     })
 }
 
-fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> SignedIn {
-    let mut services = Services::new(session, ctx);
+/// The session `saved` had when it was last online, for opening its downloads without the
+/// server: only when there are downloads to open.
+fn offline_session(client: Client, saved: &SavedServer) -> Option<Session> {
+    let account = saved.credential_account();
+    if !downloads::has_downloads(&account) {
+        return None;
+    }
+    let (user, server) = downloads::saved_session(&account)?;
+    Some(Session { client, user, server })
+}
+
+/// The signed-in screen for `session`: online, or offline with only its downloads.
+fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session, online: bool) -> SignedIn {
+    let mut services = if online {
+        Services::new(session, ctx)
+    } else {
+        Services::offline(session, ctx)
+    };
     services
         .playback
         .set_video_import(video::import(frame.wgpu_render_state()));
@@ -545,7 +690,11 @@ fn signed_in(ctx: &egui::Context, frame: &eframe::Frame, session: Session) -> Si
         render_state: frame.wgpu_render_state(),
         under_bar: None,
     });
-    SignedIn { services, shell }
+    SignedIn {
+        services,
+        shell,
+        reconnect: None,
+    }
 }
 
 impl eframe::App for App {
@@ -609,6 +758,7 @@ impl eframe::App for App {
             Some(Screen::SignIn(login)) => login.tick(ctx),
             Some(Screen::Restoring { .. }) | None => {}
         }
+        self.tick_reconnect(ctx, frame);
 
         // The form's requests finish here too, so an approval or a returning server signs in
         // even with the window hidden.
@@ -670,7 +820,7 @@ impl eframe::App for App {
         ui.scope_builder(safe, |ui| {
             match self.screen.as_mut() {
                 Some(Screen::SignedIn(signed_in)) => {
-                    let SignedIn { services, shell } = signed_in.as_mut();
+                    let SignedIn { services, shell, .. } = signed_in.as_mut();
                     let mut nav = Vec::new();
                     let mut cx = PageCx {
                         ctx: &ctx,

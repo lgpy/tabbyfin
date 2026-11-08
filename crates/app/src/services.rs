@@ -9,6 +9,7 @@
 
 use crate::cast::Cast;
 use crate::config::SavedServer;
+use crate::downloads::{self, Downloads};
 use crate::images::ImageCache;
 use crate::item_menu::{Mark, PlaylistEdits};
 use crate::live::Live;
@@ -23,6 +24,10 @@ use crate::widgets::menu::RefusedMarks;
 
 pub struct Services {
     pub session: Session,
+    /// Whether the server answered when this was built. An offline one (the account has
+    /// downloads, the server can't be reached) has no websocket, starts no downloads and
+    /// reports nothing; the app replaces it with an online one when the server is back.
+    pub online: bool,
     /// Server images as egui textures (`images.rs`), with their queue and memory budget.
     pub images: ImageCache,
     /// Bumped when the user's watch data changed elsewhere (played state, resume points,
@@ -70,6 +75,9 @@ pub struct Services {
     /// Chromecasts on the network and the cast in progress. While casting, playing and the
     /// controls go to the TV (`cast.rs`).
     pub cast: Cast,
+    /// The account's downloaded files, their queue and the transfers running now
+    /// (`downloads.rs`); `tick_downloads` turns what they did into toasts.
+    pub downloads: Downloads,
 }
 
 /// A watched or favorite change, as its request finishes: what was asked for, on which item,
@@ -114,18 +122,59 @@ pub enum AppEvent {
 }
 
 impl Services {
+    /// The services of a session the server answered for: the websocket connects, downloads
+    /// start, and what a downloaded file's playback missed while the server was down goes out
+    /// now.
     pub fn new(session: Session, ctx: &egui::Context) -> Self {
+        // A launch the server can't answer still knows the account, and which downloads to show
+        // (`downloads::saved_session`). Both writes are small and happen off the UI thread.
+        let (account, user, server) = (session.account_key(), session.user.clone(), session.server.clone());
+        crate::runtime::detach(async move {
+            let _ = tokio::task::spawn_blocking(move || downloads::save_session(&account, &user, &server)).await;
+        });
+        let services = Self::build(session, ctx, true);
+        let (client, account) = (services.session.client.clone(), services.session.account_key());
+        // A playback the last run left unfinished (a crash) never reached the server; it does
+        // now. Only an online session can report it.
+        playback::report_unfinished(&client, &account);
+        crate::runtime::detach(async move { downloads::flush_pending(&client, &account).await });
+        services
+    }
+
+    /// The services of a session signed in without the server: its downloads play from disk,
+    /// nothing else talks to the server. [`Live`] connects to nothing and [`Downloads`] starts
+    /// no transfer (a queued one waits for the next online sign-in). The app signs in this way
+    /// when the server can't be reached and the account has downloads.
+    pub fn offline(session: Session, ctx: &egui::Context) -> Self {
+        Self::build(session, ctx, false)
+    }
+
+    fn build(session: Session, ctx: &egui::Context, online: bool) -> Self {
         let (marking, marked) = task::channel(ctx);
         let (up_next_from, up_next) = task::channel(ctx);
         let (shuffle_from, shuffles) = task::channel(ctx);
+        let account = session.account_key();
+        let wifi_only = crate::config::Config::load().download_wifi_only();
+        let mut downloads = Downloads::new(session.client.clone(), &account, ctx, wifi_only);
+        let mut playback = PlaybackManager::new(ctx, session.client.clone(), account);
+        if !online {
+            downloads.hold();
+            playback.set_offline();
+        }
         Self {
+            online,
             images: ImageCache::new(session.client.clone(), ctx),
-            playback: PlaybackManager::new(ctx, session.client.clone(), session.account_key()),
+            playback,
             syncplay: SyncPlay::new(session.client.clone(), ctx),
-            live: Live::connect(session.client.clone(), ctx),
+            live: if online {
+                Live::connect(session.client.clone(), ctx)
+            } else {
+                Live::disconnected(session.client.clone(), ctx)
+            },
             remote: Remote::new(session.client.clone(), ctx),
             cast: Cast::new(&session, ctx),
             playlist_edits: PlaylistEdits::new(ctx),
+            downloads,
             session,
             user_data: 0,
             prefetch: Prefetch::default(),
@@ -149,6 +198,7 @@ impl Services {
         self.prefetch.tick(ctx, &self.session.client, self.user_data);
         self.apply_menu_requests();
         self.tick_playlist_edits();
+        self.tick_downloads();
         self.tick_playback();
         self.tick_live();
         self.tick_remote();
@@ -165,6 +215,8 @@ impl Services {
     pub fn end(&mut self) {
         self.stop_playback();
         self.stop_cast();
+        // Unfinished downloads stay queued, and start again at this account's next sign-in.
+        self.downloads.pause();
         if self.in_group() {
             self.syncplay.leave();
         }

@@ -22,7 +22,6 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [egui](ht
 
 **Not in v1 (later)**
 - Music, Live TV, books, and photos.
-- Downloads and offline mode.
 - Multiple servers at once, and admin features.
 - Remote-controlling other sessions (other clients can control this one).
 
@@ -103,13 +102,13 @@ crates/app/src/
 ├── motion.rs        animations: page entry, the shelves' stagger, image fades, toggle pops, the player's prompt and controls
 ├── config.rs, credentials.rs, session.rs, update.rs, markers.rs
 ├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
-├── playback.rs, syncplay.rs, remote.rs, live.rs, cast.rs   services
+├── playback.rs, syncplay.rs, remote.rs, live.rs, cast.rs, downloads.rs   services
 ├── images.rs, trickplay.rs   textures
 ├── theme.rs         appearance: theme, text size, zoom, animations, over_video; `theme::apply` is called at launch
 ├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
 ├── ui_tests/        the headless UI tests (egui_kittest)
 ├── widgets/         text (Load<T>), card, image, shelf, menu, popup, select, dialog, button, state, mascot, video, subtitles (cues a player leaves to the UI)
-└── views/           mod (Page, PageCx, open), shell, casting (the cast panel and the now-casting bar), home, login, search, libraries, library, value_filters, item, settings, player (with its touch gestures and phone controls), dialogs; item has its phone header in item/compact.rs
+└── views/           mod (Page, PageCx, open), shell, casting (the cast panel and the now-casting bar), home, login, search, libraries, library, value_filters, item, downloads, settings, player (with its touch gestures and phone controls), dialogs; item has its phone header in item/compact.rs
 ```
 
 **Models:** we write the serde DTOs by hand and keep them to the fields we need. Every field is `Option` or `#[serde(default)]`, and unknown fields are ignored. Generating code from the full OpenAPI spec would create a huge, churny surface. Swashbuckle v10 in 12.0 already changed the generated document once. If we later want generated code, we generate it from the 12.x spec.
@@ -172,6 +171,7 @@ We use the user-scoped routes without a userId, such as `/UserViews` and `/Items
 
 - **Playlist entries (10.11 and 12.2):** an entry's `PlaylistItemId` is the item's own id, and 12.2 adds an item already in a playlist a second time (10.11 skips it), so the copies can't be removed separately. *Add to playlist* checks for the item first. Other users' shared playlists report `CanDelete: true` but answer 403 to added items and 404 to renames. `POST /Playlists` without `IsPublic` makes the playlist visible to every user, so the app sends `false`; *Edit* shares it.
 - **Resolution filters (10.11 and 12.2):** `GET /Items` with `is4K=false` matches nothing on either version, and 12.2's `isHd=true` also returns the hidden items of a movie's alternate versions. The library filters use `minWidth` / `maxWidth` instead, which 12.2 applies to an item's widest version and 10.11 to its first. Found while building the library filters.
+- **Version order (10.11 and 12.2):** `PlaybackInfo` lists a movie's versions in a different order on each: the dev server's Test Movie comes back 4K, 1080p, 720p on 10.11 and 1080p, 4K, 720p on 12.2. The app plays the first, as the web client does, so the same movie starts in a different version. Found clicking through the app on 10.11.
 - **Direct play needs subtitle profiles (12.2):** a `PlaybackInfo` device profile without `SubtitleProfiles` gets `SupportsDirectPlay: false` on every source in 12.2 (10.11 still allows direct play). The app's profile always lists them. Found while capturing test fixtures.
 
 Source: the 12.0 release notes, plus 12.1 and 12.2, which only contained bug fixes.
@@ -345,6 +345,18 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 - **Handover:** casting while something plays here stops it and, once its stop is reported, plays it on the TV at its position, version and tracks, with the queue after it.
 - **Casting and SyncPlay don't mix:** the cast button is off in a group, and joining or starting one while casting asks to stop the cast first.
 - **Ending:** *Stop casting* stops the receiver; *Disconnect* and quitting leave it playing; signing out stops it, since the receiver holds the session's token.
+
+### 5.6 Downloads
+
+`downloads.rs` keeps an account's downloads: original files only, from `GET /Items/{id}/Download`, which the server allows per user (*Allow media downloading*, sent as each item's `CanDownload`, which list queries must ask for with `Fields=CanDownload`).
+
+- **On disk:** `config::downloads_dir()` (the platform's local data dir, not the cache; on Android the app's external files dir, `getExternalFilesDir`, through `TABBYFIN_DOWNLOADS_DIR`), one folder per account and one per item: `item.json` (the item with its chapters, the media source from a `PlaybackInfo` at download time, the segments), `media.<container>` (`.part` until it's complete), the external subtitles, and the poster and backdrop. A finished media file is what makes a download done, whatever `index.json` (the account's queue, with queued, paused and failed states) says, and a finished item is read from its `item.json` rather than the queue's copy (one that finished with no frame to save the queue after it is still listed there as it was asked for).
+- **Transfers:** `Services.downloads`, two workers on tokio, aborted when the services are dropped. Each worker takes the next waiting item from the queue it shares with `Downloads` itself, so the queue moves on with no frame drawn (an Android app in the background draws none). A `.part` resumes with a `Range` request (a 200 instead of a 206 starts it over), a transfer with no bytes for 30 s fails (`Error::Stalled`) rather than hanging, and free space is checked first. Progress comes back over a `task::channel`, at most four times a second; finished and failed ones become toasts. Signing out or switching accounts leaves the unfinished ones queued for that account's next sign-in.
+- **Android:** while any worker runs, a foreground service (`DownloadService.java`, type `dataSync`, with a partial wake lock) keeps the process alive in the background, its notification showing the first transfer's progress and how many are to come; the workers start and stop it (`android::downloads_notice`). Swiping the app away ends the process (`MainActivity.onDestroy`), and the next launch resumes from the `.part`. *Download over Wi-Fi only* (Settings › Downloads, on by default) holds the workers while `MainActivity`'s network callback reports no unmetered network; a transfer under way when the phone leaves Wi-Fi stops and goes back to the front of the queue, and the notification and the Downloads page say "Waiting for Wi-Fi".
+- **Asking:** the item menu (*Download*, *Cancel download*, *Remove download*, *Retry download*) and the item page's Download button, which shows a bar (a ring on a phone) while the file comes. A series or season queues each of its episodes the account may download. The Downloads page (account menu) lists them all, with their progress, size or error.
+- **Playing:** `run_session` looks for a finished copy first (`downloads::find_local`), and when the version asked for is the one downloaded, it skips `PlaybackInfo` and plays the file (a `file://` URL, no auth header; Media3 reads it through a `DefaultDataSource`) with its stored media source, so the track mapping is the same as streaming it. Its external subtitles come from their files. It still reports to the server, as direct play with no play session. The downloaded copy's chapters and segments stand in for the server's when it can't be asked.
+- **Watch state:** when a downloaded file's playback ends, its `item.json` takes the new resume point (watched past 90 %), so it resumes there offline, and the Downloads page's copy follows. A stop report the server didn't take waits in `pending.json`, only the latest per item (an earlier one, sent first, would make the later look older than the playback it recorded); the next online sign-in sends it (`downloads::flush_pending`), unless the server's `LastPlayedDate` for the item is newer, i.e. it was watched elsewhere since.
+- **Offline mode:** an online sign-in saves the user and server info (`session.json`). At launch, when the server can't be reached and the account has downloads, the app signs in with that and the stored token, offline (`Services::offline`): no websocket, no transfers, no reports (each would wait out a timeout), and a shell with only the Downloads page, an *Offline* tag where the search box is, and no SyncPlay. Downloads draw their saved posters (`ImageCache::get_file`). The restore is tried again after 10 s, then backing off to a minute; once the server answers the screen is swapped for an online one, after any playback ends (`App::tick_reconnect`). A token the server no longer takes goes to sign-in.
 
 ## 6. App architecture
 

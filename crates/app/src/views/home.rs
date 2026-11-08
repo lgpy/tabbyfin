@@ -22,6 +22,7 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType, ItemField, Ite
 use jellyfin::{Client, ItemsQuery};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
+use crate::downloads::Downloads;
 use crate::images::ImageCache;
 use crate::item_menu::{is_playable, resume_point};
 use crate::keys::{Action, Scope};
@@ -36,7 +37,7 @@ use crate::widgets::{backdrop, card, library_tile, shelf, state};
 
 /// How many items each shelf asks for.
 const SHELF_LIMIT: u32 = 24;
-const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio];
+const FIELDS: &[ItemField] = &[ItemField::PrimaryImageAspectRatio, ItemField::CanDownload];
 /// Home's cards are larger than the other pages', with more room between them.
 const CARD_SCALE: f32 = 1.2;
 const CARD_GAP: f32 = 24.;
@@ -402,6 +403,7 @@ fn show_shelves(
             })
             .show(ui, |ui| {
                 let images = &mut cx.services.images;
+                let downloads = &cx.services.downloads;
                 // A phone's shelves sit closer to its edges, their cards closer together.
                 let compact = crate::layout::compact(ui.ctx());
                 let padding = if compact {
@@ -425,6 +427,7 @@ fn show_shelves(
                                 moved,
                                 &mut *cursor,
                                 &mut *images,
+                                downloads,
                                 &mut asked,
                             );
                         };
@@ -488,6 +491,7 @@ fn cards(
     moved: bool,
     cursor: &mut Cursor,
     images: &mut ImageCache,
+    downloads: &Downloads,
     asked: &mut Asked,
 ) {
     for (index, item) in items.iter().enumerate() {
@@ -510,7 +514,7 @@ fn cards(
         } else if response.clicked() {
             asked.open = Some(Route::for_item(item));
         }
-        if let Some(action) = menu::item_menu(&response, item) {
+        if let Some(action) = menu::item_menu(&response, item, downloads) {
             asked.menu = Some((action, item.clone()));
         }
     }

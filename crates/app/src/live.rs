@@ -62,7 +62,8 @@ pub struct Live {
     capabilities: Option<Task<jellyfin::Result<()>>>,
     /// A watch-data refresh, once its burst is due.
     refresh: Refresh,
-    _socket: Task<()>,
+    /// The websocket's task, `None` when there is no connection to keep (offline).
+    _socket: Option<Task<()>>,
 }
 
 impl Live {
@@ -85,7 +86,23 @@ impl Live {
             events,
             capabilities: None,
             refresh: Refresh::default(),
-            _socket: socket,
+            _socket: Some(socket),
+        }
+    }
+
+    /// A session signed in without the server: no websocket, so nothing arrives and nothing is
+    /// pushed. [`Services::tick_live`] finds an empty stream and no capabilities to report.
+    pub fn disconnected(client: Client, ctx: &egui::Context) -> Self {
+        let (sender, events) = task::channel(ctx);
+        // With no sender left, the stream is over: `drain` returns nothing, `recv` never waits.
+        drop(sender);
+        Self {
+            ctx: ctx.clone(),
+            client,
+            events,
+            capabilities: None,
+            refresh: Refresh::default(),
+            _socket: None,
         }
     }
 

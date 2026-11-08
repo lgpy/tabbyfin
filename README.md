@@ -6,7 +6,18 @@ A native desktop client for [Jellyfin](https://jellyfin.org), built with [egui](
 
 Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**; developed against 12.x.
 
-> Early days: version 0.1. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's missing.
+> Early days: version 0.2. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's missing.
+
+## Screenshots
+
+![Home: Continue Watching, the Latest shelves, and your libraries along the top](docs/screenshots/home.jpg)
+
+| | |
+|---|---|
+| ![A library grid, with its filters and sort](docs/screenshots/library.jpg) | ![A movie's page: poster, actions and chapters](docs/screenshots/item.jpg) |
+| ![The player paused, its controls over the video](docs/screenshots/player.jpg) | ![Settings, for this device and for the server](docs/screenshots/settings.jpg) |
+
+Films: Blender Studio's [open movies](https://studio.blender.org/films/) (CC BY), with posters and metadata from TMDb.
 
 ## Features
 

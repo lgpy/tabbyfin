@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Ticks;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PublicSystemInfo {
     pub id: Option<String>,
@@ -27,7 +27,7 @@ pub struct AuthenticationResult {
     pub server_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct UserDto {
     pub id: String,
@@ -41,7 +41,7 @@ pub struct UserDto {
 /// The user's preferences kept by the server (the web client's Settings → Home, Display and
 /// Playback). The server applies the track ones itself: `PlaybackInfo` picks the default audio
 /// and subtitle streams from them. Change them with [`crate::Client::update_user_configuration`].
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct UserConfiguration {
     /// Library ids left out of "My Media". `/UserViews` already leaves them out.
@@ -192,7 +192,7 @@ pub struct QueryResult<T> {
     pub start_index: u32,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct BaseItemDto {
     pub id: String,
@@ -231,6 +231,11 @@ pub struct BaseItemDto {
     /// Only present when requested with [`crate::models::ItemField::CanDelete`]. Not a
     /// permission check for playlists: other users' shared playlists report `true` too.
     pub can_delete: Option<bool>,
+    /// Whether the user may download the original file. `/Items/{id}` sends it without asking;
+    /// list endpoints (episodes included) need [`crate::models::ItemField::CanDownload`].
+    /// Folders such as series and seasons report `false`; their episodes are what downloads.
+    #[serde(default, deserialize_with = "nullable")]
+    pub can_download: bool,
 
     pub user_data: Option<UserItemDataDto>,
 
@@ -296,14 +301,14 @@ pub struct ItemFilterValues {
     pub years: Vec<i32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct NameGuidPair {
     pub name: String,
     pub id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct MediaUrl {
     pub url: String,
@@ -313,7 +318,7 @@ pub struct MediaUrl {
 /// One set of trickplay tiles: JPEG sheets of `tile_width` × `tile_height` thumbnails, each
 /// `width` × `height`, one every `interval` ms. Sheet `n` holds thumbnails from
 /// `n × tile_width × tile_height`, row by row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct TrickplayInfo {
     pub width: u32,
@@ -325,7 +330,7 @@ pub struct TrickplayInfo {
     pub interval: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct BaseItemPerson {
     pub id: String,
@@ -338,7 +343,7 @@ pub struct BaseItemPerson {
     pub primary_image_tag: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ChapterInfo {
     #[serde(default, deserialize_with = "nullable")]
@@ -350,7 +355,7 @@ pub struct ChapterInfo {
 }
 
 /// A stretch of an item marked by a segment provider plugin (e.g. Intro Skipper).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct MediaSegmentDto {
     #[serde(rename = "Type", default)]
@@ -359,7 +364,7 @@ pub struct MediaSegmentDto {
     pub end_ticks: Ticks,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct UserItemDataDto {
     /// Resume position. Since 12.0 this is the only place it is reported
@@ -377,7 +382,7 @@ pub struct UserItemDataDto {
     pub last_played_date: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct MediaSourceInfo {
     pub id: String,
@@ -402,7 +407,7 @@ pub struct MediaSourceInfo {
     pub default_subtitle_stream_index: Option<i32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct MediaStream {
     pub index: i32,
@@ -433,6 +438,10 @@ pub struct MediaStream {
 
 /// Defines an enum that decodes from Jellyfin's string values, maps anything unrecognized to
 /// `Other`, and can be turned back into the wire string for query parameters.
+///
+/// `Other` has no wire string of its own: it writes as an empty string, which any `other`
+/// variant reads back as `Other` again, so a saved item never grows a value the server can't
+/// have sent.
 macro_rules! wire_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident = $wire:literal),+ $(,)? }) => {
         $(#[$meta])*
@@ -451,6 +460,12 @@ macro_rules! wire_enum {
                     $(Self::$variant => Some($wire),)+
                     Self::Other => None,
                 }
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_str(self.as_str().unwrap_or_default())
             }
         }
     };
@@ -533,6 +548,7 @@ wire_enum!(
         Tags = "Tags",
         RemoteTrailers = "RemoteTrailers",
         CanDelete = "CanDelete",
+        CanDownload = "CanDownload",
     }
 );
 
@@ -561,13 +577,6 @@ wire_enum!(
         Smart = "Smart",
     }
 );
-
-/// For [`UserConfigurationChanges`]. `Other` is never written; it goes back as `Default`.
-impl Serialize for SubtitleMode {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str().unwrap_or("Default"))
-    }
-}
 
 wire_enum!(ItemSortBy {
     Default = "Default",

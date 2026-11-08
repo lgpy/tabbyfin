@@ -54,6 +54,8 @@ The harness presses keys from inside the app and the UI tests click headless, so
 - **Versions**: switching to an item's second version restarts at the same position; the seek bar then shows that version's trickplay tiles, and an item without tiles shows only the time.
 - **Subtitles and delays**: subtitle delay and size on a real subtitle track and audio delay with sound; an ASS subtitle keeps its own style; the size set in Settings, during playback too, and in the player's menu agree afterwards.
 - **A reconnect** over the last frame (Back while it shows).
+- **Downloads** on the desktop, with mpv (the Android emulator showed a whole season of the dev server's, a broken connection's *Retry* resuming with a `Range` request, and an app ended mid-download carrying on at its next launch): a feature-length movie from a real server; the log says `playing a downloaded file` and the file plays with its audio, embedded and external subtitles chosen as when streaming; the server shows the playback and keeps the resume point; a full disk is refused before starting; a user without *Allow media downloading* gets no Download entry or button.
+- **Offline mode** on the desktop, with mpv (the Android emulator showed the rest, with its server's port refusing connections and in airplane mode: the downloads open with the *Offline* tag and their posters, one plays with its chapters and resumes where it stopped after a restart, and once the server answers "You're back online." shows and the server has the last resume point): a pause or seek during offline playback isn't held up; "You're back online." waits for a playback that's on.
 
 ## 5. SyncPlay (2.10)
 
@@ -92,9 +94,9 @@ The harness presses keys from inside the app and the UI tests click headless, so
 - **Window placement on Windows at 150 % and in mixed DPI** (the machine's monitors are both at 100 %): one monitor at 150 % (the config's `scale` is 1.5, `x`/`y` are physical pixels, no visible move); a window saved on the other-scaled monitor reopens there after one jump, maximized too, and un-maximizes to its saved spot; a spot between monitors of different heights opens centred; un-maximizing after a maximized launch at 150 % restores the saved size, not 1.5× it; a maximized window at 150 % reopening maximized with no flicker.
 - **Window placement on Linux** (a real window manager, X11 and Wayland, where only the size is kept) and **macOS**: a saved spot reopens as saved, a maximized window reopens maximized, and one saved on a missing monitor still opens on screen.
 
-## 9. Jellyfin 10.11 (4.1)
+## 9. Jellyfin 10.11
 
-Against `mise run dev:min` (port 8097): signing in with a password and with Quick Connect, libraries (sort and filter on a bigger library, the HD and SD resolution choices), marking watched, Settings, and the seek bar's trickplay tiles.
+Library sort and filters against a 10.11 library bigger than the dev server's.
 
 ## 10. Memory and long sessions (6.4)
 
@@ -128,6 +130,8 @@ Everything so far ran against the fake device in `crates/cast/tests/` and the ap
 ## 13. Android
 
 Built with `mise run android:install`, and tried on the emulator and one phone (a Honor with Android 16; `docs/android.md`).
+
+- Downloads on the phone (the emulator showed the rest: the notification and the permission prompt, a download carrying on in the background and resuming with a `Range` request after the app is swiped away, *Waiting for Wi-Fi* with Wi-Fi off and resuming when it's back, and Media3 playing a download offline with its external subtitle): a feature-length film with the screen off for its whole length (the wake lock against Doze, and MagicOS's own battery management); downloads still going when the notification permission is refused; walking out of Wi-Fi onto mobile data mid-download; a download played on mpv with its external subtitles; the files gone after uninstalling.
 
 - Playback on Media3: external subtitles (`sub-add`), image subtitles (PGS, VobSub), subtitle and audio delay, an HLS transcode, and audio focus (a call or another app's audio pauses it).
 - Playback on mpv: ASS subtitles with their styling and the system's fonts.

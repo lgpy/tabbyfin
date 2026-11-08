@@ -6,6 +6,7 @@
 
 pub mod casting;
 pub mod dialogs;
+pub mod downloads;
 pub mod home;
 pub mod item;
 pub mod libraries;
@@ -154,6 +155,7 @@ pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
         Route::Person { id, name } => Box::new(library::LibraryPage::new(cx, library::Source::Person { id }, name)),
         Route::Libraries => Box::new(libraries::LibrariesPage::default()),
         Route::Search => Box::new(search::SearchPage::default()),
+        Route::Downloads => Box::new(downloads::DownloadsPage),
         Route::Settings => Box::new(settings::SettingsPage::new()),
         Route::SettingsSection(section) => Box::new(settings::SettingsPage::for_section(section)),
     }

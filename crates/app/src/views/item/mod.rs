@@ -135,6 +135,8 @@ pub enum ItemAction {
     EditPlaylist,
     /// Only offered when the server says the user may delete it.
     DeletePlaylist,
+    /// Start, cancel, remove or retry the download, by where it stands ([`header::download_look`]).
+    Download,
     /// Opens a menu of the item's less frequent actions ([`more_actions`]).
     More,
 }
@@ -162,6 +164,16 @@ pub fn item_actions(item: &BaseItemDto, up_next: Option<&BaseItemDto>) -> Vec<It
     }
     actions.push(ItemAction::TogglePlayed);
     actions.push(ItemAction::ToggleFavorite);
+    // Offered whatever the download is doing, so the buttons after it keep their places as it
+    // goes; a series' or season's own `CanDownload` is always false, its episodes say.
+    let downloadable = match item.kind {
+        BaseItemKind::Series | BaseItemKind::Season => true,
+        BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video => item.can_download,
+        _ => false,
+    };
+    if downloadable {
+        actions.push(ItemAction::Download);
+    }
     if !more_actions(item).is_empty() {
         actions.push(ItemAction::More);
     }
@@ -717,6 +729,12 @@ impl ItemPage {
                 let (item_id, favorite) = (data.item.id.clone(), is_favorite(&data.item));
                 self.mark(item_id, Mark::Favorite(!favorite), cx);
             }
+            ItemAction::Download => {
+                if let Some(offer) = cx.services.downloads.offer(&data.item) {
+                    let item = data.item.clone();
+                    cx.services.download(offer, &item);
+                }
+            }
             // A show plays all its episodes, shuffled, which takes a request; the services run
             // it so leaving the page doesn't drop it.
             ItemAction::Shuffle if matches!(data.item.kind, BaseItemKind::Series | BaseItemKind::Season) => {
@@ -843,6 +861,8 @@ impl ItemPage {
         let moved = self.cursor.take_reveal();
         let selected = self.cursor.selected();
         let images = &mut cx.services.images;
+        let downloads = &cx.services.downloads;
+        let download = header::download_look(downloads, &data.item);
         let under_bar = cx.under_bar.as_ref();
         let cursor = &mut self.cursor;
         let fills = &self.fills;
@@ -870,6 +890,7 @@ impl ItemPage {
                         &actions,
                         selected,
                         fills,
+                        &download,
                         images,
                         under_bar,
                         overview_open,
@@ -896,6 +917,7 @@ impl ItemPage {
                             moved,
                             cursor,
                             images,
+                            downloads,
                             &mut asked,
                         ));
                     } else if let Some(title) = children::children_heading(data) {
@@ -903,10 +925,19 @@ impl ItemPage {
                         children_title = Some(children::heading(ui, title));
                         ui.add_space(children::HEADING_GAP);
                         children_row = match data.item.kind {
-                            BaseItemKind::Series => {
-                                children::seasons(ui, data, columns, open.as_deref(), cursor, images, &mut asked)
+                            BaseItemKind::Series => children::seasons(
+                                ui,
+                                data,
+                                columns,
+                                open.as_deref(),
+                                cursor,
+                                images,
+                                downloads,
+                                &mut asked,
+                            ),
+                            BaseItemKind::BoxSet => {
+                                children::posters(ui, data, columns, cursor, images, downloads, &mut asked)
                             }
-                            BaseItemKind::BoxSet => children::posters(ui, data, columns, cursor, images, &mut asked),
                             kind => {
                                 let playlist = kind == BaseItemKind::Playlist;
                                 let rows = children::rows(
@@ -918,6 +949,7 @@ impl ItemPage {
                                     None,
                                     cursor,
                                     images,
+                                    downloads,
                                     &mut asked,
                                 );
                                 rows.selected
@@ -937,13 +969,29 @@ impl ItemPage {
                         let unfolded = motion::unfold(ui, "season-band", open, |ui| {
                             ui.add_space(SECTION_GAP);
                             if open {
-                                children::episodes_band(ui, season, episode_columns, cursor, images, &mut asked)
+                                children::episodes_band(
+                                    ui,
+                                    season,
+                                    episode_columns,
+                                    cursor,
+                                    images,
+                                    downloads,
+                                    &mut asked,
+                                )
                             } else {
                                 // A closing band is only drawn: it has no cursor and takes no
                                 // clicks.
                                 let mut cursor = Cursor::default();
                                 let mut asked = Asked::default();
-                                children::episodes_band(ui, season, episode_columns, &mut cursor, images, &mut asked)
+                                children::episodes_band(
+                                    ui,
+                                    season,
+                                    episode_columns,
+                                    &mut cursor,
+                                    images,
+                                    downloads,
+                                    &mut asked,
+                                )
                             }
                         });
                         band_settled = unfolded.settled;
@@ -966,7 +1014,9 @@ impl ItemPage {
                     let mut similar_row = None;
                     if !data.similar.is_empty() {
                         ui.add_space(SECTION_GAP);
-                        similar_row = Some(shelves::similar_shelf(ui, data, moved, cursor, images, &mut asked));
+                        similar_row = Some(shelves::similar_shelf(
+                            ui, data, moved, cursor, images, downloads, &mut asked,
+                        ));
                     }
                     ui.add_space(BOTTOM_PADDING);
 
@@ -1394,6 +1444,7 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
                 ItemField::Tags,
                 ItemField::RemoteTrailers,
                 ItemField::CanDelete,
+                ItemField::CanDownload,
                 ItemField::Chapters,
             ],
         )
@@ -1404,7 +1455,14 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
             let series_id = item.series_id.as_deref().unwrap_or_default();
             season_episodes(&client, series_id, &item.id).await?
         }
-        BaseItemKind::BoxSet => collection_items(&client, &item.id, &[ItemField::PrimaryImageAspectRatio]).await?,
+        BaseItemKind::BoxSet => {
+            collection_items(
+                &client,
+                &item.id,
+                &[ItemField::PrimaryImageAspectRatio, ItemField::CanDownload],
+            )
+            .await?
+        }
         BaseItemKind::Playlist => client.playlist_items(&item.id, &[ItemField::Overview]).await?.items,
         _ => Vec::new(),
     };
@@ -1427,7 +1485,11 @@ async fn load(client: Client, item_id: String) -> jellyfin::Result<ItemData> {
 /// lists them itself.
 async fn season_episodes(client: &Client, series_id: &str, season_id: &str) -> jellyfin::Result<Vec<BaseItemDto>> {
     let episodes = client
-        .episodes(series_id, Some(season_id), &[ItemField::Overview])
+        .episodes(
+            series_id,
+            Some(season_id),
+            &[ItemField::Overview, ItemField::CanDownload],
+        )
         .await?;
     Ok(own_episodes(episodes.items, season_id))
 }

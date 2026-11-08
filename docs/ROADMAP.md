@@ -10,22 +10,21 @@ What's still open. Finished work is listed in a line per area; its details are i
 v1 scope is done: sign-in (password and Quick Connect, several accounts), Home, libraries, search and item pages, playback inside the window with server reporting, SyncPlay, remote control, Settings, and packages for Linux, Windows and macOS from CI. The whole app is in the cozy look (`docs/DESIGN.md`).
 
 The big gaps:
-- **Release:** no tagged release yet, and no signed macOS or Windows build.
+- **Release:** no signed macOS or Windows build.
 - **macOS:** libmpv isn't bundled and video is drawn in software.
-- **Testing** on hardware and servers we haven't touched (NVIDIA, Intel, real Linux GPUs, macOS), the app UI on Jellyfin 10.11, and a real mouse and keyboard (`TESTING.md`).
+- **Testing** on hardware we haven't touched (NVIDIA, Intel, real Linux GPUs, macOS) and a real mouse and keyboard (`TESTING.md`).
 
-## 1. Release blockers (before tagging v0.1.0)
+## 1. Release blockers (before tagging v0.3.0)
 
-Done: license (GPL-3.0-or-later), package metadata, log files in release builds, `cargo fmt` in CI, the README.
+Done: license (GPL-3.0-or-later), package metadata, log files in release builds, `cargo fmt` in CI, the README and its screenshots.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
 | 1.5 | **Smoke-test the CI artifacts** | P1 | S | The Windows zip runs on the dev machine and the `.deb` installs and starts in a clean Ubuntu 24.04 container. Still to do: a real Linux desktop with a GPU, and the macOS zip on a Mac. |
-| 1.6 | **Screenshots in the README** | P1 | S | The README has no screenshots yet. |
 
 ## 2. Playback
 
-Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay thumbnails, speed, subtitle and audio delay, subtitle size, the time-left clock, mouse niceties, previous and next, the resume prompt; transcoding (H.264 and HEVC, automatic bitrate), recovery from network drops and player crashes, volume and mute in reports, remote control from other clients; SyncPlay with group UI, queue and drift correction.
+Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay thumbnails, speed, subtitle and audio delay, subtitle size, the time-left clock, mouse niceties, previous and next, the resume prompt; transcoding (H.264 and HEVC, automatic bitrate), recovery from network drops and player crashes, volume and mute in reports, remote control from other clients; SyncPlay with group UI, queue and drift correction; downloads of the original file, played from disk, and offline mode (the downloads open when the server can't be reached, and their watch state reaches it once it answers); on Android, downloads that carry on in the background under a foreground service, Wi-Fi only as a setting, the files in app-specific external storage, and Media3 playing them.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
@@ -53,11 +52,7 @@ Done: keyboard navigation everywhere, library sort and filters, favorites, cast 
 
 ## 4. Accounts and settings
 
-Done: player preferences, subtitle appearance, theme, window size and position, several servers and users, Settings for this device and the server (languages, Home), a 10.11 smoke test.
-
-| # | Item | Pri | Effort | Notes |
-|---|---|---|---|---|
-| 4.1 | **The app UI on real 10.11** | P1 | S | `mise run dev:min` passes the API smoke test on 10.11.11; the app itself hasn't been clicked through there. |
+Done: player preferences, subtitle appearance, theme, window size and position, several servers and users, Settings for this device and the server (languages, Home), 10.11 support (the API smoke test, and the app clicked through on 10.11.11).
 
 ## 5. Platform and packaging
 
@@ -85,7 +80,7 @@ Done: an integration job in CI against 12.2 and 10.11 (not yet run on GitHub Act
 
 ## Suggested order
 
-1. **Release (§1, 4.1):** screenshots, the artifact smoke tests and a 10.11 click-through, then tag v0.1.0.
+1. **Release (§1):** the artifact smoke tests, then tag v0.3.0.
 2. **Hardware testing (2.6, 2.7):** borrow or rent an NVIDIA/Intel machine; ask testers with Linux desktops.
 3. **Signing and Flathub (5.1–5.3).**
 4. **macOS (2.3, 2.4, 5.1)** once a Mac is available.

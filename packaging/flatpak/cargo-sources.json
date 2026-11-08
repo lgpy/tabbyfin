@@ -2069,6 +2069,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/fs4/fs4-0.13.1.crate",
+        "sha256": "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4",
+        "dest": "cargo/vendor/fs4-0.13.1"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4\", \"files\": {}}",
+        "dest": "cargo/vendor/fs4-0.13.1",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/futures/futures-0.3.34.crate",
         "sha256": "9a31d2a3fbaaeb2af2368bbdd904aa8e812d3c04a1ee10d3171f52d556e5d0a3",
         "dest": "cargo/vendor/futures-0.3.34"
@@ -7147,6 +7160,19 @@
         "type": "inline",
         "contents": "{\"package\": \"282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d\", \"files\": {}}",
         "dest": "cargo/vendor/windows-sys-0.52.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/windows-sys/windows-sys-0.59.0.crate",
+        "sha256": "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b",
+        "dest": "cargo/vendor/windows-sys-0.59.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b\", \"files\": {}}",
+        "dest": "cargo/vendor/windows-sys-0.59.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
