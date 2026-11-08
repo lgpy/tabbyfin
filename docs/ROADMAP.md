@@ -14,13 +14,9 @@ The big gaps:
 - **macOS:** libmpv isn't bundled and video is drawn in software.
 - **Testing** on hardware we haven't touched (NVIDIA, Intel, real Linux GPUs, macOS) and a real mouse and keyboard (`TESTING.md`).
 
-## 1. Release blockers (before tagging v0.3.0)
+## 1. Release
 
-Done: license (GPL-3.0-or-later), package metadata, log files in release builds, `cargo fmt` in CI, the README and its screenshots.
-
-| # | Item | Pri | Effort | Notes |
-|---|---|---|---|---|
-| 1.5 | **Smoke-test the CI artifacts** | P1 | S | The Windows zip runs on the dev machine and the `.deb` installs and starts in a clean Ubuntu 24.04 container. Still to do: a real Linux desktop with a GPU, and the macOS zip on a Mac. |
+Done: license (GPL-3.0-or-later), package metadata, log files in release builds, `cargo fmt` in CI, the README and its screenshots, smoke tests of the CI artifacts (the Windows zip signs in and plays; the `.deb`, tarball, AppImage and Flatpak start in Ubuntu 24.04 containers). What's left needs a real Linux desktop or a Mac, and is in `TESTING.md`.
 
 ## 2. Playback
 
@@ -65,10 +61,11 @@ Done: an Inno Setup installer for Windows, an AppImage and a Flatpak bundle besi
 | 5.3 | **Flathub** | P2 | M | The Flatpak builds and plays from a local bundle; it isn't published. |
 | 5.4 | **ARM builds** | P3 | M | Windows on ARM and Linux aarch64 aren't built. The libmpv and ANGLE pins are x86_64 only. |
 | 5.5 | **Android (phones and tablets)** | P3 | L | Signs in, browses and plays by touch, in a phone layout (a bottom bar, compact pages, 48-point targets, long-press menus); Media3 (default) and libmpv (a setting) play on a phone, with a touch player page. Left: refining the touch UI, then the release (`build.sh --sign` makes the signed APKs; CI signing on tags and the key are left), predictive Back's animation, picture-in-picture and a `MediaSession`. Plan in [`android.md`](android.md). |
+| 5.6 | **Tarball and AppImage dependencies** | P3 | S | Without `libxkbcommon-x11` (a bare container) both panic at start-up in `xkbcommon-dl` instead of saying what's missing, and the tarball doesn't list what it needs. Real desktops have it. |
 
 ## 6. Quality and engineering
 
-Done: an integration job in CI against 12.2 and 10.11 (not yet run on GitHub Actions), error messages for the common failures, bounded image memory and a loading queue.
+Done: an integration job in CI against 12.2 and 10.11, error messages for the common failures, bounded image memory and a loading queue.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
@@ -80,8 +77,7 @@ Done: an integration job in CI against 12.2 and 10.11 (not yet run on GitHub Act
 
 ## Suggested order
 
-1. **Release (§1):** the artifact smoke tests, then tag v0.3.0.
-2. **Hardware testing (2.6, 2.7):** borrow or rent an NVIDIA/Intel machine; ask testers with Linux desktops.
-3. **Signing and Flathub (5.1–5.3).**
-4. **macOS (2.3, 2.4, 5.1)** once a Mac is available.
-5. **Android (5.5)**, following the milestones in `android.md`.
+1. **Hardware testing (2.6, 2.7):** borrow or rent an NVIDIA/Intel machine; ask testers with Linux desktops.
+2. **Signing and Flathub (5.1–5.3).**
+3. **macOS (2.3, 2.4, 5.1)** once a Mac is available.
+4. **Android (5.5)**, following the milestones in `android.md`.
