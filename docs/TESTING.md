@@ -94,9 +94,9 @@ The harness presses keys from inside the app and the UI tests click headless, so
 - **Window placement on Windows at 150 % and in mixed DPI** (the machine's monitors are both at 100 %): one monitor at 150 % (the config's `scale` is 1.5, `x`/`y` are physical pixels, no visible move); a window saved on the other-scaled monitor reopens there after one jump, maximized too, and un-maximizes to its saved spot; a spot between monitors of different heights opens centred; un-maximizing after a maximized launch at 150 % restores the saved size, not 1.5× it; a maximized window at 150 % reopening maximized with no flicker.
 - **Window placement on Linux** (a real window manager, X11 and Wayland, where only the size is kept) and **macOS**: a saved spot reopens as saved, a maximized window reopens maximized, and one saved on a missing monitor still opens on screen.
 
-## 9. Jellyfin 10.11 (4.1)
+## 9. Jellyfin 10.11
 
-Against `mise run dev:min` (port 8097): signing in with a password and with Quick Connect, libraries (sort and filter on a bigger library, the HD and SD resolution choices), marking watched, Settings, and the seek bar's trickplay tiles.
+Library sort and filters against a 10.11 library bigger than the dev server's.
 
 ## 10. Memory and long sessions (6.4)
 
