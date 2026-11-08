@@ -23,9 +23,9 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [egui](ht
 **Not in v1 (later)**
 - Music, Live TV, books, and photos.
 - Multiple servers at once, and admin features.
-- Casting, and remote-controlling other sessions (other clients can control this one).
+- Remote-controlling other sessions (other clients can control this one).
 
-SyncPlay, first left out, has since been built (§5.4).
+SyncPlay and casting to a Chromecast, first left out, have since been built (§5.4, §5.5).
 
 ---
 
@@ -63,6 +63,13 @@ tabbyfin/
 │   │   ├── images.rs         #   image URL builder
 │   │   ├── ticks.rs          #   Ticks newtype (1 tick = 100 ns) <-> Duration
 │   │   └── models.rs         #   hand-written DTOs, only the fields we use
+│   ├── cast/                 # CASTV2 (Chromecast) sender and the Jellyfin receiver's contract: no UI (§5.5)
+│   │   ├── codec.rs          #   CastMessage protobuf by hand, length-prefixed frames
+│   │   ├── channel.rs        #   TLS to the device, heartbeat, requestId matching
+│   │   ├── receiver.rs       #   GET_STATUS, LAUNCH, STOP, SET_VOLUME
+│   │   ├── discovery.rs      #   mDNS browsing (mdns-sd)
+│   │   ├── jellyfin.rs       #   Envelope, Command, PlayRequest, ReceiverEvent, MediaStatus
+│   │   └── fake.rs           #   a scripted device on loopback (feature `fake-device`, for tests)
 │   ├── player/               # mpv via libmpv: no UI
 │   │   ├── lib.rs            #   Player: load, set_property, command, add_subtitle, quit
 │   │   ├── events.rs         #   PlayerEvent enum and event translation
@@ -95,13 +102,13 @@ crates/app/src/
 ├── motion.rs        animations: page entry, the shelves' stagger, image fades, toggle pops, the player's prompt and controls
 ├── config.rs, credentials.rs, session.rs, update.rs, markers.rs
 ├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
-├── playback.rs, syncplay.rs, remote.rs, live.rs, downloads.rs   services
+├── playback.rs, syncplay.rs, remote.rs, live.rs, cast.rs, downloads.rs   services
 ├── images.rs, trickplay.rs   textures
 ├── theme.rs         appearance: theme, text size, zoom, animations, over_video; `theme::apply` is called at launch
 ├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
 ├── ui_tests/        the headless UI tests (egui_kittest)
 ├── widgets/         text (Load<T>), card, image, shelf, menu, popup, select, dialog, button, state, mascot, video, subtitles (cues a player leaves to the UI)
-└── views/           mod (Page, PageCx, open), shell, home, login, search, libraries, library, value_filters, item, downloads, settings, player (with its touch gestures and phone controls), dialogs; item has its phone header in item/compact.rs
+└── views/           mod (Page, PageCx, open), shell, casting (the cast panel and the now-casting bar), home, login, search, libraries, library, value_filters, item, downloads, settings, player (with its touch gestures and phone controls), dialogs; item has its phone header in item/compact.rs
 ```
 
 **Models:** we write the serde DTOs by hand and keep them to the fields we need. Every field is `Option` or `#[serde(default)]`, and unknown fields are ignored. Generating code from the full OpenAPI spec would create a huge, churny surface. Swashbuckle v10 in 12.0 already changed the generated document once. If we later want generated code, we generate it from the 12.x spec.
@@ -328,7 +335,20 @@ The flow here:
 9. **Leaving:** signing out, switching accounts and quitting leave the group first.
 10. **The queue:** the SyncPlay menu lists the group's queue (names fetched by id) with the playing entry marked: `SetPlaylistItem` plays an entry, `MovePlaylistItem` and `RemoveFromPlaylist` edit it, `SetShuffleMode` and `SetRepeatMode` set the modes. The changes come back as queue updates to everyone.
 
-### 5.5 Downloads
+### 5.5 Casting
+
+Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyfin-chromecast), which does the Jellyfin work itself: `PlaybackInfo` with its own profile, progress reports with our token, the next episode. The app is its remote. `docs/chromecast.md` has the protocol and the reasons.
+
+- **`crates/cast`** speaks CASTV2 itself, on tokio and rustls with the ring provider (no aws-lc-rs, for Android), with a hand-written protobuf codec. `Channel` is one TLS connection: a task owns the socket, sends `PING` every 5 s, answers the device's, calls the connection dead after 15 s of silence, and matches replies to requests by `requestId`; what it doesn't consume comes out on a stream. `jellyfin.rs` is the receiver's contract as types: `Command` lists only the commands the receiver handles, since an unknown one throws on the TV.
+- **`cast.rs`** is `services.cast`. Discovery (mDNS, `_googlecast._tcp`) runs while signed in. A cast's connection runs on tokio (detached, so a *Stop* or *Disconnect* still reaches the TV after the services go) and reports through a `task::channel` into `Casting`, the state the player draws: item, position (extrapolated between reports), pause, tracks, the TV's volume. Every message carries the session's credentials; a loopback server address is replaced by the server's `LocalAddress`, which the TV can reach.
+- **The redirects:** while casting, `Services::play`, `play_all_with`, `enqueue`, `control`, `play_next`, `play_previous`, `change_audio`, `change_subtitle` and `reload` go to the TV, as a SyncPlay group takes them with `in_group()`; remote control from the dashboard goes through the same entry points. Volume and mute are the TV's (`SET_VOLUME`); speed, delays and subtitle size aren't sent.
+- **Handover:** casting while something plays here stops it and, once its stop is reported, plays it on the TV at its position, version and tracks, with the queue after it.
+- **Casting and SyncPlay don't mix:** the cast button is off in a group, and joining or starting one while casting asks to stop the cast first.
+- **Ending:** *Stop casting* stops the receiver; *Disconnect* and quitting leave it playing; signing out stops it, since the receiver holds the session's token.
+- **Staying connected:** a dropped connection is retried on tokio inside the connection task, with the command channel kept, so the session and its UI carry on: 1 s, 2 s, 4 s, 8 s and 16 s waits, five tries, and *Stop* or *Disconnect* ends it at once. Each try asks the device's `GET_STATUS` and, if the receiver still runs, joins it and sends `Identify`, whose answer restores the item and position; a receiver that's gone ends the cast as stopped, and exhausted tries use the *Lost the connection* error. The bar and the casting player say *Reconnecting to <TV>…* meanwhile. A device whose mDNS `rs` names Jellyfin gets *Reconnect* in the panel instead of *Cast to* (no connection per device, and nothing reconnects by itself). When another sender takes over, the standard `MEDIA_STATUS` is followed once the custom messages have been quiet for 3 s, and until our own flow again. Offline sessions start no discovery and offer no casting.
+- **Android:** the phone runs the same sender. Discovery holds a `WifiManager.MulticastLock` (`CHANGE_WIFI_MULTICAST_STATE`) through `android.rs`'s JNI calls, taken by a guard in `cast.rs` while the browse runs and released when it's dropped; the hardware volume keys set the TV's volume while casting (`MainActivity.dispatchKeyEvent` → `nativeCastVolume`, a step a press, the app's `cast_volume_step` on the next frame), and Android has them otherwise; and the connection never waits on a frame, so it carries on in the background, where its updates wait in an unbounded channel until the app draws again.
+
+### 5.6 Downloads
 
 `downloads.rs` keeps an account's downloads: original files only, from `GET /Items/{id}/Download`, which the server allows per user (*Allow media downloading*, sent as each item's `CanDownload`, which list queries must ask for with `Fields=CanDownload`).
 
@@ -346,11 +366,11 @@ The flow here:
 
 - `App` (`app.rs`) is the `eframe::App`. It owns the screens (`Restoring`, `SignIn(Box<Login>)`, `SignedIn(Box<SignedIn>)`), the toasts, the window's `Placement`, the zoom, and the keys `raw_input_hook` took from egui for the app.
 - While signed in, `SignedIn` holds the session's `Services` and the `Shell`. Pages get a `&mut PageCx` each frame: `ctx`, `services`, a `nav: Vec<NavRequest>` to push into, and `render_state` (the player's video needs the wgpu device; `None` in tests). There are no globals and no `Rc<RefCell<…>>`.
-- `Services` (`services.rs`) is everything per signed-in session: the session (client, user, server), `user_data`, `events: Vec<AppEvent>`, `images`, `playback`, `syncplay`, `live`, `remote`, the item page's playlist edit queue, and the marks and fetches that outlive a frame (a watched change, a series' next episode, a shuffle). `Services::new(session, ctx)` takes the `egui::Context`, which the services keep to wake the UI. `Services::tick(ctx)` runs each part's background work: images, the item menu's finished requests, playlist edits, then playback's, the websocket's, remote control's and SyncPlay's.
+- `Services` (`services.rs`) is everything per signed-in session: the session (client, user, server), `user_data`, `events: Vec<AppEvent>`, `images`, `playback`, `syncplay`, `live`, `remote`, `cast`, the item page's playlist edit queue, and the marks and fetches that outlive a frame (a watched change, a series' next episode, a shuffle). `Services::new(session, ctx)` takes the `egui::Context`, which the services keep to wake the UI. `Services::tick(ctx)` runs each part's background work: images, the item menu's finished requests, playlist edits, then playback's, the websocket's, remote control's, SyncPlay's and the cast's.
 - Cross-service calls that would otherwise be globals are methods on `Services` (`control(UiCommand)`, `play(&item, options)`, `play_all_with`, `enqueue`, `reload`, `mark`, `play_up_next`); each part's module adds its own `impl Services` block, so `services.rs` stays small.
-- `AppEvent`s are what the app or the shell must act on: `Toast`, `AppearanceChanged`, `SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `PlaybackStarted`, `PlaybackEnded`, `ToggleFullscreen`. The app drains them after the shell has drawn.
+- `AppEvent`s are what the app or the shell must act on: `Toast`, `AppearanceChanged`, `SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `PlaybackStarted`, `PlaybackEnded`, `ToggleFullscreen`, `LeavePlayer` (Back from the player while casting). The app drains them after the shell has drawn.
 - Adding an account parks the signed-in screen in `App::parked`: it keeps ticking (playback, the websocket), its toasts still show, and its screen-changing events (`SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `ToggleFullscreen`) are dropped, while anything else waits in its queue for the shell after *Back to your account*.
-- Ending a session (sign-out, expiry, switching, removing the parked account) calls `Services::end()` (stops playback, leaves a SyncPlay group) and then drops the screen. Quitting saves the window placement and calls `Services::shut_down` on the signed-in session and a parked one, waiting up to 3 s.
+- Ending a session (sign-out, expiry, switching, removing the parked account) calls `Services::end()` (stops playback and a cast, leaves a SyncPlay group) and then drops the screen. Quitting saves the window placement and calls `Services::shut_down` on the signed-in session and a parked one (a cast is left playing), waiting up to 3 s.
 - `user_data` counts changes to the user's watch data: bumped when a session ends, when the server says it changed elsewhere (coalesced, half a second later, and not during playback), and by the app's own edits.
 
 ### Pages and navigation
@@ -372,6 +392,7 @@ The flow here:
 - The bar is the app icon, Back while there's a page to go back to, the top page's title, the search box in the middle, and on the right SyncPlay (its panel), Settings (opens Settings, or closes it when it's on top) and the account menu. The buttons are `widgets::round_button::RoundButton`s: a muted icon with no frame, an `inset_hover` circle under the pointer, and SyncPlay on (circle kept, icon in `brand`) while in a group; the account button is the user's avatar (`avatar::paint`). The search box is always open: sign-in's field (`base` text, 12 × 9 margin, `inset` fill) with the search icon inside its left end. Its width shrinks with the bar (at least 120 px) so the icon, Back and a title fit on its left and the buttons on its right at any window size or zoom. While the field has text, a round clear (×) button at its right end (`field::trailing_button`) clears the text, closes the results as clearing by keyboard does, and keeps the keyboard in the box; it skips focus (`Focus::Skip`) and has an AccessKit name, so Tab still belongs to the field.
 - **On a phone** (`layout::Size::Compact`: touch, and under 600 points wide) the bar is 56 tall: Back (or the app's icon at 32 on Home), the title at `lg`, and Search, SyncPlay and the account at the right; Settings is an entry of the account menu. Search opens the results with the keyboard in the box (over Settings, the box filters Settings instead); over the results, and over Settings while its box has the keyboard or a term, the search box takes the title's place and the buttons'. A bottom bar (`Shell::bottom_bar`) has the places to go, Home and Libraries (`views/libraries.rs`, the user's libraries as tiles): a place's page goes right above Home, closing what was there, the open place is the one just above Home (a library opened from Libraries is still under Libraries), and its button again goes back to its first page. Home leaves out *My Media*, and Settings is a list of its sections, each opening on a page of its own (`Route::SettingsSection`). On a phone the results stay open with the box emptied. The bottom bar goes while the soft keyboard is up, and slides away while the page scrolls down (`BottomBar`, fed by `layout::note_page_scroll` from `backdrop::scroll_edge`). Medium (600 to 840, a phone in landscape) and expanded keep the desktop's bar; without touch the layout is always expanded, so a narrow desktop window doesn't change.
 - **Search:** the box is the bar's only text field. Typing opens the results page (or comes back to it from a page opened from it); clearing the box closes them; Enter or Down moves into them; Up or Shift+Tab the results leave unused at their first row go back into the box. Esc gives the keyboard back to the page (over the results it closes them and clears the box).
+- **Casting:** once a Chromecast has been found (or while casting) a cast button sits just left of SyncPlay: `cast`, or a lit `cast_connected` while casting, and off with its reason in a SyncPlay group. Its panel (`views/casting.rs`, built like SyncPlay's) is *Cast to a TV* with a *Casting* dot while casting, the TVs under *On this network* as one `list_row::block` of rows (a TV icon or `speaker_group`, the name, the model or *Group*; the one in use lit, with a `brand` `cast_connected` and *Casting*), and while casting a quiet *Disconnect* and a quiet-danger *Stop casting*. While casting the player draws the cast in its usual layout: the item's backdrop under `over_video::VEIL`, *Playing on <TV>* over the TV's model in the middle, a lit cast button at the top bar's end, and the bottom bar without the settings button and fullscreen (the track menu hangs from the audio or subtitles button). Back leaves the player and the cast goes on; the now-casting bar (at most 640 × 68, 24 up from the bottom, radius 18; on a phone full width less 8, 64 tall, above the bottom bar) brings it back.
 - The SyncPlay panel hangs under its button in the menus' frame, placement and opening motion (`popup::panel`), 340 wide with 16 points of room, and is laid out like a small surface. Without a group: a *Watch together* heading, the server's groups as `AvatarRow`s (their members' avatars overlapping, the name, who's in it and the state, a `brand` *Join* at the right end; the whole row joins), then *New group*, which is `quiet` beside those rows and `brand` when there are none (the groups icon over "No one is watching together right now."). In one: the group's name with its state as a coloured dot (green playing, amber waiting, grey paused or idle), *Watching* with each member as an `avatar_row::person` (the user's marked "you"), then the queue in one inset block (the playing entry marked ▶ in `brand`, the others numbered, round shuffle and repeat toggles beside its label, and round move and remove buttons only on the row the keyboard or pointer is on) and *Leave group* as a `button::quiet_danger`. Everything in it is clicks only (`Focus::Skip`): the panel reads its own keys, and the keyboard's place is a ring (on a toggle or button) or the row's highlight. The account menu is a `PopupMenu` (`widgets/popup.rs`): the saved accounts with their server in muted text and the current one checked, then *Add account…* and *Sign out*.
 
 ### Async

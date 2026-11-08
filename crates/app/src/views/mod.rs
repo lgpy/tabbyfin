@@ -4,6 +4,7 @@
 //! and drawn each frame with a [`PageCx`] lending it the session's services. [`open`] makes the
 //! page for a route.
 
+pub mod casting;
 pub mod dialogs;
 pub mod downloads;
 pub mod home;

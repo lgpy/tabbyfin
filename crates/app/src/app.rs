@@ -592,7 +592,7 @@ impl App {
                         signed_in.shell.player_started(ctx);
                     }
                 }
-                AppEvent::PlaybackEnded => {
+                AppEvent::PlaybackEnded | AppEvent::LeavePlayer => {
                     if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
                         signed_in.shell.player_ended(ctx);
                     }
@@ -758,6 +758,10 @@ impl eframe::App for App {
             Some(Screen::SignIn(login)) => login.tick(ctx),
             Some(Screen::Restoring { .. }) | None => {}
         }
+        // The volume keys the phone's activity took for the TV while casting arrive as steps
+        // (`android.rs`): it answers the key before this frame, so they wait for it.
+        #[cfg(target_os = "android")]
+        self.android_cast_volume();
         self.tick_reconnect(ctx, frame);
 
         // The form's requests finish here too, so an approval or a returning server signs in
@@ -861,7 +865,10 @@ impl eframe::App for App {
             // Android puts the app in the background.
             let goes_back = keys::egui_wants_keys(&ctx)
                 || matches!(&self.screen, Some(Screen::SignedIn(signed_in)) if signed_in.shell.handles_back());
-            crate::android::after_frame(&ctx, goes_back);
+            // While casting, the volume keys are the TV's, which the activity takes before egui
+            // sees anything.
+            let casting = matches!(&self.screen, Some(Screen::SignedIn(signed_in)) if signed_in.services.is_casting());
+            crate::android::after_frame(&ctx, goes_back, casting);
         }
         self.handle_events(&ctx);
         if let Some(action) = self.toasts.show(&ctx) {
@@ -885,6 +892,20 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// The volume keys Android took for the TV while casting (`android.rs`): a step a press,
+    /// applied as the player's own volume keys move the TV's volume. The activity has to answer
+    /// the key at once, so the steps wait for this frame.
+    #[cfg(target_os = "android")]
+    fn android_cast_volume(&mut self) {
+        let steps = crate::android::take_volume_steps();
+        if steps == 0 {
+            return;
+        }
+        if let Some(Screen::SignedIn(signed_in)) = self.screen.as_mut() {
+            signed_in.services.cast_volume_step(steps);
+        }
+    }
+
     /// Carries out the app's own keys (the zoom, which works on every screen) and hands the rest
     /// to the page and the shell.
     fn app_keys(&mut self, ctx: &egui::Context, keys: Vec<Press>) -> Vec<Press> {

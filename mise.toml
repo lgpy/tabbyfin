@@ -55,6 +55,10 @@ depends = ["fmt:check", "check", "test"]
 description = "Exercise the Jellyfin API client against the dev server"
 run = "cargo run -p jellyfin --example smoke"
 
+[tasks.cast]
+description = "Cast to a Chromecast on this network (crates/cast/examples/cast.rs)"
+run = "cargo run -p cast --example cast --"
+
 # Android (docs/android.md)
 
 [tasks."android:build"]

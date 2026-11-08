@@ -317,6 +317,15 @@ const BITRATE: Row = Row {
     key: "max_streaming_bitrate",
     unset: "no limit",
 };
+const CAST_BITRATE: Row = Row {
+    section: Section::Playback,
+    label: "Chromecast bitrate",
+    description: "The most a Chromecast or Google TV streams at when you cast to it; the server transcodes \
+                  anything above it. Automatic leaves it to the TV, which measures its connection. Sent with \
+                  the next command to the TV, which keeps it until it's changed.",
+    key: "cast_max_bitrate",
+    unset: "automatic",
+};
 const PLAYER: Row = Row {
     section: Section::Playback,
     label: "Player",
@@ -495,7 +504,7 @@ const HOME_SECTIONS_NOTE: Row = Row {
 
 /// Every row, for the search. A row left out of here still shows in its section, but a search
 /// would only find it through another row of the same section.
-const ROWS: [Row; 36] = [
+const ROWS: [Row; 37] = [
     THEME,
     TEXT_SIZE,
     ANIMATIONS,
@@ -503,6 +512,7 @@ const ROWS: [Row; 36] = [
     AUTOPLAY,
     SKIP_INTRO,
     BITRATE,
+    CAST_BITRATE,
     HEVC,
     PLAYER,
     SUBTITLES_NOTE,
@@ -1000,7 +1010,7 @@ impl SettingsPage {
     fn section(&mut self, ui: &mut Ui, cx: &mut PageCx, section: Section) {
         card(ui, |ui| match section {
             Section::Appearance => self.appearance(ui, cx),
-            Section::Playback => self.playback(ui),
+            Section::Playback => self.playback(ui, cx),
             Section::Subtitles => self.subtitles(ui, cx),
             Section::Downloads => self.downloads(ui, cx),
             Section::Storage => self.storage(ui, cx),
@@ -1050,7 +1060,7 @@ impl SettingsPage {
         }
     }
 
-    fn playback(&mut self, ui: &mut Ui) {
+    fn playback(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         if note(ui, &self.search, TRACKS_NOTE, Some("Languages")) {
             self.open(ui.ctx(), Section::Languages);
         }
@@ -1090,6 +1100,33 @@ impl SettingsPage {
                 config.max_streaming_bitrate = None;
             }),
             None => {}
+        }
+
+        // 0 leaves it to the TV.
+        let cast_bitrates: Vec<(i32, String)> = BITRATES_MBPS
+            .iter()
+            .map(|&mbps| match mbps {
+                0 => (mbps, "Automatic".to_string()),
+                mbps => (mbps, format!("{mbps} Mbit/s")),
+            })
+            .collect();
+        let current = self.config.cast_max_bitrate.map_or(0, |bps| (bps / 1_000_000) as i32);
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            CAST_BITRATE,
+            "settings_cast_bitrate",
+            &cast_bitrates,
+            current,
+            Some(0),
+        );
+        if let Some(edit) = picked {
+            let bitrate = match edit {
+                Edit::Set(mbps) if mbps > 0 => Some(mbps as u64 * 1_000_000),
+                Edit::Set(_) | Edit::Default => None,
+            };
+            self.save(|config| config.cast_max_bitrate = bitrate);
+            cx.services.cast.set_max_bitrate(bitrate);
         }
 
         let current = self.config.prefer_hevc.unwrap_or(false);

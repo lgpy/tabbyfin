@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/jellyfin", "crates/player", "crates/app"]
+members = ["crates/jellyfin", "crates/player", "crates/cast", "crates/app"]
 default-members = ["crates/app"]
 
 [workspace.package]
@@ -13,6 +13,7 @@ publish = false
 [workspace.dependencies]
 jellyfin = { path = "crates/jellyfin" }
 player = { path = "crates/player" }
+cast = { path = "crates/cast" }
 
 # The UI. egui, eframe and egui-wgpu are released together; bump them together, along with
 # egui_material_icons (built for one egui version).

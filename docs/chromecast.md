@@ -2,7 +2,7 @@
 
 **Goal:** cast to a Chromecast or Google TV from the desktop and Android. We cast to Jellyfin's own receiver app ([jellyfin-chromecast](https://github.com/jellyfin/jellyfin-chromecast), the one the web client casts to), not to Google's Default Media Receiver. The receiver does the Jellyfin work itself: it calls `PlaybackInfo` with its own device profile, chooses direct play or a transcode, reports start, progress and stop to the server with our token, and plays the next episode. The app is only the remote: it finds devices, launches the receiver, sends it commands and draws what it reports.
 
-**Status:** not started. Nothing here has been tried against a device. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
+**Status:** milestones 1 to 6 are built (`crates/cast`, `crates/app/src/cast.rs`, `views/casting.rs`, the player's casting view, and Android's glue in `android.rs` and `MainActivity.java`), and tested against the fake device, a real Chromecast and the Android emulator (below, *What a real Chromecast showed*). Left: the rest of `TESTING.md`'s checks on a device — a phone casting to a real TV, and a Google TV. The protocol notes come from reading the receiver's and jellyfin-web's source (jellyfin-chromecast `src/`, jellyfin-web `src/plugins/chromecastPlayer/plugin.js`, Nov 2026).
 
 ## Decision
 
@@ -56,14 +56,14 @@
 
   | command | options | Notes |
   |---|---|---|
-  | `Identify` | `{}` | Sent right after `CONNECT`, with credentials. The receiver then reports its capabilities to the server. While something plays, it answers with the current state (as a `playbackstop`-typed message). |
+  | `Identify` | `{}` | Sent right after `CONNECT`, with credentials. The receiver then reports its capabilities to the server. It answers with the current state: a `playbackstop`-typed message while something plays, a `volumechange` with empty ids when idle. |
   | `PlayNow` | `{items, startIndex?, startPositionTicks?, mediaSourceId?, audioStreamIndex?, subtitleStreamIndex?}` | `items` are stubs, `{Id, ServerId, Name, Type, MediaType, IsFolder}`; the receiver fetches each item when it plays it. Positions and tracks apply only to the first item played. A single episode is extended with the rest of the series when the user has next-episode autoplay on. |
   | `PlayNext`, `PlayLast` | `{items}` | **Both append to the end of the queue.** |
   | `Shuffle` | `{items: [item]}` | The receiver picks up to 50 random items from the item. |
   | `Pause`, `Unpause`, `PlayPause`, `Stop`, `NextTrack`, `PreviousTrack` | `{}` | |
   | `Seek` | `{position}` | In seconds, not ticks. |
-  | `SetAudioStreamIndex` | `{index}` | Reloads the stream. |
-  | `SetSubtitleStreamIndex` | `{index}` | `-1` turns subtitles off. |
+  | `SetAudioStreamIndex` | `{index}` | Reloads the stream. **Not used:** see *What a real Chromecast showed*. |
+  | `SetSubtitleStreamIndex` | `{index}` | `-1` turns subtitles off. **Not used**, as above. |
   | `SetRepeatMode` | `{RepeatMode}` | Not used. After it is sent once, the receiver also sends `repeatmodechange` after every later command. |
 
   **Never send anything else.** An unknown command falls through to the receiver's play handler, which throws. Volume and mute commands on this namespace do nothing on the receiver; they go through `SET_VOLUME`.
@@ -73,6 +73,18 @@
   - There's no queue or playlist index in it.
 - **Other senders** (another phone casting to the same TV) get none of those messages. They do get the standard `urn:x-cast:com.google.cast.media` `MEDIA_STATUS`, whose `media.customData` has `itemId`, `mediaSourceId`, the stream indexes, `canClientSeek` and `startPositionTicks`. When `canClientSeek` is false (a non-HLS transcode), the real position is `currentTime + startPositionTicks`. We follow `MEDIA_STATUS` when we aren't the last sender. Seeking and track changes still go through the custom commands, since the standard ones bypass the receiver's stream logic.
 - **The token is shared with the receiver.** Signing out revokes it, and the receiver then stops working. Signing out while casting stops the cast first.
+
+### What a real Chromecast showed
+
+Seen on a Chromecast with the stable receiver (2026-11), against the dev server; the fake device in `cast::fake` now behaves the same way.
+
+- **Leaving with `CLOSE` quits the receiver.** It stops when its last sender disconnects on purpose. *Disconnect* and quitting the app only close the socket, which leaves it playing.
+- **`RECEIVER_STATUS` without `applications`.** Right after a launch and between apps the device sends statuses with only the volume. Our app is gone only when the list is there without it (usually listing the idle screen, *Backdrop*).
+- **Empty ids mean nothing plays.** An idle receiver answers `Identify` with a `volumechange` whose `ItemId` and `NowPlayingItem.Id` are `""`. The end of an item is a `playbackstop` with empty ids too.
+- **`SET_VOLUME` is answered in about 0.1 s**, even when the level doesn't change. The receiver sends progress about four times a second, so a sender that stops reading its messages while it awaits an answer stalls: the connection's message stream is unbounded for that reason, and volume requests don't block the loop.
+- **The receiver's own track changes break.** `SetAudioStreamIndex`, and `SetSubtitleStreamIndex` when it has to reload (burned-in subtitles), restart the stream from `currentTime × 10⁷`. That's fractional, and the server answers a fractional `StartTimeTicks` with HTTP 400, so the TV shows `NoCompatibleStream`. Its stop reports have the same flaw: the server keeps the TV's session "playing" after it stopped.
+- **A `PlayNow` over playback can leave *Ready to cast* on top.** Its handling of the interrupted stream can land after the new one started and show the idle screen over it for good, while the stream plays on underneath. Jellyfin's Android app does the same. So other tracks and versions are a `Stop`, then (once its `playbackstop` came, plus 1 s) a `PlayNow` from the current position in whole ticks (`Services::cast_reload`).
+- **A frame is at most 64 KB.** A `PlayNow` with about 300 episodes is 51 KB, with 400 it's 67 KB. The app cuts a longer queue to what fits; the channel refuses a bigger message with `FrameTooLarge` instead of ending the connection.
 
 ## Code
 
@@ -89,8 +101,9 @@
 ### `crates/app`
 
 - `cast.rs`: `Cast` in `Services`.
-  - Discovery runs while signed in, and its results come back through a `task::channel` drained in `Services::tick`.
-  - `CastSession` holds the device, the connection, the app's `transportId`, and `Casting`, the state the UI draws: item, position (extrapolated between reports, as `NowPlaying` is), paused, duration, streams, the chosen audio and subtitle, and volume and mute (from `RECEIVER_STATUS` and `volumechange`).
+  - Discovery runs while signed in, and its results come back through a `task::channel` drained in `Services::tick`. An offline session discovers nothing and casts nothing.
+  - `CastSession` holds the device, the connection, the app's `transportId`, and `Casting`, the state the UI draws: item, position (extrapolated between reports, as `NowPlaying` is), paused, duration, streams, the chosen audio and subtitle, and volume and mute (from `RECEIVER_STATUS` and `volumechange`). `reconnecting` is set while a dropped connection is being retried.
+  - The connection's task (`run`/`join`) launches the receiver, then relays until it ends; a lost connection retries with backoff (`Reconnect`), and the `Identify` after each rejoin restores the state. Another sender's `MEDIA_STATUS` is followed once the custom messages go quiet.
   - It also holds the credentials it sends: the token, `serverAddress` with the loopback fix, and the receiver id from `/Users/Me`.
 - `impl Services`: casting redirects the existing entry points, the same way SyncPlay does with `in_group()`.
   - `play`, `play_all_with`, `enqueue` and `play_now` become `PlayNow` or `PlayLast`. Items become stubs; `PlayOptions`' start, version, audio and subtitle go in the `PlayRequest`.
@@ -122,8 +135,9 @@ The look below was settled with mockups.
 
 - A **cast button** (`cast` icon, `cast_connected` and lit while casting) sits in the top bar just left of SyncPlay. It shows only when a device has been found or something is casting.
   - **Its panel** is built like SyncPlay's (`popup::panel`). Its heading is *Cast to a TV*, with a *Casting* status dot while casting, and a line saying what the panel does.
-  - **The devices** are listed under an *On this network* overline, as one `list_row::block` of `ListRow`s. Each row has a TV icon (a group's is `speaker_group`), the device's name, and its model or *Group · N TVs* at the right.
+  - **The devices** are listed under an *On this network* overline, as one `list_row::block` of `ListRow`s. Each row has a TV icon (a group's is `speaker_group`), the device's name, and its model or *Group* at the right (mDNS doesn't say how many TVs a group has).
   - **The TV in use** is highlighted, with a `brand` `cast_connected` icon and *Casting*.
+  - **A TV whose ad says Jellyfin's receiver is running** says *Reconnect to <name>* rather than *Cast to <name>*, with *Jellyfin is running* where the model goes: picking it brings back what the TV plays.
   - **While casting**, a quiet *Disconnect* and a quiet-danger *Stop casting* sit under the list.
 - **While casting**, the player page draws `Casting` instead of `NowPlaying`.
   - **It keeps today's player layout.** Where the video was, it shows the item's backdrop, dimmed (`over_video::VEIL`). In the middle, a `cast_connected` mark in a dark circle sits over *Playing on <TV>* (`xl`) and the TV's model (`sm`, muted).
@@ -137,15 +151,18 @@ The look below was settled with mockups.
 
 ### Android
 
-- Add `CHANGE_WIFI_MULTICAST_STATE` to the manifest. The Java `MainActivity` holds a `WifiManager.MulticastLock` while discovery runs, called through JNI (`jni-sys`, as the player crate does). If `mdns-sd` proves unreliable on phones, `NsdManager` takes its place behind `discovery.rs`.
-- In the background the cast keeps playing on the TV. Our connection may be dropped, so returning to the app reconnects (below).
-- The volume keys set the TV's volume while casting.
+- Add `CHANGE_WIFI_MULTICAST_STATE` to the manifest. The Java `MainActivity` holds a `WifiManager.MulticastLock` (`tabbyfin-cast`, reference counted: a parked session and the account being added discover at once) while discovery runs, called through JNI (`jni-sys`, as the player crate does): `android.rs` has the calls, and a guard in `cast.rs` takes the lock before the mDNS browse starts and lets it go when the browse is dropped (sign-out, an offline session, quitting). Both are logged (`cast: multicast lock held=true`), since a phone that finds no TV is usually a lock that wasn't held. If `mdns-sd` proves unreliable on phones, `NsdManager` takes its place behind `discovery.rs`.
+- **The volume keys set the TV's volume while casting**, a step a press (5 %, as the player's own keys), and Android's own volume UI has them when nothing is casting. `MainActivity.dispatchKeyEvent` asks Rust first: `nativeCastVolume(direction)` answers whether the app is casting (a flag the app updates each frame, like Back's) and, if it is, queues the step, which `App::logic` drains into the `UiCommand::SetVolume` the casting player's volume keys send. A held key's repeats each count as a press, and the press's release is taken with it. Each key is logged at debug level with whether the app was casting. There's no toast; the casting player's volume bar shows the TV's level as the receiver reports it.
+- **In the background the cast keeps playing on the TV.** The connection runs on tokio, detached from frames: the heartbeat is the channel's own task, commands go into an unbounded channel, and updates into an unbounded `task::channel` that `Services::tick` drains in `App::logic`. Android stops drawing an app's frames once it's in the background, so `tick` may not run at all; nothing the connection does waits for it, and the reports that piled up are taken in one frame when the app comes back. Our connection may still be dropped there, so returning to the app reconnects (below).
+- **When the cast ends while the app is backgrounded** — the receiver stopped, or the retries ran out — that shows when the app comes back: the same toast (*<TV> stopped casting*, or *Lost the connection*) and the player closes, which is the ended state the foreground would have shown.
 
 ## Staying connected
 
-- **A dropped connection reconnects with backoff.** We `GET_STATUS`; if the receiver is still running, we `CONNECT` to its `transportId` and send `Identify`, which answers with the state.
-- **At launch**, a found device whose `rs` or status shows the Jellyfin receiver offers *Reconnect* in the cast panel. Reconnecting doesn't happen on its own.
-- **Another sender takes over** when the custom messages stop and `MEDIA_STATUS` shows another item. We keep following through `MEDIA_STATUS` until we send a command again.
+- **A dropped connection is retried with backoff.** The connection task keeps the command channel, so the UI and the session go on as before: after a loss it waits 1 s, then 2 s, 4 s, 8 s and 16 s (capped, five tries, or until *Stop casting* or *Disconnect* comes in, which ends it at once). Each try connects to the device and asks `GET_STATUS`; if the Jellyfin receiver is still listed, it `CONNECT`s to that app's `transportId` and sends `Identify`, whose answer restores the item, position and pause state. If the receiver isn't running any more, the cast ends as *<TV> stopped casting*; if the tries run out, with the usual *Lost the connection* toast. While it retries, the now-casting bar and the casting player say *Reconnecting to <TV>…* and the cast panel's status dot says *Reconnecting*. Commands made in the meantime (volume, pause) aren't replayed: the `Identify` answer is the truth. A reconnect doesn't launch anything over a running receiver.
+- **At launch, a device whose ad says the receiver is running offers *Reconnect*.** The signal is mDNS's `rs` TXT field, the app the device advertises, which flow discovery already carries: no extra connection per device, and the device re-announces it when its app changes. A device whose `rs` names Jellyfin gets a *Reconnect to <name>* row (detail *Jellyfin is running*) in the cast panel, in place of *Cast to*. Picking it is the same connect as casting from idle — the receiver is joined rather than launched, and `Identify` brings back what it plays. Nothing reconnects on its own: at launch it's an offer, and in a running cast it's the retry above.
+- **Another sender takes over** when the custom messages stop: the receiver answers only the sender of the last custom message. Once 3 s pass without one, the app follows the TV's own `MEDIA_STATUS` instead (the item and its `customData`, the position, paused and playing), kept from the last broadcast so the switch needs no new message; a status that arrived before the last custom one isn't mistaken for it. It keeps following, including an item that isn't ours, until the receiver answers this sender again — either a custom message arrives or we send a command, which makes us the last sender again.
+- **Signing out stops the cast and any retry**: the receiver plays with this session's token, which signing out revokes.
+- **Offline there's no casting.** Discovery doesn't start, the panel and the button aren't shown, and a cast can't be started; the session that replaces an offline one when the server comes back discovers normally.
 
 ## Milestones
 
@@ -159,13 +176,12 @@ The look below was settled with mockups.
 ## Testing
 
 - **Unit tests:** the codec against frames captured from a device; `Envelope`, `PlayRequest` and `ReceiverEvent` against JSON taken from the receiver's source and from a device; and the `UiCommand` → `Command` mapping.
-- **A fake device** for tests: `crates/cast/tests/` runs a TLS server with a self-signed certificate that speaks the connection, heartbeat and receiver namespaces and records the custom messages. It answers `PlayNow` with scripted `playbackprogress`. The app's UI tests drive the casting player page and the redirects against it, with no network beyond loopback.
-- **Real hardware** (to `TESTING.md` once built): a Chromecast and a Google TV, a cast group, the dev server reached by its LAN address, a transcode (the receiver's choice), track changes, next episode, two senders, the TV turned off mid-cast, and Android in the background.
-- **The dev server** must listen on the LAN, not only `localhost`, for the TV to reach it. `dev/setup-server.py`'s Docker port binding needs checking.
+- **A fake device** for tests: `crates/cast/tests/` runs a TLS server with a self-signed certificate that speaks the connection, heartbeat and receiver namespaces and records the custom messages. It answers `PlayNow` with scripted `playbackprogress`, keeps the receiver running across a dropped connection and answers the next `Identify` with what it plays, can be taken off the network, and broadcasts the device's own `MEDIA_STATUS` for another sender. The app's UI tests drive the casting player page and the redirects against it, with no network beyond loopback.
+- **Real hardware:** the checks are in `TESTING.md`, with how to reach the dev server from the TV.
 
 ## Risks
 
-- **No device on hand yet.** Everything here is from reading source; heartbeat timeouts, message size limits (about 64 KB) and mixed content (an HTTP server from the HTTPS receiver page) are unconfirmed.
+- **Only one Chromecast tried.** The frame limit and an HTTP server played from the HTTPS receiver page are confirmed on it; a Google TV, a cast group and a heartbeat held for an hour are not.
 - **Receiver quirks we can't fix:**
   - `PlayNext` appends to the end of the queue.
   - Only the last sender gets the custom messages.
