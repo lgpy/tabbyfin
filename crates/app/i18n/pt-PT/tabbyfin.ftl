@@ -512,6 +512,7 @@ dialog-playlist-forbidden = Esta lista de reprodução pertence a outra pessoa; 
 ## downloads-and-casting
 
 # As transferências, e o aviso que a plataforma mostra delas (a notificação do Android).
+downloads-title = Transferências
 downloads-empty = Ainda não há nada transferido. Transfira um filme ou um episódio a partir da respetiva página ou do menu.
 downloads-summary-done = { $count ->
     [one] { $count } transferido, { $size }

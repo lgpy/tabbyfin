@@ -53,8 +53,8 @@ enum Asked {
 }
 
 impl Page for DownloadsPage {
-    fn title(&self) -> &str {
-        "Downloads"
+    fn title(&self) -> String {
+        tr!("downloads-title")
     }
 
     fn show(&mut self, ui: &mut Ui, cx: &mut PageCx) {

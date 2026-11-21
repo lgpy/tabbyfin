@@ -1312,8 +1312,8 @@ impl Cards {
 }
 
 impl Page for Cards {
-    fn title(&self) -> &str {
-        "Cards"
+    fn title(&self) -> String {
+        "Cards".to_owned()
     }
 
     fn show(&mut self, ui: &mut Ui, cx: &mut PageCx) {

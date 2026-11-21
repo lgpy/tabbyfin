@@ -54,7 +54,7 @@ use tokio::sync::watch;
 use url::Url;
 
 use crate::config;
-use crate::i18n::tr;
+use crate::i18n::{self, tr};
 use crate::playback;
 use crate::services::Services;
 use crate::session::describe_error;
@@ -1688,7 +1688,7 @@ pub fn bytes(count: u64) -> String {
     if unit == "B" {
         format!("{count} B")
     } else {
-        format!("{value:.1} {unit}")
+        format!("{} {unit}", i18n::decimal(format!("{value:.1}")))
     }
 }
 

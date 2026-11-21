@@ -283,8 +283,6 @@ pub struct HomePage {
     /// Whether *My Media* shows: not in the compact layout, whose bottom bar leads to the
     /// libraries. Set as the page draws, for the cursor's sections too.
     my_media: bool,
-    /// The top bar's title, refreshed as the page draws so a change of language shows.
-    title: String,
 }
 
 impl Default for HomePage {
@@ -296,7 +294,6 @@ impl Default for HomePage {
             cursor: Cursor::default(),
             add_to_playlist: None,
             my_media: true,
-            title: tr!("home-title"),
         }
     }
 }
@@ -312,8 +309,8 @@ impl HomePage {
 }
 
 impl Page for HomePage {
-    fn title(&self) -> &str {
-        &self.title
+    fn title(&self) -> String {
+        tr!("home-title")
     }
 
     fn scope(&self) -> Option<Scope> {
@@ -329,7 +326,6 @@ impl Page for HomePage {
     }
 
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
-        self.title = tr!("home-title");
         if self.loaded_at != Some(cx.services.user_data) {
             self.reload(cx);
         }

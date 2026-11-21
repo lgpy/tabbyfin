@@ -431,6 +431,8 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 - The language follows the system's preferred languages (`sys-locale`; any Portuguese gets pt-PT, anything else without a translation English) unless *Settings → Appearance → Language* picks one (`config.language`). `i18n::apply` runs with the appearance, at launch and on `AppEvent::AppearanceChanged`; egui draws each frame anew, so the change shows at once, except in text kept from before (a toast already up).
 - The loader is a process-wide `LazyLock`, the app's one global: messages are made on the UI thread and on tokio's. Fluent's bidi isolation marks are off, since the fonts draw them as boxes. Tests always run in English.
 - Counts use Fluent's plural selectors, and a sentence is one message with arguments, never pieces put together, since word order differs between languages.
+- Numbers the interface writes go through `i18n::decimal` for the fraction's mark and `i18n::grouped` for thousands: English's `4.3` and `1,284`, Portugal's `4,3` and `12 840`. Portuguese groups from five digits, with a no-break space between them, since the fonts have no U+202F.
+- A page's title is made each frame with `tr!` (`Page::title` returns a `String`), so a change of language reaches the top bar on the next frame; a page named after the server's data hands back a clone.
 
 ### Window placement
 

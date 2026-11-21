@@ -24,7 +24,7 @@ use jellyfin::models::ImageType;
 
 use super::{
     PlayerPage, SEEK_STEP, SettingsChoice, SettingsTab, View, chapter_colours, control, gradient, label_badge,
-    settings_body,
+    settings_body, speed_text,
 };
 use crate::i18n::tr;
 use crate::playback::{PlayOptions, SubtitleChoice, UiCommand};
@@ -263,7 +263,7 @@ impl PlayerPage {
                     self.toggle_remaining();
                 }
                 if (view.speed - 1.).abs() > 1e-6 {
-                    label_badge(ui, &format!("{}×", view.speed));
+                    label_badge(ui, &speed_text(view.speed));
                 }
             },
         );

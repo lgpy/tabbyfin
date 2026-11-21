@@ -1618,8 +1618,8 @@ impl LibraryPage {
 }
 
 impl Page for LibraryPage {
-    fn title(&self) -> &str {
-        &self.title
+    fn title(&self) -> String {
+        self.title.clone()
     }
 
     fn scope(&self) -> Option<Scope> {

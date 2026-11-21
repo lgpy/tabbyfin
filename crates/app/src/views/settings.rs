@@ -667,8 +667,6 @@ impl Search {
 }
 
 pub struct SettingsPage {
-    /// The top bar's title: this page's, or the one section's, in the interface's language.
-    title: String,
     /// The config as this page last read or wrote it, for the controls' values. A change reads
     /// the file again rather than writing this copy back.
     config: Config,
@@ -706,7 +704,6 @@ enum Job {
 impl SettingsPage {
     pub fn new() -> Self {
         Self {
-            title: Self::title_for(None),
             config: Config::load(),
             job: None,
             pickers: Pickers::default(),
@@ -724,7 +721,6 @@ impl SettingsPage {
     /// A phone's page for one section.
     pub fn for_section(section: Section) -> Self {
         Self {
-            title: Self::title_for(Some(section)),
             only: Some(section),
             section,
             ..Self::new()
@@ -751,8 +747,6 @@ impl SettingsPage {
     /// the animations are the app's, not the session's, so they apply on every screen.
     fn save_appearance(&mut self, cx: &mut PageCx, change: impl FnOnce(&mut Config)) {
         self.save(change);
-        // The language is one of these, and the title is the page's own text.
-        self.title = Self::title_for(self.only);
         cx.services.events.push(AppEvent::AppearanceChanged);
     }
 
@@ -845,8 +839,8 @@ impl Default for SettingsPage {
 }
 
 impl Page for SettingsPage {
-    fn title(&self) -> &str {
-        &self.title
+    fn title(&self) -> String {
+        Self::title_for(self.only)
     }
 
     /// A section's own page has nothing to search but what it shows.

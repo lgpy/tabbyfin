@@ -53,8 +53,6 @@ pub struct SearchPage {
     width: f32,
     /// *Add to playlist…* from a card's menu, while it's open.
     add_to_playlist: Option<AddToPlaylist>,
-    /// The top bar's title, refreshed as the page draws so a change of language shows.
-    title: String,
 }
 
 impl Default for SearchPage {
@@ -67,7 +65,6 @@ impl Default for SearchPage {
             cursor: Cursor::default(),
             width: 0.,
             add_to_playlist: None,
-            title: tr!("search-title"),
         }
     }
 }
@@ -109,8 +106,8 @@ impl SearchPage {
 }
 
 impl Page for SearchPage {
-    fn title(&self) -> &str {
-        &self.title
+    fn title(&self) -> String {
+        tr!("search-title")
     }
 
     fn scope(&self) -> Option<Scope> {
@@ -151,7 +148,6 @@ impl Page for SearchPage {
     }
 
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
-        self.title = tr!("search-title");
         if self.debounce.fire(cx.ctx) {
             self.search_now(cx);
         }

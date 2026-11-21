@@ -51,7 +51,7 @@ use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
 
 use crate::cast::Casting;
-use crate::i18n::tr;
+use crate::i18n::{self, tr};
 use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::motion;
@@ -941,7 +941,7 @@ impl PlayerPage {
                     self.toggle_remaining();
                 }
                 if (view.speed - 1.).abs() > 1e-6 {
-                    label_badge(ui, &format!("{}×", view.speed));
+                    label_badge(ui, &speed_text(view.speed));
                 }
             },
         );
@@ -1945,13 +1945,19 @@ fn next_tip(item: &jellyfin::models::BaseItemDto) -> String {
 /// Under this many seconds a delay reads as zero.
 const DELAY_ZERO: f64 = 0.05;
 
+/// A playback speed as the player writes it: "1.5×", "0.75×", with the language's decimal mark.
+fn speed_text(speed: f64) -> String {
+    format!("{}×", i18n::decimal(speed.to_string()))
+}
+
 /// A settings value's step: "0.0 s" at zero, "+0.3 s" and "−0.1 s" otherwise.
 fn delay_text(seconds: f64) -> String {
-    if seconds.abs() < DELAY_ZERO {
-        "0.0 s".to_owned()
+    let text = if seconds.abs() < DELAY_ZERO {
+        "0.0".to_owned()
     } else {
-        format!("{seconds:+.1} s")
-    }
+        format!("{seconds:+.1}")
+    };
+    format!("{} s", i18n::decimal(text))
 }
 
 /// The player's settings menu, in egui's popup memory.
@@ -2271,7 +2277,7 @@ fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab)
 
 /// The speed choices, the chosen one in the player's lilac. Returns the speed clicked.
 fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
-    let labels = Adjustments::SPEEDS.map(|speed| format!("{speed}×"));
+    let labels = Adjustments::SPEEDS.map(speed_text);
     let chosen = Adjustments::SPEEDS
         .iter()
         .position(|speed| (speed - current).abs() < 1e-6);

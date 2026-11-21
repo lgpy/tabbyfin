@@ -110,11 +110,85 @@ pub fn apply(language: Language) {
     select(&LOADER, language);
 }
 
+/// How a language writes a number: the mark before its fraction, the separator between its
+/// groups of thousands, and the fewest digits that take one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Separators {
+    decimal: char,
+    group: char,
+    group_from: usize,
+}
+
+impl Language {
+    fn separators(self) -> Separators {
+        match self {
+            Language::English => Separators {
+                decimal: '.',
+                group: ',',
+                // English groups four digits: "1,284".
+                group_from: 4,
+            },
+            Language::PortuguesePortugal => Separators {
+                decimal: ',',
+                // A no-break space keeps a number together across a line break. The app draws
+                // with egui's built-in Ubuntu, which has U+00A0; U+202F, the narrow space the
+                // Portuguese norm prefers, isn't in it.
+                group: '\u{a0}',
+                // Portuguese leaves four digits together: "1284", "12 840".
+                group_from: 5,
+            },
+        }
+    }
+}
+
+/// The language the loader last selected, the one [`tr!`] reads.
+pub fn current() -> Language {
+    let id = LOADER.current_languages().first().map(ToString::to_string);
+    Language::ALL
+        .into_iter()
+        .find(|language| id.as_deref() == Some(language.id()))
+        .unwrap_or(Language::English)
+}
+
+/// A number Rust formatted with `.` before its fraction, in the interface's language: `4,3`
+/// for Portuguese, `4.3` for English.
+pub fn decimal(text: impl AsRef<str>) -> String {
+    decimal_in(current(), text)
+}
+
+/// [`decimal`] in `language`, for tests and anything holding its own language.
+pub fn decimal_in(language: Language, text: impl AsRef<str>) -> String {
+    let mark = language.separators().decimal.to_string();
+    text.as_ref().replace('.', &mark)
+}
+
+/// `count` with its thousands grouped the interface's language's way.
+pub fn grouped(count: u64) -> String {
+    grouped_in(current(), count)
+}
+
+/// [`grouped`] in `language`.
+pub fn grouped_in(language: Language, count: u64) -> String {
+    let separators = language.separators();
+    let digits = count.to_string();
+    if digits.len() < separators.group_from {
+        return digits;
+    }
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(separators.group);
+        }
+        out.push(digit);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use super::{Language, Translations};
+    use super::{Language, Translations, decimal_in, grouped_in};
 
     fn file(language: Language) -> String {
         let path = format!("{}/tabbyfin.ftl", language.id());
@@ -185,6 +259,25 @@ mod tests {
         assert_eq!(Language::for_locale("pt_BR.UTF-8"), Some(Language::PortuguesePortugal));
         assert_eq!(Language::for_locale("en-US"), Some(Language::English));
         assert_eq!(Language::for_locale("de-DE"), None);
+    }
+
+    /// Numbers are written each language's way; the tests name the language rather than switch
+    /// the loader they share with every other test.
+    #[test]
+    fn numbers_follow_the_language() {
+        assert_eq!(decimal_in(Language::English, "4.3"), "4.3");
+        assert_eq!(decimal_in(Language::English, "+0.3"), "+0.3");
+        assert_eq!(decimal_in(Language::PortuguesePortugal, "4.3"), "4,3");
+        assert_eq!(decimal_in(Language::PortuguesePortugal, "+0.3"), "+0,3");
+        assert_eq!(grouped_in(Language::English, 999), "999");
+        assert_eq!(grouped_in(Language::English, 1284), "1,284");
+        assert_eq!(grouped_in(Language::English, 1_000_000), "1,000,000");
+        assert_eq!(grouped_in(Language::PortuguesePortugal, 1284), "1284");
+        assert_eq!(grouped_in(Language::PortuguesePortugal, 12_840), "12\u{a0}840");
+        assert_eq!(
+            grouped_in(Language::PortuguesePortugal, 1_000_000),
+            "1\u{a0}000\u{a0}000"
+        );
     }
 
     #[test]

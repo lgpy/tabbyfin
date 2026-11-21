@@ -1089,7 +1089,7 @@ impl Shell {
         let can_go_back = self.can_go_back();
         let keyboard = self.bar_key;
         let in_group = cx.services.in_group();
-        let title = self.top().title().to_owned();
+        let title = self.top().title();
         let logo = self.logo.clone();
         let gap = ui.spacing().item_spacing.x;
 
@@ -1197,7 +1197,7 @@ impl Shell {
         let own_searching = self.own_search.is_some()
             && (self.search_focused || self.want_search_focus || !self.search_text.trim().is_empty());
         let searching = self.top_is_search() || own_searching;
-        let title = self.top().title().to_owned();
+        let title = self.top().title();
         let logo = self.logo.clone();
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), COMPACT_BAR_H), Sense::hover());
         ui.scope_builder(

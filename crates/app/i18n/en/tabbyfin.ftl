@@ -515,6 +515,7 @@ dialog-playlist-forbidden = This playlist belongs to someone else; it can't be c
 # as a new message.
 
 # The downloads page, and the platform's notice of the transfers (Android's notification).
+downloads-title = Downloads
 downloads-empty = Nothing downloaded yet. Download a movie or an episode from its page or its menu.
 downloads-summary-done = { $count ->
     [one] { $count } downloaded, { $size }

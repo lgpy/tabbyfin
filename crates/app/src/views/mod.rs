@@ -71,8 +71,8 @@ impl UnderBar {
 }
 
 pub trait Page {
-    /// The top bar's title while the page is on top.
-    fn title(&self) -> &str;
+    /// The top bar's title while the page is on top, in the interface's language.
+    fn title(&self) -> String;
 
     /// The key bindings the page uses, besides the shell's (`keys.rs`). `None` leaves Tab, the
     /// arrows, Space and Enter to egui's own focus, for a page of ordinary controls.

@@ -35,7 +35,7 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ItemField, ItemSo
 use jellyfin::{Client, ItemsQuery, Ticks};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
-use crate::i18n::tr;
+use crate::i18n::{self, tr};
 use crate::item_menu::{
     Mark, PlaylistEdit, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played,
     resume_point,
@@ -102,7 +102,7 @@ pub fn meta_line(item: &BaseItemDto) -> String {
         parts.push(rating.clone());
     }
     if let Some(score) = item.community_rating {
-        parts.push(format!("★ {score:.1}"));
+        parts.push(format!("★ {}", i18n::decimal(format!("{score:.1}"))));
     }
     parts.join(" · ")
 }
@@ -1205,8 +1205,8 @@ fn versions_menu_id(ui: &Ui) -> Id {
 }
 
 impl Page for ItemPage {
-    fn title(&self) -> &str {
-        &self.name
+    fn title(&self) -> String {
+        self.name.clone()
     }
 
     fn scope(&self) -> Option<Scope> {

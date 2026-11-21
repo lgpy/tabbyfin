@@ -21,8 +21,8 @@ enum Dialog {
 }
 
 impl Page for Host {
-    fn title(&self) -> &str {
-        "Dialog"
+    fn title(&self) -> String {
+        "Dialog".to_owned()
     }
 
     fn show(&mut self, _ui: &mut egui::Ui, cx: &mut PageCx) {
