@@ -64,28 +64,41 @@ use crate::widgets::round_button::RoundButton;
 use crate::widgets::{backdrop, pill, select, surface, toggle};
 
 /// The theme choices, in the order the picker lists them.
-const THEMES: [(ThemePreference, &str); 3] = [
-    (ThemePreference::System, "Follow the system"),
-    (ThemePreference::Light, "Light"),
-    (ThemePreference::Dark, "Dark"),
-];
+fn themes() -> [(ThemePreference, String); 3] {
+    [
+        (ThemePreference::System, tr!("settings-theme-system")),
+        (ThemePreference::Light, tr!("settings-theme-light")),
+        (ThemePreference::Dark, tr!("settings-theme-dark")),
+    ]
+}
 
-const SUBTITLE_COLORS: [(SubtitleColor, &str); 2] =
-    [(SubtitleColor::White, "White"), (SubtitleColor::Yellow, "Yellow")];
+fn subtitle_colors() -> [(SubtitleColor, String); 2] {
+    [
+        (SubtitleColor::White, tr!("settings-color-white")),
+        (SubtitleColor::Yellow, tr!("settings-color-yellow")),
+    ]
+}
 
+/// The players' names are their own, so they read the same in every language.
 const PLAYERS: [(AndroidPlayer, &str); 2] = [(AndroidPlayer::Media3, "Media3"), (AndroidPlayer::Mpv, "mpv")];
 
-const SUBTITLE_STYLES: [(SubtitleStyle, &str); 2] =
-    [(SubtitleStyle::Outline, "Outline"), (SubtitleStyle::Box, "Dark box")];
+fn subtitle_styles() -> [(SubtitleStyle, String); 2] {
+    [
+        (SubtitleStyle::Outline, tr!("settings-style-outline")),
+        (SubtitleStyle::Box, tr!("settings-style-box")),
+    ]
+}
 
 /// The server's subtitle modes, in the web client's order.
-const SUBTITLE_MODES: [(SubtitleMode, &str); 5] = [
-    (SubtitleMode::Default, "Default"),
-    (SubtitleMode::Smart, "Smart"),
-    (SubtitleMode::OnlyForced, "Only forced"),
-    (SubtitleMode::Always, "Always"),
-    (SubtitleMode::Off, "None"),
-];
+fn subtitle_modes() -> [(SubtitleMode, String); 5] {
+    [
+        (SubtitleMode::Default, tr!("settings-mode-default")),
+        (SubtitleMode::Smart, tr!("settings-mode-smart")),
+        (SubtitleMode::OnlyForced, tr!("settings-mode-only-forced")),
+        (SubtitleMode::Always, tr!("settings-mode-always")),
+        (SubtitleMode::Off, tr!("settings-mode-none")),
+    ]
+}
 
 /// Subtitle sizes offered here; the player's menu sets any size in 10 % steps.
 const SUBTITLE_SCALES: [f64; 6] = [0.75, 1., 1.25, 1.5, 1.75, 2.];
@@ -137,10 +150,10 @@ enum Store {
 impl Store {
     const ALL: [Store; 2] = [Store::Device, Store::Server];
 
-    fn title(self) -> &'static str {
+    fn title(self) -> String {
         match self {
-            Store::Device => "This device",
-            Store::Server => "Jellyfin server",
+            Store::Device => tr!("settings-store-device"),
+            Store::Server => tr!("settings-store-server"),
         }
     }
 
@@ -202,32 +215,32 @@ impl Section {
         }
     }
 
-    fn title(self) -> &'static str {
+    fn title(self) -> String {
         match self {
-            Section::Appearance => "Appearance",
-            Section::Playback => "Playback",
-            Section::Subtitles => "Subtitles",
-            Section::Downloads => "Downloads",
-            Section::Storage => "Storage",
-            Section::About => "About",
-            Section::Account => "Account",
-            Section::Languages => "Languages",
-            Section::Home => "Home",
+            Section::Appearance => tr!("settings-section-appearance"),
+            Section::Playback => tr!("settings-section-playback"),
+            Section::Subtitles => tr!("settings-section-subtitles"),
+            Section::Downloads => tr!("settings-section-downloads"),
+            Section::Storage => tr!("settings-section-storage"),
+            Section::About => tr!("settings-section-about"),
+            Section::Account => tr!("settings-section-account"),
+            Section::Languages => tr!("settings-section-languages"),
+            Section::Home => tr!("settings-section-home"),
         }
     }
 
     /// What the section has, under its title in a phone's list of sections.
-    fn summary(self) -> &'static str {
+    fn summary(self) -> String {
         match self {
-            Section::Appearance => "Theme, text size, animations and language",
-            Section::Playback => "Next episode, intros, quality and the player",
-            Section::Subtitles => "Colour, style and size",
-            Section::Downloads => "Wi-Fi only, and where they're kept",
-            Section::Storage => "Image cache and logs",
-            Section::About => "Version and updates",
-            Section::Account => "Who's signed in, and the server",
-            Section::Languages => "Audio and subtitle tracks",
-            Section::Home => "What Home's rows show",
+            Section::Appearance => tr!("settings-section-appearance-summary"),
+            Section::Playback => tr!("settings-section-playback-summary"),
+            Section::Subtitles => tr!("settings-section-subtitles-summary"),
+            Section::Downloads => tr!("settings-section-downloads-summary"),
+            Section::Storage => tr!("settings-section-storage-summary"),
+            Section::About => tr!("settings-section-about-summary"),
+            Section::Account => tr!("settings-section-account-summary"),
+            Section::Languages => tr!("settings-section-languages-summary"),
+            Section::Home => tr!("settings-section-home-summary"),
         }
     }
 
@@ -252,328 +265,364 @@ impl Section {
 ///
 /// A row with no label is a note (only its description), and one with no description or key
 /// is information with nothing to change.
-#[derive(Clone, Copy)]
-struct Row<'a> {
+///
+/// The text is in the interface's language, so a row is made when it's drawn: one kept from an
+/// earlier frame would stay in the language it was made in.
+struct Row {
     section: Section,
-    label: &'a str,
-    description: &'a str,
+    label: String,
+    description: String,
     /// The config key, the server's field, or what the row is about when nothing is saved.
-    key: &'a str,
+    key: &'static str,
     /// The value while the key is unset; empty for a row with nothing to save, and for the
     /// server's, which always has a value.
-    unset: &'a str,
+    unset: String,
 }
 
-const LANGUAGE: Row = Row {
-    section: Section::Appearance,
-    label: "Language",
-    description: "The app's language. Applies at once.",
-    key: "language",
-    unset: "the system language",
-};
-const THEME: Row = Row {
-    section: Section::Appearance,
-    label: "Theme",
-    description: "Dark, light, or the desktop's colour scheme. Applies at once.",
-    key: "theme",
-    unset: "dark",
-};
-const TEXT_SIZE: Row = Row {
-    section: Section::Appearance,
-    label: "Text size",
-    description: "Scales the app's text and controls, not its layout. Applies at once.",
-    key: "text_size",
-    unset: "the system text size",
-};
-const ANIMATIONS: Row = Row {
-    section: Section::Appearance,
-    label: "Animations",
-    description: "Animations and smooth scrolling. Applies at once.",
-    key: "animations",
-    unset: "on",
-};
+fn language_row() -> Row {
+    Row {
+        section: Section::Appearance,
+        label: tr!("settings-language"),
+        description: tr!("settings-language-description"),
+        key: "language",
+        unset: tr!("settings-language-unset"),
+    }
+}
+fn theme_row() -> Row {
+    Row {
+        section: Section::Appearance,
+        label: tr!("settings-theme"),
+        description: tr!("settings-theme-description"),
+        key: "theme",
+        unset: tr!("settings-theme-unset"),
+    }
+}
+fn text_size_row() -> Row {
+    Row {
+        section: Section::Appearance,
+        label: tr!("settings-text-size"),
+        description: tr!("settings-text-size-description"),
+        key: "text_size",
+        unset: tr!("settings-text-size-unset"),
+    }
+}
+fn animations_row() -> Row {
+    Row {
+        section: Section::Appearance,
+        label: tr!("settings-animations"),
+        description: tr!("settings-animations-description"),
+        key: "animations",
+        unset: tr!("settings-animations-unset"),
+    }
+}
 
-const TRACKS_NOTE: Row = Row {
-    section: Section::Playback,
-    label: "",
-    description: "Which audio and subtitle tracks an item starts with is kept on the server, for every app \
-                  you use.",
-    key: "",
-    unset: "",
-};
-const AUTOPLAY: Row = Row {
-    section: Section::Playback,
-    label: "Play the next episode automatically",
-    description: "When an episode ends, so the player stays open. From the next item on.",
-    key: "autoplay_next_episode",
-    unset: "on",
-};
-const SKIP_INTRO: Row = Row {
-    section: Section::Playback,
-    label: "Skip intros and recaps automatically",
-    description: "Each intro or recap once as it starts, never in a SyncPlay group. From the next item on.",
-    key: "auto_skip_intro",
-    unset: "off",
-};
-const BITRATE: Row = Row {
-    section: Section::Playback,
-    label: "Max streaming bitrate",
-    description: "Videos above this bitrate are transcoded by the server. Lower it for slow connections. \
-                  Automatic measures the connection before playing (at most every 10 minutes) and uses 80% of \
-                  it, keeping the cap for when it's turned off. Read when the next \
-                  item starts.",
-    key: "max_streaming_bitrate",
-    unset: "no limit",
-};
-const CAST_BITRATE: Row = Row {
-    section: Section::Playback,
-    label: "Chromecast bitrate",
-    description: "The most a Chromecast or Google TV streams at when you cast to it; the server transcodes \
-                  anything above it. Automatic leaves it to the TV, which measures its connection. Sent with \
-                  the next command to the TV, which keeps it until it's changed.",
-    key: "cast_max_bitrate",
-    unset: "automatic",
-};
-const PLAYER: Row = Row {
-    section: Section::Playback,
-    label: "Player",
-    description: "Media3 plays with Android's own decoders, keeps HDR and uses the least battery. mpv plays \
-                  more kinds of files, and shows styled (ASS) subtitles as they were made. Read when the next \
-                  item starts.",
-    key: "android_player",
-    unset: "Media3",
-};
-const HEVC: Row = Row {
-    section: Section::Playback,
-    label: "Ask for HEVC when the server transcodes",
-    description: "HEVC needs half the bandwidth of H.264 for the same picture, but is much harder for the \
-                  server to encode. Used only if the server allows it (Dashboard › Playback › Transcoding). \
-                  Read when the next item starts.",
-    key: "prefer_hevc",
-    unset: "off",
-};
+fn tracks_note_row() -> Row {
+    note_row(Section::Playback, tr!("settings-tracks-note"))
+}
+fn autoplay_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-autoplay"),
+        description: tr!("settings-autoplay-description"),
+        key: "autoplay_next_episode",
+        unset: tr!("settings-autoplay-unset"),
+    }
+}
+fn skip_intro_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-skip-intro"),
+        description: tr!("settings-skip-intro-description"),
+        key: "auto_skip_intro",
+        unset: tr!("settings-skip-intro-unset"),
+    }
+}
+fn bitrate_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-bitrate"),
+        description: tr!("settings-bitrate-description"),
+        key: "max_streaming_bitrate",
+        unset: tr!("settings-bitrate-unset"),
+    }
+}
+fn cast_bitrate_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-cast-bitrate"),
+        description: tr!("settings-cast-bitrate-description"),
+        key: "cast_max_bitrate",
+        unset: tr!("settings-cast-bitrate-unset"),
+    }
+}
+fn player_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-player"),
+        description: tr!("settings-player-description"),
+        key: "android_player",
+        unset: tr!("settings-player-unset"),
+    }
+}
+fn hevc_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-hevc"),
+        description: tr!("settings-hevc-description"),
+        key: "prefer_hevc",
+        unset: tr!("settings-hevc-unset"),
+    }
+}
 
-const SUBTITLES_NOTE: Row = Row {
-    section: Section::Subtitles,
-    label: "",
-    description: "How text subtitles such as SRT look; styled (ASS) subtitles keep their own look and only \
-                  change size. The player's settings menu also changes the size while watching.",
-    key: "",
-    unset: "",
-};
-const SUBTITLE_TRACKS_NOTE: Row = Row {
-    section: Section::Subtitles,
-    label: "",
-    description: "Which subtitles turn on by themselves, and in which language, is kept on the server.",
-    key: "",
-    unset: "",
-};
-const SUBTITLE_COLOR: Row = Row {
-    section: Section::Subtitles,
-    label: "Colour",
-    description: "Of text subtitles. Read when the next item starts.",
-    key: "subtitle_color",
-    unset: "white",
-};
-const SUBTITLE_STYLE: Row = Row {
-    section: Section::Subtitles,
-    label: "Style",
-    description: "An outline, or a translucent dark box, behind text subtitles. Read when the next item starts.",
-    key: "subtitle_style",
-    unset: "outline",
-};
-const SUBTITLE_SIZE: Row = Row {
-    section: Section::Subtitles,
-    label: "Size",
-    description: "Shared with the player's settings menu. Goes to the playback manager at once, so a running \
-                  session changes with it.",
-    key: "subtitle_scale",
-    unset: "100 %",
-};
+fn subtitles_note_row() -> Row {
+    note_row(Section::Subtitles, tr!("settings-subtitles-note"))
+}
+fn subtitle_tracks_note_row() -> Row {
+    note_row(Section::Subtitles, tr!("settings-subtitle-tracks-note"))
+}
+fn subtitle_color_row() -> Row {
+    Row {
+        section: Section::Subtitles,
+        label: tr!("settings-subtitle-color"),
+        description: tr!("settings-subtitle-color-description"),
+        key: "subtitle_color",
+        unset: tr!("settings-subtitle-color-unset"),
+    }
+}
+fn subtitle_style_row() -> Row {
+    Row {
+        section: Section::Subtitles,
+        label: tr!("settings-subtitle-style"),
+        description: tr!("settings-subtitle-style-description"),
+        key: "subtitle_style",
+        unset: tr!("settings-subtitle-style-unset"),
+    }
+}
+fn subtitle_size_row() -> Row {
+    Row {
+        section: Section::Subtitles,
+        label: tr!("settings-subtitle-size"),
+        description: tr!("settings-subtitle-size-description"),
+        key: "subtitle_scale",
+        unset: tr!("settings-subtitle-size-unset"),
+    }
+}
 
-const WIFI_ONLY: Row = Row {
-    section: Section::Downloads,
-    label: "Download over Wi-Fi only",
-    description: "On mobile data, downloads wait for Wi-Fi, and one under way stops and carries on from where \
-                  it was once Wi-Fi is back. Applies at once.",
-    key: "download_wifi_only",
-    unset: "on",
-};
+fn wifi_only_row() -> Row {
+    Row {
+        section: Section::Downloads,
+        label: tr!("settings-wifi-only"),
+        description: tr!("settings-wifi-only-description"),
+        key: "download_wifi_only",
+        unset: tr!("settings-wifi-only-unset"),
+    }
+}
 /// Its smaller line shows the folder, as the storage rows do.
-const DOWNLOADS_FOLDER: Row = Row {
-    section: Section::Downloads,
-    label: "Downloads folder",
-    description: "The app's own folder on the phone's shared storage. Uninstalling the app deletes it.",
-    key: "",
-    unset: "",
-};
+fn downloads_folder_row() -> Row {
+    Row {
+        section: Section::Downloads,
+        label: tr!("settings-downloads-folder"),
+        description: tr!("settings-downloads-folder-description"),
+        key: "",
+        unset: String::new(),
+    }
+}
 
 /// The storage rows' smaller line shows the folder, which [`SettingsPage::storage`] fills in.
-const IMAGE_CACHE: Row = Row {
-    section: Section::Storage,
-    label: "Image cache",
-    description: "Posters and backdrops are kept here and reload as pages ask for them again.",
-    key: "",
-    unset: "",
-};
-const LOGS: Row = Row {
-    section: Section::Storage,
-    label: "Logs",
-    description: "A log file is written each day. Attach it to bug reports.",
-    key: "",
-    unset: "",
-};
+fn image_cache_row() -> Row {
+    Row {
+        section: Section::Storage,
+        label: tr!("settings-image-cache"),
+        description: tr!("settings-image-cache-description"),
+        key: "",
+        unset: String::new(),
+    }
+}
+fn logs_row() -> Row {
+    Row {
+        section: Section::Storage,
+        label: tr!("settings-logs"),
+        description: tr!("settings-logs-description"),
+        key: "",
+        unset: String::new(),
+    }
+}
 
-const VERSION: Row = info_row(Section::About, "Version");
-const CHECK_FOR_UPDATES: Row = Row {
-    section: Section::About,
-    label: "Tell me when a new version is out",
-    description: "Checks the GitHub releases once a day, when the app starts.",
-    key: "check_for_updates",
-    unset: "on",
-};
+fn version_row() -> Row {
+    info_row(Section::About, tr!("settings-version"))
+}
+fn check_for_updates_row() -> Row {
+    Row {
+        section: Section::About,
+        label: tr!("settings-check-for-updates"),
+        description: tr!("settings-check-for-updates-description"),
+        key: "check_for_updates",
+        unset: tr!("settings-check-for-updates-unset"),
+    }
+}
 
-const USER: Row = info_row(Section::Account, "User");
-const SERVER: Row = info_row(Section::Account, "Server");
-const ADDRESS: Row = info_row(Section::Account, "Address");
-const SERVER_VERSION: Row = info_row(Section::Account, "Jellyfin version");
+fn user_row() -> Row {
+    info_row(Section::Account, tr!("settings-user"))
+}
+fn server_row() -> Row {
+    info_row(Section::Account, tr!("settings-server"))
+}
+fn address_row() -> Row {
+    info_row(Section::Account, tr!("settings-address"))
+}
+fn server_version_row() -> Row {
+    info_row(Section::Account, tr!("settings-server-version"))
+}
 
-const LANGUAGES_NOTE: Row = Row {
-    section: Section::Languages,
-    label: "",
-    description: "The server picks the tracks an item starts with from these. The player's menus change them \
-                  while watching. From the next item on.",
-    key: "",
-    unset: "",
-};
-const AUDIO_LANGUAGE: Row = Row {
-    section: Section::Languages,
-    label: "Audio language",
-    description: "The audio track in this language, when the file has one.",
-    key: "AudioLanguagePreference",
-    unset: "",
-};
-const PLAY_DEFAULT_AUDIO: Row = Row {
-    section: Section::Languages,
-    label: "Play the default audio track",
-    description: "The track the file marks as default, whatever its language.",
-    key: "PlayDefaultAudioTrack",
-    unset: "",
-};
-const REMEMBER_AUDIO: Row = Row {
-    section: Section::Languages,
-    label: "Remember the audio track I pick",
-    description: "A track picked by hand is picked again for the next episodes of the series.",
-    key: "RememberAudioSelections",
-    unset: "",
-};
-const SUBTITLE_LANGUAGE: Row = Row {
-    section: Section::Languages,
-    label: "Subtitle language",
-    description: "The language the subtitle mode looks for.",
-    key: "SubtitleLanguagePreference",
-    unset: "",
-};
-const SUBTITLE_MODE: Row = Row {
-    section: Section::Languages,
-    label: "Subtitle mode",
-    description: "Which subtitles turn on by themselves. Default: the ones the file marks as default or \
-                  forced. Smart: the subtitle language's when the audio is in another. Only forced: forced \
-                  ones only. Always: the subtitle language's whatever the audio. None: none until one is \
-                  picked.",
-    key: "SubtitleMode",
-    unset: "",
-};
-const REMEMBER_SUBTITLES: Row = Row {
-    section: Section::Languages,
-    label: "Remember the subtitles I pick",
-    description: "Subtitles picked by hand, or turned off, are picked again for the next episodes of the \
-                  series.",
-    key: "RememberSubtitleSelections",
-    unset: "",
-};
+fn languages_note_row() -> Row {
+    note_row(Section::Languages, tr!("settings-languages-note"))
+}
+fn audio_language_row() -> Row {
+    Row {
+        section: Section::Languages,
+        label: tr!("settings-audio-language"),
+        description: tr!("settings-audio-language-description"),
+        key: "AudioLanguagePreference",
+        unset: String::new(),
+    }
+}
+fn play_default_audio_row() -> Row {
+    Row {
+        section: Section::Languages,
+        label: tr!("settings-play-default-audio"),
+        description: tr!("settings-play-default-audio-description"),
+        key: "PlayDefaultAudioTrack",
+        unset: String::new(),
+    }
+}
+fn remember_audio_row() -> Row {
+    Row {
+        section: Section::Languages,
+        label: tr!("settings-remember-audio"),
+        description: tr!("settings-remember-audio-description"),
+        key: "RememberAudioSelections",
+        unset: String::new(),
+    }
+}
+fn subtitle_language_row() -> Row {
+    Row {
+        section: Section::Languages,
+        label: tr!("settings-subtitle-language"),
+        description: tr!("settings-subtitle-language-description"),
+        key: "SubtitleLanguagePreference",
+        unset: String::new(),
+    }
+}
+fn subtitle_mode_row() -> Row {
+    Row {
+        section: Section::Languages,
+        label: tr!("settings-subtitle-mode"),
+        description: tr!("settings-subtitle-mode-description"),
+        key: "SubtitleMode",
+        unset: String::new(),
+    }
+}
+fn remember_subtitles_row() -> Row {
+    Row {
+        section: Section::Languages,
+        label: tr!("settings-remember-subtitles"),
+        description: tr!("settings-remember-subtitles-description"),
+        key: "RememberSubtitleSelections",
+        unset: String::new(),
+    }
+}
 
-const HIDE_PLAYED_IN_LATEST: Row = Row {
-    section: Section::Home,
-    label: "Leave watched items out of Latest",
-    description: "Home's Latest rows show only what you haven't watched. Home reloads when it's saved.",
-    key: "HidePlayedInLatest",
-    unset: "",
-};
+fn hide_played_in_latest_row() -> Row {
+    Row {
+        section: Section::Home,
+        label: tr!("settings-hide-played-in-latest"),
+        description: tr!("settings-hide-played-in-latest-description"),
+        key: "HidePlayedInLatest",
+        unset: String::new(),
+    }
+}
 // No settings of our own for these: the web client's profile decides.
-const HOME_SECTIONS_NOTE: Row = Row {
-    section: Section::Home,
-    label: "",
-    description: "Which sections Home shows, and the libraries in them, follow your Jellyfin profile \
-                  (Settings › Home in the web client).",
-    key: "",
-    unset: "",
-};
+fn home_sections_note_row() -> Row {
+    note_row(Section::Home, tr!("settings-home-sections-note"))
+}
 
 /// Every row, for the search. A row left out of here still shows in its section, but a search
 /// would only find it through another row of the same section.
-const ROWS: [Row; 38] = [
-    THEME,
-    TEXT_SIZE,
-    ANIMATIONS,
-    LANGUAGE,
-    TRACKS_NOTE,
-    AUTOPLAY,
-    SKIP_INTRO,
-    BITRATE,
-    CAST_BITRATE,
-    HEVC,
-    PLAYER,
-    SUBTITLES_NOTE,
-    SUBTITLE_TRACKS_NOTE,
-    SUBTITLE_COLOR,
-    SUBTITLE_STYLE,
-    SUBTITLE_SIZE,
-    WIFI_ONLY,
-    DOWNLOADS_FOLDER,
-    IMAGE_CACHE,
-    LOGS,
-    VERSION,
-    CHECK_FOR_UPDATES,
-    USER,
-    SERVER,
-    ADDRESS,
-    SERVER_VERSION,
-    LANGUAGES_NOTE,
-    AUDIO_LANGUAGE,
-    PLAY_DEFAULT_AUDIO,
-    REMEMBER_AUDIO,
-    SUBTITLE_LANGUAGE,
-    SUBTITLE_MODE,
-    REMEMBER_SUBTITLES,
-    HIDE_PLAYED_IN_LATEST,
-    HOME_SECTIONS_NOTE,
-    // The section headings' own words find the section through these.
-    section_row(Section::Storage),
-    section_row(Section::Account),
-    section_row(Section::Home),
-];
+fn all_rows() -> Vec<Row> {
+    vec![
+        theme_row(),
+        text_size_row(),
+        animations_row(),
+        language_row(),
+        tracks_note_row(),
+        autoplay_row(),
+        skip_intro_row(),
+        bitrate_row(),
+        cast_bitrate_row(),
+        hevc_row(),
+        player_row(),
+        subtitles_note_row(),
+        subtitle_tracks_note_row(),
+        subtitle_color_row(),
+        subtitle_style_row(),
+        subtitle_size_row(),
+        wifi_only_row(),
+        downloads_folder_row(),
+        image_cache_row(),
+        logs_row(),
+        version_row(),
+        check_for_updates_row(),
+        user_row(),
+        server_row(),
+        address_row(),
+        server_version_row(),
+        languages_note_row(),
+        audio_language_row(),
+        play_default_audio_row(),
+        remember_audio_row(),
+        subtitle_language_row(),
+        subtitle_mode_row(),
+        remember_subtitles_row(),
+        hide_played_in_latest_row(),
+        home_sections_note_row(),
+        // The section headings' own words find the section through these.
+        section_row(Section::Storage),
+        section_row(Section::Account),
+        section_row(Section::Home),
+    ]
+}
+
+/// A note's row: a description with nothing to change, and no label.
+fn note_row(section: Section, description: String) -> Row {
+    Row {
+        section,
+        label: String::new(),
+        description,
+        key: "",
+        unset: String::new(),
+    }
+}
 
 /// A row that's only information: a label and a value beside it.
-const fn info_row(section: Section, label: &'static str) -> Row<'static> {
+fn info_row(section: Section, label: String) -> Row {
     Row {
         section,
         label,
-        description: "",
+        description: String::new(),
         key: "",
-        unset: "",
+        unset: String::new(),
     }
 }
 
 /// A row that's never drawn, so that a search for a section's title or store finds it even
 /// when no row's own words do. The search reads the section's title for every row anyway.
-const fn section_row(section: Section) -> Row<'static> {
+fn section_row(section: Section) -> Row {
     Row {
         section,
-        label: "",
-        description: "",
+        label: String::new(),
+        description: String::new(),
         key: "",
-        unset: "",
+        unset: String::new(),
     }
 }
 
@@ -597,9 +646,9 @@ impl Search {
         let haystack = [
             row.section.store().title(),
             row.section.title(),
-            row.label,
-            row.description,
-            row.key,
+            row.label.clone(),
+            row.description.clone(),
+            row.key.to_owned(),
         ]
         .join(" ")
         .to_lowercase();
@@ -609,15 +658,17 @@ impl Search {
             .all(|word| haystack.contains(word))
     }
 
-    /// How many of `section`'s rows the search finds.
-    fn matches(&self, section: Section) -> usize {
-        ROWS.iter()
+    /// How many of `section`'s rows, of `rows`, the search finds.
+    fn matches(&self, section: Section, rows: &[Row]) -> usize {
+        rows.iter()
             .filter(|row| row.section == section && self.shows(row))
             .count()
     }
 }
 
 pub struct SettingsPage {
+    /// The top bar's title: this page's, or the one section's, in the interface's language.
+    title: String,
     /// The config as this page last read or wrote it, for the controls' values. A change reads
     /// the file again rather than writing this copy back.
     config: Config,
@@ -655,6 +706,7 @@ enum Job {
 impl SettingsPage {
     pub fn new() -> Self {
         Self {
+            title: Self::title_for(None),
             config: Config::load(),
             job: None,
             pickers: Pickers::default(),
@@ -672,10 +724,16 @@ impl SettingsPage {
     /// A phone's page for one section.
     pub fn for_section(section: Section) -> Self {
         Self {
+            title: Self::title_for(Some(section)),
             only: Some(section),
             section,
             ..Self::new()
         }
+    }
+
+    /// The page's title, or the one section's, in the interface's language.
+    fn title_for(only: Option<Section>) -> String {
+        only.map_or_else(|| tr!("settings-title"), Section::title)
     }
 
     /// Writes a change through the config file: loaded fresh, changed, saved, and kept for the
@@ -693,6 +751,8 @@ impl SettingsPage {
     /// the animations are the app's, not the session's, so they apply on every screen.
     fn save_appearance(&mut self, cx: &mut PageCx, change: impl FnOnce(&mut Config)) {
         self.save(change);
+        // The language is one of these, and the title is the page's own text.
+        self.title = Self::title_for(self.only);
         cx.services.events.push(AppEvent::AppearanceChanged);
     }
 
@@ -762,17 +822,17 @@ impl SettingsPage {
         };
         self.job = None;
         match job {
-            Job::Cleared(Ok(())) => cx.services.toast(Toast::success("Image cache cleared.")),
+            Job::Cleared(Ok(())) => cx.services.toast(Toast::success(tr!("settings-image-cache-cleared"))),
             Job::Cleared(Err(err)) => {
                 tracing::warn!("clearing the image cache failed: {err}");
-                let message = "Couldn't clear the image cache. Close anything using its folder and try again.";
-                cx.services.toast(Toast::error(message));
+                cx.services.toast(Toast::error(tr!("settings-image-cache-failed")));
             }
             Job::Opened(Ok(())) => {}
             Job::Opened(Err(err)) => {
                 tracing::warn!("couldn't open {}: {err}", config::log_dir().display());
-                let message = format!("Couldn't open the logs folder ({}).", config::log_dir().display());
-                cx.services.toast(Toast::error(message));
+                let folder = config::log_dir().display().to_string();
+                cx.services
+                    .toast(Toast::error(tr!("settings-logs-folder-failed", path = folder)));
             }
         }
     }
@@ -786,7 +846,7 @@ impl Default for SettingsPage {
 
 impl Page for SettingsPage {
     fn title(&self) -> &str {
-        self.only.map_or("Settings", Section::title)
+        &self.title
     }
 
     /// A section's own page has nothing to search but what it shows.
@@ -838,6 +898,9 @@ impl Page for SettingsPage {
 impl SettingsPage {
     /// The two groups of sections.
     fn menu(&mut self, ui: &mut Ui) {
+        let searching = self.search.active();
+        // The rows only matter while they're being searched through.
+        let rows = searching.then(all_rows);
         let area = egui::ScrollArea::vertical()
             .id_salt("settings_menu")
             .auto_shrink([false, false])
@@ -852,8 +915,7 @@ impl SettingsPage {
                             }
                             menu_heading(ui, store);
                             for section in Section::shown().filter(|section| section.store() == store) {
-                                let searching = self.search.active();
-                                let matches = searching.then(|| self.search.matches(section));
+                                let matches = rows.as_deref().map(|rows| self.search.matches(section, rows));
                                 let selected = !searching && self.section == section;
                                 if menu_entry(ui, section, selected, matches).clicked() {
                                     self.open(ui.ctx(), section);
@@ -948,13 +1010,18 @@ impl SettingsPage {
     /// what keeping them there means. Returns where each section starts: the page's padding
     /// above the first one, otherwise the gap above its title.
     fn sections(&mut self, ui: &mut Ui, cx: &mut PageCx) -> Vec<(Section, f32)> {
+        // The rows only matter while they're being searched through.
+        let rows = self.search.active().then(all_rows);
         let found: Vec<Section> = Section::shown()
             .filter(|&section| self.only.is_none_or(|only| only == section))
-            .filter(|&section| self.search.matches(section) > 0)
+            .filter(|&section| {
+                rows.as_deref()
+                    .is_none_or(|rows| self.search.matches(section, rows) > 0)
+            })
             .collect();
         let mut starts = Vec::with_capacity(found.len());
         if found.is_empty() {
-            let message = format!("No settings match “{}”.", self.search.text.trim());
+            let message = tr!("settings-no-match", query = self.search.text.trim());
             ui.label(label::muted(ui, message));
             return starts;
         }
@@ -987,23 +1054,24 @@ impl SettingsPage {
     /// means (with how saving to the server is going).
     fn heading(&self, ui: &mut Ui, cx: &PageCx, section: Section, explain: bool) {
         let store = section.store();
+        let store_title = store.title();
         ui.horizontal(|ui| {
             ui.label(label::heading(ui, section.title()));
             ui.add_space(SPACE.xs);
-            pill::icon_tag(ui, store.icon(), store.title());
+            pill::icon_tag(ui, store.icon(), &store_title);
         });
         if !explain {
             return;
         }
         let description = match store {
-            Store::Device => "Kept on this computer, for every account signed in here.".to_string(),
+            Store::Device => tr!("settings-kept-on-device"),
             Store::Server => {
                 let session = &cx.services.session;
-                let server = session.server.server_name.as_deref().unwrap_or("the server");
-                format!(
-                    "Kept in {}'s account on {server}, so the web client and other Jellyfin apps share them.",
-                    session.user.name
-                )
+                let user = session.user.name.as_str();
+                match session.server.server_name.as_deref() {
+                    Some(server) => tr!("settings-kept-in-account-on", user = user, server = server),
+                    None => tr!("settings-kept-in-account", user = user),
+                }
             }
         };
         ui.add_space(SPACE.xs);
@@ -1033,15 +1101,22 @@ impl SettingsPage {
     fn appearance(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let current = self.config.theme;
         let default = Some(ThemePreference::default());
-        let picked = self
-            .pickers
-            .choose(ui, &self.search, THEME, "settings_theme", &THEMES, current, default);
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            theme_row(),
+            "settings_theme",
+            &themes(),
+            current,
+            default,
+        );
         if let Some(edit) = picked {
             self.save_appearance(cx, |config| config.theme = edit.or_unset().unwrap_or_default());
         }
 
         // `None` follows the system, whose size can differ from 100 %.
-        let system = format!("Follow the system ({:.0}%)", theme::system_text_scale() * 100.);
+        let scale = format!("{:.0}", theme::system_text_scale() * 100.);
+        let system = tr!("settings-text-size-system", scale = scale);
         let text_sizes: Vec<(Option<u16>, String)> = std::iter::once((None, system))
             .chain(
                 theme::TEXT_SIZES
@@ -1053,7 +1128,7 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            TEXT_SIZE,
+            text_size_row(),
             "settings_text_size",
             &text_sizes,
             current,
@@ -1064,7 +1139,7 @@ impl SettingsPage {
         }
 
         let current = self.config.animations.unwrap_or(true);
-        if let Some(edit) = toggle(ui, &self.search, ANIMATIONS, current, Some(true)) {
+        if let Some(edit) = toggle(ui, &self.search, animations_row(), current, Some(true)) {
             self.save_appearance(cx, |config| config.animations = edit.or_unset());
         }
 
@@ -1077,7 +1152,7 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            LANGUAGE,
+            language_row(),
             "settings_language",
             &languages,
             current,
@@ -1089,24 +1164,24 @@ impl SettingsPage {
     }
 
     fn playback(&mut self, ui: &mut Ui, cx: &mut PageCx) {
-        if note(ui, &self.search, TRACKS_NOTE, Some("Languages")) {
+        if note(ui, &self.search, tracks_note_row(), Some(Section::Languages)) {
             self.open(ui.ctx(), Section::Languages);
         }
 
         let current = self.config.autoplay_next_episode.unwrap_or(true);
-        if let Some(edit) = toggle(ui, &self.search, AUTOPLAY, current, Some(true)) {
+        if let Some(edit) = toggle(ui, &self.search, autoplay_row(), current, Some(true)) {
             self.save(|config| config.autoplay_next_episode = edit.or_unset());
         }
 
         let current = self.config.auto_skip_intro.unwrap_or(false);
-        if let Some(edit) = toggle(ui, &self.search, SKIP_INTRO, current, Some(false)) {
+        if let Some(edit) = toggle(ui, &self.search, skip_intro_row(), current, Some(false)) {
             self.save(|config| config.auto_skip_intro = edit.or_unset());
         }
 
         // `AUTOMATIC` measures the connection before playing instead.
-        let bitrates: Vec<(i32, String)> = std::iter::once((AUTOMATIC, "Automatic (measured)".to_string()))
+        let bitrates: Vec<(i32, String)> = std::iter::once((AUTOMATIC, tr!("settings-bitrate-auto-measured")))
             .chain(BITRATES_MBPS.iter().map(|&mbps| match mbps {
-                0 => (mbps, "No limit".to_string()),
+                0 => (mbps, tr!("settings-bitrate-unlimited")),
                 mbps => (mbps, format!("{mbps} Mbit/s")),
             }))
             .collect();
@@ -1115,7 +1190,7 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            BITRATE,
+            bitrate_row(),
             "settings_bitrate",
             &bitrates,
             current,
@@ -1134,7 +1209,7 @@ impl SettingsPage {
         let cast_bitrates: Vec<(i32, String)> = BITRATES_MBPS
             .iter()
             .map(|&mbps| match mbps {
-                0 => (mbps, "Automatic".to_string()),
+                0 => (mbps, tr!("settings-bitrate-auto")),
                 mbps => (mbps, format!("{mbps} Mbit/s")),
             })
             .collect();
@@ -1142,7 +1217,7 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            CAST_BITRATE,
+            cast_bitrate_row(),
             "settings_cast_bitrate",
             &cast_bitrates,
             current,
@@ -1158,7 +1233,7 @@ impl SettingsPage {
         }
 
         let current = self.config.prefer_hevc.unwrap_or(false);
-        if let Some(edit) = toggle(ui, &self.search, HEVC, current, Some(false)) {
+        if let Some(edit) = toggle(ui, &self.search, hevc_row(), current, Some(false)) {
             self.save(|config| config.prefer_hevc = edit.or_unset());
         }
 
@@ -1170,7 +1245,7 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            PLAYER,
+            player_row(),
             "settings_player",
             &PLAYERS,
             current,
@@ -1182,8 +1257,8 @@ impl SettingsPage {
     }
 
     fn subtitles(&mut self, ui: &mut Ui, cx: &mut PageCx) {
-        note(ui, &self.search, SUBTITLES_NOTE, None);
-        if note(ui, &self.search, SUBTITLE_TRACKS_NOTE, Some("Languages")) {
+        note(ui, &self.search, subtitles_note_row(), None);
+        if note(ui, &self.search, subtitle_tracks_note_row(), Some(Section::Languages)) {
             self.open(ui.ctx(), Section::Languages);
         }
 
@@ -1191,9 +1266,9 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            SUBTITLE_COLOR,
+            subtitle_color_row(),
             "settings_subtitle_color",
-            &SUBTITLE_COLORS,
+            &subtitle_colors(),
             current,
             Some(SubtitleColor::default()),
         );
@@ -1205,9 +1280,9 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            SUBTITLE_STYLE,
+            subtitle_style_row(),
             "settings_subtitle_style",
-            &SUBTITLE_STYLES,
+            &subtitle_styles(),
             current,
             Some(SubtitleStyle::default()),
         );
@@ -1224,7 +1299,7 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            SUBTITLE_SIZE,
+            subtitle_size_row(),
             "settings_subtitle_size",
             &scales,
             current,
@@ -1239,36 +1314,36 @@ impl SettingsPage {
 
     fn downloads(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let current = self.config.download_wifi_only.unwrap_or(true);
-        if let Some(edit) = toggle(ui, &self.search, WIFI_ONLY, current, Some(true)) {
+        if let Some(edit) = toggle(ui, &self.search, wifi_only_row(), current, Some(true)) {
             let wifi_only = edit.or_unset();
             self.save(|config| config.download_wifi_only = wifi_only);
             cx.services.downloads.set_wifi_only(wifi_only.unwrap_or(true));
         }
-        if self.search.shows(&DOWNLOADS_FOLDER) {
+        if self.search.shows(&downloads_folder_row()) {
             let folder = config::downloads_dir().display().to_string();
-            row_with_folder(ui, DOWNLOADS_FOLDER, Some(&folder), None, |_| {});
+            row_with_folder(ui, downloads_folder_row(), Some(&folder), None, |_| {});
         }
     }
 
     fn storage(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         // Nothing to save for these two, so the row shows its folder instead of a default.
         let busy = self.job.is_some();
-        if self.search.shows(&IMAGE_CACHE) {
+        if self.search.shows(&image_cache_row()) {
             let images = config::cache_dir().join("images").display().to_string();
             let mut clear = false;
-            row_with_folder(ui, IMAGE_CACHE, Some(&images), None, |ui| {
-                clear = button::quiet(ui, "Clear", ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
+            row_with_folder(ui, image_cache_row(), Some(&images), None, |ui| {
+                clear = button::quiet(ui, &tr!("settings-clear"), ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
             });
             if clear {
                 self.clear_image_cache(cx);
             }
         }
 
-        if self.search.shows(&LOGS) {
+        if self.search.shows(&logs_row()) {
             let logs = config::log_dir().display().to_string();
             let mut open = false;
-            row_with_folder(ui, LOGS, Some(&logs), None, |ui| {
-                open = button::quiet(ui, "Open folder", ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
+            row_with_folder(ui, logs_row(), Some(&logs), None, |ui| {
+                open = button::quiet(ui, &tr!("settings-open-folder"), ROW_BUTTON_W, ready(busy), Focus::Tab).clicked();
             });
             if open {
                 self.open_logs(cx);
@@ -1277,14 +1352,14 @@ impl SettingsPage {
     }
 
     fn about(&mut self, ui: &mut Ui) {
-        info(ui, &self.search, VERSION, env!("CARGO_PKG_VERSION"));
+        info(ui, &self.search, version_row(), env!("CARGO_PKG_VERSION"));
 
         // The store updates the app on Android, so there's no check to turn off.
         if cfg!(target_os = "android") {
             return;
         }
         let current = self.config.check_for_updates.unwrap_or(true);
-        if let Some(edit) = toggle(ui, &self.search, CHECK_FOR_UPDATES, current, Some(true)) {
+        if let Some(edit) = toggle(ui, &self.search, check_for_updates_row(), current, Some(true)) {
             self.save(|config| config.check_for_updates = edit.or_unset());
         }
     }
@@ -1293,32 +1368,36 @@ impl SettingsPage {
         let session = &cx.services.session;
         // Who's signed in, as the sign-in screen lists accounts: one row for the user, the
         // server and its address, found by a search for any of the three.
-        if [USER, SERVER, ADDRESS].iter().any(|row| self.search.shows(row)) {
+        if [user_row(), server_row(), address_row()]
+            .iter()
+            .any(|row| self.search.shows(row))
+        {
             let server = session.server.server_name.clone().unwrap_or_else(|| "Jellyfin".into());
             let address = session.client.base_url().as_str().trim_end_matches('/').to_owned();
             let subtitle = format!("{server} · {address}");
-            let label = format!("Signed in as {} on {subtitle}", session.user.name);
+            let user = session.user.name.as_str();
+            let label = tr!("settings-signed-in-as", user = user, server = subtitle.as_str());
             let names = [session.user.name.as_str()];
             ui.add_space(ROW_PAD);
             AvatarRow::new(&names, &session.user.name, &subtitle, &label).show(ui, false);
             ui.add_space(ROW_PAD);
         }
         let version = session.server.version.clone().unwrap_or_else(|| "?".into());
-        info(ui, &self.search, SERVER_VERSION, &version);
+        info(ui, &self.search, server_version_row(), &version);
     }
 
     fn languages(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         let Some(config) = self.server.loaded(ui) else {
             return;
         };
-        note(ui, &self.search, LANGUAGES_NOTE, None);
+        note(ui, &self.search, languages_note_row(), None);
 
         let current = config.audio_language_preference.as_deref().unwrap_or("");
         let languages = self.server.language_choices(current);
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            AUDIO_LANGUAGE,
+            audio_language_row(),
             "settings_audio_language",
             &languages,
             current,
@@ -1335,7 +1414,7 @@ impl SettingsPage {
         if let Some(Edit::Set(on)) = toggle(
             ui,
             &self.search,
-            PLAY_DEFAULT_AUDIO,
+            play_default_audio_row(),
             config.play_default_audio_track,
             None,
         ) {
@@ -1346,7 +1425,13 @@ impl SettingsPage {
             self.server.change(cx, changes);
         }
 
-        if let Some(Edit::Set(on)) = toggle(ui, &self.search, REMEMBER_AUDIO, config.remember_audio_selections, None) {
+        if let Some(Edit::Set(on)) = toggle(
+            ui,
+            &self.search,
+            remember_audio_row(),
+            config.remember_audio_selections,
+            None,
+        ) {
             let changes = UserConfigurationChanges {
                 remember_audio_selections: Some(on),
                 ..Default::default()
@@ -1359,7 +1444,7 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            SUBTITLE_LANGUAGE,
+            subtitle_language_row(),
             "settings_subtitle_language",
             &languages,
             current,
@@ -1376,9 +1461,9 @@ impl SettingsPage {
         let picked = self.pickers.choose(
             ui,
             &self.search,
-            SUBTITLE_MODE,
+            subtitle_mode_row(),
             "settings_subtitle_mode",
-            &SUBTITLE_MODES,
+            &subtitle_modes(),
             config.subtitle_mode,
             None,
         );
@@ -1393,7 +1478,7 @@ impl SettingsPage {
         if let Some(Edit::Set(on)) = toggle(
             ui,
             &self.search,
-            REMEMBER_SUBTITLES,
+            remember_subtitles_row(),
             config.remember_subtitle_selections,
             None,
         ) {
@@ -1410,7 +1495,7 @@ impl SettingsPage {
             && let Some(Edit::Set(on)) = toggle(
                 ui,
                 &self.search,
-                HIDE_PLAYED_IN_LATEST,
+                hide_played_in_latest_row(),
                 config.hide_played_in_latest,
                 None,
             )
@@ -1421,7 +1506,7 @@ impl SettingsPage {
             };
             self.server.change(cx, changes);
         }
-        note(ui, &self.search, HOME_SECTIONS_NOTE, None);
+        note(ui, &self.search, home_sections_note_row(), None);
     }
 }
 
@@ -1498,9 +1583,7 @@ impl ServerSettings {
                 }
                 Err(err) => {
                     tracing::warn!("couldn't save the user's settings: {err}");
-                    cx.services.toast(Toast::error(
-                        "Couldn't save your settings to the server. They're back as the server has them.",
-                    ));
+                    cx.services.toast(Toast::error(tr!("settings-save-failed")));
                     self.config = None;
                 }
             }
@@ -1537,13 +1620,9 @@ impl ServerSettings {
         }
         ui.add_space(ROW_PAD);
         if self.failed {
-            surface::notice(
-                ui,
-                surface::Kind::Danger,
-                "Couldn't load your settings from the server.",
-            );
+            surface::notice(ui, surface::Kind::Danger, &tr!("settings-load-failed"));
             ui.add_space(surface::GAP_FIELD);
-            let retry = button::quiet(ui, "Retry", ROW_BUTTON_W, State::Ready, Focus::Tab).clicked();
+            let retry = button::quiet(ui, &tr!("settings-retry"), ROW_BUTTON_W, State::Ready, Focus::Tab).clicked();
             if retry {
                 self.failed = false;
                 self.cultures_asked = !self.languages.is_empty();
@@ -1551,7 +1630,7 @@ impl ServerSettings {
         } else {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(14.).color(theme::tokens_of(ui).ink_muted));
-                ui.label(label::muted(ui, "Loading your settings from the server…"));
+                ui.label(label::muted(ui, tr!("settings-loading")));
             });
         }
         ui.add_space(ROW_PAD);
@@ -1560,12 +1639,12 @@ impl ServerSettings {
 
     /// A language picker's choices: none first, then the server's languages, and the current
     /// code by itself if the server's list doesn't have it (or didn't load).
-    fn language_choices<'a>(&'a self, current: &'a str) -> Vec<(&'a str, &'a str)> {
-        let mut choices: Vec<(&str, &str)> = std::iter::once(("", "Any language"))
-            .chain(self.languages.iter().map(|(code, name)| (code.as_str(), name.as_str())))
+    fn language_choices<'a>(&'a self, current: &'a str) -> Vec<(&'a str, String)> {
+        let mut choices: Vec<(&str, String)> = std::iter::once(("", tr!("settings-any-language")))
+            .chain(self.languages.iter().map(|(code, name)| (code.as_str(), name.clone())))
             .collect();
         if !choices.iter().any(|(code, _)| *code == current) {
-            choices.push((current, current));
+            choices.push((current, current.to_owned()));
         }
         choices
     }
@@ -1573,9 +1652,13 @@ impl ServerSettings {
     /// How saving is going, under the server's banner.
     fn status(&self) -> Option<String> {
         if self.save.is_some() || !self.pending.is_empty() {
-            Some("Saving…".into())
+            Some(tr!("settings-saving"))
         } else if self.saved {
-            Some(format!("{} Saved to the server", ICON_CLOUD_DONE.codepoint))
+            Some(format!(
+                "{} {}",
+                ICON_CLOUD_DONE.codepoint,
+                tr!("settings-saved-to-server")
+            ))
         } else {
             None
         }
@@ -1598,9 +1681,10 @@ fn language_list(cultures: Vec<Culture>) -> Vec<(String, String)> {
 
 /// A store's name over its sections in the menu.
 fn menu_heading(ui: &mut Ui, store: Store) {
+    let title = store.title();
     ui.horizontal(|ui| {
         ui.add_space(8.);
-        ui.label(label::overline(ui, store.title()));
+        ui.label(label::overline(ui, &title));
     });
     ui.add_space(HEADING_GAP);
 }
@@ -1613,7 +1697,8 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
     let tokens = theme::tokens_of(ui);
     let height = (ui.spacing().interact_size.y + 8.).max(40.);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, section.title()));
+    let title = section.title();
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, &title));
     let focused = ui.memory(|memory| memory.has_focus(response.id));
     let radius = egui::CornerRadius::same(tokens.radius_control);
     if selected || response.hovered() || focused {
@@ -1641,13 +1726,8 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
     );
     let font = text::font(ui, "base");
     let label_x = icon_x + icon.size / 2. + 10.;
-    ui.painter().text(
-        pos2(label_x, rect.center().y),
-        Align2::LEFT_CENTER,
-        section.title(),
-        font,
-        color,
-    );
+    ui.painter()
+        .text(pos2(label_x, rect.center().y), Align2::LEFT_CENTER, &title, font, color);
     if let Some(count) = matches.filter(|&count| count > 0) {
         ui.painter().text(
             pos2(rect.right() - 8., rect.center().y),
@@ -1665,13 +1745,14 @@ fn menu_entry(ui: &mut Ui, section: Section, selected: bool, matches: Option<usi
 /// while pressed.
 fn section_entry(ui: &mut Ui, section: Section) -> egui::Response {
     let tokens = theme::tokens_of(ui);
-    let title = text::font(ui, "base");
-    let summary = text::font(ui, "sm");
-    let (title_h, summary_h) = ui.fonts_mut(|fonts| (fonts.row_height(&title), fonts.row_height(&summary)));
+    let title_font = text::font(ui, "base");
+    let summary_font = text::font(ui, "sm");
+    let (title_h, summary_h) = ui.fonts_mut(|fonts| (fonts.row_height(&title_font), fonts.row_height(&summary_font)));
     let lines = title_h + summary_h;
     let height = (lines + 2. * ROW_PAD).max(64.);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, section.title()));
+    let title = section.title();
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &title));
     let first = rect.top() <= ui.min_rect().top() + 0.5;
     let focused = ui.memory(|memory| memory.has_focus(response.id));
     if response.is_pointer_button_down_on() || response.hovered() || focused {
@@ -1694,8 +1775,9 @@ fn section_entry(ui: &mut Ui, section: Section) -> egui::Response {
         job.wrap = egui::text::TextWrapping::truncate_at_width(width);
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
-    let title_galley = line(section.title(), title, tokens.ink);
-    let summary_galley = line(section.summary(), summary, tokens.ink_muted);
+    let title_galley = line(&title, title_font, tokens.ink);
+    let summary = section.summary();
+    let summary_galley = line(&summary, summary_font, tokens.ink_muted);
     let painter = ui.painter();
     painter.text(
         pos2(icon_x, rect.center().y),
@@ -1773,12 +1855,16 @@ fn row_with_folder(
     let text = ui
         .scope_builder(UiBuilder::new().max_rect(text_rect), |ui| {
             ui.spacing_mut().item_spacing.y = SPACE.xxs;
-            let name = ui.label(RichText::new(row.label).font(text::font(ui, "base")).color(tokens.ink));
+            let name = ui.label(
+                RichText::new(row.label.as_str())
+                    .font(text::font(ui, "base"))
+                    .color(tokens.ink),
+            );
             if let Some(tip) = key_tooltip(&row) {
                 name.on_hover_text(tip);
             }
             if !row.description.is_empty() {
-                ui.label(label::muted(ui, row.description));
+                ui.label(label::muted(ui, row.description.as_str()));
             }
             if let Some(folder) = folder {
                 // Monospace, as a path: `RichText::monospace` would apply its family after the
@@ -1829,17 +1915,18 @@ fn key_tooltip(row: &Row) -> Option<String> {
         return None;
     }
     Some(match row.section.store() {
-        Store::Device if row.unset.is_empty() => format!("{} in the config file", row.key),
-        Store::Device => format!("{} in the config file · unset: {}", row.key, row.unset),
-        Store::Server => format!("{} in your Jellyfin profile", row.key),
+        Store::Device if row.unset.is_empty() => tr!("settings-key-config", key = row.key),
+        Store::Device => tr!("settings-key-config-unset", key = row.key, unset = row.unset.as_str()),
+        Store::Server => tr!("settings-key-profile", key = row.key),
     })
 }
 
 /// The undo button of a setting that's off its default, naming the default in its tooltip.
 /// Tab stops on it after the setting's control.
 fn reset_button(ui: &mut Ui, default: &str) -> egui::Response {
-    let tooltip = format!("Back to the default: {default}");
-    RoundButton::icon(ICON_UNDO, "Back to the default")
+    let tooltip = tr!("settings-reset-default-tooltip", default = default);
+    let label = tr!("settings-reset-default");
+    RoundButton::icon(ICON_UNDO, &label)
         .size(RESET_W, RESET_ICON)
         .tooltip(&tooltip)
         .show(ui)
@@ -1869,13 +1956,18 @@ fn toggle(ui: &mut Ui, search: &Search, row: Row, value: bool, default: Option<b
     if !search.shows(&row) {
         return None;
     }
-    let reset = default
-        .filter(|&default| default != value)
-        .map(|default| if default { "On" } else { "Off" });
+    let reset = default.filter(|&default| default != value).map(|default| {
+        if default {
+            tr!("settings-on")
+        } else {
+            tr!("settings-off")
+        }
+    });
+    let label = row.label.clone();
     let mut flipped = None;
-    let reset_clicked = self::row(ui, row, reset, |ui| {
+    let reset_clicked = self::row(ui, row, reset.as_deref(), |ui| {
         let mut on = value;
-        if toggle::switch(ui, &mut on, row.label).changed() {
+        if toggle::switch(ui, &mut on, &label).changed() {
             flipped = Some(Edit::Set(on));
         }
     });
@@ -1953,10 +2045,11 @@ impl Pickers {
             .and_then(|default| options.iter().find(|(value, _)| *value == default))
             .map(|(_, label)| label.as_ref());
         let mut focused = None;
+        let name = row.label.clone();
         let reset_clicked = self::row(ui, row, reset, |ui| {
             // A value not among the choices (a bitrate set by hand) shows the first one.
             let menu = ui.make_persistent_id(id);
-            let (response, chosen) = select::select(ui, menu, PICKER_W, row.label, &labels, index.unwrap_or(0), true);
+            let (response, chosen) = select::select(ui, menu, PICKER_W, &name, &labels, index.unwrap_or(0), true);
             if let Some(chosen) = chosen {
                 picked = Some(options[chosen].0);
             }
@@ -2011,23 +2104,24 @@ fn info(ui: &mut Ui, search: &Search, row: Row, value: &str) {
     });
 }
 
-/// A paragraph in a group that isn't a setting, when the search shows it, with a link to the
-/// section `link` names after it. Returns whether the link was clicked.
-fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<&str>) -> bool {
+/// A paragraph in a group that isn't a setting, when the search shows it, with a link to
+/// `link`'s section after it. Returns whether the link was clicked.
+fn note(ui: &mut Ui, search: &Search, row: Row, link: Option<Section>) -> bool {
     if !search.shows(&row) {
         return false;
     }
     hairline(ui);
     ui.add_space(ROW_PAD);
-    let description = label::muted(ui, row.description);
+    let description = label::muted(ui, row.description.as_str());
     let mut clicked = false;
     match link {
         // Wrapped with the link at the end of its last line. A wrapped row's lines are a
         // control's height apart, so a note without a link is a plain label.
-        Some(link) => {
+        Some(section) => {
+            let title = section.title();
             ui.horizontal_wrapped(|ui| {
                 ui.label(description);
-                clicked = button::link(ui, link, "sm").clicked();
+                clicked = button::link(ui, &title, "sm").clicked();
             });
         }
         None => {
@@ -2094,8 +2188,8 @@ mod tests {
     use crate::config::{Config, ThemePreference};
 
     use super::{
-        AUTOMATIC, BITRATES_MBPS, ROWS, SUBTITLE_SCALES, Search, Section, Store, THEMES, apply_bitrate, bitrate_choice,
-        language_list, stepped, subtitle_scales,
+        AUTOMATIC, BITRATES_MBPS, SUBTITLE_SCALES, Search, Section, Store, all_rows, apply_bitrate, bitrate_choice,
+        language_list, stepped, subtitle_scales, themes,
     };
 
     #[test]
@@ -2133,7 +2227,7 @@ mod tests {
 
     #[test]
     fn left_and_right_step_a_picker_and_stop_at_the_ends() {
-        let themes: Vec<ThemePreference> = THEMES.iter().map(|(theme, _)| *theme).collect();
+        let themes: Vec<ThemePreference> = themes().iter().map(|(theme, _)| *theme).collect();
         assert_eq!(
             stepped(&themes, ThemePreference::System, 1),
             Some(ThemePreference::Light)
@@ -2179,15 +2273,17 @@ mod tests {
     /// The sections a search finds, in the menu's order.
     fn found(text: &str) -> Vec<Section> {
         let search = search(text);
+        let rows = all_rows();
         Section::shown()
-            .filter(|&section| search.matches(section) > 0)
+            .filter(|&section| search.matches(section, &rows) > 0)
             .collect()
     }
 
     #[test]
     fn every_section_has_rows_for_the_search() {
+        let rows = all_rows();
         for section in Section::ALL {
-            assert!(ROWS.iter().any(|row| row.section == section), "{section:?}");
+            assert!(rows.iter().any(|row| row.section == section), "{section:?}");
         }
     }
 
@@ -2213,8 +2309,9 @@ mod tests {
     fn the_search_finds_a_whole_section_or_store() {
         let storage = search("storage");
         assert_eq!(found("storage"), [Section::Storage]);
+        let rows = all_rows();
         assert!(
-            ROWS.iter()
+            rows.iter()
                 .filter(|row| row.section == Section::Storage)
                 .all(|row| storage.shows(row))
         );
