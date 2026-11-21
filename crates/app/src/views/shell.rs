@@ -854,7 +854,7 @@ impl Shell {
         let casting = cx.services.is_casting();
         let icon = if casting { ICON_CAST_CONNECTED } else { ICON_CAST };
         let label = casting::button_label(cx.services);
-        let button = bar_button(icon, label, highlighted)
+        let button = bar_button(icon, &label, highlighted)
             .on(casting)
             .enabled(casting || !cx.services.in_group())
             .show(ui);

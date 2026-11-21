@@ -215,3 +215,102 @@ settings-any-language = Any language
 ## shell
 
 ## downloads-and-casting
+
+# A select's closing brace is indented: `i18n::tests` reads a line that starts at the left margin
+# as a new message.
+
+# The downloads page, and the platform's notice of the transfers (Android's notification).
+downloads-empty = Nothing downloaded yet. Download a movie or an episode from its page or its menu.
+downloads-summary-done = { $count ->
+    [one] { $count } downloaded, { $size }
+   *[other] { $count } downloaded, { $size }
+  }
+downloads-summary-coming = { $count } to come
+downloads-summary-failed = { $count ->
+    [one] { $count } failed
+   *[other] { $count } failed
+  }
+downloads-status-waiting-wifi = Waiting for Wi-Fi
+downloads-status-waiting = Waiting to download
+downloads-status-paused = Paused
+downloads-status-progress = { $done } of { $total } · { $percent }%
+downloads-status-so-far = { $done } so far
+downloads-status-failed = Failed: { $message }
+downloads-action-play = Play
+downloads-action-remove = Remove download
+downloads-action-retry = Retry download
+downloads-action-remove-queued = Remove from downloads
+downloads-action-cancel = Cancel download
+downloads-activity-waiting-wifi = Waiting for Wi-Fi
+downloads-activity-downloading = Downloading
+downloads-activity-to-come = { $count ->
+    [one] { $count } download to come
+   *[other] { $count } downloads to come
+  }
+downloads-activity-progress = { $done } of { $total }
+downloads-activity-so-far = { $done } so far
+downloads-activity-more = { $count } more to come
+downloads-toast-downloaded = Downloaded { $title }
+downloads-toast-failed = Couldn't download { $title }: { $message }
+downloads-error-not-downloadable = This item can't be downloaded from this server.
+downloads-error-not-media = Only videos, and the series and seasons that hold them, can be downloaded.
+downloads-error-stopped = the download stopped unexpectedly
+downloads-error-folder = couldn't make its folder: { $error }
+downloads-error-no-media = the server returned no playable media
+downloads-error-write-item = couldn't write { $file }: { $error }
+downloads-error-open = couldn't open the file: { $error }
+downloads-error-restart = couldn't restart the file: { $error }
+downloads-error-continue = couldn't continue the file: { $error }
+downloads-error-write = couldn't write the file: { $error }
+downloads-error-partial = only { $done } of { $total } bytes arrived
+downloads-error-finish = couldn't finish the file: { $error }
+downloads-error-no-space = there isn't enough free space: { $needed } is needed and { $free } is free
+
+# Casting: the panel, the now-casting bar and the toasts.
+cast-title = Casting
+cast-status-casting = Casting
+cast-status-reconnecting = Reconnecting
+cast-panel-title = Cast to a TV
+cast-panel-note = Play on a Chromecast or Google TV on this network. Your TV plays it; this app is the remote.
+cast-looking = Looking for TVs on this network…
+cast-section-network = On this network
+cast-device-casting = { $device }, casting
+cast-device-reconnect = Reconnect to { $device }
+cast-device-cast = Cast to { $device }
+cast-device-running = Jellyfin is running
+cast-device-group = Group
+cast-disconnect = Disconnect
+cast-stop = Stop casting
+cast-stop-join-title = Stop casting to join?
+cast-stop-create-title = Stop casting to start a group?
+cast-stop-note = A SyncPlay group plays here, in step with the others, so casting to { $device } stops. What it plays stops too.
+cast-bar-label-on = { $name }, on { $device }
+cast-bar-label-reconnecting = { $name }, reconnecting to { $device }
+cast-bar-play = Play
+cast-bar-pause = Pause
+cast-bar-reconnecting = Reconnecting to { $device }…
+cast-bar-series = { $series } · on { $device }
+cast-bar-on = on { $device }
+cast-button = Cast to a TV
+cast-button-casting = Casting (cast to a TV)
+cast-button-off-in-group = Cast to a TV (off in a SyncPlay group)
+cast-toast-casting = Casting to { $device }
+cast-toast-play-failed = The TV couldn't play this ({ $code }).
+cast-toast-unreachable = The TV couldn't reach the server at { $address }. It needs an address the TV can reach on this network.
+cast-toast-lost = Lost the connection to { $device }.
+cast-toast-stopped = { $device } stopped casting.
+cast-toast-leave-group = Leave the SyncPlay group to cast to a TV.
+cast-error-connect = Couldn't connect to { $device }.
+cast-error-launch = { $device } couldn't start Jellyfin.
+cast-error-wrong-app = { $device } started an app that isn't Jellyfin's receiver.
+cast-unknown-error = unknown error
+
+# SyncPlay: the group's updates, as toasts.
+syncplay-joined = Joined the SyncPlay group { $group }
+syncplay-left = Left { $group }
+syncplay-gone = That SyncPlay group no longer exists.
+syncplay-no-access = Someone in the group can't access this item.
+syncplay-user-joined = { $user } joined
+syncplay-user-left = { $user } left
+syncplay-error = SyncPlay: { $message }
+syncplay-load-failed = Couldn't load the group's item: { $message }

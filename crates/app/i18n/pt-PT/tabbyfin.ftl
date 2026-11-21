@@ -215,3 +215,99 @@ settings-any-language = Qualquer idioma
 ## shell
 
 ## downloads-and-casting
+
+# As transferências, e o aviso que a plataforma mostra delas (a notificação do Android).
+downloads-empty = Ainda não há nada transferido. Transfira um filme ou um episódio a partir da respetiva página ou do menu.
+downloads-summary-done = { $count ->
+    [one] { $count } transferido, { $size }
+   *[other] { $count } transferidos, { $size }
+  }
+downloads-summary-coming = { $count } por transferir
+downloads-summary-failed = { $count ->
+    [one] { $count } falhou
+   *[other] { $count } falharam
+  }
+downloads-status-waiting-wifi = À espera de Wi-Fi
+downloads-status-waiting = Em fila
+downloads-status-paused = Em pausa
+downloads-status-progress = { $done } de { $total } · { $percent }%
+downloads-status-so-far = { $done } até agora
+downloads-status-failed = Falhou: { $message }
+downloads-action-play = Reproduzir
+downloads-action-remove = Remover transferência
+downloads-action-retry = Tentar novamente
+downloads-action-remove-queued = Remover das transferências
+downloads-action-cancel = Cancelar transferência
+downloads-activity-waiting-wifi = À espera de Wi-Fi
+downloads-activity-downloading = A transferir…
+downloads-activity-to-come = { $count ->
+    [one] Falta { $count } transferência
+   *[other] Faltam { $count } transferências
+  }
+downloads-activity-progress = { $done } de { $total }
+downloads-activity-so-far = { $done } até agora
+downloads-activity-more = mais { $count } a chegar
+downloads-toast-downloaded = Transferido: { $title }
+downloads-toast-failed = Não foi possível transferir { $title }: { $message }
+downloads-error-not-downloadable = Este item não pode ser transferido a partir deste servidor.
+downloads-error-not-media = Só é possível transferir vídeos e as séries e temporadas que os contêm.
+downloads-error-stopped = a transferência parou inesperadamente
+downloads-error-folder = não foi possível criar a pasta: { $error }
+downloads-error-no-media = o servidor não devolveu nenhum ficheiro reproduzível
+downloads-error-write-item = não foi possível escrever { $file }: { $error }
+downloads-error-open = não foi possível abrir o ficheiro: { $error }
+downloads-error-restart = não foi possível recomeçar o ficheiro: { $error }
+downloads-error-continue = não foi possível continuar o ficheiro: { $error }
+downloads-error-write = não foi possível escrever o ficheiro: { $error }
+downloads-error-partial = só chegaram { $done } de { $total } bytes
+downloads-error-finish = não foi possível concluir o ficheiro: { $error }
+downloads-error-no-space = não há espaço livre suficiente: são necessários { $needed } e há { $free } livres
+
+# A transmissão: o painel, a barra e os avisos.
+cast-title = Transmissão
+cast-status-casting = A transmitir
+cast-status-reconnecting = A religar
+cast-panel-title = Transmitir para uma TV
+cast-panel-note = Reproduza num Chromecast ou Google TV nesta rede. É a TV que reproduz; esta aplicação serve de comando.
+cast-looking = A procurar TVs nesta rede…
+cast-section-network = Nesta rede
+cast-device-casting = { $device }, a transmitir
+cast-device-reconnect = Voltar a ligar a { $device }
+cast-device-cast = Transmitir para { $device }
+cast-device-running = O Jellyfin está a funcionar
+cast-device-group = Grupo
+cast-disconnect = Desconectar
+cast-stop = Parar a transmissão
+cast-stop-join-title = Parar a transmissão para se juntar?
+cast-stop-create-title = Parar a transmissão para criar um grupo?
+cast-stop-note = Um grupo SyncPlay reproduz aqui, em sintonia com os outros, por isso a transmissão para { $device } termina. O que está a reproduzir também termina.
+cast-bar-label-on = { $name }, em { $device }
+cast-bar-label-reconnecting = { $name }, a restabelecer a ligação a { $device }
+cast-bar-play = Reproduzir
+cast-bar-pause = Pausar
+cast-bar-reconnecting = A restabelecer a ligação a { $device }…
+cast-bar-series = { $series } · em { $device }
+cast-bar-on = em { $device }
+cast-button = Transmitir para uma TV
+cast-button-casting = A transmitir (transmissão para uma TV)
+cast-button-off-in-group = Transmitir para uma TV (indisponível num grupo SyncPlay)
+cast-toast-casting = A transmitir para { $device }
+cast-toast-play-failed = A TV não conseguiu reproduzir isto ({ $code }).
+cast-toast-unreachable = A TV não conseguiu chegar ao servidor em { $address }. É preciso um endereço a que a TV consiga chegar nesta rede.
+cast-toast-lost = Perdeu-se a ligação a { $device }.
+cast-toast-stopped = { $device } deixou de transmitir.
+cast-toast-leave-group = Saia do grupo SyncPlay para transmitir para uma TV.
+cast-error-connect = Não foi possível ligar a { $device }.
+cast-error-launch = { $device } não conseguiu iniciar o Jellyfin.
+cast-error-wrong-app = { $device } iniciou uma aplicação que não é o recetor do Jellyfin.
+cast-unknown-error = erro desconhecido
+
+# O SyncPlay: as atualizações do grupo, como avisos.
+syncplay-joined = Juntou-se ao grupo SyncPlay { $group }
+syncplay-left = Saiu de { $group }
+syncplay-gone = Esse grupo SyncPlay já não existe.
+syncplay-no-access = Alguém no grupo não tem acesso a este item.
+syncplay-user-joined = { $user } juntou-se ao grupo
+syncplay-user-left = { $user } saiu do grupo
+syncplay-error = SyncPlay: { $message }
+syncplay-load-failed = Não foi possível carregar o item do grupo: { $message }

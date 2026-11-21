@@ -24,6 +24,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::config::Config;
+use crate::i18n::tr;
 use crate::playback::{PlayOptions, SubtitleChoice, UiCommand};
 use crate::runtime;
 use crate::services::{AppEvent, Services};
@@ -726,7 +727,7 @@ impl Services {
             return;
         }
         if self.in_group() {
-            self.toast(Toast::info("Leave the SyncPlay group to cast to a TV."));
+            self.toast(Toast::info(tr!("cast-toast-leave-group")));
             return;
         }
         let Some(device) = self.cast.devices.iter().find(|device| device.id == device_id).cloned() else {
@@ -1013,7 +1014,10 @@ impl Services {
                     session.connected = true;
                     session.reconnecting = None;
                     session.casting.apply_volume(&status);
-                    toasts.push(Toast::success(format!("Casting to {}", session.device.name)));
+                    toasts.push(Toast::success(tr!(
+                        "cast-toast-casting",
+                        device = session.device.name.clone()
+                    )));
                 }
                 // The receiver was still running: `Identify`'s answer restores what it plays,
                 // so only the connection's state changes here.
@@ -1089,18 +1093,19 @@ impl Services {
                         ReceiverEvent::PlaybackError(data) => {
                             // Nothing is starting any more: its stop closes the player.
                             session.starting = false;
-                            let code = data.message.as_deref().unwrap_or("unknown error");
-                            toasts.push(Toast::error(format!("The TV couldn't play this ({code}).")).title("Casting"));
+                            let code = data.message.clone().unwrap_or_else(|| tr!("cast-unknown-error"));
+                            toasts.push(
+                                Toast::error(tr!("cast-toast-play-failed", code = code)).title(tr!("cast-title")),
+                            );
                         }
                         ReceiverEvent::ConnectionError(_) => {
                             session.starting = false;
                             toasts.push(
-                                Toast::error(format!(
-                                    "The TV couldn't reach the server at {}. It needs an address the TV can \
-                                     reach on this network.",
-                                    self.cast.credentials.server_address
+                                Toast::error(tr!(
+                                    "cast-toast-unreachable",
+                                    address = self.cast.credentials.server_address.as_str()
                                 ))
-                                .title("Casting"),
+                                .title(tr!("cast-title")),
                             );
                         }
                         ReceiverEvent::Error(data) => {
@@ -1193,9 +1198,11 @@ impl Services {
                 .map(|session| session.device.name)
                 .unwrap_or_default();
             match end {
-                End::Failed(message) => self.toast(Toast::error(message).title("Casting")),
-                End::Dropped => self.toast(Toast::error(format!("Lost the connection to {name}.")).title("Casting")),
-                End::AppGone => self.toast(Toast::info(format!("{name} stopped casting."))),
+                End::Failed(message) => self.toast(Toast::error(message).title(tr!("cast-title"))),
+                End::Dropped => {
+                    self.toast(Toast::error(tr!("cast-toast-lost", device = name)).title(tr!("cast-title")))
+                }
+                End::AppGone => self.toast(Toast::info(tr!("cast-toast-stopped", device = name))),
                 End::Stopped | End::Disconnected => {}
             }
             self.cast_closed();
@@ -1360,7 +1367,7 @@ async fn join(
             return if resumed {
                 Attempt::Dropped
             } else {
-                Attempt::Failed(format!("Couldn't connect to {name}."))
+                Attempt::Failed(tr!("cast-error-connect", device = name.as_str()))
             };
         }
     };
@@ -1386,12 +1393,12 @@ async fn join(
             Ok(app) => app,
             Err(err) => {
                 tracing::warn!("cast: launching {app_id} failed: {err}");
-                return Attempt::Failed(format!("{name} couldn't start Jellyfin."));
+                return Attempt::Failed(tr!("cast-error-launch", device = name.as_str()));
             }
         };
         if !app.has_namespace(receiver_app::NAMESPACE) {
             tracing::warn!(?app, "cast: the receiver doesn't listen on {}", receiver_app::NAMESPACE);
-            return Attempt::Failed(format!("{name} started an app that isn't Jellyfin's receiver."));
+            return Attempt::Failed(tr!("cast-error-wrong-app", device = name.as_str()));
         }
         app
     };

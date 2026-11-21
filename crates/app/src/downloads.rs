@@ -54,6 +54,7 @@ use tokio::sync::watch;
 use url::Url;
 
 use crate::config;
+use crate::i18n::tr;
 use crate::playback;
 use crate::services::Services;
 use crate::session::describe_error;
@@ -305,25 +306,33 @@ impl Queue {
         let to_come = current.len() + self.waiting.len();
         let first = current.first().filter(|_| !self.held);
         let Some(first) = first else {
-            let title = if self.held { "Waiting for Wi-Fi" } else { "Downloading" };
-            let text = match to_come {
-                1 => "1 download to come".to_owned(),
-                count => format!("{count} downloads to come"),
+            let title = if self.held {
+                tr!("downloads-activity-waiting-wifi")
+            } else {
+                tr!("downloads-activity-downloading")
             };
             return Some(Activity {
-                title: title.to_owned(),
-                text,
+                title,
+                text: tr!("downloads-activity-to-come", count = to_come),
                 progress: None,
             });
         };
         let total = first.total.filter(|&total| total > 0);
-        let mut text = match total {
-            Some(total) => format!("{} of {}", bytes(first.done), bytes(total)),
-            None => format!("{} so far", bytes(first.done)),
+        let text = match total {
+            Some(total) => tr!(
+                "downloads-activity-progress",
+                done = bytes(first.done),
+                total = bytes(total)
+            ),
+            None => tr!("downloads-activity-so-far", done = bytes(first.done)),
         };
-        if to_come > 1 {
-            text.push_str(&format!(" · {} more to come", to_come - 1));
-        }
+        // Two whole labels, as the summary's are: the dot between them isn't a word.
+        let text = if to_come > 1 {
+            let more = to_come - 1;
+            format!("{text} · {}", tr!("downloads-activity-more", count = more))
+        } else {
+            text
+        };
         Some(Activity {
             title: first.title.clone(),
             text,
@@ -589,12 +598,12 @@ impl Downloads {
             }
             BaseItemKind::Movie | BaseItemKind::Episode | BaseItemKind::Video => {
                 if !item.can_download {
-                    return Err("This item can't be downloaded from this server.".to_owned());
+                    return Err(tr!("downloads-error-not-downloadable"));
                 }
                 self.queue(vec![item.clone()]);
                 Ok(())
             }
-            _ => Err("Only videos, and the series and seasons that hold them, can be downloaded.".to_owned()),
+            _ => Err(tr!("downloads-error-not-media")),
         }
     }
 
@@ -937,8 +946,10 @@ impl Services {
     pub(crate) fn tick_downloads(&mut self) {
         for notice in self.downloads.tick() {
             let toast = match notice {
-                Notice::Downloaded { title } => Toast::success(format!("Downloaded {title}")),
-                Notice::Failed { title, message } => Toast::error(format!("Couldn't download {title}: {message}")),
+                Notice::Downloaded { title } => Toast::success(tr!("downloads-toast-downloaded", title = title)),
+                Notice::Failed { title, message } => {
+                    Toast::error(tr!("downloads-toast-failed", title = title, message = message))
+                }
             };
             self.toast(toast);
         }
@@ -1274,7 +1285,7 @@ async fn transfer(client: Client, item: BaseItemDto, dir: PathBuf, updates: &Rep
     match result {
         Ok(Ok(())) => None,
         Ok(Err(message)) => Some(Failure::Error(message)),
-        Err(_) => Some(Failure::Error("the download stopped unexpectedly".to_owned())),
+        Err(_) => Some(Failure::Error(tr!("downloads-error-stopped"))),
     }
 }
 
@@ -1282,7 +1293,7 @@ async fn transfer(client: Client, item: BaseItemDto, dir: PathBuf, updates: &Rep
 async fn download(client: &Client, item: &BaseItemDto, dir: &Path, updates: &Reporter) -> Result<(), String> {
     tokio::fs::create_dir_all(dir)
         .await
-        .map_err(|err| format!("couldn't make its folder: {err}"))?;
+        .map_err(|err| tr!("downloads-error-folder", error = err.to_string()))?;
     // `PlaybackInfo` gives the version as playback would negotiate it, with its defaults; the
     // item's own fetch supplies chapters and the sources a page shows.
     let info = client
@@ -1293,7 +1304,7 @@ async fn download(client: &Client, item: &BaseItemDto, dir: &Path, updates: &Rep
         .media_sources
         .into_iter()
         .next()
-        .ok_or("the server returned no playable media")?;
+        .ok_or_else(|| tr!("downloads-error-no-media"))?;
     let full = client
         .item(
             &item.id,
@@ -1325,7 +1336,8 @@ async fn download(client: &Client, item: &BaseItemDto, dir: &Path, updates: &Rep
         file,
         size,
     };
-    write_json(&dir.join(ITEM_FILE), &local).map_err(|err| format!("couldn't write {ITEM_FILE}: {err}"))?;
+    write_json(&dir.join(ITEM_FILE), &local)
+        .map_err(|err| tr!("downloads-error-write-item", file = ITEM_FILE, error = err.to_string()))?;
     fetch_media(client, &local, dir, updates).await
 }
 
@@ -1360,22 +1372,22 @@ async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &R
         .write(true)
         .open(&part)
         .await
-        .map_err(|err| format!("couldn't open the file: {err}"))?;
+        .map_err(|err| tr!("downloads-error-open", error = err.to_string()))?;
     let mut done = offset;
     if restart || (offset > 0 && !download.partial) {
         // The server ignored the range and sent the whole file: start the file over.
         tracing::info!(item = %local.item.name, "starting the file over");
         file.set_len(0)
             .await
-            .map_err(|err| format!("couldn't restart the file: {err}"))?;
+            .map_err(|err| tr!("downloads-error-restart", error = err.to_string()))?;
         file.seek(SeekFrom::Start(0))
             .await
-            .map_err(|err| format!("couldn't restart the file: {err}"))?;
+            .map_err(|err| tr!("downloads-error-restart", error = err.to_string()))?;
         done = 0;
     } else {
         file.seek(SeekFrom::Start(offset))
             .await
-            .map_err(|err| format!("couldn't continue the file: {err}"))?;
+            .map_err(|err| tr!("downloads-error-continue", error = err.to_string()))?;
     }
     updates.send(Update::Progress {
         item_id: item_id.clone(),
@@ -1386,7 +1398,7 @@ async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &R
     while let Some(chunk) = download.chunk().await.map_err(|err| describe_error(&err))? {
         file.write_all(&chunk)
             .await
-            .map_err(|err| format!("couldn't write the file: {err}"))?;
+            .map_err(|err| tr!("downloads-error-write", error = err.to_string()))?;
         done += chunk.len() as u64;
         if reported.elapsed() >= PROGRESS_INTERVAL {
             reported = Instant::now();
@@ -1399,11 +1411,11 @@ async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &R
     }
     file.flush()
         .await
-        .map_err(|err| format!("couldn't write the file: {err}"))?;
+        .map_err(|err| tr!("downloads-error-write", error = err.to_string()))?;
     drop(file);
     if let Some(total) = total.filter(|total| done != *total) {
         // The `.part` stays: the retry resumes from here.
-        return Err(format!("only {done} of {total} bytes arrived"));
+        return Err(tr!("downloads-error-partial", done = done, total = total));
     }
     finish(&part, &finished, done, local.poster(dir), updates, item_id).await
 }
@@ -1419,7 +1431,7 @@ async fn finish(
 ) -> Result<(), String> {
     tokio::fs::rename(part, finished)
         .await
-        .map_err(|err| format!("couldn't finish the file: {err}"))?;
+        .map_err(|err| tr!("downloads-error-finish", error = err.to_string()))?;
     updates.send(Update::Done {
         item_id: item_id.to_owned(),
         size,
@@ -1433,10 +1445,10 @@ async fn finish(
 /// network share with no reported quota) only logs.
 fn check_space(dir: &Path, needed: u64) -> Result<(), String> {
     match fs4::available_space(dir) {
-        Ok(free) if free < needed => Err(format!(
-            "there isn't enough free space: {} is needed and {} is free",
-            bytes(needed),
-            bytes(free)
+        Ok(free) if free < needed => Err(tr!(
+            "downloads-error-no-space",
+            needed = bytes(needed),
+            free = bytes(free)
         )),
         Ok(_) => Ok(()),
         Err(err) => {
