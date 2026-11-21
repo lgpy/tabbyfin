@@ -18,6 +18,7 @@ use egui::{
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{ICON_CHECK_CIRCLE, ICON_CLOSE, ICON_ERROR, ICON_INFO};
 
+use crate::i18n::tr;
 use crate::theme::{self, SPACE, text};
 use crate::widgets::popup;
 
@@ -278,8 +279,8 @@ fn draw(ui: &mut Ui, toast: &Toast) -> Drawn {
     let close = ui
         .interact(close_rect, ui.scope_id().with("close"), Sense::CLICK)
         .on_hover_cursor(CursorIcon::PointingHand);
-    close.widget_info(|| WidgetInfo::labeled(Role::Button, true, "Close"));
-    let close = close.on_hover_text("Close");
+    close.widget_info(|| WidgetInfo::labeled(Role::Button, true, tr!("shell-toast-close")));
+    let close = close.on_hover_text(tr!("shell-toast-close"));
     if close.hovered() {
         painter.circle_filled(close_rect.center(), CLOSE / 2., tokens.inset_hover);
     }
@@ -341,11 +342,11 @@ fn icon(kind: Kind, tokens: &theme::Tokens) -> (MaterialIcon, Color32) {
 }
 
 /// What a screen reader says for a toast's icon.
-fn kind_label(kind: Kind) -> &'static str {
+fn kind_label(kind: Kind) -> String {
     match kind {
-        Kind::Info => "Information",
-        Kind::Success => "Success",
-        Kind::Error => "Error",
+        Kind::Info => tr!("shell-toast-information"),
+        Kind::Success => tr!("shell-toast-success"),
+        Kind::Error => tr!("shell-toast-error"),
     }
 }
 

@@ -19,6 +19,7 @@ use jellyfin::Client;
 
 use crate::config::{Config, SavedServer};
 use crate::downloads;
+use crate::i18n::tr;
 use crate::keys::{self, Press};
 use crate::services::{AppEvent, Services};
 use crate::session::{Session, client_info, describe_error};
@@ -322,7 +323,7 @@ impl App {
                 }
                 self.remember(&session);
                 self.show_signed_in(ctx, frame, *session);
-                self.toasts.push(Toast::success("You're back online."));
+                self.toasts.push(Toast::success(tr!("shell-back-online")));
             }
             Some(Reconnected::Expired) => self.session_expired(ctx),
         }

@@ -13,6 +13,7 @@ use jellyfin::models::PublicSystemInfo;
 use jellyfin::{Client, ClientInfo, Error, MIN_SUPPORTED_VERSION};
 
 use crate::config::SavedServer;
+use crate::i18n::tr;
 use crate::keyboard::Kind;
 use crate::session::{self, Session, describe_error};
 use crate::task::{self, Deadline, Receiver, Sender, Task};
@@ -333,22 +334,22 @@ impl Login {
             // An aside to the step: the way out of a Quick Connect wait, the way back to another
             // server, or what this one needs.
             if self.quick_connect_code.is_some() {
-                if button::subtle(ui, "Cancel").clicked() {
+                if button::subtle(ui, &tr!("login-cancel")).clicked() {
                     self.cancel();
                 }
             } else if self.server.is_some() {
-                if button::subtle(ui, "Use another server").clicked() {
+                if button::subtle(ui, &tr!("login-use-another-server")).clicked() {
                     self.change_server();
                 }
             } else {
                 ui.label(label::muted(
                     ui,
-                    format!("Works with Jellyfin {MIN_SUPPORTED_VERSION} or newer"),
+                    tr!("login-min-version", version = MIN_SUPPORTED_VERSION.to_string()),
                 ));
             }
             if self.can_cancel {
                 ui.add_space(surface::GAP_ITEM);
-                if ui.button((ICON_ARROW_BACK, "Back to your account")).clicked() {
+                if ui.button((ICON_ARROW_BACK, tr!("login-back-to-account"))).clicked() {
                     self.event = Some(LoginEvent::Cancel);
                 }
             }
@@ -359,26 +360,24 @@ impl Login {
     /// The panel under the mascot: the step's title, what went wrong, and the step's fields.
     fn panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let (title, subtitle) = if self.quick_connect_code.is_some() {
-            (
-                "Approve this sign-in".to_owned(),
-                "Enter this code in Quick Connect, in a Jellyfin app you're signed in to.".to_owned(),
-            )
+            (tr!("login-quick-connect-title"), tr!("login-quick-connect-subtitle"))
         } else if let Some((client, info)) = &self.server {
             let host = client.base_url().host_str().unwrap_or_default();
             (
-                format!("Sign in to {}", info.server_name.as_deref().unwrap_or("Jellyfin")),
-                format!("Jellyfin {} at {host}", info.version.as_deref().unwrap_or("?")),
+                tr!(
+                    "login-to-server",
+                    server = info.server_name.as_deref().unwrap_or("Jellyfin")
+                ),
+                tr!(
+                    "login-server-line",
+                    version = info.version.as_deref().unwrap_or("?"),
+                    host = host
+                ),
             )
         } else if !self.accounts.is_empty() {
-            (
-                "Welcome back".to_owned(),
-                "Pick an account to carry on watching.".to_owned(),
-            )
+            (tr!("login-welcome-back"), tr!("login-welcome-back-subtitle"))
         } else {
-            (
-                "Welcome to Tabbyfin".to_owned(),
-                "Let's find your Jellyfin server.".to_owned(),
-            )
+            (tr!("login-welcome"), tr!("login-welcome-subtitle"))
         };
         surface::heading(ui, &title, &subtitle);
         ui.add_space(surface::GAP_HEADING);
@@ -418,7 +417,7 @@ impl Login {
     fn connect(&mut self, ctx: &egui::Context) {
         let input = self.url.trim().to_string();
         if input.is_empty() {
-            self.error = Some("Enter your server's address.".into());
+            self.error = Some(tr!("login-address-required"));
             return;
         }
         let candidates = candidates(&input);
@@ -440,7 +439,7 @@ impl Login {
         let username = self.username.trim().to_string();
         let password = self.password.clone();
         if username.is_empty() {
-            self.error = Some("Enter your username.".into());
+            self.error = Some(tr!("login-username-required"));
             return;
         }
 
@@ -454,7 +453,7 @@ impl Login {
                     user: auth.user,
                     server: info,
                 })),
-                Err(Error::Unauthorized) => Outcome::Failed("Wrong username or password.".into()),
+                Err(Error::Unauthorized) => Outcome::Failed(tr!("login-wrong-credentials")),
                 Err(err) => Outcome::Failed(describe_error(&err)),
             }
         }));
@@ -474,7 +473,7 @@ impl Login {
         self.task = Some(Task::spawn(ctx, async move {
             match client.quick_connect_enabled().await {
                 Ok(true) => {}
-                Ok(false) => return Outcome::Failed("Quick Connect is turned off on this server.".into()),
+                Ok(false) => return Outcome::Failed(tr!("login-quick-connect-off")),
                 Err(err) => return Outcome::Failed(describe_error(&err)),
             }
             let qc = match client.quick_connect_initiate().await {
@@ -488,7 +487,7 @@ impl Login {
                     Ok(state) if state.authenticated => break,
                     Ok(_) => {}
                     Err(Error::NotFound) => {
-                        return Outcome::Failed("The Quick Connect code expired. Try again.".into());
+                        return Outcome::Failed(tr!("login-quick-connect-expired"));
                     }
                     Err(err) => return Outcome::Failed(describe_error(&err)),
                 }
@@ -529,8 +528,7 @@ impl Login {
                     self.error = Some(message);
                     // Waiting to restore a saved session: keep trying until the server is back.
                     if self.resume_saved_session {
-                        self.status =
-                            Some("You'll be signed back in automatically as soon as the server answers.".into());
+                        self.status = Some(tr!("login-reconnect"));
                         self.retry.set(RECONNECT_INTERVAL);
                     } else {
                         // The address is what has to change (or be tried again), so the keyboard
@@ -588,7 +586,7 @@ impl Login {
             let names = [account.username.as_str()];
             let subtitle = account.server_name.as_deref().unwrap_or(&account.url);
             let row = AvatarRow::new(&names, &account.username, subtitle, &label)
-                .remove("Remove this account")
+                .remove(&tr!("login-remove-account"))
                 .show(ui, self.busy.is_none());
             if row.row.clicked() {
                 self.event = Some(LoginEvent::UseAccount(account.clone()));
@@ -604,20 +602,15 @@ impl Login {
 
         field::label(
             ui,
-            if self.accounts.is_empty() {
-                "Server address"
+            &if self.accounts.is_empty() {
+                tr!("login-server-address")
             } else {
-                "Or connect to another server"
+                tr!("login-other-server")
             },
         );
-        let address = field::single_line(
-            ui,
-            Field::Server.id(),
-            &mut self.url,
-            "jellyfin.example.com or 192.168.1.10:8096",
-        )
-        .interactive(self.busy.is_none())
-        .show(ui);
+        let address = field::single_line(ui, Field::Server.id(), &mut self.url, &tr!("login-address-hint"))
+            .interactive(self.busy.is_none())
+            .show(ui);
         self.watch_field(&address);
         let address = address.response.response;
         field::shown(&address, Kind::Url);
@@ -629,7 +622,7 @@ impl Login {
         ui.add_space(surface::GAP_GROUP);
         let connect = button::brand(
             ui,
-            "Connect",
+            &tr!("login-connect"),
             ui.available_width(),
             self.button(Busy::Connecting),
             button::Focus::Tab,
@@ -650,7 +643,7 @@ impl Login {
     }
 
     fn credentials_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        field::label(ui, "Username");
+        field::label(ui, &tr!("login-username"));
         let username = field::single_line(ui, Field::Username.id(), &mut self.username, "")
             .interactive(self.busy.is_none())
             .show(ui);
@@ -664,7 +657,7 @@ impl Login {
         let username_entered = username.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         ui.add_space(surface::GAP_FIELD);
 
-        field::label(ui, "Password");
+        field::label(ui, &tr!("login-password"));
         let password = field::with_trailing(ui, Field::Password.id(), &mut self.password, "")
             .password(!self.show_password)
             .interactive(self.busy.is_none())
@@ -685,11 +678,11 @@ impl Login {
         }
         let password_entered = password.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         let (icon, tooltip) = if self.show_password {
-            (ICON_VISIBILITY_OFF, "Hide password")
+            (ICON_VISIBILITY_OFF, tr!("login-hide-password"))
         } else {
-            (ICON_VISIBILITY, "Show password")
+            (ICON_VISIBILITY, tr!("login-show-password"))
         };
-        if field::trailing(ui, &password, icon, tooltip, self.busy.is_none()).clicked() {
+        if field::trailing(ui, &password, icon, &tooltip, self.busy.is_none()).clicked() {
             self.show_password = !self.show_password;
         }
         if username_entered {
@@ -699,13 +692,27 @@ impl Login {
         ui.add_space(surface::GAP_GROUP);
 
         let width = ui.available_width();
-        let sign_in = button::brand(ui, "Sign in", width, self.button(Busy::SigningIn), button::Focus::Tab);
+        let sign_in = button::brand(
+            ui,
+            &tr!("login-sign-in"),
+            width,
+            self.button(Busy::SigningIn),
+            button::Focus::Tab,
+        );
         if sign_in.clicked() || password_entered {
             self.sign_in(ctx);
         }
         ui.add_space(surface::GAP_ITEM);
         let quick_connect = self.button(Busy::QuickConnect);
-        if button::quiet(ui, "Use Quick Connect", width, quick_connect, button::Focus::Tab).clicked() {
+        if button::quiet(
+            ui,
+            &tr!("login-quick-connect"),
+            width,
+            quick_connect,
+            button::Focus::Tab,
+        )
+        .clicked()
+        {
             self.start_quick_connect(ctx);
         }
     }
@@ -717,7 +724,7 @@ impl Login {
         let shown = widgets::code::show(ui, code);
         self.watch.look_at = Some(shown.rect.center());
         ui.add_space(surface::GAP_GROUP);
-        surface::waiting(ui, "Waiting for approval…");
+        surface::waiting(ui, &tr!("login-waiting-approval"));
     }
 }
 
@@ -768,18 +775,20 @@ async fn probe(
             match client.public_info().await {
                 Ok(server) => {
                     let Some(version) = server.server_version() else {
-                        return Err("The server didn't report its version.".into());
+                        return Err(tr!("login-no-version"));
                     };
                     if !version.is_supported() {
-                        return Err(format!(
-                            "This server runs Jellyfin {version}. Tabbyfin needs {MIN_SUPPORTED_VERSION} or newer."
+                        return Err(tr!(
+                            "login-version-too-old",
+                            version = version.to_string(),
+                            needed = MIN_SUPPORTED_VERSION.to_string()
                         ));
                     }
                     tracing::info!(url = %client.base_url(), %version, "connected to server");
                     return Ok((client, server));
                 }
                 Err(Error::ServerStarting) if started.elapsed() < STARTUP_WAIT => {
-                    let _ = progress.send(Progress::Status("The server is starting up. Waiting…".into()));
+                    let _ = progress.send(Progress::Status(tr!("login-server-starting")));
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
                 Err(err) => {
@@ -791,9 +800,9 @@ async fn probe(
         }
     }
     Err(match last_error {
-        Some(Error::Decode { .. } | Error::NotFound) => "That address doesn't look like a Jellyfin server.".into(),
+        Some(Error::Decode { .. } | Error::NotFound) => tr!("login-not-jellyfin"),
         Some(err) => describe_error(&err),
-        None => "Couldn't reach the server.".into(),
+        None => tr!("login-unreachable"),
     })
 }
 

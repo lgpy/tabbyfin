@@ -16,6 +16,7 @@ use egui_material_icons::icons::{ICON_ADD, ICON_PLAYLIST_PLAY};
 use jellyfin::ItemsQuery;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemSortBy};
 
+use crate::i18n::tr;
 use crate::keyboard::Kind;
 use crate::nav::NavRequest;
 use crate::task::Task;
@@ -35,11 +36,6 @@ const WIDTH: f32 = 460.;
 const LIST_MAX_H: f32 = 320.;
 /// The gap between playlist rows.
 const ROW_GAP: f32 = 6.;
-/// The edit dialog's sharing switch.
-const SHARING: &str = "Everyone on this server can see it";
-/// What deleting a playlist does, said plainly before it happens.
-const DELETE_PLAYLIST_NOTE: &str =
-    "The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.";
 
 /// The "Add to playlist" dialog: typing filters the user's playlists, Enter (or a click) adds
 /// the item to the highlighted one, or makes a new playlist with the typed name.
@@ -132,9 +128,13 @@ impl AddToPlaylist {
             match result {
                 Ok(outcome) => {
                     let toast = match outcome {
-                        Outcome::Added => Toast::success(format!("Added to {name}.")),
-                        Outcome::Created => Toast::success(format!("Made the playlist {name}.")),
-                        Outcome::AlreadyThere => Toast::info(format!("{} is already in {name}.", self.item_name)),
+                        Outcome::Added => Toast::success(tr!("dialog-added", name = name.as_str())),
+                        Outcome::Created => Toast::success(tr!("dialog-created", name = name.as_str())),
+                        Outcome::AlreadyThere => Toast::info(tr!(
+                            "dialog-already-there",
+                            item = self.item_name.as_str(),
+                            name = name.as_str()
+                        )),
                     };
                     cx.services.toast(toast);
                     // Open playlist pages reload with the new entry.
@@ -143,7 +143,7 @@ impl AddToPlaylist {
                 }
                 // Someone else's playlist, shared for viewing only.
                 Err(jellyfin::Error::Forbidden) => {
-                    let message = format!("You can't change {name}; it belongs to someone else.");
+                    let message = tr!("dialog-cant-change", name = name.as_str());
                     cx.services.toast(Toast::error(message));
                 }
                 Err(err) => {
@@ -158,8 +158,8 @@ impl AddToPlaylist {
         let id = egui::Id::unique("add_to_playlist");
         // What to type goes under the title rather than in the field, which has the keyboard
         // from the start and so never shows a hint (`field::single_line`).
-        let subtitle = "Pick one of your playlists, or type a name to make a new one.";
-        let modal = dialog::show(ctx, id, WIDTH, "Add to playlist", Some(subtitle), |ui| {
+        let subtitle = tr!("dialog-add-subtitle");
+        let modal = dialog::show(ctx, id, WIDTH, &tr!("dialog-add-to-playlist"), Some(&subtitle), |ui| {
             // Enter picks the highlighted line; the field never sees it, or it would only give
             // up the focus.
             let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
@@ -229,7 +229,7 @@ impl AddToPlaylist {
     fn lines(&mut self, ui: &mut Ui, rows: &[Row], chosen: &mut Option<usize>) {
         match &self.playlists {
             Load::Loading => {
-                ui.label(label::muted(ui, "Loading playlists…"));
+                ui.label(label::muted(ui, tr!("dialog-loading-playlists")));
             }
             Load::Failed(error) => {
                 ui.label(label::muted(ui, error.clone()));
@@ -237,9 +237,9 @@ impl AddToPlaylist {
             Load::Loaded(_) if rows.is_empty() => {
                 let typed = !self.typed.trim().is_empty();
                 let line = if typed {
-                    "No playlist has that name."
+                    tr!("dialog-no-playlist-named")
                 } else {
-                    "No playlists yet. Type a name to make one."
+                    tr!("dialog-no-playlists")
                 };
                 ui.label(label::muted(ui, line));
             }
@@ -384,14 +384,14 @@ impl EditPlaylist {
         let ctx = cx.ctx;
         let mut save = false;
         let id = egui::Id::unique("edit_playlist");
-        let modal = dialog::show(ctx, id, WIDTH, "Edit playlist", None, |ui| {
+        let modal = dialog::show(ctx, id, WIDTH, &tr!("dialog-edit-playlist"), None, |ui| {
             // Enter saves; the field never sees it.
             let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
             if !self.busy {
                 self.keys(ui);
             }
 
-            field::label(ui, "Name");
+            field::label(ui, &tr!("dialog-name"));
             let field = ui.add(field::single_line(ui, id.with("name"), &mut self.typed, "").interactive(!self.busy));
             field::shown(&field, Kind::Name);
             if std::mem::take(&mut self.focus) {
@@ -404,7 +404,7 @@ impl EditPlaylist {
             ui.add_space(surface::GAP_FIELD);
             match &self.public {
                 Load::Loading => {
-                    ui.label(label::muted(ui, "Checking who can see it…"));
+                    ui.label(label::muted(ui, tr!("dialog-checking-sharing")));
                 }
                 Load::Failed(message) => {
                     ui.label(label::muted(ui, message.clone()));
@@ -412,7 +412,7 @@ impl EditPlaylist {
                 Load::Loaded(public) => {
                     let on = *public;
                     let ringed = self.field == Field::Sharing;
-                    let row = toggle::row(ui, on, SHARING, Focus::Skip, ringed);
+                    let row = toggle::row(ui, on, &tr!("dialog-sharing"), Focus::Skip, ringed);
                     if row.clicked() && !self.busy {
                         self.field = Field::Sharing;
                         let_keyboard_go(ui);
@@ -428,7 +428,7 @@ impl EditPlaylist {
                 } else {
                     State::Ready
                 };
-                if dialog::main(ui, "Save", state).clicked() {
+                if dialog::main(ui, &tr!("dialog-save"), state).clicked() {
                     save = true;
                 }
                 dialog::cancel(ui);
@@ -533,14 +533,15 @@ impl DeletePlaylist {
             self.busy = false;
             match result {
                 Ok(()) => {
-                    cx.services.toast(Toast::success(format!("Deleted {}.", self.name)));
+                    cx.services
+                        .toast(Toast::success(tr!("dialog-deleted", name = self.name.as_str())));
                     cx.services.user_data += 1;
                     // Back to the page before the playlist's, which is gone.
                     cx.nav.push(NavRequest::Back);
                     return false;
                 }
                 Err(jellyfin::Error::Forbidden) => {
-                    let message = format!("{} belongs to someone else; it can't be deleted.", self.name);
+                    let message = tr!("dialog-delete-forbidden", name = self.name.as_str());
                     cx.services.toast(Toast::error(message));
                 }
                 Err(err) => {
@@ -552,12 +553,12 @@ impl DeletePlaylist {
 
         let ctx = cx.ctx;
         let mut delete = false;
-        let title = format!("Delete “{}”?", self.name);
+        let title = tr!("dialog-delete-title", name = self.name.as_str());
         let modal = dialog::show(ctx, egui::Id::unique("delete_playlist"), WIDTH, &title, None, |ui| {
-            ui.label(DELETE_PLAYLIST_NOTE);
+            ui.label(tr!("dialog-delete-note"));
             dialog::buttons(ui, |ui| {
                 let state = if self.busy { State::Loading } else { State::Ready };
-                if dialog::danger(ui, "Delete", state).clicked() {
+                if dialog::danger(ui, &tr!("dialog-delete"), state).clicked() {
                     delete = true;
                 }
                 dialog::cancel(ui);
@@ -623,11 +624,15 @@ fn playlist_row(ui: &mut Ui, row: &Row, highlighted: bool, ring: bool) -> Respon
     let tokens = theme::tokens_of(ui);
     let (name, icon, colour) = match row.playlist_id {
         Some(_) => (row.name.clone(), ICON_PLAYLIST_PLAY, tokens.ink_muted),
-        None => (format!("New playlist “{}”", row.name), ICON_ADD, tokens.brand),
+        None => (
+            tr!("dialog-new-playlist", name = row.name.as_str()),
+            ICON_ADD,
+            tokens.brand,
+        ),
     };
     let detail = row.entries.map(entry_count);
     let label = match &detail {
-        Some(detail) => format!("{name}, {detail}"),
+        Some(detail) => tr!("dialog-row-label", name = name.as_str(), detail = detail.as_str()),
         None => name.clone(),
     };
     ListRow::new(&name)
@@ -649,18 +654,15 @@ fn let_keyboard_go(ui: &Ui) {
 }
 
 fn entry_count(count: u32) -> String {
-    match count {
-        1 => "1 item".into(),
-        n => format!("{n} items"),
-    }
+    // A second, plain argument: Fluent formats a number with the locale's digit grouping, which
+    // would add a separator the count never had.
+    tr!("dialog-item-count", count = count, digits = count.to_string())
 }
 
 /// Another user's playlist answers 404 to changes (and 403 to some reads).
 fn describe(err: &jellyfin::Error, cx: &mut PageCx) -> String {
     match err {
-        jellyfin::Error::NotFound | jellyfin::Error::Forbidden => {
-            "This playlist belongs to someone else; it can't be changed.".to_owned()
-        }
+        jellyfin::Error::NotFound | jellyfin::Error::Forbidden => tr!("dialog-playlist-forbidden"),
         err => cx.services.handle_error(err),
     }
 }

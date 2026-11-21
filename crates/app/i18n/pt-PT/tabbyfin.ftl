@@ -214,6 +214,136 @@ settings-any-language = Qualquer idioma
 
 ## shell
 
+shell-home = Início
+shell-libraries = Bibliotecas
+shell-back = Voltar
+shell-settings = Definições
+shell-syncplay = Ver em conjunto (SyncPlay)
+shell-search = Pesquisar
+shell-search-page = Pesquisar { $page }
+shell-clear-search = Limpar pesquisa
+shell-account-on = { $name } em { $server }
+shell-downloads = Transferências
+shell-add-account = Adicionar conta…
+shell-sign-out = Terminar sessão
+
+shell-syncplay-title = Ver em conjunto
+shell-syncplay-description = Reproduza em sincronia com outras pessoas neste servidor.
+shell-syncplay-empty = Não há ninguém a ver em conjunto neste momento.
+shell-syncplay-join-section = Juntar-se a um grupo
+shell-syncplay-new-group = Novo grupo
+shell-syncplay-anything = Tudo o que reproduzir agora é reproduzido para todos aqui.
+shell-syncplay-leave = Sair do grupo
+shell-syncplay-join-label = Juntar-se a { $group }, com { $people }
+shell-syncplay-join = Juntar-se
+shell-people-nobody = ainda ninguém
+shell-people-and = { $others } e { $last }
+shell-group-status-playing = A reproduzir
+shell-group-status-waiting = A aguardar por todos
+shell-group-status-paused = Em pausa
+shell-group-status-idle = Nada a reproduzir
+shell-group-subtitle = { $people } · { $status }
+shell-group-watching = A ver · { $count }
+shell-group-you = você
+shell-queue = Fila
+shell-queue-repeat-off = Repetição desativada
+shell-queue-repeat-all = A repetir a fila
+shell-queue-repeat-one = A repetir um
+shell-queue-shuffle-on = Aleatório ativado
+shell-queue-shuffle-off = Aleatório desativado
+shell-queue-playing = { $name }, a reproduzir
+shell-queue-remove = Remover (Delete)
+shell-new-group-name = Grupo de { $user }
+
+shell-offline = Sem ligação
+shell-offline-hint = Não é possível contactar o servidor. As suas transferências estão aqui e a aplicação continua a tentar.
+
+shell-update-message = Já saiu a versão { $version } (esta é a { $current }).
+shell-update-title = Atualização disponível
+shell-update-download = Transferir
+shell-back-online = Está novamente ligado.
+
+shell-toast-close = Fechar
+shell-toast-information = Informação
+shell-toast-success = Sucesso
+shell-toast-error = Erro
+
+shell-error-invalid-url = Esse não parece ser um endereço de servidor válido.
+shell-error-timeout = O servidor demorou demasiado tempo a responder.
+shell-error-connect = Não foi possível contactar o servidor. Verifique o endereço e a ligação.
+shell-error-broken = A ligação ao servidor foi interrompida. Pode estar a reiniciar.
+shell-error-starting = O servidor ainda está a arrancar.
+shell-error-expired = A sua sessão expirou. Inicie sessão novamente.
+shell-error-forbidden = Esta conta não tem permissão para isso.
+shell-error-not-found = O servidor não encontrou o que foi pedido.
+shell-error-decode = O servidor enviou uma resposta que esta aplicação não compreende.
+shell-error-stalled = O servidor não enviou nada durante 30 segundos.
+shell-error-socket = A ligação em direto ao servidor falhou.
+shell-error-status = O servidor devolveu um erro ({ $status }).
+
+login-cancel = Cancelar
+login-use-another-server = Usar outro servidor
+login-min-version = Funciona com o Jellyfin { $version } ou mais recente
+login-back-to-account = Voltar à sua conta
+login-quick-connect-title = Aprovar este início de sessão
+login-quick-connect-subtitle = Introduza este código em Quick Connect, numa aplicação Jellyfin com sessão iniciada.
+login-to-server = Iniciar sessão em { $server }
+login-server-line = Jellyfin { $version } em { $host }
+login-welcome-back = Bem-vindo de volta
+login-welcome-back-subtitle = Escolha uma conta para continuar a ver.
+login-welcome = Bem-vindo ao Tabbyfin
+login-welcome-subtitle = Vamos encontrar o seu servidor Jellyfin.
+login-address-required = Introduza o endereço do servidor.
+login-username-required = Introduza o nome de utilizador.
+login-wrong-credentials = Nome de utilizador ou palavra-passe incorretos.
+login-quick-connect-off = O Quick Connect está desativado neste servidor.
+login-quick-connect-expired = O código do Quick Connect expirou. Tente novamente.
+login-reconnect = A sessão será retomada automaticamente assim que o servidor responder.
+login-remove-account = Remover esta conta
+login-server-address = Endereço do servidor
+login-other-server = Ou ligue-se a outro servidor
+login-address-hint = jellyfin.example.com ou 192.168.1.10:8096
+login-connect = Ligar
+login-username = Nome de utilizador
+login-password = Palavra-passe
+login-hide-password = Ocultar palavra-passe
+login-show-password = Mostrar palavra-passe
+login-sign-in = Iniciar sessão
+login-quick-connect = Usar Quick Connect
+login-waiting-approval = A aguardar aprovação…
+login-no-version = O servidor não indicou a versão.
+login-version-too-old = Este servidor executa o Jellyfin { $version }. O Tabbyfin precisa da versão { $needed } ou mais recente.
+login-server-starting = O servidor está a arrancar. A aguardar…
+login-not-jellyfin = Esse endereço não parece ser um servidor Jellyfin.
+login-unreachable = Não foi possível contactar o servidor.
+
+dialog-sharing = Todos neste servidor podem vê-la
+dialog-delete-note = A lista de reprodução é removida do servidor para todos com quem está partilhada. O que está nela fica nas suas bibliotecas.
+dialog-added = Adicionado a { $name }.
+dialog-created = Lista de reprodução { $name } criada.
+dialog-already-there = { $item } já está em { $name }.
+dialog-cant-change = Não pode alterar { $name }; pertence a outra pessoa.
+dialog-add-to-playlist = Adicionar à lista de reprodução
+dialog-add-subtitle = Escolha uma das suas listas de reprodução ou escreva um nome para criar uma nova.
+dialog-loading-playlists = A carregar listas de reprodução…
+dialog-no-playlist-named = Nenhuma lista de reprodução tem esse nome.
+dialog-no-playlists = Ainda não tem listas de reprodução. Escreva um nome para criar uma.
+dialog-edit-playlist = Editar lista de reprodução
+dialog-name = Nome
+dialog-checking-sharing = A verificar quem a pode ver…
+dialog-save = Guardar
+dialog-deleted = { $name } eliminada.
+dialog-delete-forbidden = { $name } pertence a outra pessoa e não pode ser eliminada.
+dialog-delete-title = Eliminar “{ $name }”?
+dialog-delete = Eliminar
+dialog-new-playlist = Nova lista de reprodução “{ $name }”
+dialog-row-label = { $name }, { $detail }
+dialog-item-count = { $count ->
+    [one] { $digits } item
+   *[other] { $digits } itens
+  }
+dialog-playlist-forbidden = Esta lista de reprodução pertence a outra pessoa; não pode ser alterada.
+
 ## downloads-and-casting
 
 # As transferências, e o aviso que a plataforma mostra delas (a notificação do Android).

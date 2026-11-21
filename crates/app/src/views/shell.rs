@@ -44,6 +44,7 @@ use jellyfin::{GroupInfo, GroupState, PlayQueue, RepeatMode, ShuffleMode};
 
 use crate::browse::Move;
 use crate::config::{Config, SavedServer};
+use crate::i18n::tr;
 use crate::keyboard::Kind;
 use crate::keys::{self, Action, Press, Scope};
 use crate::layout;
@@ -82,8 +83,12 @@ const COMPACT_LOGO: f32 = 32.;
 /// The compact layout's bottom bar, above the gesture bar's inset.
 const NAV_H: f32 = 64.;
 /// The places the bottom bar leads to, in its order. Search is the top bar's button and
-/// Settings is in the account menu, as on a phone's other apps.
-const PLACES: [(MaterialIcon, &str); 2] = [(ICON_HOME, "Home"), (ICON_VIDEO_LIBRARY, "Libraries")];
+/// Settings is in the account menu, as on a phone's other apps. Each name is called while the
+/// bar draws, so a change of language shows at once.
+const PLACES: [(MaterialIcon, fn() -> String); 2] = [
+    (ICON_HOME, || tr!("shell-home")),
+    (ICON_VIDEO_LIBRARY, || tr!("shell-libraries")),
+];
 /// The open search box's width, when the window has room for it.
 const SEARCH_BOX_W: f32 = 400.;
 /// The search box's id: it gives its focus back when the keyboard leaves it.
@@ -1112,7 +1117,8 @@ impl Shell {
                 ui.spacing_mut().item_spacing.x = gap;
                 logo_image(ui, logo.as_ref(), LOGO);
                 if can_go_back {
-                    let back = bar_button(ICON_ARROW_BACK, "Back", keyboard == Some(BarItem::Back)).show(ui);
+                    let back =
+                        bar_button(ICON_ARROW_BACK, &tr!("shell-back"), keyboard == Some(BarItem::Back)).show(ui);
                     if back.clicked() {
                         // A mouse click leaves no keyboard in the bar, since going back focuses
                         // the page.
@@ -1136,7 +1142,12 @@ impl Shell {
             |ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 self.account_button(ui, cx, keyboard == Some(BarItem::Account));
-                let settings = bar_button(ICON_SETTINGS, "Settings", keyboard == Some(BarItem::Settings)).show(ui);
+                let settings = bar_button(
+                    ICON_SETTINGS,
+                    &tr!("shell-settings"),
+                    keyboard == Some(BarItem::Settings),
+                )
+                .show(ui);
                 if settings.clicked() {
                     self.toggle_settings(cx);
                 }
@@ -1144,13 +1155,9 @@ impl Shell {
                     return;
                 }
                 // On while in a group.
-                let syncplay = bar_button(
-                    ICON_GROUPS,
-                    "Watch together (SyncPlay)",
-                    keyboard == Some(BarItem::SyncPlay),
-                )
-                .on(in_group)
-                .show(ui);
+                let syncplay = bar_button(ICON_GROUPS, &tr!("shell-syncplay"), keyboard == Some(BarItem::SyncPlay))
+                    .on(in_group)
+                    .show(ui);
                 if syncplay.clicked() {
                     // A click leaves no keyboard in the bar (the panel's keys are
                     // `syncplay_panel_keys`').
@@ -1201,7 +1208,10 @@ impl Shell {
                 // Apart enough that the buttons' 48-point targets don't overlap.
                 ui.spacing_mut().item_spacing.x = 8.;
                 if can_go_back {
-                    if bar_button(ICON_ARROW_BACK, "Back", false).show(ui).clicked() {
+                    if bar_button(ICON_ARROW_BACK, &tr!("shell-back"), false)
+                        .show(ui)
+                        .clicked()
+                    {
                         self.bar_key = None;
                         cx.nav.push(NavRequest::Back);
                     }
@@ -1233,7 +1243,7 @@ impl Shell {
                         ui.add(OfflineTag);
                         return;
                     }
-                    let syncplay = bar_button(ICON_GROUPS, "Watch together (SyncPlay)", false)
+                    let syncplay = bar_button(ICON_GROUPS, &tr!("shell-syncplay"), false)
                         .on(in_group)
                         .show(ui);
                     if syncplay.clicked() {
@@ -1242,7 +1252,7 @@ impl Shell {
                     }
                     self.syncplay_panel(&syncplay, cx);
                     self.cast_button(ui, cx, false);
-                    if bar_button(ICON_SEARCH, "Search", false).show(ui).clicked() {
+                    if bar_button(ICON_SEARCH, &tr!("shell-search"), false).show(ui).clicked() {
                         self.open_search(cx);
                     }
                 });
@@ -1287,25 +1297,26 @@ impl Shell {
         );
         let open = self.place();
         let width = rect.width() / PLACES.len() as f32;
-        for (index, (icon, name)) in PLACES.iter().enumerate() {
+        for (index, &(icon, name)) in PLACES.iter().enumerate() {
             let cell = Rect::from_min_size(
                 egui::pos2(rect.left() + width * index as f32, rect.top()),
                 vec2(width, rect.height()),
             );
             let response = ui.interact(cell, Id::unique("bottom_bar").with(index), sense);
             let on = index == open;
-            response.widget_info(|| egui::WidgetInfo::selected(Role::Tab, true, on, *name));
+            let name = name();
+            response.widget_info(|| egui::WidgetInfo::selected(Role::Tab, true, on, name.as_str()));
             let icon_center = egui::pos2(cell.center().x, cell.top() + 22.);
             if on || response.is_pointer_button_down_on() {
                 let pill = Rect::from_center_size(icon_center, vec2(56., 30.));
                 painter.rect_filled(pill, 15., tokens.inset_hover);
             }
             let colour = if on { tokens.brand } else { tokens.ink_muted };
-            crate::widgets::round_button::glyph(ui, icon_center, *icon, 24., colour);
+            crate::widgets::round_button::glyph(ui, icon_center, icon, 24., colour);
             painter.text(
                 egui::pos2(cell.center().x, cell.top() + 48.),
                 egui::Align2::CENTER_CENTER,
-                *name,
+                &name,
                 text::font(ui, "xs"),
                 if on { tokens.ink } else { tokens.ink_muted },
             );
@@ -1350,7 +1361,7 @@ impl Shell {
     fn account_button(&mut self, ui: &mut egui::Ui, cx: &mut PageCx, highlighted: bool) {
         let name = cx.services.session.user.name.clone();
         let tooltip = match &cx.services.session.server.server_name {
-            Some(server) => format!("{name} on {server}"),
+            Some(server) => tr!("shell-account-on", name = name.as_str(), server = server.as_str()),
             None => name.clone(),
         };
         // The user's avatar, in the colour the sign-in screen gives the same name.
@@ -1381,12 +1392,12 @@ impl Shell {
                     .checked(account.credential_account() == current)
             })
             .collect();
-        entries.push(Entry::new("Downloads").checked(false).separated());
-        entries.push(Entry::new("Add account…").checked(false).separated());
+        entries.push(Entry::new(tr!("shell-downloads")).checked(false).separated());
+        entries.push(Entry::new(tr!("shell-add-account")).checked(false).separated());
         if layout::compact(ui.ctx()) {
-            entries.push(Entry::new("Settings").checked(false).separated());
+            entries.push(Entry::new(tr!("shell-settings")).checked(false).separated());
         }
-        entries.push(Entry::new("Sign out").checked(false));
+        entries.push(Entry::new(tr!("shell-sign-out")).checked(false));
         let shown = PopupMenu::new(id)
             .hung()
             .align(RectAlign::BOTTOM_END)
@@ -1471,8 +1482,8 @@ impl Shell {
                 popup::panel_heading(
                     ui,
                     &group.group_name,
-                    Some((status, dot)),
-                    "Anything you play now plays for everyone here.",
+                    Some((status.as_str(), dot)),
+                    &tr!("shell-syncplay-anything"),
                 );
                 ui.add_space(surface::GAP_GROUP);
                 group_members(ui, group, user);
@@ -1481,7 +1492,7 @@ impl Shell {
                     chosen = Some(entry);
                 }
                 ui.add_space(surface::GAP_GROUP);
-                let leave = button::quiet_danger(ui, "Leave group", width, State::Ready, Focus::Skip);
+                let leave = button::quiet_danger(ui, &tr!("shell-syncplay-leave"), width, State::Ready, Focus::Skip);
                 if matches!(highlight, Some(MenuEntry::LeaveGroup)) {
                     focus::ring(ui, leave.rect, radius, Place::Outside);
                 }
@@ -1490,12 +1501,13 @@ impl Shell {
                 }
             }
             None => {
-                popup::panel_heading(ui, "Watch together", None, "Play in sync with others on this server.");
+                let description = tr!("shell-syncplay-description");
+                popup::panel_heading(ui, &tr!("shell-syncplay-title"), None, &description);
                 ui.add_space(surface::GAP_GROUP);
                 if state.groups.is_empty() {
-                    state::icon_message(ui, ICON_GROUPS, "No one is watching together right now.");
+                    state::icon_message(ui, ICON_GROUPS, &tr!("shell-syncplay-empty"));
                 } else {
-                    popup::panel_section(ui, "Join a group", QUEUE_TOGGLE, |_| {});
+                    popup::panel_section(ui, &tr!("shell-syncplay-join-section"), QUEUE_TOGGLE, |_| {});
                 }
                 for (index, group) in state.groups.iter().enumerate() {
                     if index > 0 {
@@ -1509,9 +1521,9 @@ impl Shell {
                 // Joining is the main action while there are groups to join (each row's own
                 // `brand` Join); with none, starting one is.
                 let new_group = if state.groups.is_empty() {
-                    button::brand(ui, "New group", width, State::Ready, Focus::Skip)
+                    button::brand(ui, &tr!("shell-syncplay-new-group"), width, State::Ready, Focus::Skip)
                 } else {
-                    button::quiet(ui, "New group", width, State::Ready, Focus::Skip)
+                    button::quiet(ui, &tr!("shell-syncplay-new-group"), width, State::Ready, Focus::Skip)
                 };
                 if matches!(highlight, Some(MenuEntry::NewGroup)) {
                     focus::ring(ui, new_group.rect, radius, Place::Outside);
@@ -1533,8 +1545,8 @@ impl Shell {
         let focused = ui.ctx().memory(|memory| memory.has_focus(Id::unique(SEARCH_ID)));
         // Over a page that searches itself, the hint names it ("Search settings").
         let hint = match self.own_search {
-            Some(_) => format!("Search {}", self.top().title().to_lowercase()),
-            None => "Search".to_owned(),
+            Some(_) => tr!("shell-search-page", page = self.top().title().to_lowercase()),
+            None => tr!("shell-search"),
         };
         let mut clear_clicked = false;
         let response = ui
@@ -1576,7 +1588,7 @@ impl Shell {
                     if clear {
                         // Not focusable, like the app's other painted controls: a Tab that gave
                         // egui the keyboard would take the box's keys.
-                        clear_clicked = field::trailing_button(ui, ICON_CLOSE, "Clear search")
+                        clear_clicked = field::trailing_button(ui, ICON_CLOSE, &tr!("shell-clear-search"))
                             .focus(Focus::Skip)
                             .show_at(
                                 ui,
@@ -1673,14 +1685,14 @@ impl Shell {
         };
         self.update_check = None;
         if let Some(update) = result {
-            let text = format!(
-                "Version {} is out (this is {}).",
-                update.version,
-                env!("CARGO_PKG_VERSION")
+            let text = tr!(
+                "shell-update-message",
+                version = update.version.as_str(),
+                current = env!("CARGO_PKG_VERSION")
             );
             let toast = Toast::info(text)
-                .title("Update available")
-                .action("Download", ToastAction::OpenUrl(update.url));
+                .title(tr!("shell-update-title"))
+                .action(tr!("shell-update-download"), ToastAction::OpenUrl(update.url));
             cx.services.toast(toast);
         }
     }
@@ -1803,7 +1815,7 @@ fn cast_panel_id() -> Id {
 
 /// The name *New group* gives the group: `"{user}'s group"`.
 fn new_group_name(session: &Session) -> String {
-    format!("{}'s group", session.user.name)
+    tr!("shell-new-group-name", user = session.user.name.as_str())
 }
 
 /// What the SyncPlay panel lists, in the order the keyboard walks it: with a group, its queue's
@@ -1894,20 +1906,23 @@ fn move_target(entries: &[MenuEntry], from: usize, by: isize) -> Option<usize> {
 /// Who's in a group, as a sentence: "dev", "dev and ana", "dev, ana and bo".
 fn people(names: &[String]) -> String {
     match names {
-        [] => "nobody yet".into(),
+        [] => tr!("shell-people-nobody"),
         [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        [rest @ .., last] => {
+            let others = rest.join(", ");
+            tr!("shell-people-and", others = others.as_str(), last = last.as_str())
+        }
     }
 }
 
 /// A group's state as a note and the colour of the dot beside it.
-fn group_status(ui: &Ui, state: GroupState) -> (&'static str, Color32) {
+fn group_status(ui: &Ui, state: GroupState) -> (String, Color32) {
     let tokens = theme::tokens_of(ui);
     match state {
-        GroupState::Playing => ("Playing", tokens.success),
-        GroupState::Waiting => ("Waiting for everyone", tokens.warning),
-        GroupState::Paused => ("Paused", tokens.ink_muted),
-        GroupState::Idle => ("Nothing playing", tokens.ink_muted),
+        GroupState::Playing => (tr!("shell-group-status-playing"), tokens.success),
+        GroupState::Waiting => (tr!("shell-group-status-waiting"), tokens.warning),
+        GroupState::Paused => (tr!("shell-group-status-paused"), tokens.ink_muted),
+        GroupState::Idle => (tr!("shell-group-status-idle"), tokens.ink_muted),
     }
 }
 
@@ -1920,12 +1935,21 @@ fn join_row(ui: &mut Ui, group: &GroupInfo, highlight: Option<&MenuEntry>) -> Re
         names.push(&group.group_name);
     }
     let (status, dot) = group_status(ui, group.state);
-    let subtitle = format!("{} · {status}", people(&group.participants));
-    let label = format!("Join {}, with {}", group.group_name, people(&group.participants));
+    let members = people(&group.participants);
+    let subtitle = tr!(
+        "shell-group-subtitle",
+        people = members.as_str(),
+        status = status.as_str()
+    );
+    let label = tr!(
+        "shell-syncplay-join-label",
+        group = group.group_name.as_str(),
+        people = members.as_str()
+    );
     let highlighted = matches!(highlight, Some(MenuEntry::JoinGroup(id)) if id == &group.group_id);
     AvatarRow::new(&names, &group.group_name, &subtitle, &label)
         .status(dot)
-        .action("Join")
+        .action(&tr!("shell-syncplay-join"))
         .highlighted(highlighted)
         .focus(Focus::Skip)
         .show(ui, true)
@@ -1934,14 +1958,11 @@ fn join_row(ui: &mut Ui, group: &GroupInfo, highlight: Option<&MenuEntry>) -> Re
 
 /// Who's in the group, a row each, the user marked "you".
 fn group_members(ui: &mut Ui, group: &GroupInfo, user: &str) {
-    popup::panel_section(
-        ui,
-        &format!("Watching · {}", group.participants.len()),
-        QUEUE_TOGGLE,
-        |_| {},
-    );
+    let watching = tr!("shell-group-watching", count = group.participants.len().to_string());
+    popup::panel_section(ui, &watching, QUEUE_TOGGLE, |_| {});
+    let you = tr!("shell-group-you");
     for name in &group.participants {
-        avatar_row::person(ui, name, (name == user).then_some("you"));
+        avatar_row::person(ui, name, (name == user).then_some(you.as_str()));
     }
 }
 
@@ -1952,21 +1973,25 @@ fn group_queue(ui: &mut Ui, state: &SyncPlay, highlight: Option<&MenuEntry>, scr
     let queue = state.queue.as_ref().filter(|queue| !queue.playlist.is_empty())?;
     let mut chosen = None;
     ui.add_space(surface::GAP_GROUP);
-    popup::panel_section(ui, "Queue", QUEUE_TOGGLE, |ui| {
+    popup::panel_section(ui, &tr!("shell-queue"), QUEUE_TOGGLE, |ui| {
         // Off, all, one: each press moves to the next.
         let (icon, tooltip, on) = match queue.repeat_mode {
-            RepeatMode::RepeatNone => (ICON_REPEAT, "Repeat is off", false),
-            RepeatMode::RepeatAll => (ICON_REPEAT, "Repeating the queue", true),
-            RepeatMode::RepeatOne => (ICON_REPEAT_ONE, "Repeating one", true),
+            RepeatMode::RepeatNone => (ICON_REPEAT, tr!("shell-queue-repeat-off"), false),
+            RepeatMode::RepeatAll => (ICON_REPEAT, tr!("shell-queue-repeat-all"), true),
+            RepeatMode::RepeatOne => (ICON_REPEAT_ONE, tr!("shell-queue-repeat-one"), true),
         };
         let repeat_ringed = matches!(highlight, Some(MenuEntry::CycleRepeat));
-        if queue_toggle(icon, tooltip, on, repeat_ringed).show(ui).clicked() {
+        if queue_toggle(icon, &tooltip, on, repeat_ringed).show(ui).clicked() {
             chosen = Some(MenuEntry::CycleRepeat);
         }
         let shuffled = queue.shuffle_mode == ShuffleMode::Shuffle;
-        let tooltip = if shuffled { "Shuffle is on" } else { "Shuffle is off" };
+        let tooltip = if shuffled {
+            tr!("shell-queue-shuffle-on")
+        } else {
+            tr!("shell-queue-shuffle-off")
+        };
         let shuffle_ringed = matches!(highlight, Some(MenuEntry::ToggleShuffle));
-        if queue_toggle(ICON_SHUFFLE, tooltip, shuffled, shuffle_ringed)
+        if queue_toggle(ICON_SHUFFLE, &tooltip, shuffled, shuffle_ringed)
             .show(ui)
             .clicked()
         {
@@ -2028,7 +2053,7 @@ fn queue_row(
     highlighted: bool,
 ) -> ListRowResponse {
     let label = if playing {
-        format!("{name}, playing")
+        tr!("shell-queue-playing", name = name)
     } else {
         name.to_owned()
     };
@@ -2040,7 +2065,7 @@ fn queue_row(
     ListRow::new(name)
         .compact()
         .leading(leading)
-        .handles(moves, "Remove (Delete)")
+        .handles(moves, &tr!("shell-queue-remove"))
         .highlighted(highlighted)
         .ringed(highlighted)
         .role(Role::MenuItem)
@@ -2075,8 +2100,8 @@ struct OfflineTag;
 
 impl egui::Widget for OfflineTag {
     fn ui(self, ui: &mut egui::Ui) -> Response {
-        crate::widgets::pill::icon_tag(ui, ICON_CLOUD_OFF, "Offline")
-            .on_hover_text("The server can't be reached. Your downloads are here, and the app keeps trying.")
+        crate::widgets::pill::icon_tag(ui, ICON_CLOUD_OFF, &tr!("shell-offline"))
+            .on_hover_text(tr!("shell-offline-hint"))
     }
 }
 

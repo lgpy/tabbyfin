@@ -214,6 +214,136 @@ settings-any-language = Any language
 
 ## shell
 
+shell-home = Home
+shell-libraries = Libraries
+shell-back = Back
+shell-settings = Settings
+shell-syncplay = Watch together (SyncPlay)
+shell-search = Search
+shell-search-page = Search { $page }
+shell-clear-search = Clear search
+shell-account-on = { $name } on { $server }
+shell-downloads = Downloads
+shell-add-account = Add account…
+shell-sign-out = Sign out
+
+shell-syncplay-title = Watch together
+shell-syncplay-description = Play in sync with others on this server.
+shell-syncplay-empty = No one is watching together right now.
+shell-syncplay-join-section = Join a group
+shell-syncplay-new-group = New group
+shell-syncplay-anything = Anything you play now plays for everyone here.
+shell-syncplay-leave = Leave group
+shell-syncplay-join-label = Join { $group }, with { $people }
+shell-syncplay-join = Join
+shell-people-nobody = nobody yet
+shell-people-and = { $others } and { $last }
+shell-group-status-playing = Playing
+shell-group-status-waiting = Waiting for everyone
+shell-group-status-paused = Paused
+shell-group-status-idle = Nothing playing
+shell-group-subtitle = { $people } · { $status }
+shell-group-watching = Watching · { $count }
+shell-group-you = you
+shell-queue = Queue
+shell-queue-repeat-off = Repeat is off
+shell-queue-repeat-all = Repeating the queue
+shell-queue-repeat-one = Repeating one
+shell-queue-shuffle-on = Shuffle is on
+shell-queue-shuffle-off = Shuffle is off
+shell-queue-playing = { $name }, playing
+shell-queue-remove = Remove (Delete)
+shell-new-group-name = { $user }'s group
+
+shell-offline = Offline
+shell-offline-hint = The server can't be reached. Your downloads are here, and the app keeps trying.
+
+shell-update-message = Version { $version } is out (this is { $current }).
+shell-update-title = Update available
+shell-update-download = Download
+shell-back-online = You're back online.
+
+shell-toast-close = Close
+shell-toast-information = Information
+shell-toast-success = Success
+shell-toast-error = Error
+
+shell-error-invalid-url = That doesn't look like a valid server address.
+shell-error-timeout = The server took too long to respond.
+shell-error-connect = Couldn't reach the server. Check the address and your connection.
+shell-error-broken = The connection to the server broke off. It may be restarting.
+shell-error-starting = The server is still starting up.
+shell-error-expired = Your session has expired. Please sign in again.
+shell-error-forbidden = This account isn't allowed to do that.
+shell-error-not-found = The server couldn't find what was requested.
+shell-error-decode = The server sent a response this app doesn't understand.
+shell-error-stalled = The server sent nothing for 30 seconds.
+shell-error-socket = The live connection to the server failed.
+shell-error-status = The server returned an error ({ $status }).
+
+login-cancel = Cancel
+login-use-another-server = Use another server
+login-min-version = Works with Jellyfin { $version } or newer
+login-back-to-account = Back to your account
+login-quick-connect-title = Approve this sign-in
+login-quick-connect-subtitle = Enter this code in Quick Connect, in a Jellyfin app you're signed in to.
+login-to-server = Sign in to { $server }
+login-server-line = Jellyfin { $version } at { $host }
+login-welcome-back = Welcome back
+login-welcome-back-subtitle = Pick an account to carry on watching.
+login-welcome = Welcome to Tabbyfin
+login-welcome-subtitle = Let's find your Jellyfin server.
+login-address-required = Enter your server's address.
+login-username-required = Enter your username.
+login-wrong-credentials = Wrong username or password.
+login-quick-connect-off = Quick Connect is turned off on this server.
+login-quick-connect-expired = The Quick Connect code expired. Try again.
+login-reconnect = You'll be signed back in automatically as soon as the server answers.
+login-remove-account = Remove this account
+login-server-address = Server address
+login-other-server = Or connect to another server
+login-address-hint = jellyfin.example.com or 192.168.1.10:8096
+login-connect = Connect
+login-username = Username
+login-password = Password
+login-hide-password = Hide password
+login-show-password = Show password
+login-sign-in = Sign in
+login-quick-connect = Use Quick Connect
+login-waiting-approval = Waiting for approval…
+login-no-version = The server didn't report its version.
+login-version-too-old = This server runs Jellyfin { $version }. Tabbyfin needs { $needed } or newer.
+login-server-starting = The server is starting up. Waiting…
+login-not-jellyfin = That address doesn't look like a Jellyfin server.
+login-unreachable = Couldn't reach the server.
+
+dialog-sharing = Everyone on this server can see it
+dialog-delete-note = The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.
+dialog-added = Added to { $name }.
+dialog-created = Made the playlist { $name }.
+dialog-already-there = { $item } is already in { $name }.
+dialog-cant-change = You can't change { $name }; it belongs to someone else.
+dialog-add-to-playlist = Add to playlist
+dialog-add-subtitle = Pick one of your playlists, or type a name to make a new one.
+dialog-loading-playlists = Loading playlists…
+dialog-no-playlist-named = No playlist has that name.
+dialog-no-playlists = No playlists yet. Type a name to make one.
+dialog-edit-playlist = Edit playlist
+dialog-name = Name
+dialog-checking-sharing = Checking who can see it…
+dialog-save = Save
+dialog-deleted = Deleted { $name }.
+dialog-delete-forbidden = { $name } belongs to someone else; it can't be deleted.
+dialog-delete-title = Delete “{ $name }”?
+dialog-delete = Delete
+dialog-new-playlist = New playlist “{ $name }”
+dialog-row-label = { $name }, { $detail }
+dialog-item-count = { $count ->
+    [one] { $digits } item
+   *[other] { $digits } items
+  }
+dialog-playlist-forbidden = This playlist belongs to someone else; it can't be changed.
+
 ## downloads-and-casting
 
 # A select's closing brace is indented: `i18n::tests` reads a line that starts at the left margin
