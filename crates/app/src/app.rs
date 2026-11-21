@@ -209,11 +209,12 @@ impl App {
         app
     }
 
-    /// Applies the config's appearance, at launch and after Settings saved a change
-    /// (`AppEvent::AppearanceChanged`): starts or stops following the desktop's colour scheme
+    /// Applies the config's appearance and language, at launch and after Settings saved a
+    /// change (`AppEvent::AppearanceChanged`): starts or stops following the desktop's colour scheme
     /// (Linux, while the theme preference is the system's), and reads the system's text size
     /// the first time a setting follows it.
     fn apply_appearance(&mut self, ctx: &egui::Context, config: &Config) {
+        crate::i18n::apply(crate::i18n::resolve(config.language));
         theme::apply(ctx, config);
         self.zoom = theme::zoom(config);
         if theme::follows_the_desktop(config) {

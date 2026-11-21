@@ -1,0 +1,6 @@
+# The interface's translations (`src/i18n.rs`). English is the fallback, and the file `fl!`
+# checks message ids and arguments against.
+fallback_language = "en"
+
+[fluent]
+assets_dir = "i18n"

@@ -46,6 +46,7 @@ use egui_material_icons::icons::{
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
 use crate::config::{self, AndroidPlayer, Config, SubtitleColor, SubtitleStyle, ThemePreference};
+use crate::i18n::{self, tr};
 use crate::nav::{NavRequest, Route};
 use crate::services::AppEvent;
 use crate::task::Task;
@@ -218,7 +219,7 @@ impl Section {
     /// What the section has, under its title in a phone's list of sections.
     fn summary(self) -> &'static str {
         match self {
-            Section::Appearance => "Theme, text size and animations",
+            Section::Appearance => "Theme, text size, animations and language",
             Section::Playback => "Next episode, intros, quality and the player",
             Section::Subtitles => "Colour, style and size",
             Section::Downloads => "Wi-Fi only, and where they're kept",
@@ -263,6 +264,13 @@ struct Row<'a> {
     unset: &'a str,
 }
 
+const LANGUAGE: Row = Row {
+    section: Section::Appearance,
+    label: "Language",
+    description: "The app's language. Applies at once.",
+    key: "language",
+    unset: "the system language",
+};
 const THEME: Row = Row {
     section: Section::Appearance,
     label: "Theme",
@@ -504,10 +512,11 @@ const HOME_SECTIONS_NOTE: Row = Row {
 
 /// Every row, for the search. A row left out of here still shows in its section, but a search
 /// would only find it through another row of the same section.
-const ROWS: [Row; 37] = [
+const ROWS: [Row; 38] = [
     THEME,
     TEXT_SIZE,
     ANIMATIONS,
+    LANGUAGE,
     TRACKS_NOTE,
     AUTOPLAY,
     SKIP_INTRO,
@@ -1057,6 +1066,25 @@ impl SettingsPage {
         let current = self.config.animations.unwrap_or(true);
         if let Some(edit) = toggle(ui, &self.search, ANIMATIONS, current, Some(true)) {
             self.save_appearance(cx, |config| config.animations = edit.or_unset());
+        }
+
+        // Each language by its own name; following the system says which one that is.
+        let system = tr!("settings-language-system", language = i18n::Language::system().name());
+        let languages: Vec<(Option<i18n::Language>, String)> = std::iter::once((None, system))
+            .chain(i18n::Language::ALL.map(|language| (Some(language), language.name().to_owned())))
+            .collect();
+        let current = self.config.language;
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            LANGUAGE,
+            "settings_language",
+            &languages,
+            current,
+            Some(None),
+        );
+        if let Some(edit) = picked {
+            self.save_appearance(cx, |config| config.language = edit.or_unset().flatten());
         }
     }
 
