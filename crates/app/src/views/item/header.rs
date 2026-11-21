@@ -23,6 +23,7 @@ use super::{
 };
 use crate::browse::Position;
 use crate::downloads::{self, DownloadState, Downloads};
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::item_menu::{is_favorite, is_played};
 use crate::layout;
@@ -272,40 +273,40 @@ pub(super) struct ActionLook {
 }
 
 pub(super) fn action_look(action: ItemAction, item: &BaseItemDto, episode: Option<&str>) -> ActionLook {
-    let labelled = |verb: &str| {
-        Some(match episode {
-            Some(episode) => format!("{verb} {episode}"),
-            None => verb.to_owned(),
-        })
-    };
     match action {
         ItemAction::Resume(position) => ActionLook {
             icon: ICON_PLAY_ARROW,
-            tooltip: format!("Resume from {}", timestamp(position.into())),
-            label: labelled("Resume"),
+            tooltip: tr!("item-resume-from", time = timestamp(position.into())),
+            label: Some(match episode {
+                Some(episode) => tr!("item-resume-episode", episode = episode),
+                None => tr!("item-resume"),
+            }),
             primary: true,
         },
         ItemAction::PlayFromStart => ActionLook {
             icon: ICON_REPLAY,
-            tooltip: "Play from beginning".to_owned(),
+            tooltip: tr!("item-play-from-beginning"),
             label: None,
             primary: false,
         },
         ItemAction::Play => ActionLook {
             icon: ICON_PLAY_ARROW,
-            tooltip: "Play".to_owned(),
-            label: labelled("Play"),
+            tooltip: tr!("item-play"),
+            label: Some(match episode {
+                Some(episode) => tr!("item-play-episode", episode = episode),
+                None => tr!("item-play"),
+            }),
             primary: true,
         },
         ItemAction::PlayAll => ActionLook {
             icon: ICON_PLAY_ARROW,
-            tooltip: "Play all".to_owned(),
-            label: Some("Play all".to_owned()),
+            tooltip: tr!("item-play-all"),
+            label: Some(tr!("item-play-all")),
             primary: true,
         },
         ItemAction::Shuffle => ActionLook {
             icon: ICON_SHUFFLE,
-            tooltip: "Shuffle".to_owned(),
+            tooltip: tr!("item-shuffle"),
             label: None,
             primary: false,
         },
@@ -315,13 +316,13 @@ pub(super) fn action_look(action: ItemAction, item: &BaseItemDto, episode: Optio
             } else {
                 ICON_OPEN_IN_NEW
             },
-            tooltip: "Trailer".to_owned(),
+            tooltip: tr!("item-trailer"),
             label: None,
             primary: false,
         },
         ItemAction::More => ActionLook {
             icon: ICON_MORE_HORIZ,
-            tooltip: "More".to_owned(),
+            tooltip: tr!("item-more"),
             label: None,
             primary: false,
         },
@@ -365,45 +366,44 @@ pub(super) fn download_look(downloads: &Downloads, item: &BaseItemDto) -> Downlo
         progress,
     };
     if let Some(children) = downloads.children_progress(item) {
-        let episodes = |n: usize| {
-            if n == 1 {
-                "1 episode".to_owned()
-            } else {
-                format!("{n} episodes")
-            }
-        };
         return if children.pending > 0 {
             look(
                 ICON_DOWNLOADING,
-                format!("Downloading {}", episodes(children.pending)),
-                "Downloading",
+                tr!("item-downloading-episodes", count = children.pending),
+                &tr!("item-downloading"),
                 None,
                 None,
             )
         } else if children.done > 0 {
             look(
                 ICON_DOWNLOAD_DONE,
-                format!("{} downloaded. Download the rest", episodes(children.done)),
-                "Downloaded",
+                tr!("item-downloaded-rest", count = children.done),
+                &tr!("item-downloaded"),
                 Some(true),
                 None,
             )
         } else {
             look(
                 ICON_DOWNLOAD,
-                "Download all episodes".to_owned(),
-                "Download",
+                tr!("item-download-all-episodes"),
+                &tr!("item-download"),
                 Some(false),
                 None,
             )
         };
     }
     match downloads.state(&item.id) {
-        None => look(ICON_DOWNLOAD, "Download".to_owned(), "Download", Some(false), None),
+        None => look(
+            ICON_DOWNLOAD,
+            tr!("item-download"),
+            &tr!("item-download"),
+            Some(false),
+            None,
+        ),
         Some(DownloadState::Queued | DownloadState::Paused) => look(
             ICON_DOWNLOADING,
-            "Waiting to download. Cancel download".to_owned(),
-            "Waiting",
+            tr!("item-waiting-to-download"),
+            &tr!("item-waiting"),
             None,
             Some(0.),
         ),
@@ -415,7 +415,7 @@ pub(super) fn download_look(downloads: &Downloads, item: &BaseItemDto) -> Downlo
             };
             look(
                 ICON_DOWNLOADING,
-                format!("Downloading, {so_far}. Cancel download"),
+                tr!("item-downloading-progress", progress = so_far.as_str()),
                 &so_far,
                 None,
                 Some(share.unwrap_or(0.)),
@@ -423,15 +423,15 @@ pub(super) fn download_look(downloads: &Downloads, item: &BaseItemDto) -> Downlo
         }
         Some(DownloadState::Done { size }) => look(
             ICON_DOWNLOAD_DONE,
-            format!("Downloaded, {}. Remove download", downloads::bytes(size)),
-            "Downloaded",
+            tr!("item-downloaded-size", size = downloads::bytes(size)),
+            &tr!("item-downloaded"),
             Some(true),
             None,
         ),
         Some(DownloadState::Failed(message)) => look(
             ICON_ERROR.outlined(),
-            format!("Download failed: {message} Retry download"),
-            "Retry",
+            tr!("item-download-failed", message = message.as_str()),
+            &tr!("item-retry"),
             None,
             None,
         ),
@@ -504,7 +504,7 @@ fn actions_row(
                         ICON_CHECK.outlined()
                     };
                     let scale = if animations { fills.played.scale(now) } else { 1. };
-                    button::quiet_icon(ui, icon, "Watched", Some(played), scale, ringed)
+                    button::quiet_icon(ui, icon, &tr!("item-watched"), Some(played), scale, ringed)
                 }
                 ItemAction::ToggleFavorite => {
                     let icon = if favorite {
@@ -513,7 +513,7 @@ fn actions_row(
                         ICON_FAVORITE.outlined()
                     };
                     let scale = if animations { fills.favorite.scale(now) } else { 1. };
-                    button::quiet_icon(ui, icon, "Favorite", Some(favorite), scale, ringed)
+                    button::quiet_icon(ui, icon, &tr!("item-favorite"), Some(favorite), scale, ringed)
                 }
                 ItemAction::Download => {
                     let response = button::quiet_icon(ui, download.icon, &download.tooltip, download.on, 1., ringed);
@@ -573,7 +573,7 @@ pub(super) fn pickers_row(
                 .max_rect(cell)
                 .layout(Layout::left_to_right(Align::Center)),
         );
-        let version_text = label::muted(&cell, "Version");
+        let version_text = label::muted(&cell, tr!("item-version"));
         cell.label(version_text);
         let ringed = selected
             == Some(Position {
@@ -593,7 +593,7 @@ pub(super) fn pickers_row(
 fn picker(ui: &mut Ui, name: &str, ringed: bool, size: egui::Vec2) -> Response {
     // No wider than what's left of the row.
     let size = vec2(size.x.min(ui.available_width()), size.y);
-    let response = select::button(ui, size, name, "Version", false);
+    let response = select::button(ui, size, name, &tr!("item-version"), false);
     if ringed {
         focus::ring_widget(ui, &response);
     }
@@ -601,7 +601,10 @@ fn picker(ui: &mut Ui, name: &str, ringed: bool, size: egui::Vec2) -> Response {
 }
 
 pub(super) fn version_label(source: &MediaSourceInfo, index: usize) -> String {
-    source.name.clone().unwrap_or_else(|| format!("Version {}", index + 1))
+    source
+        .name
+        .clone()
+        .unwrap_or_else(|| tr!("item-version-number", number = (index + 1)))
 }
 
 /// Fades the backdrop image into the page at its bottom: into the window's backdrop at that

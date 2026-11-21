@@ -19,6 +19,7 @@ use egui_material_icons::icons::{ICON_HIDE_IMAGE, ICON_PLAY_ARROW};
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemDto, BaseItemPerson, ChapterInfo, ImageType};
 
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::item_menu::is_played;
 use crate::theme;
@@ -181,7 +182,10 @@ pub fn chapter_without_image(ui: &mut Ui, index: usize, chapter: &ChapterInfo, s
 
 /// A chapter's name, or its number when it has none.
 fn chapter_name(index: usize, chapter: &ChapterInfo) -> String {
-    chapter.name.clone().unwrap_or_else(|| format!("Chapter {}", index + 1))
+    chapter
+        .name
+        .clone()
+        .unwrap_or_else(|| tr!("widget-chapter-number", number = (index + 1)))
 }
 
 /// A crossed-out picture in the middle of an image that has nothing to show.

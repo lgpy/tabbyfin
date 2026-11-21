@@ -9,6 +9,7 @@ use super::{
 };
 use crate::browse::Cursor;
 use crate::downloads::Downloads;
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::nav::Route;
 use crate::widgets::text::CARD_GAP;
@@ -26,22 +27,30 @@ pub(super) fn chapters_shelf(
 ) -> Rect {
     let chapters = chapters(&data.item);
     let any_image = chapters.iter().any(|chapter| chapter.image_tag.is_some());
-    shelf::shelf_with_gaps(ui, "chapters", "Chapters", CARD_GAP, SHELF_TITLE_GAP, 0., |ui| {
-        for (index, chapter) in chapters.iter().enumerate() {
-            let is_selected = cursor.is_selected(CHAPTERS, index);
-            let response = if any_image {
-                card::chapter(ui, images, &data.item.id, index, chapter, is_selected)
-            } else {
-                card::chapter_without_image(ui, index, chapter, is_selected)
-            };
-            if is_selected && moved {
-                response.scroll_to_me(None);
+    shelf::shelf_with_gaps(
+        ui,
+        "chapters",
+        &tr!("item-chapters"),
+        CARD_GAP,
+        SHELF_TITLE_GAP,
+        0.,
+        |ui| {
+            for (index, chapter) in chapters.iter().enumerate() {
+                let is_selected = cursor.is_selected(CHAPTERS, index);
+                let response = if any_image {
+                    card::chapter(ui, images, &data.item.id, index, chapter, is_selected)
+                } else {
+                    card::chapter_without_image(ui, index, chapter, is_selected)
+                };
+                if is_selected && moved {
+                    response.scroll_to_me(None);
+                }
+                if response.clicked() {
+                    asked.play_from = Some(chapter.start_position_ticks);
+                }
             }
-            if response.clicked() {
-                asked.play_from = Some(chapter.start_position_ticks);
-            }
-        }
-    })
+        },
+    )
 }
 
 /// The people shelf: each one's photo or initials, role and job, opening their page.
@@ -57,25 +66,33 @@ pub(super) fn people_shelf(
     // A phone shows round faces, more of them across.
     let compact = crate::layout::compact(ui.ctx());
     let gap = if compact { COMPACT_CARD_GAP / 2. } else { BIG_CARD_GAP };
-    shelf::shelf_with_gaps(ui, "people", "Cast & crew", gap, SHELF_TITLE_GAP, 0., |ui| {
-        for (index, person) in people.iter().enumerate() {
-            let is_selected = cursor.is_selected(PEOPLE, index);
-            let response = if compact {
-                card::person_round(ui, images, person, COMPACT_FACE, is_selected)
-            } else {
-                card::person(ui, images, person, BIG_CARD_SCALE, is_selected)
-            };
-            if is_selected && moved {
-                response.scroll_to_me(None);
+    shelf::shelf_with_gaps(
+        ui,
+        "people",
+        &tr!("item-cast-and-crew"),
+        gap,
+        SHELF_TITLE_GAP,
+        0.,
+        |ui| {
+            for (index, person) in people.iter().enumerate() {
+                let is_selected = cursor.is_selected(PEOPLE, index);
+                let response = if compact {
+                    card::person_round(ui, images, person, COMPACT_FACE, is_selected)
+                } else {
+                    card::person(ui, images, person, BIG_CARD_SCALE, is_selected)
+                };
+                if is_selected && moved {
+                    response.scroll_to_me(None);
+                }
+                if response.clicked() {
+                    asked.open = Some(Route::Person {
+                        id: person.id.clone(),
+                        name: person.name.clone(),
+                    });
+                }
             }
-            if response.clicked() {
-                asked.open = Some(Route::Person {
-                    id: person.id.clone(),
-                    name: person.name.clone(),
-                });
-            }
-        }
-    })
+        },
+    )
 }
 
 /// Trailers and extras, played from the start when chosen.
@@ -91,7 +108,7 @@ pub(super) fn extras_shelf(
     shelf::shelf_with_gaps(
         ui,
         "extras",
-        "Extras",
+        &tr!("item-extras"),
         crate::widgets::text::CARD_GAP,
         SHELF_TITLE_GAP,
         // The page already insets its content.
@@ -127,22 +144,30 @@ pub(super) fn similar_shelf(
         true => (COMPACT_CARD_SCALE, COMPACT_CARD_GAP),
         false => (BIG_CARD_SCALE, BIG_CARD_GAP),
     };
-    shelf::shelf_with_gaps(ui, "similar", "More like this", gap, SHELF_TITLE_GAP, 0., |ui| {
-        for (index, item) in similar.iter().enumerate() {
-            let is_selected = cursor.is_selected(SIMILAR, index);
-            let response = card::poster_scaled(ui, images, item, scale, is_selected);
-            if is_selected && moved {
-                response.scroll_to_me(None);
+    shelf::shelf_with_gaps(
+        ui,
+        "similar",
+        &tr!("item-more-like-this"),
+        gap,
+        SHELF_TITLE_GAP,
+        0.,
+        |ui| {
+            for (index, item) in similar.iter().enumerate() {
+                let is_selected = cursor.is_selected(SIMILAR, index);
+                let response = card::poster_scaled(ui, images, item, scale, is_selected);
+                if is_selected && moved {
+                    response.scroll_to_me(None);
+                }
+                if response.hovered() {
+                    asked.hovered = Some(Route::for_item(item));
+                }
+                if response.clicked() {
+                    asked.open = Some(Route::for_item(item));
+                }
+                if let Some(action) = menu::item_menu(&response, item, downloads) {
+                    asked.menu = Some((action, item.clone()));
+                }
             }
-            if response.hovered() {
-                asked.hovered = Some(Route::for_item(item));
-            }
-            if response.clicked() {
-                asked.open = Some(Route::for_item(item));
-            }
-            if let Some(action) = menu::item_menu(&response, item, downloads) {
-                asked.menu = Some((action, item.clone()));
-            }
-        }
-    })
+        },
+    )
 }

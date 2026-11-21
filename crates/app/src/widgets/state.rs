@@ -8,6 +8,7 @@
 use egui::{Align, Layout, Rect, RichText, Sense, Ui, UiBuilder, Vec2, vec2};
 use egui_material_icons::MaterialIcon;
 
+use crate::i18n::tr;
 use crate::theme::{self, text};
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::{backdrop, label, mascot, round_button, surface};
@@ -83,7 +84,7 @@ pub fn error(ui: &mut Ui, message: impl Into<String>) -> bool {
             ui.set_width(width);
             surface::notice(ui, surface::Kind::Danger, &message);
             ui.add_space(surface::GAP_FIELD);
-            retry = button::brand(ui, "Retry", RETRY_WIDTH, State::Ready, Focus::Tab).clicked();
+            retry = button::brand(ui, &tr!("widget-retry"), RETRY_WIDTH, State::Ready, Focus::Tab).clicked();
         });
     });
     retry

@@ -14,6 +14,7 @@ use egui::{Align, Id, Key, Modifiers, RectAlign, Response, ScrollArea, Ui, vec2}
 use egui_material_icons::icons::ICON_SEARCH;
 
 use crate::config::LibraryView;
+use crate::i18n::tr;
 use crate::keyboard::Kind;
 use crate::views::library::{FilterValues, ValueKind};
 use crate::widgets::pill::{self, Mark};
@@ -75,7 +76,8 @@ impl ValueFilters {
     /// and `view` what's chosen; a click changes `view` and returns true.
     pub fn show(&mut self, anchor: &Response, values: &FilterValues, view: &mut LibraryView) -> bool {
         let mut cycled: Option<(ValueKind, String, bool)> = None;
-        let touch = popup::OnTouch::Sheet(Some("Genres and tags"));
+        let title = tr!("library-filter-values");
+        let touch = popup::OnTouch::Sheet(Some(&title));
         popup::panel(Self::id(), anchor, RectAlign::BOTTOM_START, WIDTH, touch, |ui| {
             // A frame, not a `horizontal`, which would cap the scroll area's room at one row.
             egui::Frame::new()
@@ -158,12 +160,15 @@ impl ValueFilters {
         list.show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
             if shown.is_empty() {
-                let message = format!("No genres or tags match \u{201c}{}\u{201d}.", self.search.trim());
+                let message = tr!("library-values-none-match", search = self.search.trim());
                 ui.label(label::muted(ui, message));
                 return;
             }
             let mut index = 0;
-            for (kind, title) in [(ValueKind::Genre, "Genres"), (ValueKind::Tag, "Tags")] {
+            for (kind, title) in [
+                (ValueKind::Genre, tr!("library-values-genres")),
+                (ValueKind::Tag, tr!("library-values-tags")),
+            ] {
                 let group: Vec<&String> = shown
                     .iter()
                     .filter(|(k, _)| *k == kind)
@@ -175,7 +180,7 @@ impl ValueFilters {
                 if index > 0 {
                     ui.add_space(12.);
                 }
-                ui.label(label::overline(ui, title));
+                ui.label(label::overline(ui, &title));
                 ui.add_space(6.);
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
@@ -198,9 +203,9 @@ impl ValueFilters {
 
         ui.add_space(10.);
         let hint = if crate::layout::touch(ui.ctx()) {
-            "Tap once to include, twice to exclude, long-press to clear."
+            tr!("library-values-hint-touch")
         } else {
-            "Click once to include, twice to exclude, right-click to clear."
+            tr!("library-values-hint-mouse")
         };
         ui.label(label::note(ui, hint));
         cycled
@@ -209,7 +214,12 @@ impl ValueFilters {
     /// The search box: the cozy field, with its icon inside the left padding as the top bar's
     /// and Settings' have it. Returns whether its text changed.
     fn search_box(&mut self, ui: &mut Ui) -> bool {
-        let edit = field::with_leading(ui, Self::id().with("search"), &mut self.search, "Find a genre or tag");
+        let edit = field::with_leading(
+            ui,
+            Self::id().with("search"),
+            &mut self.search,
+            &tr!("library-values-find"),
+        );
         let response = ui.add(edit);
         field::shown(&response, Kind::Search);
         if std::mem::take(&mut self.focus_search) {
@@ -253,16 +263,16 @@ pub fn clear(view: &mut LibraryView) {
 pub fn summary(view: &LibraryView) -> String {
     let chosen = chosen(view);
     match chosen.as_slice() {
-        [] => "Genres and tags".to_owned(),
+        [] => tr!("library-filter-values"),
         [one] => describe(one),
-        [one, two] => format!("{}, {}", describe(one), describe(two)),
-        many => format!("{} filters", many.len()),
+        [one, two] => tr!("library-values-two", first = describe(one), second = describe(two)),
+        many => tr!("library-values-count", count = many.len()),
     }
 }
 
 fn describe((_, value, mark): &(ValueKind, String, Mark)) -> String {
     match mark {
-        Mark::Excluded => format!("Not {value}"),
+        Mark::Excluded => tr!("library-values-not", value = value.as_str()),
         _ => value.clone(),
     }
 }

@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField};
 use jellyfin::{Client, Ticks};
 
+use crate::i18n::tr;
 use crate::services::Services;
 use crate::task;
 use crate::toasts::Toast;
@@ -211,9 +212,7 @@ impl Services {
             if let Err(err) = result {
                 self.playlist_edits.clear(&playlist_id);
                 let message = match err {
-                    jellyfin::Error::Forbidden => {
-                        "This playlist belongs to someone else; it can't be changed.".to_owned()
-                    }
+                    jellyfin::Error::Forbidden => tr!("item-playlist-not-yours"),
                     err => self.handle_error(&err),
                 };
                 self.toast(Toast::error(message));

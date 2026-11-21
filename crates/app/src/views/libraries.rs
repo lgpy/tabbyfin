@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use jellyfin::ItemsQuery;
 use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType};
 
+use crate::i18n::tr;
 use crate::layout;
 use crate::nav::Route;
 use crate::task::Task;
@@ -18,7 +19,6 @@ use crate::widgets::{backdrop, library_banner, state};
 const COLUMN_MIN_W: f32 = 300.;
 const GAP: f32 = 12.;
 
-#[derive(Default)]
 pub struct LibrariesPage {
     loading: Option<Task<jellyfin::Result<Vec<BaseItemDto>>>>,
     views: Option<Result<Vec<BaseItemDto>, String>>,
@@ -26,6 +26,20 @@ pub struct LibrariesPage {
     counting: HashMap<String, Task<jellyfin::Result<u32>>>,
     /// Each library's count line by its id; a count the server couldn't give has none.
     counts: HashMap<String, Option<String>>,
+    /// The top bar's title, refreshed as the page draws so a change of language shows.
+    title: String,
+}
+
+impl Default for LibrariesPage {
+    fn default() -> Self {
+        Self {
+            loading: None,
+            views: None,
+            counting: HashMap::new(),
+            counts: HashMap::new(),
+            title: tr!("library-title"),
+        }
+    }
 }
 
 impl LibrariesPage {
@@ -62,10 +76,11 @@ impl LibrariesPage {
 
 impl Page for LibrariesPage {
     fn title(&self) -> &str {
-        "Libraries"
+        &self.title
     }
 
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        self.title = tr!("library-title");
         if self.views.is_none() && self.loading.is_none() {
             let client = cx.services.session.client.clone();
             self.loading = Some(Task::spawn(cx.ctx, async move {
@@ -85,7 +100,7 @@ impl Page for LibrariesPage {
                 }
                 return;
             }
-            Some(Ok(views)) if views.is_empty() => return state::empty(ui, "Your server has no libraries yet."),
+            Some(Ok(views)) if views.is_empty() => return state::empty(ui, tr!("library-empty")),
             Some(Ok(views)) => views,
         };
         let side = layout::side(ui.ctx());
@@ -143,15 +158,15 @@ fn count_query(view: &BaseItemDto) -> ItemsQuery {
 
 /// "1,284 movies", by what the library holds.
 fn count_line(kind: Option<CollectionType>, count: u32) -> String {
-    let (one, many) = match kind {
-        Some(CollectionType::Movies) => ("movie", "movies"),
-        Some(CollectionType::TvShows) => ("show", "shows"),
-        Some(CollectionType::BoxSets) => ("collection", "collections"),
-        Some(CollectionType::Playlists) => ("playlist", "playlists"),
-        _ => ("item", "items"),
-    };
-    let noun = if count == 1 { one } else { many };
-    format!("{} {noun}", thousands(count))
+    let shown = thousands(count);
+    let count = count as usize;
+    match kind {
+        Some(CollectionType::Movies) => tr!("library-count-movies", count = count, shown = shown.as_str()),
+        Some(CollectionType::TvShows) => tr!("library-count-shows", count = count, shown = shown.as_str()),
+        Some(CollectionType::BoxSets) => tr!("library-count-collections", count = count, shown = shown.as_str()),
+        Some(CollectionType::Playlists) => tr!("library-count-playlists", count = count, shown = shown.as_str()),
+        _ => tr!("library-count-items", count = count, shown = shown.as_str()),
+    }
 }
 
 /// `count` with a comma between each three digits.

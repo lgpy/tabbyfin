@@ -3,6 +3,171 @@
 
 
 ## browse
+home-title = Início
+home-my-media = A minha multimédia
+home-continue-watching = Continuar a ver
+home-next-up = A seguir
+home-favorites = Favoritos
+home-latest = Mais recentes em { $library }
+library-empty = O servidor ainda não tem bibliotecas.
+library-title = Bibliotecas
+library-count-movies = { $count ->
+    [one] { $shown } filme
+   *[other] { $shown } filmes
+    }
+library-count-shows = { $count ->
+    [one] { $shown } série
+   *[other] { $shown } séries
+    }
+library-count-collections = { $count ->
+    [one] { $shown } coleção
+   *[other] { $shown } coleções
+    }
+library-count-playlists = { $count ->
+    [one] { $shown } lista de reprodução
+   *[other] { $shown } listas de reprodução
+    }
+library-count-items = { $count ->
+    [one] { $shown } item
+   *[other] { $shown } itens
+    }
+library-sort-name = Nome
+library-sort-added = Data de adição
+library-sort-released = Data de lançamento
+library-sort-rating = Classificação
+library-sort-runtime = Duração
+library-sort-random = Aleatório
+library-progress-any = Qualquer estado
+library-progress-unwatched = Por ver
+library-progress-watched = Visto
+library-progress-in-progress = A ver
+library-resolution-any = Qualquer resolução
+library-filter-sort = Ordenar por
+library-filter-progress = Estado
+library-filter-rating = Classificação
+library-filter-year = Ano
+library-filter-resolution = Resolução
+library-filter-filters = Filtros
+library-filter-clear = Limpar filtros
+library-filter-values = Géneros e etiquetas
+library-filter-order = Ordem
+library-any-rating = Qualquer classificação
+library-any-year = Qualquer ano
+library-shuffle-again = Baralhar novamente
+library-sort-ascending = Ordem ascendente
+library-sort-descending = Ordem descendente
+library-jump-to = Ir para { $letter }
+library-nothing-matches = Nada corresponde a estes filtros.
+library-nothing-yet = Ainda não há nada aqui.
+library-item-count = { $count ->
+    [one] { $count } item
+   *[other] { $count } itens
+    }
+library-values-chosen-items = { $chosen } escolhidos · { $items }
+library-values-chosen = { $chosen } escolhidos
+library-values-none-match = Nenhum género ou etiqueta corresponde a “{ $search }”.
+library-values-genres = Géneros
+library-values-tags = Etiquetas
+library-values-hint-touch = Toque uma vez para incluir, duas para excluir. Mantenha premido para limpar.
+library-values-hint-mouse = Clique uma vez para incluir, duas para excluir. Clique com o botão direito para limpar.
+library-values-find = Encontrar um género ou uma etiqueta
+library-values-not = Exceto { $value }
+library-values-count = { $count ->
+    [one] { $count } filtro
+   *[other] { $count } filtros
+    }
+library-values-two = { $first }, { $second }
+library-done = Concluído
+library-clear = Limpar
+search-title = Pesquisar
+search-type-to-search = Escreva na caixa de pesquisa para pesquisar.
+search-no-results = Sem resultados.
+search-movies = Filmes
+search-shows = Séries
+search-episodes = Episódios
+item-seasons = Temporadas
+item-in-this-collection = Nesta coleção
+item-playlist = Lista de reprodução
+item-episodes = Episódios
+item-episode-count = { $count ->
+    [one] { $count } episódio
+   *[other] { $count } episódios
+    }
+item-to-watch = { $count } por ver
+item-watched = Visto
+item-no-episodes = Não há episódios nesta temporada.
+item-chapters = Capítulos
+item-cast-and-crew = Elenco e equipa
+item-extras = Extras
+item-more-like-this = Semelhantes
+item-play = Reproduzir
+item-play-episode = Reproduzir { $episode }
+item-play-all = Reproduzir tudo
+item-play-from-beginning = Reproduzir desde o início
+item-resume = Retomar
+item-resume-episode = Retomar { $episode }
+item-resume-from = Retomar a partir de { $time }
+item-shuffle = Aleatório
+item-trailer = Trailer
+item-more = Mais
+item-favorite = Favorito
+item-from-start = Desde o início
+item-add-to-playlist = Adicionar à lista de reprodução…
+item-edit = Editar…
+item-delete-playlist = Eliminar lista de reprodução…
+item-version = Versão
+item-version-number = Versão { $number }
+item-nothing-to-play = Não há nada para reproduzir.
+item-download = Transferir
+item-downloading = A transferir
+item-downloaded = Transferido
+item-download-all-episodes = Transferir todos os episódios
+item-downloading-episodes = { $count ->
+    [one] A transferir { $count } episódio
+   *[other] A transferir { $count } episódios
+    }
+item-downloaded-rest = { $count ->
+    [one] { $count } episódio transferido. Transferir os restantes
+   *[other] { $count } episódios transferidos. Transferir os restantes
+    }
+item-waiting-to-download = A aguardar transferência. Cancelar transferência
+item-waiting = A aguardar
+item-downloading-progress = A transferir, { $progress }. Cancelar transferência
+item-downloaded-size = Transferido, { $size }. Remover transferência
+item-download-failed = A transferência falhou: { $message } Tentar transferir novamente
+item-retry = Repetir
+item-cancel-download = Cancelar transferência
+item-remove-download = Remover transferência
+item-retry-download = Tentar transferir novamente
+item-left = Faltam { $time }
+item-less = Menos
+item-show-less = Mostrar menos
+item-show-more = Mostrar mais
+item-director = Realização
+item-writers = Argumento
+item-studio = Estúdio
+item-playlist-not-yours = Esta lista de reprodução pertence a outra pessoa e não pode ser alterada.
+widget-back = Voltar
+widget-cancel = Cancelar
+widget-retry = Tentar novamente
+widget-scroll-left = Deslocar para a esquerda
+widget-scroll-right = Deslocar para a direita
+widget-move-up = Mover para cima (Alt+Cima)
+widget-move-down = Mover para baixo (Alt+Baixo)
+widget-remove-from-playlist = Remover da lista de reprodução (Delete)
+widget-watched-key = Visto (W)
+widget-copy-code = Copiar código
+widget-copied = Copiado
+widget-error = Erro
+widget-information = Informação
+widget-success = Sucesso
+widget-decrease = Diminuir { $label }
+widget-increase = Aumentar { $label }
+widget-reset = Repor { $label }
+widget-chapter-number = Capítulo { $number }
+widget-unwatched = { $count } por ver
+widget-included = { $label }, incluído
+widget-excluded = { $label }, excluído
 
 ## player
 player-back = Voltar (Esc)

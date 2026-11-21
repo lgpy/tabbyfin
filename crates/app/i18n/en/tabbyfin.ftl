@@ -3,6 +3,171 @@
 
 
 ## browse
+home-title = Home
+home-my-media = My Media
+home-continue-watching = Continue Watching
+home-next-up = Next Up
+home-favorites = Favorites
+home-latest = Latest { $library }
+library-empty = Your server has no libraries yet.
+library-title = Libraries
+library-count-movies = { $count ->
+    [one] { $shown } movie
+   *[other] { $shown } movies
+    }
+library-count-shows = { $count ->
+    [one] { $shown } show
+   *[other] { $shown } shows
+    }
+library-count-collections = { $count ->
+    [one] { $shown } collection
+   *[other] { $shown } collections
+    }
+library-count-playlists = { $count ->
+    [one] { $shown } playlist
+   *[other] { $shown } playlists
+    }
+library-count-items = { $count ->
+    [one] { $shown } item
+   *[other] { $shown } items
+    }
+library-sort-name = Name
+library-sort-added = Date added
+library-sort-released = Release date
+library-sort-rating = Rating
+library-sort-runtime = Runtime
+library-sort-random = Random
+library-progress-any = Any progress
+library-progress-unwatched = Unwatched
+library-progress-watched = Watched
+library-progress-in-progress = In progress
+library-resolution-any = Any resolution
+library-filter-sort = Sort
+library-filter-progress = Progress
+library-filter-rating = Rating
+library-filter-year = Year
+library-filter-resolution = Resolution
+library-filter-filters = Filters
+library-filter-clear = Clear filters
+library-filter-values = Genres and tags
+library-filter-order = Order
+library-any-rating = Any rating
+library-any-year = Any year
+library-shuffle-again = Shuffle again
+library-sort-ascending = Sort ascending
+library-sort-descending = Sort descending
+library-jump-to = Jump to { $letter }
+library-nothing-matches = Nothing matches these filters.
+library-nothing-yet = Nothing here yet.
+library-item-count = { $count ->
+    [one] { $count } item
+   *[other] { $count } items
+    }
+library-values-chosen-items = { $chosen } chosen · { $items }
+library-values-chosen = { $chosen } chosen
+library-values-none-match = No genres or tags match “{ $search }”.
+library-values-genres = Genres
+library-values-tags = Tags
+library-values-hint-touch = Tap once to include, twice to exclude, long-press to clear.
+library-values-hint-mouse = Click once to include, twice to exclude, right-click to clear.
+library-values-find = Find a genre or tag
+library-values-not = Not { $value }
+library-values-count = { $count ->
+    [one] { $count } filter
+   *[other] { $count } filters
+    }
+library-values-two = { $first }, { $second }
+library-done = Done
+library-clear = Clear
+search-title = Search
+search-type-to-search = Type in the search box to search.
+search-no-results = No results.
+search-movies = Movies
+search-shows = Shows
+search-episodes = Episodes
+item-seasons = Seasons
+item-in-this-collection = In this collection
+item-playlist = Playlist
+item-episodes = Episodes
+item-episode-count = { $count ->
+    [one] { $count } episode
+   *[other] { $count } episodes
+    }
+item-to-watch = { $count } to watch
+item-watched = Watched
+item-no-episodes = No episodes in this season.
+item-chapters = Chapters
+item-cast-and-crew = Cast & crew
+item-extras = Extras
+item-more-like-this = More like this
+item-play = Play
+item-play-episode = Play { $episode }
+item-play-all = Play all
+item-play-from-beginning = Play from beginning
+item-resume = Resume
+item-resume-episode = Resume { $episode }
+item-resume-from = Resume from { $time }
+item-shuffle = Shuffle
+item-trailer = Trailer
+item-more = More
+item-favorite = Favorite
+item-from-start = From start
+item-add-to-playlist = Add to playlist…
+item-edit = Edit…
+item-delete-playlist = Delete playlist…
+item-version = Version
+item-version-number = Version { $number }
+item-nothing-to-play = Nothing here to play.
+item-download = Download
+item-downloading = Downloading
+item-downloaded = Downloaded
+item-download-all-episodes = Download all episodes
+item-downloading-episodes = { $count ->
+    [one] Downloading { $count } episode
+   *[other] Downloading { $count } episodes
+    }
+item-downloaded-rest = { $count ->
+    [one] { $count } episode downloaded. Download the rest
+   *[other] { $count } episodes downloaded. Download the rest
+    }
+item-waiting-to-download = Waiting to download. Cancel download
+item-waiting = Waiting
+item-downloading-progress = Downloading, { $progress }. Cancel download
+item-downloaded-size = Downloaded, { $size }. Remove download
+item-download-failed = Download failed: { $message } Retry download
+item-retry = Retry
+item-cancel-download = Cancel download
+item-remove-download = Remove download
+item-retry-download = Retry download
+item-left = { $time } left
+item-less = Less
+item-show-less = Show less
+item-show-more = Show more
+item-director = Director
+item-writers = Writers
+item-studio = Studio
+item-playlist-not-yours = This playlist belongs to someone else; it can't be changed.
+widget-back = Back
+widget-cancel = Cancel
+widget-retry = Retry
+widget-scroll-left = Scroll left
+widget-scroll-right = Scroll right
+widget-move-up = Move up (Alt+Up)
+widget-move-down = Move down (Alt+Down)
+widget-remove-from-playlist = Remove from playlist (Delete)
+widget-watched-key = Watched (W)
+widget-copy-code = Copy code
+widget-copied = Copied
+widget-error = Error
+widget-information = Information
+widget-success = Success
+widget-decrease = Decrease { $label }
+widget-increase = Increase { $label }
+widget-reset = Reset { $label }
+widget-chapter-number = Chapter { $number }
+widget-unwatched = { $count } unwatched
+widget-included = { $label }, included
+widget-excluded = { $label }, excluded
 
 ## player
 player-back = Back (Esc)

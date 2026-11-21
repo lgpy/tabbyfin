@@ -8,6 +8,7 @@
 use egui::{Align, Id, Layout, ModalResponse, Response, Ui};
 use egui_material_icons::icons::ICON_ARROW_BACK;
 
+use crate::i18n::tr;
 use crate::theme::{self, text};
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::round_button::RoundButton;
@@ -73,7 +74,7 @@ fn modal<R>(
             match back {
                 Some(back) => {
                     ui.horizontal(|ui| {
-                        let pressed = RoundButton::icon(ICON_ARROW_BACK, "Back")
+                        let pressed = RoundButton::icon(ICON_ARROW_BACK, &tr!("widget-back"))
                             .size(BACK_BUTTON, 22.)
                             .focus(Focus::Skip)
                             .show(ui)
@@ -121,8 +122,9 @@ pub fn quiet(ui: &mut Ui, label: &str, state: State) -> Response {
 
 /// *Cancel*: closes the dialog, as Esc and a click on the backdrop do.
 pub fn cancel(ui: &mut Ui) {
-    let width = button_width(ui, "Cancel");
-    if button::quiet(ui, "Cancel", width, State::Ready, Focus::Skip).clicked() {
+    let cancel = tr!("widget-cancel");
+    let width = button_width(ui, &cancel);
+    if button::quiet(ui, &cancel, width, State::Ready, Focus::Skip).clicked() {
         ui.close();
     }
 }

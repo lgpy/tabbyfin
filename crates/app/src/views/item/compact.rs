@@ -19,6 +19,7 @@ use super::{
     COMPACT_POSTER_H, COMPACT_POSTER_W, COMPACT_TITLE_SIZE, Fills, ItemAction, ItemData, meta_line,
 };
 use crate::browse::Position;
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::item_menu::{is_favorite, is_played};
 use crate::nav::Route;
@@ -198,7 +199,7 @@ fn titles(ui: &mut Ui, item: &BaseItemDto, asked: &mut Asked) {
 fn progress_line(ui: &mut Ui, position: Ticks, runtime: Ticks) {
     let tokens = theme::tokens_of(ui);
     let fraction = (position.0 as f64 / runtime.0 as f64).clamp(0., 1.) as f32;
-    let left = format!("{} left", runtime_text(Ticks((runtime.0 - position.0).max(0))));
+    let left = tr!("item-left", time = runtime_text(Ticks((runtime.0 - position.0).max(0))));
     let galley = ui
         .painter()
         .layout_no_wrap(left, text::font(ui, "xs"), tokens.ink_muted);
@@ -251,7 +252,7 @@ fn round_actions(
                     ICON_CHECK.outlined()
                 };
                 let scale = if animations { fills.played.scale(now) } else { 1. };
-                (icon, "Watched", Some(played), scale)
+                (icon, tr!("item-watched"), Some(played), scale)
             }
             ItemAction::ToggleFavorite => {
                 let favorite = is_favorite(item);
@@ -261,12 +262,12 @@ fn round_actions(
                     ICON_FAVORITE.outlined()
                 };
                 let scale = if animations { fills.favorite.scale(now) } else { 1. };
-                (icon, "Favorite", Some(favorite), scale)
+                (icon, tr!("item-favorite"), Some(favorite), scale)
             }
-            ItemAction::Download => (download.icon, download.short.as_str(), download.on, 1.),
+            ItemAction::Download => (download.icon, download.short.clone(), download.on, 1.),
             _ => (action_look(action, item, None).icon, short_name(action), None, 1.),
         };
-        let response = round_action(ui, cell, icon, name, on, scale, ringed(selected, index));
+        let response = round_action(ui, cell, icon, &name, index, on, scale, ringed(selected, index));
         if action == ItemAction::Download
             && let Some(done) = download.progress
         {
@@ -285,32 +286,35 @@ fn round_actions(
 }
 
 /// An action's name under its round button.
-fn short_name(action: ItemAction) -> &'static str {
+fn short_name(action: ItemAction) -> String {
     match action {
-        ItemAction::PlayFromStart => "From start",
-        ItemAction::Shuffle => "Shuffle",
-        ItemAction::Trailer => "Trailer",
-        ItemAction::More => "More",
-        ItemAction::Resume(_) => "Resume",
-        ItemAction::PlayAll => "Play all",
-        _ => "Play",
+        ItemAction::PlayFromStart => tr!("item-from-start"),
+        ItemAction::Shuffle => tr!("item-shuffle"),
+        ItemAction::Trailer => tr!("item-trailer"),
+        ItemAction::More => tr!("item-more"),
+        ItemAction::Resume(_) => tr!("item-resume"),
+        ItemAction::PlayAll => tr!("item-play-all"),
+        _ => tr!("item-play"),
     }
 }
 
 /// One round action in `cell`: a circle outlined on the surface (`inset_hover` with a `brand`
 /// outline and icon while a toggle is on, or while pressed), its name in `xs` under it. The
-/// whole cell takes the touch.
+/// whole cell takes the touch. `key` is the action's place in the row, which its id goes by
+/// rather than its name, since the name follows the interface's language.
+#[allow(clippy::too_many_arguments)]
 fn round_action(
     ui: &mut Ui,
     cell: Rect,
     icon: MaterialIcon,
     name: &str,
+    key: usize,
     on: Option<bool>,
     scale: f32,
     ringed: bool,
 ) -> Response {
     let tokens = theme::tokens_of(ui);
-    let response = ui.interact(cell, ui.scope_id().with(("round_action", name)), Sense::CLICK);
+    let response = ui.interact(cell, ui.scope_id().with(("round_action", key)), Sense::CLICK);
     match on {
         Some(on) => response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, name)),
         None => response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name)),
@@ -387,15 +391,19 @@ fn overview(ui: &mut Ui, item: &BaseItemDto, open: bool, asked: &mut Asked) {
     let cut = galley.elided;
     ui.add(Label::new(galley).selectable(false));
     if cut || open {
-        let word = if open { "Less" } else { "More" };
+        let word = if open { tr!("item-less") } else { tr!("item-more") };
         let label = RichText::new(word)
             .font(text::font(ui, "sm"))
             .strong()
             .color(tokens.brand);
         let response = ui.add(Label::new(label).sense(Sense::CLICK).selectable(false));
         // Named apart from the More button's menu.
-        let name = if open { "Show less" } else { "Show more" };
-        response.widget_info(|| WidgetInfo::labeled(Role::Link, true, name));
+        let name = if open {
+            tr!("item-show-less")
+        } else {
+            tr!("item-show-more")
+        };
+        response.widget_info(|| WidgetInfo::labeled(Role::Link, true, name.as_str()));
         let response = crate::layout::grow(ui, response, Sense::CLICK);
         if response.clicked() {
             asked.toggle_overview = true;
@@ -421,9 +429,9 @@ fn details(ui: &mut Ui, item: &BaseItemDto) {
         .collect::<Vec<_>>()
         .join(", ");
     let rows = [
-        ("Director", people("Director")),
-        ("Writers", people("Writer")),
-        ("Studio", studios),
+        (tr!("item-director"), people("Director")),
+        (tr!("item-writers"), people("Writer")),
+        (tr!("item-studio"), studios),
     ];
     if rows.iter().all(|(_, value)| value.is_empty()) {
         return;
@@ -437,7 +445,7 @@ fn details(ui: &mut Ui, item: &BaseItemDto) {
             ui.painter().text(
                 cell.left_center(),
                 egui::Align2::LEFT_CENTER,
-                *name,
+                name.as_str(),
                 text::font(ui, "sm"),
                 tokens.ink_muted,
             );

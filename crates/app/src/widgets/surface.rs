@@ -9,6 +9,7 @@ use egui::{
 };
 use egui_material_icons::icons::{ICON_CHECK_CIRCLE, ICON_ERROR, ICON_INFO};
 
+use crate::i18n::tr;
 use crate::theme::{self, SPACE, text};
 
 /// The room inside a surface.
@@ -131,6 +132,16 @@ pub enum Kind {
 
 impl Kind {
     /// What a screen reader says for the notice's icon.
+    fn spoken(self) -> String {
+        match self {
+            Self::Danger => tr!("widget-error"),
+            Self::Info => tr!("widget-information"),
+            Self::Success => tr!("widget-success"),
+        }
+    }
+
+    /// [`Kind::spoken`] in English, which the UI tests look the icon up by.
+    #[cfg(test)]
     pub fn label(self) -> &'static str {
         match self {
             Self::Danger => "Error",
@@ -164,7 +175,7 @@ pub fn notice(ui: &mut Ui, kind: Kind, message: &str) {
                 // that line whatever the text size, and wrapped lines start under the message.
                 let line = ui.fonts_mut(|fonts| fonts.row_height(&font));
                 let (rect, response) = ui.allocate_exact_size(Vec2::splat(line), Sense::hover());
-                response.widget_info(|| WidgetInfo::labeled(Role::Image, true, kind.label()));
+                response.widget_info(|| WidgetInfo::labeled(Role::Image, true, kind.spoken()));
                 let glyph_font = FontId::new(text::font(ui, "lg").size, icon.font_family());
                 let galley = ui
                     .painter()

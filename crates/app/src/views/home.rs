@@ -23,6 +23,7 @@ use jellyfin::{Client, ItemsQuery};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
 use crate::downloads::Downloads;
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::item_menu::{is_playable, resume_point};
 use crate::keys::{Action, Scope};
@@ -201,7 +202,7 @@ fn shelves(data: &HomeData, my_media: bool) -> Vec<Shelf<'_>> {
     let favorites = || {
         row(
             ShelfId::Favorites,
-            "Favorites".to_owned(),
+            tr!("home-favorites"),
             &data.favorites,
             Cards::Poster,
         )
@@ -210,18 +211,18 @@ fn shelves(data: &HomeData, my_media: bool) -> Vec<Shelf<'_>> {
     for section in &data.sections {
         match section {
             HomeSection::MyMedia if my_media => {
-                shelves.push(row(ShelfId::Views, "My Media".to_owned(), &data.views, Cards::Tiles))
+                shelves.push(row(ShelfId::Views, tr!("home-my-media"), &data.views, Cards::Tiles))
             }
             HomeSection::MyMedia => {}
             HomeSection::Resume => shelves.push(row(
                 ShelfId::Resume,
-                "Continue Watching".to_owned(),
+                tr!("home-continue-watching"),
                 &data.resume,
                 Cards::Landscape,
             )),
             HomeSection::NextUp => shelves.push(row(
                 ShelfId::NextUp,
-                "Next Up".to_owned(),
+                tr!("home-next-up"),
                 &data.next_up,
                 Cards::Landscape,
             )),
@@ -230,7 +231,7 @@ fn shelves(data: &HomeData, my_media: bool) -> Vec<Shelf<'_>> {
                 shelves.extend(data.latest.iter().enumerate().map(|(i, (view, items))| {
                     let mut shelf = row(
                         ShelfId::Latest(i),
-                        format!("Latest {}", view.name),
+                        tr!("home-latest", library = view.name.as_str()),
                         items,
                         Cards::Poster,
                     );
@@ -282,6 +283,8 @@ pub struct HomePage {
     /// Whether *My Media* shows: not in the compact layout, whose bottom bar leads to the
     /// libraries. Set as the page draws, for the cursor's sections too.
     my_media: bool,
+    /// The top bar's title, refreshed as the page draws so a change of language shows.
+    title: String,
 }
 
 impl Default for HomePage {
@@ -293,6 +296,7 @@ impl Default for HomePage {
             cursor: Cursor::default(),
             add_to_playlist: None,
             my_media: true,
+            title: tr!("home-title"),
         }
     }
 }
@@ -309,7 +313,7 @@ impl HomePage {
 
 impl Page for HomePage {
     fn title(&self) -> &str {
-        "Home"
+        &self.title
     }
 
     fn scope(&self) -> Option<Scope> {
@@ -325,6 +329,7 @@ impl Page for HomePage {
     }
 
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
+        self.title = tr!("home-title");
         if self.loaded_at != Some(cx.services.user_data) {
             self.reload(cx);
         }
@@ -351,7 +356,7 @@ impl Page for HomePage {
             // The same line shows whenever there's no shelf to draw, whether the server has no
             // libraries or the user hid every section in the web client.
             Load::Loaded(data) if shelves(data, my_media).is_empty() => {
-                state::empty(ui, "Your server has no libraries yet.");
+                state::empty(ui, tr!("library-empty"));
             }
             Load::Loaded(data) => show_shelves(ui, data, my_media, &mut self.cursor, &mut self.add_to_playlist, cx),
         }

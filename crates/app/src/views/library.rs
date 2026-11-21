@@ -36,6 +36,7 @@ use jellyfin::{Client, ItemsQuery, SortOrder};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
 use crate::config::{Config, LibraryView};
+use crate::i18n::tr;
 use crate::keys::{Action, Scope};
 use crate::layout;
 use crate::nav::{NavRequest, Route};
@@ -84,31 +85,57 @@ const GRID_START: Position = Position {
     index: 0,
 };
 
-/// Sort choices: config key, label, server sort, and whether it starts descending.
-pub const SORTS: [(&str, &str, ItemSortBy, bool); 6] = [
-    ("name", "Name", ItemSortBy::SortName, false),
-    ("added", "Date added", ItemSortBy::DateCreated, true),
-    ("released", "Release date", ItemSortBy::PremiereDate, true),
-    ("rating", "Rating", ItemSortBy::CommunityRating, true),
-    ("runtime", "Runtime", ItemSortBy::Runtime, false),
-    ("random", "Random", ItemSortBy::Random, false),
+/// A choice's name, read as the toolbar draws it, so it follows a change of language.
+type Name = fn() -> String;
+
+/// Sort choices: config key, its name, server sort, and whether it starts descending.
+pub const SORTS: [(&str, Name, ItemSortBy, bool); 6] = [
+    ("name", || tr!("library-sort-name"), ItemSortBy::SortName, false),
+    ("added", || tr!("library-sort-added"), ItemSortBy::DateCreated, true),
+    (
+        "released",
+        || tr!("library-sort-released"),
+        ItemSortBy::PremiereDate,
+        true,
+    ),
+    (
+        "rating",
+        || tr!("library-sort-rating"),
+        ItemSortBy::CommunityRating,
+        true,
+    ),
+    ("runtime", || tr!("library-sort-runtime"), ItemSortBy::Runtime, false),
+    ("random", || tr!("library-sort-random"), ItemSortBy::Random, false),
 ];
 
-/// Progress choices: config key, label, server filter.
-pub const FILTERS: [(&str, &str, Option<ItemFilter>); 4] = [
-    ("all", "Any progress", None),
-    ("unwatched", "Unwatched", Some(ItemFilter::IsUnplayed)),
-    ("watched", "Watched", Some(ItemFilter::IsPlayed)),
-    ("in-progress", "In progress", Some(ItemFilter::IsResumable)),
+/// Progress choices: config key, its name, server filter.
+pub const FILTERS: [(&str, Name, Option<ItemFilter>); 4] = [
+    ("all", || tr!("library-progress-any"), None),
+    (
+        "unwatched",
+        || tr!("library-progress-unwatched"),
+        Some(ItemFilter::IsUnplayed),
+    ),
+    (
+        "watched",
+        || tr!("library-progress-watched"),
+        Some(ItemFilter::IsPlayed),
+    ),
+    (
+        "in-progress",
+        || tr!("library-progress-in-progress"),
+        Some(ItemFilter::IsResumable),
+    ),
 ];
 
-/// Resolution choices: config key, label, and video width bounds (4K from 3800 wide, HD from
+/// Resolution choices: config key, its name, and video width bounds (4K from 3800 wide, HD from
 /// 1200, which 720p's 1280 clears). 12.2 goes by an item's widest version, 10.11 by its first.
-pub const RESOLUTIONS: [(&str, &str, Option<u32>, Option<u32>); 4] = [
-    ("any", "Any resolution", None, None),
-    ("4k", "4K", Some(3800), None),
-    ("hd", "HD", Some(1200), Some(3799)),
-    ("sd", "SD", None, Some(1199)),
+pub const RESOLUTIONS: [(&str, Name, Option<u32>, Option<u32>); 4] = [
+    ("any", || tr!("library-resolution-any"), None, None),
+    // The shorthand is written the same in every language.
+    ("4k", || "4K".to_owned(), Some(3800), None),
+    ("hd", || "HD".to_owned(), Some(1200), Some(3799)),
+    ("sd", || "SD".to_owned(), None, Some(1199)),
 ];
 
 /// The value picked from an "any, then `values`" menu; `None` for "any".
@@ -1070,7 +1097,7 @@ impl LibraryPage {
                                 focus::ring_widget(ui, &response);
                             }
                         }
-                        ui.label(label::muted(ui, "Sort"));
+                        ui.label(label::muted(ui, tr!("library-filter-sort")));
                     });
                 });
             });
@@ -1093,37 +1120,72 @@ impl LibraryPage {
         match tool {
             Tool::Filters => {
                 // Lit while anything is filtered out, as the grid then isn't the whole library.
-                let response = button::quiet_icon(ui, ICON_TUNE, "Filters", Some(self.filtered()), 1., selected);
+                let response = button::quiet_icon(
+                    ui,
+                    ICON_TUNE,
+                    &tr!("library-filter-filters"),
+                    Some(self.filtered()),
+                    1.,
+                    selected,
+                );
                 (response.clone(), response.clicked().then_some(ToolAction::OpenFilters))
             }
             Tool::Sort => {
-                let labels = SORTS.iter().map(|(_, label, ..)| *label).collect();
-                let (response, index) = picker(ui, "library_sort", "Sort", 150., labels, self.sort_index);
+                let labels = SORTS.iter().map(|(_, label, ..)| label()).collect();
+                let (response, index) = picker(
+                    ui,
+                    "library_sort",
+                    &tr!("library-filter-sort"),
+                    150.,
+                    labels,
+                    self.sort_index,
+                );
                 (response, index.map(ToolAction::Sort))
             }
             Tool::Show => {
-                let labels = FILTERS.iter().map(|(_, label, ..)| *label).collect();
-                let (response, index) = picker(ui, "library_show", "Progress", 140., labels, self.filter_index);
+                let labels = FILTERS.iter().map(|(_, label, ..)| label()).collect();
+                let (response, index) = picker(
+                    ui,
+                    "library_show",
+                    &tr!("library-filter-progress"),
+                    140.,
+                    labels,
+                    self.filter_index,
+                );
                 (response, index.map(ToolAction::Show))
             }
             Tool::Rating => {
-                let mut labels = vec!["Any rating"];
-                labels.extend(self.values.ratings.iter().map(String::as_str));
-                let (response, index) = picker(ui, "library_rating", "Rating", 120., labels, self.rating_index);
+                let mut labels = vec![tr!("library-any-rating")];
+                labels.extend(self.values.ratings.iter().cloned());
+                let (response, index) = picker(
+                    ui,
+                    "library_rating",
+                    &tr!("library-filter-rating"),
+                    120.,
+                    labels,
+                    self.rating_index,
+                );
                 (response, index.map(ToolAction::Rating))
             }
             Tool::Year => {
-                let mut labels = vec!["Any year"];
-                labels.extend(self.years.iter().map(String::as_str));
-                let (response, index) = picker(ui, "library_year", "Year", 120., labels, self.year_index);
+                let mut labels = vec![tr!("library-any-year")];
+                labels.extend(self.years.iter().cloned());
+                let (response, index) = picker(
+                    ui,
+                    "library_year",
+                    &tr!("library-filter-year"),
+                    120.,
+                    labels,
+                    self.year_index,
+                );
                 (response, index.map(ToolAction::Year))
             }
             Tool::Resolution => {
-                let labels = RESOLUTIONS.iter().map(|(_, label, ..)| *label).collect();
+                let labels = RESOLUTIONS.iter().map(|(_, label, ..)| label()).collect();
                 let (response, index) = picker(
                     ui,
                     "library_resolution",
-                    "Resolution",
+                    &tr!("library-filter-resolution"),
                     150.,
                     labels,
                     self.resolution_index,
@@ -1139,13 +1201,13 @@ impl LibraryPage {
                     ICON_ARROW_UPWARD
                 };
                 let tooltip = if view.sort == "random" {
-                    "Shuffle again"
+                    tr!("library-shuffle-again")
                 } else if view.descending {
-                    "Sort ascending"
+                    tr!("library-sort-ascending")
                 } else {
-                    "Sort descending"
+                    tr!("library-sort-descending")
                 };
-                let response = RoundButton::icon(icon, tooltip)
+                let response = RoundButton::icon(icon, &tooltip)
                     .size(ORDER_BUTTON, 20.)
                     .ringed(selected)
                     .focus(button::Focus::Skip)
@@ -1158,12 +1220,12 @@ impl LibraryPage {
                 // controls after it don't shift as the choice changes.
                 let label = value_filters::summary(view);
                 let size = vec2(VALUES_BUTTON_W, ui.spacing().interact_size.y);
-                let response = select::button(ui, size, &label, "Genres and tags", false);
+                let response = select::button(ui, size, &label, &tr!("library-filter-values"), false);
                 let action = response.clicked().then_some(ToolAction::OpenValues);
                 (response, action)
             }
             Tool::Clear => {
-                let response = button::text(ui, "Clear filters", self.filtered());
+                let response = button::text(ui, &tr!("library-filter-clear"), self.filtered());
                 let action = response.clicked().then_some(ToolAction::Clear);
                 (response, action)
             }
@@ -1212,7 +1274,14 @@ impl LibraryPage {
             let is_current = self
                 .scrubbing
                 .map_or(current == Some(letter), |scrubbed| scrubbed == letter);
-            response.widget_info(|| WidgetInfo::selected(Role::Button, true, is_current, format!("Jump to {letter}")));
+            response.widget_info(|| {
+                WidgetInfo::selected(
+                    Role::Button,
+                    true,
+                    is_current,
+                    tr!("library-jump-to", letter = letter.to_string()),
+                )
+            });
             let hovered = response.hovered() && self.scrubbing.is_none();
             if hovered {
                 let pill = rect.expand2(vec2(-4., 2.));
@@ -1442,11 +1511,12 @@ impl LibraryPage {
         let subtitle = self.total.map(item_count);
         let filtered = self.filtered();
         let summary = value_filters::summary(&self.view);
+        let title = tr!("library-filter-filters");
         let modal = dialog::show(
             cx.ctx,
             egui::Id::unique("library_filters"),
             FILTERS_DIALOG_W,
-            "Filters",
+            &title,
             subtitle.as_deref(),
             |ui| {
                 for tool in tools.iter().copied() {
@@ -1466,13 +1536,13 @@ impl LibraryPage {
                     });
                 }
                 dialog::buttons(ui, |ui| {
-                    done = dialog::main(ui, "Done", button::State::Ready).clicked();
+                    done = dialog::main(ui, &tr!("library-done"), button::State::Ready).clicked();
                     let state = if filtered {
                         button::State::Ready
                     } else {
                         button::State::Disabled
                     };
-                    if dialog::quiet(ui, "Clear filters", state).clicked() {
+                    if dialog::quiet(ui, &tr!("library-filter-clear"), state).clicked() {
                         action = Some(ToolAction::Clear);
                     }
                 });
@@ -1495,30 +1565,31 @@ impl LibraryPage {
         let items = self.total.map(item_count);
         let subtitle = match (chosen, items) {
             (0, items) => items,
-            (chosen, Some(items)) => Some(format!("{chosen} chosen \u{b7} {items}")),
-            (chosen, None) => Some(format!("{chosen} chosen")),
+            (chosen, Some(items)) => Some(tr!("library-values-chosen-items", chosen = chosen, items = items)),
+            (chosen, None) => Some(tr!("library-values-chosen", chosen = chosen)),
         };
         let list_height = (cx.ctx.content_rect().height() - VALUES_PAGE_CHROME).max(VALUES_LIST_MIN_H);
         let (mut back, mut changed, mut done, mut clear) = (false, false, false, false);
+        let title = tr!("library-filter-values");
         let modal = dialog::show_page(
             cx.ctx,
             // Its own id: a new modal is sized before it's shown, where the filters' would be
             // drawn a frame at their size and place first.
             egui::Id::unique("library_filters_values"),
             FILTERS_DIALOG_W,
-            "Genres and tags",
+            &title,
             subtitle.as_deref(),
             &mut back,
             |ui| {
                 changed = self.value_filters.page(ui, &self.values, &mut self.view, list_height);
                 dialog::buttons(ui, |ui| {
-                    done = dialog::main(ui, "Done", button::State::Ready).clicked();
+                    done = dialog::main(ui, &tr!("library-done"), button::State::Ready).clicked();
                     let state = if chosen > 0 {
                         button::State::Ready
                     } else {
                         button::State::Disabled
                     };
-                    clear = dialog::quiet(ui, "Clear", state).clicked();
+                    clear = dialog::quiet(ui, &tr!("library-clear"), state).clicked();
                 });
             },
         );
@@ -1607,9 +1678,9 @@ impl Page for LibraryPage {
             }
         } else if self.total == Some(0) {
             let message = if self.filtered() {
-                "Nothing matches these filters."
+                tr!("library-nothing-matches")
             } else {
-                "Nothing here yet."
+                tr!("library-nothing-yet")
             };
             state::empty(ui, message);
         } else {
@@ -1648,17 +1719,17 @@ impl Browse for LibraryPage {
 }
 
 /// A filter's name on its row of the phone's filters dialog.
-fn tool_name(tool: Tool) -> &'static str {
+fn tool_name(tool: Tool) -> String {
     match tool {
-        Tool::Show => "Progress",
-        Tool::Rating => "Rating",
-        Tool::Values => "Genres and tags",
-        Tool::Year => "Year",
-        Tool::Resolution => "Resolution",
-        Tool::Filters => "Filters",
-        Tool::Clear => "Clear filters",
-        Tool::Sort => "Sort",
-        Tool::Order => "Order",
+        Tool::Show => tr!("library-filter-progress"),
+        Tool::Rating => tr!("library-filter-rating"),
+        Tool::Values => tr!("library-filter-values"),
+        Tool::Year => tr!("library-filter-year"),
+        Tool::Resolution => tr!("library-filter-resolution"),
+        Tool::Filters => tr!("library-filter-filters"),
+        Tool::Clear => tr!("library-filter-clear"),
+        Tool::Sort => tr!("library-filter-sort"),
+        Tool::Order => tr!("library-filter-order"),
     }
 }
 
@@ -1679,7 +1750,7 @@ fn values_row(ui: &mut Ui, summary: &str) -> Response {
     painter.text(
         rect.left_center(),
         Align2::LEFT_CENTER,
-        name,
+        name.as_str(),
         body,
         ui.visuals().text_color(),
     );
@@ -1722,10 +1793,11 @@ fn picker(
     id: &'static str,
     name: &str,
     width: f32,
-    labels: Vec<&str>,
+    labels: Vec<String>,
     selected: usize,
 ) -> (Response, Option<usize>) {
     let id = ui.make_persistent_id(id);
+    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
     select::select(ui, id, width, name, &labels, selected, false)
 }
 
@@ -1834,10 +1906,7 @@ fn scroll_to_row(
 }
 
 fn item_count(total: usize) -> String {
-    match total {
-        1 => "1 item".into(),
-        n => format!("{n} items"),
-    }
+    tr!("library-item-count", count = total)
 }
 
 #[cfg(test)]

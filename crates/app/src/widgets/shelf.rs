@@ -28,6 +28,7 @@ use egui::style::KineticScrollStyle;
 use egui::{Align, Layout, Rect, ScrollArea, Ui};
 use egui_material_icons::icons::{ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT};
 
+use crate::i18n::tr;
 use crate::smooth_scroll::{Fling, Glide};
 use crate::theme;
 use crate::theme::text;
@@ -158,13 +159,13 @@ fn shelf_inner(
                 ui.add_space(padding);
             }
             ui.spacing_mut().item_spacing.x = 4.;
-            if arrow(ICON_CHEVRON_RIGHT, "Scroll right", !arrows.at_end)
+            if arrow(ICON_CHEVRON_RIGHT, &tr!("widget-scroll-right"), !arrows.at_end)
                 .show(ui)
                 .clicked()
             {
                 distance = page;
             }
-            if arrow(ICON_CHEVRON_LEFT, "Scroll left", !arrows.at_start)
+            if arrow(ICON_CHEVRON_LEFT, &tr!("widget-scroll-left"), !arrows.at_start)
                 .show(ui)
                 .clicked()
             {
