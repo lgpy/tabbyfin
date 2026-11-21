@@ -104,6 +104,7 @@ crates/app/src/
 ├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
 ├── playback.rs, syncplay.rs, remote.rs, live.rs, cast.rs, downloads.rs   services
 ├── images.rs, trickplay.rs   textures
+├── i18n.rs          the interface's language: `tr!`, the Fluent loader, the system language
 ├── theme.rs         appearance: theme, text size, zoom, animations, over_video; `theme::apply` is called at launch
 ├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
 ├── ui_tests/        the headless UI tests (egui_kittest)
@@ -423,6 +424,13 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 - On Linux the desktop's colour scheme comes from the XDG portal (`theme::SystemTheme`), read on tokio; Windows and macOS let egui/winit follow the system.
 - Colours come from egui's style. The player stays dark over the video in both themes and takes its colours from `theme::over_video` (`Color32` constants): the bars' scrims, the sliders' track and thumb, chapter marks and the cards. Its menus sit on an opaque surface in neutral greys (`over_video::MENU`, `MENU_BORDER`, `MENU_INK`, `MENU_INSET`, `MENU_INSET_HOVER`, `TAB_TRACK`), its one accent is the dark theme's `brand` (`over_video::BRAND`). Its widgets are painted by the page rather than built from egui's, so each registers its own AccessKit info (`Response::widget_info`: a button's name, a tab's or row's selected state, a slider's value) while staying non-focusable — egui focus would take every key from the player, so they are clicked, never tabbed to.
 - Settings raises `AppEvent::AppearanceChanged` after saving an appearance setting; the app calls `theme::apply` (the appearance is the app's, so it applies on the sign-in screen too).
+
+### Languages
+
+- Every text the interface shows is a Fluent message in `crates/app/i18n/<language>/tabbyfin.ftl`: English (`en`, the fallback) and European Portuguese (`pt-PT`), embedded in the binary through `rust-embed`. Code asks for one with `i18n::tr!("message-id", name = value)`, which wraps `i18n_embed_fl::fl!`: a missing id or argument fails the build against the English file, and `i18n::tests` fails when a translation lacks a message, has a stale one or names other arguments. Logs, panics, config keys and the server's own text (titles, names) aren't messages.
+- The language follows the system's preferred languages (`sys-locale`; any Portuguese gets pt-PT, anything else without a translation English) unless *Settings → Appearance → Language* picks one (`config.language`). `i18n::apply` runs with the appearance, at launch and on `AppEvent::AppearanceChanged`; egui draws each frame anew, so the change shows at once, except in text kept from before (a toast already up).
+- The loader is a process-wide `LazyLock`, the app's one global: messages are made on the UI thread and on tokio's. Fluent's bidi isolation marks are off, since the fonts draw them as boxes. Tests always run in English.
+- Counts use Fluent's plural selectors, and a sentence is one message with arguments, never pieces put together, since word order differs between languages.
 
 ### Window placement
 

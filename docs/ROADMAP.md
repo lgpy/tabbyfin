@@ -65,13 +65,12 @@ Done: an Inno Setup installer for Windows, an AppImage and a Flatpak bundle besi
 
 ## 6. Quality and engineering
 
-Done: an integration job in CI against 12.2 and 10.11, error messages for the common failures, bounded image memory and a loading queue.
+Done: an integration job in CI against 12.2 and 10.11, error messages for the common failures, bounded image memory and a loading queue, the interface in English and European Portuguese (Fluent, following the system language or the one Settings picks).
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
 | 6.1 | **UI tests** | P2 | M | API fixtures, a mocked server and `egui_kittest` UI tests (`crates/app/src/ui_tests/`) cover the client, reporting, the browse cursor, sign-in, dialogs, Settings, Home, the library, the item page and the widgets. The top bar and the player have little UI coverage. |
 | 6.2 | **Screen readers** | P3 | L | Keyboard reach, contrast (WCAG AA) and text size are done, and every widget names itself to AccessKit, but no screen reader has been tried. |
-| 6.3 | **Localisation** | P3 | M | All strings are English and inline. Extract them before the UI grows much more. |
 | 6.4 | **Performance on real hardware** | P3 | M | Profiled only in WSL debug builds (10,000-item fake library: about 640 MB, posters in view 0.5 s after a fast scroll). Check a release build on real hardware. |
 | 6.5 | **Expired token while browsing** | P3 | S | The error wording exists but hasn't been rechecked. |
 
