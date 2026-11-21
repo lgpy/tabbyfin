@@ -3,6 +3,8 @@
 
 use jellyfin::models::{MediaSourceInfo, MediaStream, MediaStreamType};
 
+use crate::i18n::tr;
+
 /// Subtitle picker value for "Off".
 pub const SUBTITLES_OFF: i32 = -1;
 
@@ -19,7 +21,7 @@ fn label(stream: &MediaStream) -> String {
         .display_title
         .clone()
         .or_else(|| stream.language.clone())
-        .unwrap_or_else(|| format!("Track {}", stream.index))
+        .unwrap_or_else(|| tr!("player-track-number", index = stream.index))
 }
 
 /// How many tracks of `kind` `source` has.
@@ -47,7 +49,7 @@ pub fn track_choices(source: &MediaSourceInfo) -> (Vec<Choice>, Vec<Choice>) {
         subtitles.insert(
             0,
             Choice {
-                label: "Off".to_owned(),
+                label: tr!("player-subtitles-off"),
                 value: SUBTITLES_OFF,
             },
         );

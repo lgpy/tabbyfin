@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use jellyfin::models::{ChapterInfo, MediaSegmentDto, MediaSegmentType};
 
+use crate::i18n::tr;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chapter {
     pub start: Duration,
@@ -28,13 +30,13 @@ pub enum SegmentKind {
 
 impl SegmentKind {
     /// The skip button's label.
-    pub fn skip_label(self) -> &'static str {
+    pub fn skip_label(self) -> String {
         match self {
-            SegmentKind::Intro => "Skip intro",
-            SegmentKind::Recap => "Skip recap",
-            SegmentKind::Preview => "Skip preview",
-            SegmentKind::Commercial => "Skip ad",
-            SegmentKind::Outro => "Skip credits",
+            SegmentKind::Intro => tr!("player-skip-intro"),
+            SegmentKind::Recap => tr!("player-skip-recap"),
+            SegmentKind::Preview => tr!("player-skip-preview"),
+            SegmentKind::Commercial => tr!("player-skip-ad"),
+            SegmentKind::Outro => tr!("player-skip-credits"),
         }
     }
 }

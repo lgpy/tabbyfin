@@ -25,6 +25,7 @@ use tokio::sync::{mpsc, oneshot};
 use url::Url;
 
 use crate::config::{Config, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
+use crate::i18n::tr;
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::services::{AppEvent, Services};
@@ -1177,9 +1178,9 @@ impl Services {
                 let delay = RECONNECT_DELAYS[running.attempt];
                 tracing::warn!(attempt = running.attempt, ?delay, "stream lost: {message}");
                 let notice = if crashed {
-                    "The player stopped unexpectedly. Restarting it…"
+                    tr!("player-restarting")
                 } else {
-                    "Lost the connection to the server. Reconnecting…"
+                    tr!("player-reconnecting")
                 };
                 self.toast(Toast::info(notice));
                 let mut due = Deadline::default();
@@ -1198,9 +1199,9 @@ impl Services {
             Ok(Ended::Lost { message, crashed, .. }) => {
                 tracing::warn!("stream lost for good: {message}");
                 let error = if crashed {
-                    "The player keeps crashing on this item. The log may say why."
+                    tr!("player-crashing")
                 } else {
-                    "Lost the connection to the server. Try again when it's back."
+                    tr!("player-connection-lost")
                 };
                 self.toast(Toast::error(error));
                 self.events.push(AppEvent::PlaybackEnded);
@@ -1318,7 +1319,7 @@ fn stream_url(
     let relative = source
         .transcoding_url
         .as_deref()
-        .ok_or("The server can't stream this item to this app.")?;
+        .ok_or_else(|| tr!("player-not-streamable"))?;
     let url = client.transcode_url(relative);
     let reasons = query_param(&url, "TranscodeReasons").unwrap_or_default();
     tracing::info!(%reasons, "the server is transcoding");
@@ -1371,20 +1372,19 @@ async fn start_player(
     Player::spawn(import, engine).await.map_err(|err| match err {
         player::Error::LibmpvUnavailable(reason) if cfg!(target_os = "android") => {
             tracing::warn!("libmpv unavailable: {reason}");
-            "mpv couldn't start. Pick Media3 as the player in Settings › Playback.".to_owned()
+            tr!("player-mpv-android")
         }
         player::Error::LibmpvUnavailable(reason) => {
             tracing::warn!("libmpv unavailable: {reason}");
-            let hint = if cfg!(target_os = "macos") {
-                "Install mpv with Homebrew (brew install mpv)."
+            if cfg!(target_os = "macos") {
+                tr!("player-mpv-missing-macos")
             } else if cfg!(windows) {
-                "libmpv-2.dll is missing next to tabbyfin.exe; reinstall the app."
+                tr!("player-mpv-missing-windows")
             } else {
-                "Install libmpv (the libmpv2 package on Debian and Ubuntu)."
-            };
-            format!("Video playback needs libmpv, which wasn't found. {hint}")
+                tr!("player-mpv-missing-linux")
+            }
         }
-        err => format!("Couldn't start the player: {err}"),
+        err => tr!("player-start-failed", error = err.to_string()),
     })
 }
 
@@ -1425,9 +1425,15 @@ async fn details(client: &Client, item: &BaseItemDto, local: Option<LocalMarkers
     let versions = sources
         .iter()
         .enumerate()
-        .map(|(i, source)| Version {
-            id: source.id.clone(),
-            name: source.name.clone().unwrap_or_else(|| format!("Version {}", i + 1)),
+        .map(|(i, source)| {
+            let number = i + 1;
+            Version {
+                id: source.id.clone(),
+                name: source
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| tr!("player-version-number", number = number)),
+            }
         })
         .collect();
     Details {
@@ -1568,7 +1574,7 @@ async fn run_session(
         Some(local) => {
             tracing::info!(item = %item.name, path = %local.path.display(), "playing a downloaded file");
             let url = Url::from_file_path(&local.path)
-                .map_err(|()| format!("The downloaded file's path isn't valid: {}", local.path.display()))?;
+                .map_err(|()| tr!("player-download-path", path = local.path.display().to_string()))?;
             (
                 local.source.clone(),
                 url,
@@ -1593,13 +1599,13 @@ async fn run_session(
                 .await
                 .map_err(|err| describe_error(&err))?;
             if let Some(code) = info.error_code {
-                return Err(format!("The server won't play this item ({code})."));
+                return Err(tr!("player-server-refused", code = code));
             }
             let source = match &options.media_source_id {
                 Some(id) => info.media_sources.into_iter().find(|s| &s.id == id),
                 None => info.media_sources.into_iter().next(),
             }
-            .ok_or("The server returned no playable media.")?;
+            .ok_or_else(|| tr!("player-no-media"))?;
             let (url, method) = stream_url(&client, &item.id, &source, info.play_session_id.as_deref())?;
             let subtitle_files = subtitle_files(&client, &item.id, &source, method);
             (source, url, method, subtitle_files, info.play_session_id)
@@ -1712,7 +1718,7 @@ async fn run_session(
             },
         })
         .await
-        .map_err(|err| format!("The player couldn't open the stream: {err}"))?;
+        .map_err(|err| tr!("player-stream-open-failed", error = err.to_string()))?;
 
     let _ = channels.updates.send(SessionUpdate::Started {
         source: Box::new(source.clone()),
@@ -1769,7 +1775,7 @@ async fn run_session(
                     PlayerEvent::Duration(length) => duration = Some(*length),
                     PlayerEvent::EndFile(EndReason::Eof) if !stopping => finished = true,
                     PlayerEvent::EndFile(EndReason::Error(message)) => {
-                        error = Some(format!("The player couldn't play this file: {message}"));
+                        error = Some(tr!("player-play-failed", error = message));
                     }
                     PlayerEvent::Exited => break,
                     _ => {}

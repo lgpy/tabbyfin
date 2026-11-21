@@ -51,6 +51,7 @@ use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
 
 use crate::cast::Casting;
+use crate::i18n::tr;
 use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::motion;
@@ -458,10 +459,11 @@ impl PlayerPage {
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                if control(ICON_ARROW_BACK, CONTROL, "Back (Esc)").show(ui).clicked() {
+                let back = tr!("player-back");
+                if control(ICON_ARROW_BACK, CONTROL, &back).show(ui).clicked() {
                     self.exit(cx);
                 }
-                ui.label("Starting playback…");
+                ui.label(tr!("player-starting"));
             },
         );
     }
@@ -832,7 +834,8 @@ impl PlayerPage {
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                if control(ICON_ARROW_BACK, CONTROL, "Back (Esc)").show(ui).clicked() {
+                let back = tr!("player-back");
+                if control(ICON_ARROW_BACK, CONTROL, &back).show(ui).clicked() {
                     self.exit(cx);
                 }
                 let title_w = (ui.available_width() - badge_w).max(0.);
@@ -854,7 +857,7 @@ impl PlayerPage {
                 }
                 if let Some(cast) = &view.cast {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let tip = format!("Casting to {}", cast.device);
+                        let tip = tr!("player-cast-to-device", device = cast.device.as_str());
                         // Lit: `brand` on its circle, as a toggle that's on.
                         if control(ICON_CAST_CONNECTED, CONTROL, &tip).on(true).show(ui).clicked() {
                             // Back to the pages, where the cast panel is.
@@ -864,7 +867,8 @@ impl PlayerPage {
                 } else if cx.services.cast.has_devices() && !cx.services.in_group() {
                     // Playing here with a TV around: the same place, unlit, hands what plays over.
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let button = control(ICON_CAST, CONTROL, "Cast to a TV").show(ui);
+                        let tip = tr!("player-cast");
+                        let button = control(ICON_CAST, CONTROL, &tip).show(ui);
                         if button.clicked() {
                             PopupMenu::toggle(ui.ctx(), cast_menu_id(), Opened::Pointer);
                         }
@@ -894,30 +898,34 @@ impl PlayerPage {
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                let tip = if view.paused { "Play (Space)" } else { "Pause (Space)" };
+                let tip = if view.paused {
+                    tr!("player-play")
+                } else {
+                    tr!("player-pause")
+                };
                 let icon = if view.paused { ICON_PLAY_ARROW } else { ICON_PAUSE };
-                if control(icon, PLAY_CONTROL, tip).show(ui).clicked() {
+                if control(icon, PLAY_CONTROL, &tip).show(ui).clicked() {
                     cx.services.control(UiCommand::TogglePause);
                     self.show_controls();
                 }
-                if control(ICON_FAST_REWIND, CONTROL, "Back 10 s (Left)")
-                    .show(ui)
-                    .clicked()
-                {
+                let back = tr!("player-back-10s");
+                if control(ICON_FAST_REWIND, CONTROL, &back).show(ui).clicked() {
                     cx.services.control(UiCommand::SeekBy(-SEEK_STEP));
                     self.show_controls();
                 }
-                if control(ICON_FAST_FORWARD, CONTROL, "Forward 10 s (Right)")
-                    .show(ui)
-                    .clicked()
-                {
+                let forward = tr!("player-forward-10s");
+                if control(ICON_FAST_FORWARD, CONTROL, &forward).show(ui).clicked() {
                     cx.services.control(UiCommand::SeekBy(SEEK_STEP));
                     self.show_controls();
                 }
                 let muted = view.muted || view.volume == 0.;
                 let icon = if muted { ICON_VOLUME_OFF } else { ICON_VOLUME_UP };
-                let tip = if muted { "Unmute (M)" } else { "Mute (M)" };
-                if control(icon, CONTROL, tip).show(ui).clicked() {
+                let tip = if muted {
+                    tr!("player-unmute")
+                } else {
+                    tr!("player-mute")
+                };
+                if control(icon, CONTROL, &tip).show(ui).clicked() {
                     cx.services.control(UiCommand::ToggleMute);
                     self.show_controls();
                 }
@@ -958,11 +966,11 @@ impl PlayerPage {
                         ICON_FULLSCREEN
                     };
                     let tip = if fullscreen {
-                        "Exit fullscreen (F)"
+                        tr!("player-exit-fullscreen")
                     } else {
-                        "Fullscreen (F)"
+                        tr!("player-fullscreen")
                     };
-                    if control(icon, CONTROL, tip).show(ui).clicked() {
+                    if control(icon, CONTROL, &tip).show(ui).clicked() {
                         toggle_fullscreen(ui.ctx());
                     }
                 }
@@ -970,7 +978,8 @@ impl PlayerPage {
                 let lit = open.then(|| view.lit_button(self.settings_tab));
                 let is_lit = |button| lit == Some(button);
                 if !casting {
-                    let settings = menu_button(ui, ICON_SETTINGS, "Playback settings", is_lit(SettingsTab::General));
+                    let tip = tr!("player-settings");
+                    let settings = menu_button(ui, ICON_SETTINGS, &tip, is_lit(SettingsTab::General));
                     if settings.clicked() {
                         pressed = Some(SettingsTab::General);
                     }
@@ -978,7 +987,8 @@ impl PlayerPage {
                 }
                 let subtitles = SettingsTab::Subtitles;
                 if view.subtitles_button {
-                    let button = menu_button(ui, ICON_CLOSED_CAPTION, "Subtitles", is_lit(subtitles));
+                    let tip = tr!("player-subtitles");
+                    let button = menu_button(ui, ICON_CLOSED_CAPTION, &tip, is_lit(subtitles));
                     if button.clicked() {
                         pressed = Some(subtitles);
                     }
@@ -989,7 +999,8 @@ impl PlayerPage {
                 }
                 let audio = SettingsTab::Audio;
                 if view.audio_button {
-                    let button = menu_button(ui, ICON_AUDIOTRACK, "Audio", is_lit(audio));
+                    let tip = tr!("player-audio");
+                    let button = menu_button(ui, ICON_AUDIOTRACK, &tip, is_lit(audio));
                     if button.clicked() {
                         pressed = Some(audio);
                     }
@@ -1002,14 +1013,15 @@ impl PlayerPage {
                 }
                 if view.chapter_count >= 2 {
                     let open = egui::Popup::is_id_open(ui.ctx(), chapters_id());
-                    let chapters = menu_button(ui, ICON_VIEW_LIST, "Chapters", open);
+                    let tip = tr!("player-chapters");
+                    let chapters = menu_button(ui, ICON_VIEW_LIST, &tip, open);
                     if chapters.clicked() {
                         toggle_menu(ui.ctx(), chapters_id());
                     }
                     chapters_button = Some(chapters);
                 }
                 if let Some(name) = view.version_picker() {
-                    let picker = version_picker(ui, name);
+                    let picker = version_picker(ui, &name);
                     if picker.clicked() {
                         PopupMenu::toggle(ui.ctx(), versions_id(), Opened::Pointer);
                     }
@@ -1054,7 +1066,8 @@ impl PlayerPage {
         let response = ui.allocate_rect(rect, Sense::CLICK | Sense::DRAG);
         let shown = self.scrub.unwrap_or(view.position);
         // A slider to AccessKit, in seconds; the player's keys and the pointer are how it moves.
-        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), shown.as_secs_f64(), "Seek"));
+        let name = tr!("player-seek");
+        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), shown.as_secs_f64(), &name));
         let fraction = (shown.as_secs_f64() / duration.as_secs_f64()).clamp(0., 1.) as f32;
         let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
@@ -1139,7 +1152,8 @@ impl PlayerPage {
             view.volume
         };
         // A slider to AccessKit, in percent.
-        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), volume, "Volume"));
+        let name = tr!("player-volume");
+        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), volume, &name));
         let fraction = (volume / 100.).clamp(0., 1.) as f32;
         let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
@@ -1235,14 +1249,15 @@ impl PlayerPage {
                     );
                     let colours = pill_colours();
                     let label = segment.kind.skip_label();
-                    if countdown_pill::show(ui, label, ICON_SKIP_NEXT, Some(fraction), colours).clicked() {
+                    if countdown_pill::show(ui, &label, ICON_SKIP_NEXT, Some(fraction), colours).clicked() {
                         cx.services.control(UiCommand::SeekTo(segment.end));
                     }
                 } else if view.show_up_next {
                     self.up_next_card(ui, view, cx);
                 } else if let Some(from) = view.resume {
-                    let note = format!("Resumed from {}", timestamp(from));
-                    if prompt::note(ui, &note, ICON_RESTART_ALT, "Start over", note_colours()).clicked() {
+                    let note = tr!("player-resumed-from", time = timestamp(from));
+                    let start_over = tr!("player-start-over");
+                    if prompt::note(ui, &note, ICON_RESTART_ALT, &start_over, note_colours()).clicked() {
                         cx.services.start_over();
                     }
                 }
@@ -1259,7 +1274,7 @@ impl PlayerPage {
         popup::over_video_frame(pad as i8).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(8., 4.);
             let names = |ui: &mut egui::Ui| {
-                ui.label(label::overline(ui, "Up next").color(over_video::MUTED_FOREGROUND));
+                ui.label(label::overline(ui, &tr!("player-up-next")).color(over_video::MUTED_FOREGROUND));
                 let name = RichText::new(label)
                     .font(theme::text::font(ui, "base"))
                     .strong()
@@ -1267,7 +1282,8 @@ impl PlayerPage {
                 ui.add(egui::Label::new(name).truncate().selectable(false));
             };
             let buttons = |ui: &mut egui::Ui, cx: &mut PageCx| {
-                if countdown_pill::show(ui, "Play now", ICON_PLAY_ARROW, view.autoplay_in, pill_colours()).clicked() {
+                let play_now = tr!("player-play-now");
+                if countdown_pill::show(ui, &play_now, ICON_PLAY_ARROW, view.autoplay_in, pill_colours()).clicked() {
                     cx.services.play_next();
                 }
                 let quiet = prompt::Quiet {
@@ -1275,7 +1291,8 @@ impl PlayerPage {
                     outline: over_video::QUIET_OUTLINE,
                     hover: over_video::ROUND_HOVER,
                 };
-                if prompt::quiet(ui, "Cancel", quiet).clicked()
+                let cancel = tr!("player-cancel");
+                if prompt::quiet(ui, &cancel, quiet).clicked()
                     && let Some(state) = cx.services.playback.now_playing_mut()
                 {
                     state.next_cancelled = true;
@@ -1325,10 +1342,11 @@ impl PlayerPage {
                                 .fill_width((media_row::CHAPTER_THUMB_W * 2.) as u32)
                         });
                         let current = menu.current == Some(chapter.index);
+                        let number = chapter.index + 1;
                         let name = chapter
                             .name
                             .clone()
-                            .unwrap_or_else(|| format!("Chapter {}", chapter.index + 1));
+                            .unwrap_or_else(|| tr!("player-chapter-number", number = number));
                         let start = timestamp(chapter.start);
                         let row = media_row::chapter(
                             ui,
@@ -1402,8 +1420,9 @@ impl PlayerPage {
             .map(|device| (device.id.clone(), device.name.clone()))
             .collect();
         let entries: Vec<Entry> = devices.iter().map(|(_, name)| Entry::new(name)).collect();
+        let title = tr!("player-cast");
         let shown = PopupMenu::new(cast_menu_id())
-            .title("Cast to a TV")
+            .title(&title)
             .align(RectAlign::BOTTOM_END)
             .width(240.)
             .show(response, &entries);
@@ -1420,8 +1439,9 @@ impl PlayerPage {
             .iter()
             .map(|version| Entry::new(&version.name).checked(version.id == view.source_id))
             .collect();
+        let title = tr!("player-version");
         let shown = PopupMenu::new(versions_id())
-            .title("Version")
+            .title(&title)
             .align(RectAlign::TOP_END)
             .width(240.)
             .show(response, &entries);
@@ -1655,14 +1675,8 @@ impl View {
             time,
             chapter_marks,
             chapter_count: state.chapters.len(),
-            previous_tip: state
-                .previous
-                .as_ref()
-                .map(|item| format!("Previous {}(Shift+P)", kind_word(item))),
-            next_tip: state
-                .next
-                .as_ref()
-                .map(|item| format!("Next {}(Shift+N)", kind_word(item))),
+            previous_tip: state.previous.as_ref().map(previous_tip),
+            next_tip: state.next.as_ref().map(next_tip),
             versions: state.versions.clone(),
             source_id: state.source.id.clone(),
             version_name,
@@ -1770,9 +1784,15 @@ impl View {
         let versions: Vec<Version> = sources
             .iter()
             .enumerate()
-            .map(|(i, source)| Version {
-                id: source.id.clone(),
-                name: source.name.clone().unwrap_or_else(|| format!("Version {}", i + 1)),
+            .map(|(i, source)| {
+                let number = i + 1;
+                Version {
+                    id: source.id.clone(),
+                    name: source
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| tr!("player-version-number", number = number)),
+                }
             })
             .collect();
         let source = sources
@@ -1808,8 +1828,8 @@ impl View {
             chapter_count: chapters.len(),
             // The receiver keeps its own queue, which it doesn't report: the buttons are always
             // there, and it ignores what it has nothing for.
-            previous_tip: Some("Previous (Shift+P)".to_owned()),
-            next_tip: Some("Next (Shift+N)".to_owned()),
+            previous_tip: Some(tr!("player-previous")),
+            next_tip: Some(tr!("player-next")),
             versions,
             source_id,
             version_name,
@@ -1862,17 +1882,17 @@ impl View {
     fn badges(&self) -> Vec<String> {
         let mut badges = Vec::new();
         if self.group {
-            badges.push("SyncPlay".to_owned());
+            badges.push(tr!("player-badge-syncplay"));
         }
         if self.transcoding {
-            badges.push("Transcoding".to_owned());
+            badges.push(tr!("player-badge-transcoding"));
         }
         badges
     }
 
     /// The version picker's label, when there's a version to switch to.
-    fn version_picker(&self) -> Option<&str> {
-        (self.versions.len() >= 2).then(|| self.version_name.as_deref().unwrap_or("Version"))
+    fn version_picker(&self) -> Option<String> {
+        (self.versions.len() >= 2).then(|| self.version_name.clone().unwrap_or_else(|| tr!("player-version")))
     }
 }
 
@@ -1887,11 +1907,11 @@ enum SettingsTab {
 impl SettingsTab {
     const ALL: [Self; 3] = [Self::Audio, Self::Subtitles, Self::General];
 
-    fn label(self) -> &'static str {
+    fn label(self) -> String {
         match self {
-            Self::Audio => "Audio",
-            Self::Subtitles => "Subtitles",
-            Self::General => "General",
+            Self::Audio => tr!("player-audio"),
+            Self::Subtitles => tr!("player-subtitles"),
+            Self::General => tr!("player-tab-general"),
         }
     }
 
@@ -1904,12 +1924,21 @@ impl SettingsTab {
     }
 }
 
-/// "episode " or "movie " for a button's tooltip, or nothing for other kinds.
-fn kind_word(item: &jellyfin::models::BaseItemDto) -> &'static str {
+/// The previous and next buttons' tooltips: what each one plays, or just the direction for the
+/// kinds of item neither names.
+fn previous_tip(item: &jellyfin::models::BaseItemDto) -> String {
     match item.kind {
-        BaseItemKind::Episode => "episode ",
-        BaseItemKind::Movie => "movie ",
-        _ => "",
+        BaseItemKind::Episode => tr!("player-previous-episode"),
+        BaseItemKind::Movie => tr!("player-previous-movie"),
+        _ => tr!("player-previous"),
+    }
+}
+
+fn next_tip(item: &jellyfin::models::BaseItemDto) -> String {
+    match item.kind {
+        BaseItemKind::Episode => tr!("player-next-episode"),
+        BaseItemKind::Movie => tr!("player-next-movie"),
+        _ => tr!("player-next"),
     }
 }
 
@@ -2034,9 +2063,9 @@ fn casting_mark(ui: &egui::Ui, center: egui::Pos2, cast: &CastView) {
     round_button::glyph(ui, circle, ICON_CAST_CONNECTED, CAST_MARK_ICON, over_video::FOREGROUND);
     let line = circle.y + CAST_MARK / 2. + 28.;
     let title = if cast.reconnecting {
-        format!("Reconnecting to {}…", cast.device)
+        tr!("player-reconnecting-to", device = cast.device.as_str())
     } else {
-        format!("Playing on {}", cast.device)
+        tr!("player-playing-on", device = cast.device.as_str())
     };
     painter.text(
         pos2(center.x, line),
@@ -2132,7 +2161,7 @@ fn settings_body(
             choice.audio = track_list(
                 ui,
                 "player-audio",
-                "No audio tracks",
+                &tr!("player-no-audio-tracks"),
                 &menu.audio_choices,
                 menu.audio.or(menu.default_audio),
             );
@@ -2152,7 +2181,7 @@ fn settings_body(
             choice.subtitle = track_list(
                 ui,
                 "player-subtitles",
-                "No subtitles",
+                &tr!("player-no-subtitles"),
                 &menu.subtitle_choices,
                 Some(selected),
             )
@@ -2169,7 +2198,8 @@ fn settings_body(
             let scale = adjustments.subtitle_scale;
             let size = format!("{:.0}%", scale * 100.);
             let moved = (scale - 1.).abs() >= 0.005;
-            if let Some(step) = stepper::row(ui, "Size", None, &size, moved, stepper_colours()) {
+            let label = tr!("player-size");
+            if let Some(step) = stepper::row(ui, &label, None, &size, moved, stepper_colours()) {
                 match step {
                     Step::Down => adjustments.subtitle_scale -= Adjustments::SCALE_STEP,
                     Step::Up => adjustments.subtitle_scale += Adjustments::SCALE_STEP,
@@ -2183,7 +2213,7 @@ fn settings_body(
             let name = ui.painter().text(
                 pos2(rect.left() + 8., rect.center().y),
                 Align2::LEFT_CENTER,
-                "Speed",
+                tr!("player-speed"),
                 theme::text::font(ui, "sm"),
                 over_video::MENU_INK,
             );
@@ -2200,7 +2230,7 @@ fn settings_body(
                 ui.horizontal(|ui| {
                     ui.add_space(8.);
                     ui.label(
-                        RichText::new("Normal in SyncPlay")
+                        RichText::new(tr!("player-normal-in-syncplay"))
                             .font(theme::text::font(ui, "sm"))
                             .color(over_video::MUTED_FOREGROUND),
                     );
@@ -2219,12 +2249,14 @@ fn settings_body(
 
 /// The settings menu's tabs. Returns the tab clicked.
 fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab) -> Option<SettingsTab> {
+    let labels: Vec<String> = shown.iter().map(|tab| tab.label()).collect();
     let shown: Vec<_> = shown
         .iter()
-        .map(|&tab| tabs::Tab {
+        .zip(&labels)
+        .map(|(&tab, label)| tabs::Tab {
             value: tab,
             icon: tab.icon(),
-            label: tab.label(),
+            label: label.as_str(),
         })
         .collect();
     let colours = tabs::Colours {
@@ -2266,7 +2298,8 @@ fn stepper_colours() -> stepper::Colours {
 /// its text rounds to zero.
 fn delay_stepper(ui: &mut egui::Ui, keys: Option<&str>, delay: f64) -> Option<Step> {
     let moved = delay.abs() >= DELAY_ZERO;
-    stepper::row(ui, "Delay", keys, &delay_text(delay), moved, stepper_colours())
+    let label = tr!("player-delay");
+    stepper::row(ui, &label, keys, &delay_text(delay), moved, stepper_colours())
 }
 
 fn stepped_delay(delay: f64, step: Step) -> f64 {
@@ -2280,7 +2313,8 @@ fn stepped_delay(delay: f64, step: Step) -> f64 {
 /// The version picker's button: the app's select (`widgets::select`), small to fit the control
 /// bar. It takes no focus: the player's keys are `keys.rs`'s.
 fn version_picker(ui: &mut egui::Ui, name: &str) -> Response {
-    select::button(ui, vec2(VERSION_W, VERSION_H), name, "Version", false).on_hover_text("Version")
+    let version = tr!("player-version");
+    select::button(ui, vec2(VERSION_W, VERSION_H), name, &version, false).on_hover_text(&version)
 }
 
 /// A settings tab's list of tracks to pick from, the selected one ticked in the player's lilac.
