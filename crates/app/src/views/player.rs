@@ -22,8 +22,9 @@
 //! query by label — sees each button's name, a tab's or row's selected state, and a slider's
 //! value, even though no keyboard focus ever lands on them.
 //!
-//! Auto-skip and the clock's "time left" are config settings read when the page opens; the clock
-//! saves its choice when clicked.
+//! What happens at each kind of segment (`config::SkipActions`) is read when a session starts, and
+//! the clock's "time left" when the page opens; the clock saves its choice when clicked. A segment
+//! skipped by itself is announced by a notice with Undo.
 //!
 //! **While casting** the page is a remote for the TV rather than a video player
 //! (`controller.rs`): there's no picture here, so it draws in the app's own theme, not over
@@ -49,7 +50,7 @@ use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_FAST_FORWARD,
     ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT,
-    ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_UNDO, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
@@ -148,9 +149,14 @@ const TRACK_ROWS: f32 = 5.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PromptKind {
     Skip,
+    /// A segment was just skipped by itself, with Undo.
+    Skipped,
     UpNext,
     Resume,
 }
+
+/// How long the notice about an automatic skip stays.
+const SKIPPED_NOTICE_FOR: Duration = Duration::from_secs(6);
 
 /// The player, while a playback session shows.
 pub struct PlayerPage {
@@ -171,10 +177,12 @@ pub struct PlayerPage {
     /// Whether playback was paused before the last single click on the video, which a double
     /// click restores.
     paused_before_click: bool,
-    /// Skip intros and recaps as they start (a setting).
-    auto_skip: bool,
-    /// The segment last skipped automatically, so seeking back into it doesn't skip again.
-    auto_skipped: Option<Duration>,
+    /// The start of each segment skipped automatically, so seeking back into one (Undo included)
+    /// doesn't skip it again.
+    auto_skipped: Vec<Duration>,
+    /// The segment just skipped by itself, while its notice shows.
+    skipped: Option<(SegmentKind, Duration)>,
+    skipped_notice: task::Deadline,
     /// Seek-bar previews, once the session knows the server has tiles for this version.
     trickplay: Option<Trickplay>,
     controls_visible: bool,
@@ -212,8 +220,9 @@ impl PlayerPage {
             volume: 0.,
             scroll_pending: 0.,
             paused_before_click: false,
-            auto_skip: config.auto_skip_intro.unwrap_or(false),
-            auto_skipped: None,
+            auto_skipped: Vec::new(),
+            skipped: None,
+            skipped_notice: task::Deadline::default(),
             trickplay: None,
             controls_visible: false,
             controls_appeared: false,
@@ -404,7 +413,9 @@ impl PlayerPage {
         self.session = Some(session);
         self.scrub = None;
         self.trickplay = None;
-        self.auto_skipped = None;
+        self.auto_skipped.clear();
+        self.skipped = None;
+        self.skipped_notice.cancel();
         self.adjusting_volume = false;
         self.paused_before_click = false;
         self.settings_tab = SettingsTab::General;
@@ -416,18 +427,17 @@ impl PlayerPage {
         // The settings belong to the player, not to one item: read them again for a new
         // session.
         let config = crate::config::Config::load();
-        self.auto_skip = config.auto_skip_intro.unwrap_or(false);
         self.show_remaining = config.show_remaining_time.unwrap_or(false);
         self.show_controls();
         // A new item's prompt slides in again.
         self.prompt_in = None;
     }
 
-    /// With the setting on, skips each intro or recap once when it starts. Not in a SyncPlay
-    /// group, where every member would ask the group to seek.
+    /// Skips each segment of a kind set to Skip once, as it starts, and announces it. Not in a
+    /// SyncPlay group, where every member would ask the group to seek.
     fn auto_skip(&mut self, cx: &mut PageCx) {
-        if !self.auto_skip {
-            return;
+        if self.skipped.is_some() && self.skipped_notice.fire(cx.ctx) {
+            self.skipped = None;
         }
         let segment = {
             let Some(state) = cx.services.playback.now_playing() else {
@@ -436,14 +446,23 @@ impl PlayerPage {
             if state.group_item.is_some() {
                 return;
             }
-            state.skippable()
+            state.auto_skippable()
         };
         if let Some(segment) = segment
-            && matches!(segment.kind, SegmentKind::Intro | SegmentKind::Recap)
-            && self.auto_skipped != Some(segment.start)
+            && !self.auto_skipped.contains(&segment.start)
         {
-            self.auto_skipped = Some(segment.start);
+            self.auto_skipped.push(segment.start);
+            self.skipped = Some((segment.kind, segment.start));
+            self.skipped_notice.set(SKIPPED_NOTICE_FOR);
             cx.services.control(UiCommand::SeekTo(segment.end));
+        }
+    }
+
+    /// Undo on the skip notice: back to where the segment started, which isn't skipped again.
+    fn undo_skip(&mut self, cx: &mut PageCx) {
+        if let Some((_, start)) = self.skipped.take() {
+            self.skipped_notice.cancel();
+            cx.services.control(UiCommand::SeekTo(start));
         }
     }
 
@@ -1119,7 +1138,9 @@ impl PlayerPage {
     /// Each kind slides in when it appears. On a touch screen it keeps to the controls' `safe`
     /// area.
     fn prompt(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx, safe: Rect) {
-        let kind = if view.skippable.is_some() {
+        let kind = if self.skipped.is_some() {
+            PromptKind::Skipped
+        } else if view.skippable.is_some() {
             PromptKind::Skip
         } else if view.show_up_next {
             PromptKind::UpNext
@@ -1169,7 +1190,12 @@ impl PlayerPage {
                 if alpha < 1. {
                     ui.set_opacity(alpha);
                 }
-                if let Some(segment) = view.skippable {
+                if let Some((kind, _)) = self.skipped {
+                    let note = markers::skipped_label(kind);
+                    if prompt::note(ui, &note, ICON_UNDO, &tr!("player-undo"), note_colours()).clicked() {
+                        self.undo_skip(cx);
+                    }
+                } else if let Some(segment) = view.skippable {
                     let fraction = countdown_pill::progress(
                         view.position.as_secs_f64(),
                         segment.start.as_secs_f64(),

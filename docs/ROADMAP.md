@@ -20,7 +20,7 @@ Done: license (GPL-3.0-or-later), package metadata, log files in release builds,
 
 ## 2. Playback
 
-Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay thumbnails, speed, subtitle and audio delay, subtitle size, the time-left clock, mouse niceties, previous and next, the resume prompt; transcoding (H.264 and HEVC, automatic bitrate), recovery from network drops and player crashes, volume and mute in reports, remote control from other clients; SyncPlay with group UI, queue and drift correction; downloads of the original file, played from disk, and offline mode (the downloads open when the server can't be reached, and their watch state reaches it once it answers); on Android, downloads that carry on in the background under a foreground service, Wi-Fi only as a setting, the files in app-specific external storage, and Media3 playing them.
+Done: skip intro and outro (each kind asks, skips with Undo, or is left alone), the up-next card and autoplay, chapters, trickplay thumbnails, speed, subtitle and audio delay, subtitle size, the time-left clock, mouse niceties, previous and next, the resume prompt; transcoding (H.264 and HEVC, automatic bitrate), recovery from network drops and player crashes, volume and mute in reports, remote control from other clients; SyncPlay with group UI, queue and drift correction; downloads of the original file, played from disk, and offline mode (the downloads open when the server can't be reached, and their watch state reaches it once it answers); on Android, downloads that carry on in the background under a foreground service, Wi-Fi only as a setting, the files in app-specific external storage, and Media3 playing them.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|

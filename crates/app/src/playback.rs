@@ -24,7 +24,7 @@ use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 use url::Url;
 
-use crate::config::{Config, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
+use crate::config::{Config, SkipAction, SkipActions, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
 use crate::i18n::tr;
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
@@ -255,6 +255,8 @@ pub struct NowPlaying {
     pub chapters: Vec<Chapter>,
     /// Intro, credits and similar, once known.
     pub segments: Vec<Segment>,
+    /// What to do at each kind of segment (the setting, at session start).
+    pub skip_actions: SkipActions,
     pub stream: StreamInfo,
     /// The SyncPlay queue entry, while a group controls playback.
     pub group_item: Option<String>,
@@ -283,9 +285,16 @@ impl NowPlaying {
         self.commands.clone()
     }
 
-    /// The segment the skip button would skip, if one is playing.
+    /// The segment the skip button would skip, if one is playing. Credits are the up-next
+    /// card's while it shows.
     pub fn skippable(&self) -> Option<Segment> {
-        markers::skippable(&self.segments, self.position)
+        markers::at(&self.segments, self.position, &self.skip_actions, SkipAction::Ask)
+            .filter(|s| s.kind != SegmentKind::Outro || !self.show_up_next())
+    }
+
+    /// The segment to skip by itself right now, if the kind's action is Skip.
+    pub fn auto_skippable(&self) -> Option<Segment> {
+        markers::at(&self.segments, self.position, &self.skip_actions, SkipAction::Skip)
     }
 
     /// Whether to show the up-next card: from the credits (or near the end) of an episode
@@ -430,6 +439,7 @@ struct Running {
     muted: bool,
     adjustments: Adjustments,
     autoplay: bool,
+    skip_actions: SkipActions,
     resumed_from: Option<Duration>,
 }
 
@@ -552,6 +562,7 @@ impl PlaybackManager {
             autoplay: false,
             chapters: Vec::new(),
             segments: Vec::new(),
+            skip_actions: SkipActions::default(),
             stream: StreamInfo::default(),
             group_item: None,
             resumed_from: None,
@@ -610,7 +621,9 @@ impl PlaybackManager {
         if options.group_item.is_some() {
             adjustments.speed = 1.;
         }
-        let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
+        let config = Config::load();
+        let autoplay = config.autoplay_next_episode.unwrap_or(true);
+        let skip_actions = config.skip_actions;
         let resumed_from = options.start.filter(|_| options.resumed).map(Duration::from);
         let (updates_tx, updates) = task::channel(&self.ctx);
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
@@ -652,6 +665,7 @@ impl PlaybackManager {
             muted,
             adjustments,
             autoplay,
+            skip_actions,
             resumed_from,
         });
     }
@@ -1097,6 +1111,7 @@ impl Services {
                     autoplay: running.autoplay,
                     chapters: Vec::new(),
                     segments: Vec::new(),
+                    skip_actions: running.skip_actions,
                     stream,
                     group_item: running.options.group_item.clone(),
                     resumed_from: running.resumed_from,

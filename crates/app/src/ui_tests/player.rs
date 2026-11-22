@@ -4,6 +4,7 @@
 
 use egui::Modifiers;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 
 use crate::keys::{self, Scope};
 use crate::playback::UiCommand;
@@ -161,6 +162,102 @@ fn enter_and_s_skip_the_intro() {
         matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 13 * 60),
         "{sent:?}"
     );
+}
+
+/// A kind set to Skip is skipped as it starts, with a notice whose Undo goes back to the start of
+/// the segment and doesn't skip it again.
+#[test]
+fn a_segment_set_to_skip_is_skipped_and_undo_goes_back() {
+    use crate::config::SkipAction;
+    use crate::markers::SegmentKind;
+
+    let _config = ConfigDir::new("player-auto-skip");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    harness
+        .state_mut()
+        .now_playing_mut()
+        .expect("the session")
+        .skip_actions
+        .set(SegmentKind::Intro, Some(SkipAction::Skip));
+    harness.step();
+
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 13 * 60),
+        "{sent:?}"
+    );
+    harness.get_by_label("Skipped intro");
+
+    // The player's position hasn't moved yet, so the segment is still the one playing: it isn't
+    // skipped twice, and an automatic kind has no button.
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty());
+    assert!(harness.query_by_label("Skip intro").is_none());
+
+    harness.get_by_label("Undo").click();
+    harness.step();
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 11 * 60),
+        "{sent:?}"
+    );
+    assert!(harness.query_by_label("Undo").is_none());
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty(), "not skipped again");
+}
+
+/// A kind set to Off has no button and isn't skipped; Enter leaves it alone.
+#[test]
+fn a_segment_set_to_off_is_left_alone() {
+    use crate::config::SkipAction;
+    use crate::markers::SegmentKind;
+
+    let _config = ConfigDir::new("player-skip-off");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.get_by_label("Skip intro");
+    harness
+        .state_mut()
+        .now_playing_mut()
+        .expect("the session")
+        .skip_actions
+        .set(SegmentKind::Intro, Some(SkipAction::Off));
+    harness.step();
+    harness.state_mut().commands();
+    assert!(harness.query_by_label("Skip intro").is_none());
+
+    plain(&mut harness, egui::Key::Enter);
+    assert!(harness.state_mut().commands().is_empty());
+}
+
+/// Credits are the up-next card's: a skip button for them only shows when there's no card.
+#[test]
+fn the_credits_button_gives_way_to_the_up_next_card() {
+    use crate::config::SkipAction;
+    use crate::markers::{Segment, SegmentKind};
+
+    let _config = ConfigDir::new("player-credits");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let state = harness.state_mut().now_playing_mut().expect("the session");
+    let at = |minutes: u64| std::time::Duration::from_secs(minutes * 60);
+    state.segments = vec![Segment {
+        kind: SegmentKind::Outro,
+        start: at(45),
+        end: at(48),
+    }];
+    state.position = at(46);
+    // Off, as it starts out: just the card.
+    assert!(state.skippable().is_none() && state.show_up_next());
+    state.skip_actions.set(SegmentKind::Outro, Some(SkipAction::Ask));
+    assert!(state.skippable().is_none(), "the card offers the next episode");
+    state.next = None;
+    assert_eq!(state.skippable().map(|s| s.end), Some(at(48)));
+    // Skip jumps by itself, whether or not there's a next episode.
+    state.skip_actions.set(SegmentKind::Outro, Some(SkipAction::Skip));
+    assert_eq!(state.auto_skippable().map(|s| s.end), Some(at(48)));
 }
 
 /// The bracket keys step the speed up and down through the menu's speeds.
