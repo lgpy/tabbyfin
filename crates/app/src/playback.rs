@@ -1226,8 +1226,12 @@ impl Services {
         } else {
             playback.queue.push_last(items);
         }
-        // The queue takes the place of the next episode for the up-next card and autoplay.
+        // The queue takes the place of the next episode for the up-next card and autoplay, and
+        // asking for something to play next undoes dismissing the card.
         playback.refresh_next();
+        if let Some(state) = &mut playback.now_playing {
+            state.next_cancelled = false;
+        }
     }
 
     /// Sets what the queue does at the end of an item (the panel's repeat button, or remote

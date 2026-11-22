@@ -458,3 +458,19 @@ fn adding_while_a_reconnect_waits_keeps_the_queue_and_the_reconnect() {
     assert_eq!(queued(&mut harness), [id(0), id(2), movie().id]);
 }
 
+/// Asking for something to play next or adding to the queue undoes dismissing the up-next card,
+/// so the queued item plays when this one ends.
+#[test]
+fn queueing_after_dismissing_the_up_next_card_plays_the_queued_item() {
+    let _config = ConfigDir::new("queue-after-dismissed");
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    {
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.autoplay = true;
+        state.next_cancelled = true;
+    }
+    services.enqueue(vec![episode(2)], false);
+    assert!(!services.playback.now_playing().expect("the session").next_cancelled);
+    assert_eq!(services.end_for_test(), Some(episode(2).id));
+}
