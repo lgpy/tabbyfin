@@ -131,10 +131,11 @@ h1 { font-size: clamp(2.1rem, 1.3rem + 2.2vw, 3.2rem); line-height: 1.08; letter
 .winctl i { width: 34px; height: 26px; display: grid; place-items: center; }
 .winctl i::before { content: ""; width: 10px; height: 10px; border: 1.4px solid #a89fbb; }
 .winctl i:nth-child(1)::before { height: 0; border-width: 1.4px 0 0; }
-.winctl i:nth-child(3)::before {
-  border: 0;
-  background: linear-gradient(45deg, transparent 44%, #a89fbb 44% 56%, transparent 56%), linear-gradient(-45deg, transparent 44%, #a89fbb 44% 56%, transparent 56%);
+/* The close button's cross is two borders, not a gradient, so forced colours still draw it. */
+.winctl i:nth-child(3)::before, .winctl i:nth-child(3)::after {
+  content: ""; grid-area: 1 / 1; width: 13px; height: 0; border: 0; border-top: 1.4px solid #a89fbb; transform: rotate(45deg);
 }
+.winctl i:nth-child(3)::after { transform: rotate(-45deg); }
 .screens { position: relative; aspect-ratio: 1280 / 800; background: #120e1b; }
 .screen { margin: 0; position: absolute; inset: 0; }
 .screen img { display: block; width: 100%; height: 100%; object-fit: cover; }
@@ -259,7 +260,18 @@ kbd { display: inline-block; min-width: 1.9em; text-align: center; padding: 1px 
 
 /* ---------- Download ---------- */
 .download { padding: 96px 0 40px; }
-.oses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.oses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+/* Linux has twice the packages and notes, so it gets a column to itself and the other two share
+   one: three columns left a hole under the short cards. The visitor's own system leads. */
+@media (min-width: 1081px) {
+  #download-windows { grid-column: 1; grid-row: 1; }
+  #download-macos { grid-column: 1; grid-row: 2; }
+  #download-linux { grid-column: 2; grid-row: 1 / span 2; }
+  .oses:has(#download-macos.yours) #download-macos { grid-row: 1; }
+  .oses:has(#download-macos.yours) #download-windows { grid-row: 2; }
+  .oses:has(#download-linux.yours) #download-linux { grid-column: 1; }
+  .oses:has(#download-linux.yours) :is(#download-windows, #download-macos) { grid-column: 2; }
+}
 .os.yours { order: -1; border-color: var(--brand); box-shadow: 0 12px 40px -12px var(--shadow), 0 0 0 1px var(--brand); }
 .os header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
 .os header svg { width: 26px; height: 26px; color: var(--brand); flex: none; }
@@ -363,6 +375,21 @@ footer a:hover { color: var(--ink); }
   .keytable th, .keytable td { padding: 7px 9px; }
 }
 
+/* A phone on its side: the first screen is short, so the hero's text closes up to keep the button in it. */
+@media (max-height: 480px) and (min-width: 561px) {
+  .hero { padding-top: 14px; }
+  .kicker { margin-bottom: 10px; }
+  h1 { margin-bottom: 10px; }
+  .lead { margin-bottom: 16px; }
+}
+/* Forced colours take gradients away and leave their boxes: the glows go. */
+@media (forced-colors: active) {
+  .stage::before, .jelly-spot::before { display: none; }
+}
+@media print {
+  .theme-switch, .skip { display: none; }
+  .surface, .stop, .window { break-inside: avoid; }
+}
 @media (prefers-reduced-motion: no-preference) {
   html { scroll-behavior: smooth; }
   .screen:not([hidden]) img { animation: fade-in .35s ease; }
