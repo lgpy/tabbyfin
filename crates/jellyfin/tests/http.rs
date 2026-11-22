@@ -345,3 +345,63 @@ async fn a_failed_download_maps_to_the_error() {
     let err = client.download(client.download_url("item"), 0).await.err();
     assert!(matches!(err, Some(Error::Unauthorized)), "{err:?}");
 }
+
+/// The search names the language in the path and asks for exact matches only when told to;
+/// the result's optional fields may be missing or `null`.
+#[tokio::test]
+async fn subtitle_search_decodes_results() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/por"))
+        .and(query_param("isPerfectMatch", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"Id": "os_a/b+c==", "Name": "Movie.2020.1080p", "ProviderName": "Open Subtitles", "Format": "srt",
+             "ThreeLetterISOLanguageName": "por", "DownloadCount": 1200, "CommunityRating": 7.5, "IsHashMatch": true},
+            {"Id": "x", "Name": "Other", "ProviderName": null, "DownloadCount": null, "IsHashMatch": null}
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/eng"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = client(&server).await;
+    let found = client.search_subtitles("item1", "por", true).await.unwrap();
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0].id, "os_a/b+c==");
+    assert_eq!(found[0].download_count, Some(1200));
+    assert!(found[0].is_hash_match);
+    assert_eq!(found[1].provider_name, None);
+    assert!(!found[1].is_hash_match);
+
+    assert!(client.search_subtitles("item1", "eng", false).await.unwrap().is_empty());
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests[1].url.query(), None, "no isPerfectMatch unless asked");
+}
+
+/// The download id is one path segment, however odd, and a user without the permission
+/// gets `Forbidden`.
+#[tokio::test]
+async fn subtitle_download_posts_the_encoded_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/os_a%2Fb%2Bc%3D%3D"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item2/RemoteSearch/Subtitles/eng"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+
+    let client = client(&server).await;
+    client.download_subtitle("item1", "os_a/b+c==").await.unwrap();
+    let err = client.search_subtitles("item2", "eng", false).await.unwrap_err();
+    assert!(matches!(err, Error::Forbidden), "{err:?}");
+}
