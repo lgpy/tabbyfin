@@ -892,8 +892,8 @@ pub struct SettingsPage {
     push: Option<Section>,
 }
 
-/// How many times a test's page asked for the audio devices (the page asks none in tests, and
-/// lists none): per thread, so tests don't count each other's.
+// How many times a test's page asked for the audio devices (the page asks none in tests, and
+// lists none): per thread, so tests don't count each other's.
 #[cfg(test)]
 thread_local! {
     pub(crate) static DEVICES_ASKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
