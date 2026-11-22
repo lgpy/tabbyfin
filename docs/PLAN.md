@@ -275,6 +275,8 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
    - `/Sessions/Playing/Stopped` when playback ends, using the last known position.
 3. When playback ends, pages that show watched state refresh: the stop bumps `services.user_data`, the counter pages watch (§6).
 
+**The local play queue:** what plays after the playing item (*Play all*, remote *play next* and *last*, and the item menu's *Play next* and *Add to queue*). Those two entries show whenever something plays, is cast or is queued (`Services::queueing`, which `tick` hands the cards' menus through `menu::set_queueing`); a movie or episode goes in as it is, and a series, season, collection or playlist fetches its items on tokio (`item_menu::items_to_queue`) and `apply_menu_requests` queues them in order, with a toast. In a SyncPlay group or while casting, `Services::enqueue` hands them to the group's or the TV's queue, as before.
+
 **Ownership and events:** each session sends its updates through a `task::channel` that `Services::tick` drains into `NowPlaying`, and handles the end there (autoplay, reconnect, the events below). A session is detached on tokio rather than a `Task`, so it outlives the screen that started it and still reports its stop after sign-out: `Services::end` stops the current one, dropping the manager stops any left and saves the volume, and quitting (`Services::shut_down`) waits up to 3 s for the stop reports. `AppEvent::PlaybackStarted` and `PlaybackEnded` open and close the player page; failures and notices are toasts. Reconnecting after `Ended::Lost` waits on a `task::Deadline` (2, 5, 10 s), cancelled by stopping playback.
 
 ### 5.3 Shipping libmpv

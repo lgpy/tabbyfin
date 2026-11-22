@@ -118,6 +118,19 @@ item-delete-playlist = Delete playlist…
 item-version = Version
 item-version-number = Version { $number }
 item-nothing-to-play = Nothing here to play.
+item-play-next = Play next
+item-add-to-queue = Add to queue
+item-nothing-to-queue = Nothing here to add to the queue.
+queue-played-next = { $name } plays next.
+queue-added = Added { $name } to the queue.
+queue-played-next-count = { $count ->
+    [one] { $count } item from { $name } plays next.
+   *[other] { $count } items from { $name } play next.
+    }
+queue-added-count = { $count ->
+    [one] Added { $count } item from { $name } to the queue.
+   *[other] Added { $count } items from { $name } to the queue.
+    }
 item-download = Download
 item-downloading = Downloading
 item-downloaded = Downloaded

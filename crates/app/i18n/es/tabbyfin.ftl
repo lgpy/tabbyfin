@@ -118,6 +118,19 @@ item-delete-playlist = Eliminar lista…
 item-version = Versión
 item-version-number = Versión { $number }
 item-nothing-to-play = No hay nada que reproducir aquí.
+item-play-next = Reproducir a continuación
+item-add-to-queue = Añadir a la cola
+item-nothing-to-queue = No hay nada que añadir a la cola.
+queue-played-next = { $name } se reproducirá a continuación.
+queue-added = Se ha añadido { $name } a la cola.
+queue-played-next-count = { $count ->
+    [one] { $count } elemento de { $name } se reproducirá a continuación.
+   *[other] { $count } elementos de { $name } se reproducirán a continuación.
+    }
+queue-added-count = { $count ->
+    [one] Se ha añadido { $count } elemento de { $name } a la cola.
+   *[other] Se han añadido { $count } elementos de { $name } a la cola.
+    }
 item-download = Descargar
 item-downloading = Descargando
 item-downloaded = Descargado

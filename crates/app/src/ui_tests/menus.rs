@@ -120,3 +120,94 @@ fn enter_on_more_opens_its_menu_for_the_keyboard() {
     ui.step();
     assert!(rows(&ui, Role::MenuItem).is_empty(), "Esc closes the menu");
 }
+
+/// Plays an episode, so the menus offer the queue's entries.
+fn start_playing(ui: &mut PageHarness) {
+    let episodes: serde_json::Value = fixture_json("episodes");
+    let episode: BaseItemDto = serde_json::from_value(episodes["Items"][0].clone()).expect("an episode");
+    let movie: BaseItemDto = fixture_json("item_movie");
+    // The receiver is dropped: nothing here reads what the session is sent.
+    drop(
+        ui.services()
+            .playback
+            .start_for_test(episode, movie.media_sources[0].clone()),
+    );
+}
+
+/// *Play next* and *Add to queue* come with something playing, and a season adds its episodes, in
+/// order, with a toast to say so.
+#[test]
+fn the_queue_entries_come_with_something_playing() {
+    let _config = ConfigDir::new("menus-queue");
+    let (_server, mut ui) = series_page();
+    ui.press(Key::Tab);
+    ui.press(Key::Tab);
+    ui.step_until("the first season on screen", |harness| {
+        let window = harness.ctx.input(|input| input.viewport_rect());
+        window.contains_rect(harness.get_by_label_contains("Season 1").rect())
+    });
+
+    start_playing(&mut ui);
+    ui.step();
+    ui.harness().get_by_label_contains("Season 1").click_secondary();
+    for _ in 0..3 {
+        ui.step();
+    }
+    assert_eq!(
+        rows(&ui, Role::MenuItem),
+        [
+            "Play",
+            "Play next",
+            "Add to queue",
+            "Add to playlist…",
+            "Download all episodes"
+        ]
+    );
+
+    ui.harness()
+        .get_by_role_and_label(Role::MenuItem, "Add to queue")
+        .click();
+    ui.step_until("the season's episodes queued", |harness| {
+        harness.state().services().playback.queued().count() > 0
+    });
+    let episodes: serde_json::Value = fixture_json("episodes");
+    let expected: Vec<&str> = episodes["Items"]
+        .as_array()
+        .expect("the episodes")
+        .iter()
+        .filter_map(|episode| episode["Id"].as_str())
+        .collect();
+    let queued: Vec<&str> = ui
+        .state()
+        .services()
+        .playback
+        .queued()
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(queued, expected);
+    assert!(
+        ui.services()
+            .events
+            .iter()
+            .any(|event| matches!(event, crate::services::AppEvent::Toast(_))),
+        "a toast says what was added"
+    );
+}
+
+/// With nothing playing or queued, a card's menu has no queue entries.
+#[test]
+fn the_queue_entries_wait_for_something_to_play() {
+    let _config = ConfigDir::new("menus-no-queue");
+    let (_server, mut ui) = series_page();
+    ui.press(Key::Tab);
+    ui.press(Key::Tab);
+    ui.step_until("the first season on screen", |harness| {
+        let window = harness.ctx.input(|input| input.viewport_rect());
+        window.contains_rect(harness.get_by_label_contains("Season 1").rect())
+    });
+    ui.harness().get_by_label_contains("Season 1").click_secondary();
+    for _ in 0..3 {
+        ui.step();
+    }
+    assert!(!rows(&ui, Role::MenuItem).iter().any(|row| row.contains("queue")));
+}
