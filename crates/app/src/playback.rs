@@ -916,10 +916,16 @@ impl Services {
         self.playback.start_session(item, options, 0);
     }
 
-    /// Plays the next episode (or queued item, or movie of the collection) now.
+    /// Plays the next episode (or queued item, or movie of the collection) now; in a SyncPlay
+    /// group, moves the group to the next entry of its queue.
     pub fn play_next(&mut self) {
         if self.is_casting() {
             self.cast_skip(true);
+            return;
+        }
+        // The group's queue moves on, for everyone; the series' next episode would replace it.
+        if self.in_group() {
+            self.group_skip(true);
             return;
         }
         if let Some(next) = self.playback.now_playing().and_then(|state| state.next.clone()) {
@@ -927,10 +933,15 @@ impl Services {
         }
     }
 
-    /// Plays the previous episode (or movie of the collection) from its resume point.
+    /// Plays the previous episode (or movie of the collection) from its resume point; in a
+    /// SyncPlay group, moves the group to the previous entry of its queue.
     pub fn play_previous(&mut self) {
         if self.is_casting() {
             self.cast_skip(false);
+            return;
+        }
+        if self.in_group() {
+            self.group_skip(false);
             return;
         }
         if let Some(previous) = self.playback.now_playing().and_then(|state| state.previous.clone()) {
@@ -1230,6 +1241,11 @@ impl Services {
                 };
                 self.toast(Toast::error(error));
                 self.events.push(AppEvent::PlaybackEnded);
+                // A group's item isn't reconnected (the group is waiting on this member); the
+                // member can't keep up, so it leaves rather than hold the others.
+                if let Some(group_item) = &group_item {
+                    self.group_item_failed(group_item);
+                }
             }
             // Handed over to a TV: the player stays up, showing the cast.
             Ok(_) if self.cast.is_handing_over() => {}
@@ -1238,6 +1254,10 @@ impl Services {
                 tracing::warn!("playback failed: {message}");
                 self.toast(Toast::error(message));
                 self.events.push(AppEvent::PlaybackEnded);
+                // The group's item never started: this member would stay "buffering".
+                if let Some(group_item) = &group_item {
+                    self.group_item_failed(group_item);
+                }
             }
         }
     }

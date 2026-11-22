@@ -124,6 +124,10 @@ pub struct SyncPlay {
     watched: Option<Watched>,
     /// Report `Ready` after the player's next restart (load or seek finished).
     ready_due: bool,
+    /// This member asked to leave because it can't play the group's item, and the server hasn't
+    /// confirmed yet. Queue updates sent meanwhile are ignored: loading one would report
+    /// `Buffering` again and hold the group up for a member that's on its way out.
+    leaving: bool,
     /// The pending scheduled command, waiting on tokio; it hands back how late it ran. Replacing
     /// it cancels the previous one.
     scheduled: Option<Task<Duration>>,
@@ -163,6 +167,7 @@ impl SyncPlay {
             loading: None,
             watched: None,
             ready_due: false,
+            leaving: false,
             scheduled: None,
             clock_task: None,
             timeline: None,
@@ -265,6 +270,36 @@ impl SyncPlay {
     /// Plays another entry of the group's queue (for everyone).
     pub fn play_entry(&self, playlist_item_id: String) {
         self.call(move |client| async move { client.syncplay_set_playlist_item(&playlist_item_id).await });
+    }
+
+    /// Moves the group to the entry after (`forward`) or before the one loaded here, on the
+    /// group's own queue. At either end of the queue nothing is sent: the server answers a next
+    /// at the last entry by stopping the group (what [`Services::group_item_ended`] relies on),
+    /// which a skip must not do to everyone. The jellyfin crate has no previous-item request, so
+    /// going back plays the entry before directly.
+    pub fn skip(&self, forward: bool) {
+        let Some(from) = self.loaded.as_deref() else {
+            return;
+        };
+        let Some(target) = self.queue.as_ref().and_then(|queue| skip_target(queue, from, forward)) else {
+            return;
+        };
+        if forward {
+            let from = from.to_owned();
+            self.call(move |client| async move { client.syncplay_next_item(&from).await });
+        } else {
+            self.play_entry(target.playlist_item_id.clone());
+        }
+    }
+
+    /// Whether [`Self::skip`] has an entry to go to.
+    pub fn can_skip(&self, forward: bool) -> bool {
+        let Some(from) = self.loaded.as_deref() else {
+            return false;
+        };
+        self.queue
+            .as_ref()
+            .is_some_and(|queue| skip_target(queue, from, forward).is_some())
     }
 
     pub fn remove_entry(&self, playlist_item_id: String) {
@@ -478,6 +513,33 @@ fn correction(drift: f64) -> Correction {
     }
 }
 
+/// The entry a skip from `from` (a playlist item id) goes to: the one after it, or before it
+/// with `!forward`. The ends have none, except on repeat all, where the server wraps round
+/// (unless the queue has the one entry, which would only load again).
+fn skip_target<'a>(queue: &'a PlayQueue, from: &str, forward: bool) -> Option<&'a QueueItem> {
+    let index = queue.playlist.iter().position(|entry| entry.playlist_item_id == from)?;
+    let last = queue.playlist.len() - 1;
+    let wraps = queue.repeat_mode == RepeatMode::RepeatAll;
+    let target = match (forward, index) {
+        (true, index) if index < last => index + 1,
+        (false, index) if index > 0 => index - 1,
+        (true, _) if wraps => 0,
+        (false, _) if wraps => last,
+        _ => return None,
+    };
+    queue
+        .playlist
+        .get(target)
+        .filter(|entry| entry.playlist_item_id != from)
+}
+
+/// Whether the failure to load or play the queue entry `failed` is this member's to leave the
+/// group over: it is the entry loaded here. One the group has moved past doesn't count, its
+/// successor is what the server waits on.
+fn failure_holds_group_up(loaded: Option<&str>, failed: &str) -> bool {
+    loaded == Some(failed)
+}
+
 /// Whether a queue update with this `reason` says "play the current entry now", as opposed to
 /// editing the queue around it (`RemoveItems`, `MoveItem`, `Queue`, `QueueNext`, `RepeatMode`,
 /// `ShuffleMode`). `NextItem` counts even when the entry is the same one (repeat one, or a
@@ -551,6 +613,32 @@ impl Services {
         self.syncplay.start_queue(item, start);
     }
 
+    /// A next (`forward`) or previous from a group session's controls or a remote: the group's
+    /// own queue moves, not the series' next episode, which would replace everyone's queue.
+    pub(crate) fn group_skip(&mut self, forward: bool) {
+        self.syncplay.skip(forward);
+    }
+
+    /// Whether the group's queue has an entry for [`Self::group_skip`] to go to.
+    pub(crate) fn group_can_skip(&self, forward: bool) -> bool {
+        self.syncplay.can_skip(forward)
+    }
+
+    /// This member can't play the group's item `playlist_item_id`: it didn't load, didn't start,
+    /// or was lost. The server waits for every member to be ready, so a member that stays
+    /// "buffering" holds everyone up; leaving is the honest outcome, and the usual "left" notice
+    /// follows when the server confirms. Nothing happens when the group has moved on from that
+    /// entry meanwhile.
+    pub(crate) fn group_item_failed(&mut self, playlist_item_id: &str) {
+        if !failure_holds_group_up(self.syncplay.loaded.as_deref(), playlist_item_id) {
+            return;
+        }
+        tracing::warn!("leaving the SyncPlay group: its item can't be played here");
+        self.leave_group_playback();
+        self.syncplay.leaving = true;
+        self.syncplay.leave();
+    }
+
     /// Adds `items` to the group's queue.
     pub(crate) fn group_enqueue(&mut self, items: &[BaseItemDto], next: bool) {
         self.syncplay.enqueue(items, next);
@@ -619,11 +707,13 @@ impl Services {
         tracing::debug!(?update, "SyncPlay update");
         match update {
             GroupUpdate::GroupJoined(group) => {
+                self.syncplay.leaving = false;
                 self.toast(Toast::info(tr!("syncplay-joined", group = group.group_name.clone())));
                 self.syncplay.group = Some(group);
                 self.syncplay.start_clock();
             }
             GroupUpdate::GroupLeft | GroupUpdate::NotInGroup => {
+                self.syncplay.leaving = false;
                 if let Some(group) = self.syncplay.group.take() {
                     self.toast(Toast::info(tr!("syncplay-left", group = group.group_name)));
                 }
@@ -768,6 +858,8 @@ impl Services {
         for message in inbound {
             match message {
                 Inbound::Failed(err) => {
+                    // The leave may be what failed; the group's updates count again.
+                    self.syncplay.leaving = false;
                     let message = self.handle_error(&err);
                     self.toast(Toast::error(tr!("syncplay-error", message = message)));
                 }
@@ -849,6 +941,7 @@ impl Services {
                 tracing::warn!("couldn't load the group's item: {err}");
                 let message = self.handle_error(&err);
                 self.toast(Toast::error(tr!("syncplay-load-failed", message = message)));
+                self.group_item_failed(&playlist_item_id);
             }
         }
     }
@@ -856,6 +949,9 @@ impl Services {
     /// Loads the queue's current item when it changes (paused, at the group's position).
     fn on_group_queue(&mut self, queue: PlayQueue) {
         let syncplay = &mut self.syncplay;
+        if syncplay.leaving {
+            return;
+        }
         syncplay.fetch_names(&queue);
         let current = queue.current().cloned();
         let start = queue.start_position_ticks;
@@ -1002,7 +1098,9 @@ fn debug_skew() -> Duration {
 mod tests {
     use std::time::Duration;
 
-    use super::{Correction, UnpausePlan, correction, plan_unpause, should_load};
+    use jellyfin::{PlayQueue, QueueItem, RepeatMode};
+
+    use super::{Correction, UnpausePlan, correction, failure_holds_group_up, plan_unpause, should_load, skip_target};
 
     fn secs(s: f64) -> Duration {
         Duration::from_secs_f64(s)
@@ -1139,6 +1237,76 @@ mod tests {
         // Also after a stop.
         m.stop();
         assert!(m.queue("Queue", "d"));
+    }
+
+    fn queue_of(entries: &[&str], repeat: RepeatMode) -> PlayQueue {
+        PlayQueue {
+            reason: "NewPlaylist".into(),
+            playlist: entries
+                .iter()
+                .map(|id| QueueItem {
+                    item_id: format!("item-{id}"),
+                    playlist_item_id: (*id).into(),
+                })
+                .collect(),
+            playing_item_index: 0,
+            start_position_ticks: Default::default(),
+            is_playing: true,
+            shuffle_mode: Default::default(),
+            repeat_mode: repeat,
+        }
+    }
+
+    fn target<'a>(queue: &'a PlayQueue, from: &str, forward: bool) -> Option<&'a str> {
+        skip_target(queue, from, forward).map(|entry| entry.playlist_item_id.as_str())
+    }
+
+    #[test]
+    fn next_and_previous_move_along_the_groups_queue() {
+        let queue = queue_of(&["a", "b", "c"], RepeatMode::RepeatNone);
+        assert_eq!(target(&queue, "b", true), Some("c"));
+        assert_eq!(target(&queue, "b", false), Some("a"));
+        assert_eq!(target(&queue, "a", true), Some("b"));
+    }
+
+    #[test]
+    fn next_and_previous_at_the_ends_of_the_queue_send_nothing() {
+        // A next at the last entry would make the server stop the group.
+        let queue = queue_of(&["a", "b", "c"], RepeatMode::RepeatNone);
+        assert_eq!(target(&queue, "c", true), None);
+        assert_eq!(target(&queue, "a", false), None);
+        // Repeat one doesn't wrap either.
+        let queue = queue_of(&["a", "b"], RepeatMode::RepeatOne);
+        assert_eq!(target(&queue, "b", true), None);
+        // A film alone in the queue has nothing to skip to.
+        let queue = queue_of(&["a"], RepeatMode::RepeatNone);
+        assert_eq!(target(&queue, "a", true), None);
+        assert_eq!(target(&queue, "a", false), None);
+    }
+
+    #[test]
+    fn repeat_all_wraps_round_unless_the_queue_is_one_entry() {
+        let queue = queue_of(&["a", "b", "c"], RepeatMode::RepeatAll);
+        assert_eq!(target(&queue, "c", true), Some("a"));
+        assert_eq!(target(&queue, "a", false), Some("c"));
+        let queue = queue_of(&["a"], RepeatMode::RepeatAll);
+        assert_eq!(target(&queue, "a", true), None);
+    }
+
+    #[test]
+    fn a_skip_from_an_entry_not_in_the_queue_goes_nowhere() {
+        let queue = queue_of(&["a", "b"], RepeatMode::RepeatAll);
+        assert_eq!(target(&queue, "gone", true), None);
+        assert_eq!(target(&queue_of(&[], RepeatMode::RepeatNone), "a", true), None);
+    }
+
+    #[test]
+    fn only_a_failure_of_the_loaded_entry_leaves_the_group() {
+        assert!(failure_holds_group_up(Some("a"), "a"));
+        // The group moved on to "b" while "a" failed: "b" is what the server waits for.
+        assert!(!failure_holds_group_up(Some("b"), "a"));
+        // Stopped or already left: nothing is waiting.
+        assert!(!failure_holds_group_up(None, "a"));
     }
 
     #[test]
