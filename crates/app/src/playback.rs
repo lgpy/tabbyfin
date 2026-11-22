@@ -158,6 +158,8 @@ pub enum UiCommand {
     ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
+    /// A second text track shown with the first (a stream index), or none.
+    SetSecondarySubtitle(Option<i32>),
     Stop,
 }
 
@@ -234,6 +236,12 @@ pub struct NowPlaying {
     pub loading: bool,
     pub audio: Option<i32>,
     pub subtitle: SubtitleChoice,
+    /// A second text track shown at the top of the picture with the first, if one is picked.
+    /// Belongs to this item: the next starts without.
+    pub secondary_subtitle: Option<i32>,
+    /// libmpv plays this session; Media3 (Android) has no second subtitle, aspect modes and the
+    /// like, so the player hides those.
+    pub mpv: bool,
     pub volume: f64,
     pub muted: bool,
     pub adjustments: Adjustments,
@@ -431,6 +439,8 @@ struct Running {
     adjustments: Adjustments,
     autoplay: bool,
     resumed_from: Option<Duration>,
+    /// Plays through libmpv (see [`NowPlaying::mpv`]).
+    mpv: bool,
 }
 
 /// A session to start again after its stream was lost, once `due` fires.
@@ -541,6 +551,8 @@ impl PlaybackManager {
             loading: false,
             audio: None,
             subtitle: SubtitleChoice::Auto,
+            secondary_subtitle: None,
+            mpv: true,
             volume: self.volume,
             muted: false,
             adjustments: self.adjustments,
@@ -610,7 +622,10 @@ impl PlaybackManager {
         if options.group_item.is_some() {
             adjustments.speed = 1.;
         }
-        let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
+        let config = Config::load();
+        let autoplay = config.autoplay_next_episode.unwrap_or(true);
+        let mpv =
+            !cfg!(target_os = "android") || config.android_player.unwrap_or_default().engine() == player::Engine::Mpv;
         let resumed_from = options.start.filter(|_| options.resumed).map(Duration::from);
         let (updates_tx, updates) = task::channel(&self.ctx);
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
@@ -653,6 +668,7 @@ impl PlaybackManager {
             adjustments,
             autoplay,
             resumed_from,
+            mpv,
         });
     }
 
@@ -955,6 +971,13 @@ impl Services {
             return;
         }
         state.subtitle = choice;
+        // The same track can't be both.
+        if let SubtitleChoice::Stream(index) = choice
+            && state.secondary_subtitle == Some(index)
+        {
+            state.secondary_subtitle = None;
+            state.send(UiCommand::SetSecondarySubtitle(None));
+        }
         let as_file = match choice {
             SubtitleChoice::Stream(index) => state.stream.subtitle_files.contains(&index),
             SubtitleChoice::Off | SubtitleChoice::Auto => true,
@@ -964,6 +987,22 @@ impl Services {
         } else {
             state.send(UiCommand::Subtitle(choice));
         }
+    }
+
+    /// Shows a second text track (a stream index) with the first, or none. mpv draws it at the
+    /// top; a transcode only has the tracks the server sends as files.
+    pub fn change_secondary_subtitle(&mut self, index: Option<i32>) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.secondary_subtitle == index {
+            return;
+        }
+        state.secondary_subtitle = index;
+        state.send(UiCommand::SetSecondarySubtitle(index));
     }
 
     /// Applies changes from the settings menu. Speed stays at normal in a SyncPlay group,
@@ -1084,6 +1123,8 @@ impl Services {
                     loading: true,
                     audio,
                     subtitle,
+                    secondary_subtitle: None,
+                    mpv: running.mpv,
                     volume: running.volume,
                     muted: running.muted,
                     adjustments: running.adjustments,
@@ -1281,6 +1322,16 @@ fn mpv_subtitle_id(source: &MediaSourceInfo, index: i32) -> Option<usize> {
     };
     let position = subtitles(true).position(|s| s.index == index)?;
     Some(subtitles(false).count() + position + 1)
+}
+
+/// mpv's id for the subtitle with Jellyfin stream `index`. A transcode has only the tracks sent as
+/// files, in the order they were added.
+fn subtitle_track(source: &MediaSourceInfo, stream: &StreamInfo, index: i32) -> Option<usize> {
+    if stream.method == PlayMethod::Transcode {
+        stream.subtitle_files.iter().position(|&i| i == index).map(|i| i + 1)
+    } else {
+        mpv_subtitle_id(source, index)
+    }
 }
 
 /// The downloaded copy of `item`, when the account has one and the version asked for is the
@@ -2026,12 +2077,7 @@ async fn apply_command(
         }
         UiCommand::Subtitle(choice) => {
             let sid = match choice {
-                SubtitleChoice::Stream(index) if stream.method == PlayMethod::Transcode => stream
-                    .subtitle_files
-                    .iter()
-                    .position(|&i| i == index)
-                    .map(|i| json!(i + 1)),
-                SubtitleChoice::Stream(index) => mpv_subtitle_id(source, index).map(|id| json!(id)),
+                SubtitleChoice::Stream(index) => subtitle_track(source, stream, index).map(|id| json!(id)),
                 SubtitleChoice::Off => Some(json!("no")),
                 SubtitleChoice::Auto => Some(json!("auto")),
             };
@@ -2040,6 +2086,16 @@ async fn apply_command(
                 report.subtitle_stream_index = subtitle_index(choice);
             }
             Ok(())
+        }
+        UiCommand::SetSecondarySubtitle(index) => {
+            let sid = match index {
+                Some(index) => subtitle_track(source, stream, index).map(|id| json!(id)),
+                None => Some(json!("no")),
+            };
+            match sid {
+                Some(sid) => player.set_property("secondary-sid", sid).await,
+                None => Ok(()),
+            }
         }
         UiCommand::Stop => player.quit().await,
     }

@@ -1331,6 +1331,10 @@ impl PlayerPage {
         if let Some(subtitle) = choice.subtitle {
             cx.services.change_subtitle(subtitle);
         }
+        if let Some(index) = choice.secondary {
+            cx.services
+                .change_secondary_subtitle((index != SUBTITLES_OFF).then_some(index));
+        }
         if let Some(adjustments) = choice.adjustments {
             cx.services.adjust(adjustments);
             self.show_controls();
@@ -1507,6 +1511,9 @@ struct SettingsMenu {
     subtitle_choices: Vec<Choice>,
     default_audio: Option<i32>,
     default_subtitle: Option<i32>,
+    /// The second subtitle shown, and what can be picked for it (empty: no second subtitle here).
+    secondary: Option<i32>,
+    secondary_choices: Vec<Choice>,
 }
 
 impl SettingsMenu {
@@ -1633,6 +1640,11 @@ impl View {
             }),
             settings: menus.settings.then(|| {
                 let (audio_choices, subtitle_choices) = tracks::track_choices(&state.source);
+                let subtitle_shown = match state.subtitle {
+                    SubtitleChoice::Stream(index) => Some(index),
+                    SubtitleChoice::Off => None,
+                    SubtitleChoice::Auto => state.source.default_subtitle_stream_index.filter(|&index| index >= 0),
+                };
                 SettingsMenu {
                     adjustments: state.adjustments,
                     in_group: state.group_item.is_some(),
@@ -1643,6 +1655,13 @@ impl View {
                     subtitle_choices,
                     default_audio: state.source.default_audio_stream_index,
                     default_subtitle: state.source.default_subtitle_stream_index,
+                    secondary: state.secondary_subtitle,
+                    secondary_choices: if state.mpv {
+                        let files = state.is_transcoding().then_some(state.stream.subtitle_files.as_slice());
+                        tracks::secondary_choices(&state.source, files, subtitle_shown)
+                    } else {
+                        Vec::new()
+                    },
                 }
             }),
             audio_button: tracks::count(&state.source, MediaStreamType::Audio) > 1,
@@ -1778,6 +1797,8 @@ impl View {
                 subtitle_choices,
                 default_audio,
                 default_subtitle,
+                secondary: None,
+                secondary_choices: Vec::new(),
             }),
             audio_button: count(MediaStreamType::Audio) > 1,
             subtitles_button: count(MediaStreamType::Subtitle) > 0,
@@ -2033,6 +2054,8 @@ fn label_badge(ui: &mut egui::Ui, text: &str) {
 struct SettingsChoice {
     audio: Option<i32>,
     subtitle: Option<SubtitleChoice>,
+    /// The second subtitle: a stream index, or `SUBTITLES_OFF`.
+    secondary: Option<i32>,
     adjustments: Option<Adjustments>,
 }
 
@@ -2110,6 +2133,18 @@ fn settings_body(
                     }
                     adjusted = true;
                 }
+            }
+            if !menu.casting && !menu.secondary_choices.is_empty() {
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                ui.add_space(8.);
+                ui.label(label::overline(ui, &tr!("player-second-subtitle")).color(over_video::MUTED_FOREGROUND));
+                choice.secondary = track_list(
+                    ui,
+                    "player-second-subtitle",
+                    "",
+                    &menu.secondary_choices,
+                    Some(menu.secondary.unwrap_or(SUBTITLES_OFF)),
+                );
             }
         }
         SettingsTab::General => {

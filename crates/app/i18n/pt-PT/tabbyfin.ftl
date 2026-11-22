@@ -215,6 +215,7 @@ player-badge-syncplay = SyncPlay
 player-badge-transcoding = Transcodificação
 player-sheet-settings = Definições
 player-close = Fechar
+player-second-subtitle = Segunda legenda
 player-subtitles-off = Desligadas
 player-track-number = Faixa { $index }
 player-skip-intro = Saltar genérico

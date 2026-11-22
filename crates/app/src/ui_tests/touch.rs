@@ -555,6 +555,11 @@ impl PlayerRun {
         self.services.as_mut()?.playback.now_playing_mut()
     }
 
+    /// The services, for what a test starts without a page (the player menu's picks).
+    pub fn services_mut(&mut self) -> Option<&mut Services> {
+        self.services.as_mut()
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui) {
         use std::time::Duration;
 

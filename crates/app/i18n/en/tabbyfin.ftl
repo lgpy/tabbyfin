@@ -215,6 +215,7 @@ player-badge-syncplay = SyncPlay
 player-badge-transcoding = Transcoding
 player-sheet-settings = Settings
 player-close = Close
+player-second-subtitle = Second subtitle
 player-subtitles-off = Off
 player-track-number = Track { $index }
 player-skip-intro = Skip intro

@@ -425,6 +425,9 @@ pub struct MediaStream {
     pub is_external: bool,
     #[serde(default, deserialize_with = "nullable")]
     pub is_text_subtitle_stream: bool,
+    /// A video stream whose frames are interlaced.
+    #[serde(default, deserialize_with = "nullable")]
+    pub is_interlaced: bool,
     /// How the server delivers a subtitle in this playback (`PlaybackInfo` responses only):
     /// `External` as a file at `delivery_url`, `Encode` burned into a transcode, `Embed`.
     pub delivery_method: Option<String>,

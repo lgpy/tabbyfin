@@ -273,3 +273,55 @@ fn shift_n_plays_the_next_episode() {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
 }
+
+/// A second subtitle is the menu's pick: it goes to the session, a track can't be both the first
+/// and the second, and a cast has none.
+#[test]
+fn a_second_subtitle_is_picked_and_cleared() {
+    use crate::playback::SubtitleChoice;
+
+    let _config = ConfigDir::new("player-second-subtitle");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    let state = harness.state_mut().now_playing_mut().expect("the session");
+    let mut extra = state.source.media_streams.last().expect("a subtitle").clone();
+    extra.index = 4;
+    state.source.media_streams.push(extra);
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.change_secondary_subtitle(Some(4));
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SetSecondarySubtitle(Some(4))]),
+        "{sent:?}"
+    );
+    assert_eq!(harness.state().now_playing().unwrap().secondary_subtitle, Some(4));
+
+    // Asking for the same again sends nothing.
+    harness
+        .state_mut()
+        .services_mut()
+        .unwrap()
+        .change_secondary_subtitle(Some(4));
+    assert!(harness.state_mut().commands().is_empty());
+
+    // Making it the first track drops it as the second.
+    harness
+        .state_mut()
+        .services_mut()
+        .unwrap()
+        .change_subtitle(SubtitleChoice::Stream(4));
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [
+                UiCommand::SetSecondarySubtitle(None),
+                UiCommand::Subtitle(SubtitleChoice::Stream(4))
+            ]
+        ),
+        "{sent:?}"
+    );
+    assert_eq!(harness.state().now_playing().unwrap().secondary_subtitle, None);
+}
