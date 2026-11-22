@@ -711,7 +711,8 @@ fn outgoing_for(command: &UiCommand, casting: &Casting) -> Option<Outgoing> {
         | UiCommand::SetSubtitlePosition(_)
         | UiCommand::SetSubtitleScale(_)
         | UiCommand::SetQueueModes(..)
-        | UiCommand::PollInfo => return None,
+        | UiCommand::PollInfo
+        | UiCommand::SetNightMode(_) => return None,
     })
 }
 

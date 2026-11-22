@@ -41,7 +41,7 @@ use egui::{Align, Align2, Rect, RichText, Role, Sense, Ui, UiBuilder, WidgetInfo
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ACCOUNT_CIRCLE, ICON_CHEVRON_RIGHT, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_DOWNLOAD, ICON_HOME,
-    ICON_INFO, ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
+    ICON_INFO, ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO, ICON_VOLUME_UP,
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
@@ -178,6 +178,8 @@ impl Store {
 pub(crate) enum Section {
     Appearance,
     Playback,
+    /// Desktop only ([`Section::shown`]): Android's audio output is the system's.
+    Audio,
     Subtitles,
     /// Android only ([`Section::shown`]).
     Downloads,
@@ -191,9 +193,10 @@ pub(crate) enum Section {
 impl Section {
     /// In the menu's order: the device's, then the server's. Not all of them are on every
     /// platform: [`Section::shown`] has the ones this one has.
-    pub(crate) const ALL: [Section; 9] = [
+    pub(crate) const ALL: [Section; 10] = [
         Section::Appearance,
         Section::Playback,
+        Section::Audio,
         Section::Subtitles,
         Section::Downloads,
         Section::Storage,
@@ -204,17 +207,19 @@ impl Section {
     ];
 
     /// The sections this platform has, in the menu's order: *Downloads* holds only Android's
-    /// settings.
+    /// settings, and *Audio* only the desktop's.
     pub(crate) fn shown() -> impl Iterator<Item = Section> {
         Self::ALL
             .into_iter()
             .filter(|&section| section != Section::Downloads || cfg!(target_os = "android"))
+            .filter(|&section| section != Section::Audio || !cfg!(target_os = "android"))
     }
 
     fn store(self) -> Store {
         match self {
             Section::Appearance
             | Section::Playback
+            | Section::Audio
             | Section::Subtitles
             | Section::Downloads
             | Section::Storage
@@ -227,6 +232,7 @@ impl Section {
         match self {
             Section::Appearance => tr!("settings-section-appearance"),
             Section::Playback => tr!("settings-section-playback"),
+            Section::Audio => tr!("settings-section-audio"),
             Section::Subtitles => tr!("settings-section-subtitles"),
             Section::Downloads => tr!("settings-section-downloads"),
             Section::Storage => tr!("settings-section-storage"),
@@ -242,6 +248,7 @@ impl Section {
         match self {
             Section::Appearance => tr!("settings-section-appearance-summary"),
             Section::Playback => tr!("settings-section-playback-summary"),
+            Section::Audio => tr!("settings-section-audio-summary"),
             Section::Subtitles => tr!("settings-section-subtitles-summary"),
             Section::Downloads => tr!("settings-section-downloads-summary"),
             Section::Storage => tr!("settings-section-storage-summary"),
@@ -256,6 +263,7 @@ impl Section {
         match self {
             Section::Appearance => ICON_PALETTE,
             Section::Playback => ICON_PLAY_CIRCLE,
+            Section::Audio => ICON_VOLUME_UP,
             Section::Subtitles => ICON_SUBTITLES,
             Section::Downloads => ICON_DOWNLOAD,
             Section::Storage => ICON_STORAGE,
@@ -429,6 +437,91 @@ fn hevc_row() -> Row {
         description: tr!("settings-hevc-description"),
         key: "prefer_hevc",
         unset: tr!("settings-hevc-unset"),
+    }
+}
+
+fn audio_device_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-audio-device"),
+        description: tr!("settings-audio-device-description"),
+        key: "audio_device",
+        unset: tr!("settings-audio-device-unset"),
+    }
+}
+
+fn audio_channels_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-audio-channels"),
+        description: tr!("settings-audio-channels-description"),
+        key: "audio_channels",
+        unset: tr!("settings-audio-channels-unset"),
+    }
+}
+
+fn passthrough_ac3_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-ac3"),
+        description: tr!("settings-passthrough-ac3-description"),
+        key: "passthrough_ac3",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_eac3_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-eac3"),
+        description: tr!("settings-passthrough-eac3-description"),
+        key: "passthrough_eac3",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_dts_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-dts"),
+        description: tr!("settings-passthrough-dts-description"),
+        key: "passthrough_dts",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_dts_hd_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-dts-hd"),
+        description: tr!("settings-passthrough-dts-hd-description"),
+        key: "passthrough_dts_hd",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_truehd_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-truehd"),
+        description: tr!("settings-passthrough-truehd-description"),
+        key: "passthrough_truehd",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn audio_exclusive_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-audio-exclusive"),
+        description: tr!("settings-audio-exclusive-description"),
+        key: "audio_exclusive",
+        unset: tr!("settings-audio-exclusive-unset"),
+    }
+}
+
+fn night_mode_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-night-mode"),
+        description: tr!("settings-night-mode-description"),
+        key: "night_mode",
+        unset: tr!("settings-night-mode-unset"),
     }
 }
 
@@ -634,6 +727,15 @@ fn all_rows() -> Vec<Row> {
         cast_bitrate_row(),
         hevc_row(),
         player_row(),
+        audio_device_row(),
+        audio_channels_row(),
+        passthrough_ac3_row(),
+        passthrough_eac3_row(),
+        passthrough_dts_row(),
+        passthrough_dts_hd_row(),
+        passthrough_truehd_row(),
+        audio_exclusive_row(),
+        night_mode_row(),
         subtitles_note_row(),
         subtitle_tracks_note_row(),
         subtitle_color_row(),
@@ -749,6 +851,8 @@ pub struct SettingsPage {
     job: Option<Task<Job>>,
     /// Left and Right on a focused picker.
     pickers: Pickers,
+    /// The audio devices mpv found, for the Audio section's picker.
+    devices: Devices,
     /// The section the menu marks: the one at the top of the column when it was last drawn.
     section: Section,
     /// A menu entry's section, scrolled to the top when the column draws next.
@@ -767,6 +871,14 @@ pub struct SettingsPage {
     push: Option<Section>,
 }
 
+/// The audio devices, asked of mpv the first time the Audio section is drawn.
+enum Devices {
+    Unasked,
+    Loading(Task<player::Result<Vec<player::AudioDevice>>>),
+    /// Empty when mpv couldn't say.
+    Ready(Vec<player::AudioDevice>),
+}
+
 /// What a button on the page asked for, with how it went.
 enum Job {
     /// Cleared the image cache's folder.
@@ -781,6 +893,7 @@ impl SettingsPage {
             config: Config::load(),
             job: None,
             pickers: Pickers::default(),
+            devices: Devices::Unasked,
             section: Section::Appearance,
             scroll_to: None,
             arriving: None,
@@ -1156,6 +1269,7 @@ impl SettingsPage {
         card(ui, |ui| match section {
             Section::Appearance => self.appearance(ui, cx),
             Section::Playback => self.playback(ui, cx),
+            Section::Audio => self.audio(ui, cx),
             Section::Subtitles => self.subtitles(ui, cx),
             Section::Downloads => self.downloads(ui, cx),
             Section::Storage => self.storage(ui, cx),
@@ -1345,6 +1459,114 @@ impl SettingsPage {
         );
         if let Some(edit) = picked {
             self.save(|config| config.android_player = edit.or_unset());
+        }
+    }
+
+    fn audio(&mut self, ui: &mut Ui, cx: &mut PageCx) {
+        // Asked once per visit: the list is mpv's, which runs in a process of its own.
+        if matches!(self.devices, Devices::Unasked) && !cfg!(test) {
+            let task = Task::spawn(ui.ctx(), player::list_audio_devices());
+            self.devices = Devices::Loading(task);
+        }
+        if let Devices::Loading(task) = &mut self.devices
+            && let Some(result) = task.poll()
+        {
+            self.devices = match result {
+                Ok(devices) => Devices::Ready(devices),
+                Err(err) => {
+                    tracing::warn!("couldn't list the audio devices: {err}");
+                    Devices::Ready(Vec::new())
+                }
+            };
+        }
+
+        // Automatic first, then what mpv found. A saved device that's gone stays listed, so the
+        // picker shows what's saved; playback goes to Automatic without it.
+        let saved = self.config.audio_device.clone();
+        let mut choices: Vec<(Option<&str>, String)> = vec![(None, tr!("settings-audio-device-auto"))];
+        if let Devices::Ready(devices) = &self.devices {
+            choices.extend(
+                devices
+                    .iter()
+                    .map(|device| (Some(device.name.as_str()), device.description.clone())),
+            );
+            if let Some(name) = saved.as_deref()
+                && !devices.iter().any(|device| device.name == name)
+            {
+                choices.push((Some(name), tr!("settings-audio-device-missing", name = name)));
+            }
+        } else if let Some(name) = saved.as_deref() {
+            choices.push((Some(name), name.to_owned()));
+        }
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            audio_device_row(),
+            "settings_audio_device",
+            &choices,
+            saved.as_deref(),
+            Some(None),
+        );
+        if let Some(edit) = picked {
+            let device = edit.or_unset().flatten().map(str::to_owned);
+            self.save(|config| config.audio_device = device);
+        }
+
+        let channels = [
+            (player::Channels::Auto, tr!("settings-audio-channels-auto")),
+            (player::Channels::Stereo, tr!("settings-audio-channels-stereo")),
+            (player::Channels::Surround5_1, "5.1".to_owned()),
+            (player::Channels::Surround7_1, "7.1".to_owned()),
+        ];
+        let current = self.config.audio_channels.unwrap_or_default();
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            audio_channels_row(),
+            "settings_audio_channels",
+            &channels,
+            current,
+            Some(player::Channels::Auto),
+        );
+        if let Some(edit) = picked {
+            self.save(|config| config.audio_channels = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_ac3.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_ac3_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_ac3 = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_eac3.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_eac3_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_eac3 = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_dts.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_dts_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_dts = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_dts_hd.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_dts_hd_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_dts_hd = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_truehd.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_truehd_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_truehd = edit.or_unset());
+        }
+
+        let current = self.config.audio_exclusive.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, audio_exclusive_row(), current, Some(false)) {
+            self.save(|config| config.audio_exclusive = edit.or_unset());
+        }
+
+        let current = self.config.night_mode.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, night_mode_row(), current, Some(false)) {
+            let night = edit.or_unset();
+            self.save(|config| config.night_mode = night);
+            cx.services.playback.set_night_mode(night.unwrap_or(false));
         }
     }
 
@@ -2435,6 +2657,8 @@ mod tests {
             [Section::Playback, Section::Subtitles, Section::Languages]
         );
         assert_eq!(found("bitrate"), [Section::Playback]);
+        assert_eq!(found("night mode"), [Section::Audio]);
+        assert_eq!(found("passthrough"), [Section::Audio]);
         assert_eq!(found("subtitle mode"), [Section::Languages]);
         assert_eq!(found("hevc transcodes"), [Section::Playback]);
         // A config key, and a server field.

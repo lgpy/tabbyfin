@@ -65,7 +65,7 @@ use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::motion;
 use crate::playback::{
-    Adjustments, NowPlaying, PlayOptions, SLEEP_MINUTES, SleepTimer, SubtitleChoice, UiCommand, Version,
+    Adjustments, NowPlaying, PlayOptions, SLEEP_MINUTES, SleepTimer, SubtitleChoice, UiCommand, Version, volume_max,
 };
 use crate::services::AppEvent;
 use crate::task;
@@ -736,15 +736,18 @@ impl PlayerPage {
     }
 
     fn change_volume(&mut self, delta: f64, cx: &mut PageCx) {
-        let volume = match cx.services.cast.casting() {
-            Some(casting) => Some(casting.volume),
-            None => cx.services.playback.now_playing().map(|state| state.volume),
+        let (volume, max) = match cx.services.cast.casting() {
+            Some(casting) => (Some(casting.volume), 100.),
+            None => (
+                cx.services.playback.now_playing().map(|state| state.volume),
+                volume_max(),
+            ),
         };
         let Some(volume) = volume else {
             return;
         };
         cx.services
-            .control(UiCommand::SetVolume((volume + delta).clamp(0., 100.)));
+            .control(UiCommand::SetVolume((volume + delta).clamp(0., max)));
         self.show_controls();
     }
 
@@ -1251,8 +1254,9 @@ impl PlayerPage {
         painter.galley(label.center() - galley.size() / 2., galley, over_video::FOREGROUND);
     }
 
-    /// The volume slider: a drag bar from 0 to 100. egui's `Slider` is focusable, which would
-    /// let Tab take the player's keys from it.
+    /// The volume slider: a drag bar from 0 to the most the volume reaches (150% on the
+    /// desktop's mpv, with a mark at 100%; a cast's TV stops at 100). egui's `Slider` is
+    /// focusable, which would let Tab take the player's keys from it.
     fn volume_slider(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
         let (rect, response) = ui.allocate_exact_size(vec2(VOLUME_W, VOLUME_H), Sense::CLICK | Sense::DRAG);
         let volume = if self.adjusting_volume {
@@ -1263,12 +1267,23 @@ impl PlayerPage {
         // A slider to AccessKit, in percent.
         let name = tr!("player-volume");
         response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), volume, &name));
-        let fraction = (volume / 100.).clamp(0., 1.) as f32;
+        let max = if cx.services.cast.casting().is_some() {
+            100.
+        } else {
+            volume_max()
+        };
+        let fraction = (volume / max).clamp(0., 1.) as f32;
         let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
         painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
         painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::FOREGROUND);
+        // Where 100% is, when the slider goes past it.
+        if max > 100. {
+            let x = track.left() + track.width() * (100. / max) as f32;
+            let mark = Rect::from_center_size(pos2(x, track.center().y), vec2(2., TRACK_H + 4.));
+            painter.rect_filled(mark, CornerRadius::ZERO, over_video::MUTED_FOREGROUND);
+        }
         slider_thumb(painter, pos2(filled.right(), track.center().y));
 
         let pressed = response.is_pointer_button_down_on();
@@ -1281,7 +1296,7 @@ impl PlayerPage {
         if let Some(pos) = response.interact_pointer_pos()
             && (pressed || released)
         {
-            let value = (((pos.x - rect.left()) / rect.width()).clamp(0., 1.) * 100.).round() as f64;
+            let value = (((pos.x - rect.left()) / rect.width()).clamp(0., 1.) as f64 * max).round();
             if value != self.volume {
                 self.volume = value;
                 cx.services.control(UiCommand::SetVolume(value));
@@ -1735,6 +1750,8 @@ struct SettingsMenu {
     /// Where the sleep timer is, and its words ("off", "12 min left").
     sleep: SleepChoice,
     sleep_text: String,
+    /// Whether night mode can act (no passthrough); the desktop's mpv only.
+    night_available: bool,
 }
 
 /// The sleep timer's choices, in the order its stepper goes through them.
@@ -1899,6 +1916,7 @@ impl View {
                     info: false,
                     sleep: SleepChoice::Off,
                     sleep_text: String::new(),
+                    night_available: state.night_available,
                 }
             }),
             audio_button: tracks::count(&state.source, MediaStreamType::Audio) > 1,
@@ -2039,6 +2057,7 @@ impl View {
                 info: false,
                 sleep: SleepChoice::Off,
                 sleep_text: String::new(),
+                night_available: false,
             }),
             audio_button: count(MediaStreamType::Audio) > 1,
             subtitles_button: count(MediaStreamType::Subtitle) > 0,
@@ -2347,6 +2366,12 @@ fn settings_body(
                     adjustments.audio_delay = stepped_delay(delay, step);
                     adjusted = true;
                 }
+                if !cfg!(target_os = "android")
+                    && let Some(on) = night_mode_row(ui, adjustments.night_mode, menu.night_available)
+                {
+                    adjustments.night_mode = on;
+                    adjusted = true;
+                }
             }
         }
         SettingsTab::Subtitles => {
@@ -2500,6 +2525,39 @@ fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab)
         ink_muted: over_video::MUTED_FOREGROUND,
     };
     tabs::bar(ui, &shown, current, colours)
+}
+
+/// Night mode's row in the audio tab: Off and On, or the reason it can't act while a format is
+/// passed through. Returns the choice clicked.
+fn night_mode_row(ui: &mut egui::Ui, on: bool, available: bool) -> Option<bool> {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
+    ui.painter().text(
+        pos2(rect.left() + 8., rect.center().y),
+        Align2::LEFT_CENTER,
+        tr!("player-night-mode"),
+        theme::text::font(ui, "sm"),
+        over_video::MENU_INK,
+    );
+    if !available {
+        ui.horizontal(|ui| {
+            ui.add_space(8.);
+            ui.label(
+                RichText::new(tr!("player-night-mode-passthrough"))
+                    .font(theme::text::font(ui, "sm"))
+                    .color(over_video::MUTED_FOREGROUND),
+            );
+        });
+        return None;
+    }
+    let labels = [tr!("settings-off"), tr!("settings-on")];
+    let colours = segmented::Colours {
+        track: over_video::MENU_INSET,
+        hover: over_video::MENU_INSET_HOVER,
+        ink: over_video::MENU_INK,
+        chosen: over_video::BRAND,
+        chosen_ink: over_video::BRAND_FOREGROUND,
+    };
+    segmented::show(ui, &labels, Some(usize::from(on)), colours).map(|index| index == 1)
 }
 
 /// The speed choices, the chosen one in the player's lilac. Returns the speed clicked.

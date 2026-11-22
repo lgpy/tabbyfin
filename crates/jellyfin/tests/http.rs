@@ -140,6 +140,7 @@ async fn playback_info_offers_direct_play_under_the_bitrate_cap() {
         subtitle_stream_index: None,
         max_streaming_bitrate: Some(8_000_000),
         prefer_hevc: false,
+        passthrough_eac3: false,
     };
     let info = client.playback_info("item", &request).await.expect("playback info");
     assert!(info.play_session_id.is_some());
