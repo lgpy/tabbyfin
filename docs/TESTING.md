@@ -174,7 +174,7 @@ Built with `mise run android:install`, and tried on the emulator and one phone (
 
 - Downloads on the phone (the emulator showed the rest: the notification and the permission prompt, a download carrying on in the background and resuming with a `Range` request after the app is swiped away, *Waiting for Wi-Fi* with Wi-Fi off and resuming when it's back, and Media3 playing a download offline with its external subtitle): a feature-length film with the screen off for its whole length (the wake lock against Doze, and MagicOS's own battery management); downloads still going when the notification permission is refused; walking out of Wi-Fi onto mobile data mid-download; a download played on mpv with its external subtitles; the files gone after uninstalling.
 
-- Playback on Media3: external subtitles (`sub-add`), image subtitles (PGS, VobSub), subtitle and audio delay, an HLS transcode, and audio focus (a call or another app's audio pauses it).
+- Playback on Media3: external subtitles (`sub-add`), image subtitles (PGS, VobSub), subtitle and audio delay, an HLS transcode, audio focus (a call or another app's audio pauses it), and the TrueHD track of *Audio Codecs Test*, which stays on its first frame on a HONOR ELI-NX9 (Android 16).
 - Playback on mpv: ASS subtitles with their styling and the system's fonts.
 - Playback on a second phone, and whether HDR reaches an HDR screen as HDR.
 - The player's gestures with real fingers (they were tried with `adb shell input`): a double tap's timing, a drag that starts diagonally, and a second finger during a drag.

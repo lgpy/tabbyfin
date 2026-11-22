@@ -164,6 +164,8 @@ impl Media3Player {
             "force-media-title" | "sub-scale" | "sub-pos" | "sub-color" | "sub-border-style" | "sub-back-color" => {
                 Ok(())
             }
+            // Every session sets it before loading; Media3's decoders deinterlace on their own.
+            "deinterlace" => Ok(()),
             _ => {
                 tracing::warn!(name, ?value, "Media3 doesn't take this property");
                 Ok(())
@@ -275,7 +277,13 @@ extern "system" fn native_event(_env: *mut JNIEnv, _class: jclass, handle: jlong
         9 => PlayerEvent::EndFile(EndReason::Eof),
         _ => return,
     };
+    let ended = matches!(event, PlayerEvent::EndFile(_));
     let _ = shared.events.send(event);
+    // mpv exits when its file ends, which is what ends a session; ExoPlayer stays on the last
+    // frame, so the end of the file is the player's end here too.
+    if ended {
+        let _ = shared.events.send(PlayerEvent::Exited);
+    }
 }
 
 /// Playback failed.
@@ -284,6 +292,8 @@ extern "system" fn native_error(env: *mut JNIEnv, _class: jclass, handle: jlong,
     let shared = unsafe { &*(handle as *const Shared) };
     let message = unsafe { string(env, message) };
     let _ = shared.events.send(PlayerEvent::EndFile(EndReason::Error(message)));
+    // As at the end of the file: nothing else ends the session.
+    let _ = shared.events.send(PlayerEvent::Exited);
 }
 
 /// One cue, as the bridge describes it in JSON; an image's pixels are in the array beside it.

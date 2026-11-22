@@ -598,21 +598,40 @@ impl PlayerPage {
                 ui.style_mut().visuals = egui::Visuals::dark();
                 ui.style_mut().visuals.override_text_color = Some(over_video::FOREGROUND);
                 popup::over_video_frame(12).show(ui, |ui| {
-                    ui.set_max_width(INFO_W);
+                    // It takes no pointer, so it can't scroll: on a screen too short for one
+                    // column of rows (a phone on its side) they go side by side instead.
+                    let font = theme::text::font(ui, "sm");
+                    // A grid's rows are at least as tall as a control.
+                    let row_height = ui
+                        .fonts_mut(|fonts| fonts.row_height(&font))
+                        .max(ui.spacing().interact_size.y)
+                        + 2.;
+                    let room = (safe.bottom() - safe.top() - top - PADDING - 60.).max(row_height);
+                    let columns = ((rows.len() as f32 * row_height / room).ceil() as usize).clamp(1, 3);
+                    let per_column = rows.len().div_ceil(columns);
+                    ui.set_max_width(INFO_W * columns as f32);
                     ui.label(label::overline(ui, &tr!("player-info-title")).color(over_video::MUTED_FOREGROUND));
                     ui.add_space(4.);
                     egui::Grid::new("player_info_rows")
-                        .num_columns(2)
+                        .num_columns(2 * columns)
                         .spacing(vec2(16., 2.))
                         .show(ui, |ui| {
-                            for row in &rows {
-                                let font = theme::text::font(ui, "sm");
-                                ui.label(
-                                    RichText::new(&row.label)
-                                        .font(font.clone())
-                                        .color(over_video::MUTED_FOREGROUND),
-                                );
-                                ui.label(RichText::new(&row.value).font(font).color(over_video::FOREGROUND));
+                            for line in 0..per_column {
+                                for column in 0..columns {
+                                    let Some(row) = rows.get(line + column * per_column) else {
+                                        continue;
+                                    };
+                                    ui.label(
+                                        RichText::new(&row.label)
+                                            .font(font.clone())
+                                            .color(over_video::MUTED_FOREGROUND),
+                                    );
+                                    ui.label(
+                                        RichText::new(&row.value)
+                                            .font(font.clone())
+                                            .color(over_video::FOREGROUND),
+                                    );
+                                }
                                 ui.end_row();
                             }
                         });
