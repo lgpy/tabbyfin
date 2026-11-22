@@ -539,7 +539,7 @@ impl PlayerPage {
     }
 
     /// Where the sleep timer is among its choices.
-    fn sleep_choice(&self, sleep: Option<SleepTimer>) -> SleepChoice {
+    fn sleep_choice(&self, sleep: Option<&SleepTimer>) -> SleepChoice {
         match sleep {
             None => SleepChoice::Off,
             Some(SleepTimer::EndOfItem(_)) => SleepChoice::EndOfItem,
@@ -548,8 +548,12 @@ impl PlayerPage {
     }
 
     fn set_sleep(&mut self, choice: SleepChoice, cx: &mut PageCx) {
-        let session = cx.services.playback.now_playing().map(|state| state.session);
-        let timer = match (choice, session) {
+        // Not in a SyncPlay group: a pause there is every member's.
+        if !cx.services.sleep_timer_offered() {
+            return;
+        }
+        let item = cx.services.playback.now_playing().map(|state| state.item.id.clone());
+        let timer = match (choice, item) {
             (SleepChoice::Off, _) | (_, None) => None,
             (SleepChoice::Minutes(minutes), _) => {
                 self.sleep_minutes = minutes;
@@ -557,7 +561,7 @@ impl PlayerPage {
                     std::time::Instant::now() + Duration::from_secs(minutes * 60),
                 ))
             }
-            (SleepChoice::EndOfItem, Some(session)) => Some(SleepTimer::EndOfItem(session)),
+            (SleepChoice::EndOfItem, Some(item)) => Some(SleepTimer::EndOfItem(item)),
         };
         cx.services.playback.set_sleep(timer);
     }
@@ -2619,11 +2623,14 @@ fn settings_body(
                     choice.deinterlace = Some(!on);
                 }
             }
-            popup::separator_in(ui, over_video::MENU_BORDER);
-            let label = tr!("player-sleep");
-            let moved = menu.sleep != SleepChoice::Off;
-            if let Some(step) = stepper::row(ui, &label, None, &menu.sleep_text, moved, stepper_colours()) {
-                choice.sleep = Some(menu.sleep.stepped(step));
+            // A group's pause is every member's, so its menu has no timer.
+            if !menu.in_group {
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                let label = tr!("player-sleep");
+                let moved = menu.sleep != SleepChoice::Off;
+                if let Some(step) = stepper::row(ui, &label, None, &menu.sleep_text, moved, stepper_colours()) {
+                    choice.sleep = Some(menu.sleep.stepped(step));
+                }
             }
             popup::separator_in(ui, over_video::MENU_BORDER);
             let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());

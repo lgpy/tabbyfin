@@ -373,12 +373,13 @@ const RESUME_PROMPT_FOR: Duration = Duration::from_secs(10);
 const UP_NEXT_BEFORE_END: Duration = Duration::from_secs(20);
 
 /// Pauses playback after a while, or holds autoplay when the item ends. Not saved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SleepTimer {
     /// Pauses at this time.
     In(Instant),
-    /// Nothing plays after the end of the session with this number.
-    EndOfItem(u64),
+    /// Nothing plays after the end of the item with this id, however many sessions it takes to
+    /// get there (a reconnect, another audio track on a transcode).
+    EndOfItem(String),
 }
 
 /// The sleep timer's minutes choices.
@@ -792,22 +793,27 @@ impl PlaybackManager {
         self.now_playing.as_mut()
     }
 
-    /// What plays by itself after the session numbered `generation` ends, taking its state. The
-    /// sleep timer's end of the item holds it back, and is spent.
+    /// What plays by itself after the session numbered `generation` ends, taking its state.
     pub(crate) fn take_next(&mut self, generation: u64) -> Option<BaseItemDto> {
-        let held = matches!(self.sleep, Some(SleepTimer::EndOfItem(session)) if session == generation);
-        if held {
-            self.sleep = None;
-        }
         self.now_playing
             .take()
             .filter(|state| state.session == generation)
             .and_then(|state| state.autoplay_next())
-            .filter(|_| !held)
     }
 
-    pub fn sleep(&self) -> Option<SleepTimer> {
-        self.sleep
+    /// Whether the sleep timer holds what comes after the end of the item `item_id`: nothing
+    /// plays after it, neither the queue, nor autoplay, nor a repeat. Takes the timer, which
+    /// this spends.
+    fn hold_after_end(&mut self, item_id: &str) -> bool {
+        let held = matches!(&self.sleep, Some(SleepTimer::EndOfItem(id)) if id == item_id);
+        if held {
+            self.sleep = None;
+        }
+        held
+    }
+
+    pub fn sleep(&self) -> Option<&SleepTimer> {
+        self.sleep.as_ref()
     }
 
     /// Sets the sleep timer, or clears it with `None`.
@@ -927,6 +933,11 @@ impl PlaybackManager {
     /// Starts a session; `attempt` counts reconnects after a lost stream.
     fn start_session(&mut self, item: &BaseItemDto, options: PlayOptions, attempt: usize) {
         self.reconnect = None;
+        // An end-of-item timer belongs to the item it was set on: a restart of that item keeps
+        // it, another item takes it away.
+        if matches!(&self.sleep, Some(SleepTimer::EndOfItem(id)) if *id != item.id) {
+            self.sleep = None;
+        }
         self.started = Some(item.clone());
         // Dropping the previous sender stops that session; it still reports its final position.
         let (stop_tx, stop_rx) = oneshot::channel();
@@ -1642,14 +1653,23 @@ impl Services {
         }
     }
 
+    /// Whether the player offers a sleep timer: not in a SyncPlay group, where the pause it
+    /// makes would be every member's, and the end of an item is the server's to follow.
+    pub fn sleep_timer_offered(&self) -> bool {
+        !self.in_group() && !self.playback.now_playing().is_some_and(|state| state.group_item.is_some())
+    }
+
     /// Fires the sleep timer when it's due: pauses (so the position is reported and kept) and holds
     /// autoplay of what comes after this item. A timer with nothing playing or on its way is
-    /// dropped.
+    /// dropped, and so is one in a SyncPlay group, where a pause is every member's. One that
+    /// comes due between sessions (a reconnect waits, the next item loads) waits for the next.
     fn tick_sleep(&mut self) {
         if self.playback.sleep.is_none() {
             return;
         }
-        if !self.playback.active && self.playback.reconnect.is_none() && self.playback.now_playing.is_none() {
+        if !self.sleep_timer_offered()
+            || (!self.playback.active && self.playback.reconnect.is_none() && self.playback.now_playing.is_none())
+        {
             self.playback.sleep = None;
             return;
         }
@@ -1659,6 +1679,10 @@ impl Services {
         let now = Instant::now();
         if now < due {
             self.playback.ctx.request_repaint_after(due - now);
+            return;
+        }
+        // The pause goes to a live session, or to the TV; with neither it would be dropped.
+        if !self.is_casting() && self.playback.current().is_none() {
             return;
         }
         self.playback.sleep = None;
@@ -1686,10 +1710,6 @@ impl Services {
                 let Some(running) = playback.sessions.iter().find(|s| s.generation == generation) else {
                     return;
                 };
-                // An end-of-item timer belongs to the item it was set on.
-                if matches!(playback.sleep, Some(SleepTimer::EndOfItem(session)) if session != generation) {
-                    playback.sleep = None;
-                }
                 let deinterlace = deinterlaces_by_default(&source, stream.method);
                 playback.now_playing = Some(NowPlaying {
                     session: generation,
@@ -1787,12 +1807,15 @@ impl Services {
         }
         let playback = &mut self.playback;
         playback.active = false;
+        // The sleep timer's end of the item: nothing plays after it, whatever the queue and the
+        // repeat mode would do. The queue stays as it was.
+        let held = matches!(result, Ok(Ended::Finished)) && playback.hold_after_end(&running.item.id);
         let next = playback.take_next(running.generation);
         let group_item = running.options.group_item.clone();
         // What the queue's modes make of an item that played to its end; a group's queue is the
         // server's, so its modes are too.
         let after = match result {
-            Ok(Ended::Finished) if group_item.is_none() => self.playback.queue.after_end(&running.item, next),
+            Ok(Ended::Finished) if group_item.is_none() && !held => self.playback.queue.after_end(&running.item, next),
             _ => AfterEnd::Stop,
         };
         match result {

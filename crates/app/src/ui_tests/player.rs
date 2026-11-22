@@ -366,12 +366,139 @@ fn the_sleep_timers_end_of_item_holds_the_next_episode() {
     let services = harness.state_mut().services_mut().expect("the services");
     let state = services.playback.now_playing_mut().expect("the session");
     state.autoplay = true;
-    let session = state.session;
+    let item = state.item.clone();
     assert!(state.next.is_some());
 
-    services.playback.set_sleep(Some(SleepTimer::EndOfItem(session)));
-    assert!(services.playback.take_next(session).is_none(), "held back");
+    services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    assert_eq!(services.end_for_test(), None, "held back");
     assert_eq!(services.playback.sleep(), None, "and spent");
+}
+
+/// With the timer holding the end of an item, nothing plays after it: not the item again with
+/// repeat one, nor the queue started over with repeat all, and the queue stays as it was.
+#[test]
+fn the_sleep_timers_end_of_item_holds_repeat_too() {
+    use jellyfin::RepeatMode;
+
+    use crate::playback::SleepTimer;
+
+    for (name, mode) in [("one", RepeatMode::RepeatOne), ("all", RepeatMode::RepeatAll)] {
+        let _config = ConfigDir::new(&format!("player-sleep-repeat-{name}"));
+        let server = FixtureServer::start();
+        let mut harness = desktop_player(&server);
+        let services = harness.state_mut().services_mut().expect("the services");
+        let item = services.playback.now_playing().expect("the session").item.clone();
+        services.set_repeat(mode);
+        services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+        assert_eq!(services.end_for_test(), None, "repeat {name}: nothing plays after it");
+        assert!(
+            services
+                .events
+                .iter()
+                .any(|event| matches!(event, crate::services::AppEvent::PlaybackEnded)),
+            "repeat {name}: playback ends"
+        );
+        assert_eq!(services.playback.sleep(), None, "repeat {name}: and the timer is spent");
+        assert_eq!(services.playback.modes().0, mode);
+        assert!(services.playback.now_playing().is_none());
+    }
+}
+
+/// A restart of the same item (a dropped connection, another audio track on a transcode, a
+/// version) keeps the end-of-item timer; another item starting clears it.
+#[test]
+fn the_sleep_timers_end_of_item_survives_a_restart_of_its_item() {
+    use crate::playback::{PlayOptions, SleepTimer};
+
+    let _config = ConfigDir::new("player-sleep-restart");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let services = harness.state_mut().services_mut().expect("the services");
+    let state = services.playback.now_playing_mut().expect("the session");
+    state.autoplay = true;
+    let (item, source) = (state.item.clone(), state.source.clone());
+    let next = state.next.clone().expect("a next episode");
+    services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+
+    // The same item again, as a restart does it.
+    services.reload(PlayOptions::default());
+    drop(services.playback.start_for_test(item.clone(), source.clone()));
+    assert!(services.playback.sleep().is_some(), "kept for its item");
+    let state = services.playback.now_playing_mut().expect("the new session");
+    state.autoplay = true;
+    state.next = Some(next.clone());
+    assert_eq!(services.end_for_test(), None, "so nothing plays after the restarted session");
+    assert_eq!(services.playback.sleep(), None);
+
+    // Another item starting takes it away.
+    services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    services.play(&next, PlayOptions::default());
+    assert_eq!(services.playback.sleep(), None, "not for another item");
+}
+
+/// A timed timer that comes due while no session is live (a reconnect waits, the next item
+/// loads) stays due, and pauses once a session is up; the notice shows when it paused.
+#[test]
+fn a_sleep_timer_due_between_sessions_pauses_the_next_one() {
+    use std::time::Instant;
+
+    use crate::playback::{PlayOptions, SleepTimer};
+
+    let _config = ConfigDir::new("player-sleep-between");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let services = harness.state_mut().services_mut().expect("the services");
+    let state = services.playback.now_playing().expect("the session");
+    let (item, source) = (state.item.clone(), state.source.clone());
+    services.reload(PlayOptions::default());
+    services.events.clear();
+    services.playback.set_sleep(Some(SleepTimer::In(Instant::now())));
+
+    services.tick_playback();
+    assert!(services.playback.sleep().is_some(), "still due");
+    assert!(
+        !services
+            .events
+            .iter()
+            .any(|event| matches!(event, crate::services::AppEvent::Toast(_))),
+        "nothing was paused, so nothing is announced"
+    );
+
+    let mut sent = services.playback.start_for_test(item, source);
+    services.tick_playback();
+    assert_eq!(services.playback.sleep(), None);
+    assert!(matches!(sent.try_recv(), Ok(UiCommand::SetPause(true))));
+    assert!(
+        services
+            .events
+            .iter()
+            .any(|event| matches!(event, crate::services::AppEvent::Toast(_))),
+        "announced once paused"
+    );
+}
+
+/// A SyncPlay group's pause is every member's, so a timer running when a group is joined is
+/// dropped, without pausing the group.
+#[test]
+fn a_sleep_timer_is_cancelled_in_a_syncplay_group() {
+    use std::time::Instant;
+
+    use crate::playback::SleepTimer;
+
+    let _config = ConfigDir::new("player-sleep-group");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    let services = harness.state_mut().services_mut().expect("the services");
+    let item = services.playback.now_playing().expect("the session").item.clone();
+    for timer in [SleepTimer::In(Instant::now()), SleepTimer::EndOfItem(item.id)] {
+        services.playback.set_sleep(Some(timer));
+        services.playback.now_playing_mut().expect("the session").group_item = Some("queue-item".into());
+        services.tick_playback();
+        assert_eq!(services.playback.sleep(), None);
+        services.playback.now_playing_mut().expect("the session").group_item = None;
+    }
+    assert!(harness.state_mut().commands().is_empty(), "no pause for the group");
 }
 
 /// The bracket keys step the speed up and down through the menu's speeds.

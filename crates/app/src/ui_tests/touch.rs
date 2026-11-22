@@ -885,6 +885,26 @@ fn a_phones_settings_sheet_sets_the_sleep_timer_and_the_info() {
     harness.get_by_label("Direct play");
 }
 
+/// A SyncPlay group has no sleep timer in its settings.
+#[test]
+fn a_phones_settings_sheet_has_no_sleep_timer_in_a_syncplay_group() {
+    let _config = ConfigDir::new("touch-player-sleep-group");
+    let server = FixtureServer::start();
+    let mut harness = phone_player(&server);
+    let state = harness.state_mut().now_playing_mut().expect("the session");
+    state.mpv = false;
+    state.group_item = Some("queue-item".into());
+    harness.get_by_label("Settings").click();
+    for _ in 0..3 {
+        harness.step();
+    }
+    harness.get_by_role_and_label(Role::Tab, "General").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    assert!(harness.query_by_label("Increase sleep timer").is_none());
+}
+
 /// Chapters opens its sheet, and a chapter picked there seeks to it and closes the sheet.
 #[test]
 fn a_phones_chapters_sheet_seeks() {
