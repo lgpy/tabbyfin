@@ -287,6 +287,10 @@ player-info-output-software = Software
 player-info-output-surface = Superficie propia del reproductor
 player-info-fps = { $fps } fps
 player-info-seconds = { $seconds } s
+player-info-channel-count = { $count ->
+    [one] { $count } canal
+   *[other] { $count } canales
+    }
 player-info-reason =
     { $reason ->
         [ContainerNotSupported] El contenedor no es compatible con este reproductor

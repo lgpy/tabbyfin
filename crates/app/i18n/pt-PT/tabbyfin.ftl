@@ -287,6 +287,10 @@ player-info-output-software = Software
 player-info-output-surface = Superfície própria do leitor
 player-info-fps = { $fps } fps
 player-info-seconds = { $seconds } s
+player-info-channel-count = { $count ->
+    [one] { $count } canal
+   *[other] { $count } canais
+    }
 player-info-reason =
     { $reason ->
         [ContainerNotSupported] O contentor não é suportado por este leitor
