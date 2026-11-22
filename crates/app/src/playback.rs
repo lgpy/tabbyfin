@@ -87,29 +87,45 @@ pub struct PlayOptions {
 /// are applied to the new player again.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Picture {
+    /// The media source (version) these choices were made on.
+    pub source_id: String,
     pub aspect: Aspect,
     pub deinterlace: bool,
+    /// The user turned deinterlacing on or off, rather than it being what the stream asks for.
+    pub deinterlace_chosen: bool,
     /// A stream index of the second subtitle.
     pub secondary_subtitle: Option<i32>,
     pub ab_loop: AbLoop,
 }
 
 impl Picture {
-    /// The choices a new session of `source` starts with: those `carried` over, with the second
-    /// subtitle only if that track is still there and still a text track other than the first
-    /// (the tracks of a transcode are the ones sent as files), else the defaults of a new item.
+    /// The choices a new session of `source` starts with. Those `carried` over from the same
+    /// version stay (the second subtitle only if that track is still there and still a text
+    /// track other than the first; the tracks of a transcode are the ones sent as files), and
+    /// deinterlacing is worked out again unless the user set it. Another version of the item
+    /// keeps only the aspect: its tracks, length and interlacing are its own. Without anything
+    /// carried, the defaults of a new item.
     fn starting(
         carried: Option<&Picture>,
         source: &MediaSourceInfo,
         stream: &StreamInfo,
         subtitle: SubtitleChoice,
     ) -> Self {
-        let Some(carried) = carried else {
-            return Self {
-                deinterlace: deinterlaces_by_default(source, stream.method),
-                ..Self::default()
-            };
+        let by_default = deinterlaces_by_default(source, stream.method);
+        let fresh = Self {
+            source_id: source.id.clone(),
+            deinterlace: by_default,
+            ..Self::default()
         };
+        let Some(carried) = carried else {
+            return fresh;
+        };
+        if carried.source_id != source.id {
+            return Self {
+                aspect: carried.aspect,
+                ..fresh
+            };
+        }
         let primary = match subtitle {
             SubtitleChoice::Stream(index) => Some(index),
             SubtitleChoice::Off => None,
@@ -122,6 +138,11 @@ impl Picture {
                 .any(|choice| choice.value == wanted)
         });
         Self {
+            deinterlace: if carried.deinterlace_chosen {
+                carried.deinterlace
+            } else {
+                by_default
+            },
             secondary_subtitle,
             ..carried.clone()
         }
@@ -366,7 +387,7 @@ enum SessionUpdate {
         audio: Option<i32>,
         subtitle: SubtitleChoice,
         stream: StreamInfo,
-        picture: Picture,
+        picture: Box<Picture>,
     },
     /// Fetched after playback starts.
     Details(Box<Details>),
@@ -465,6 +486,8 @@ pub struct NowPlaying {
     pub aspect: Aspect,
     /// mpv deinterlaces the picture: on from the start when the video stream is interlaced.
     pub deinterlace: bool,
+    /// The user set `deinterlace`, so a restart keeps it instead of working it out again.
+    pub deinterlace_chosen: bool,
     /// The loop between two points this item plays.
     pub ab_loop: AbLoop,
     pub volume: f64,
@@ -608,8 +631,10 @@ impl NowPlaying {
     /// The picture choices a restart of this item keeps.
     fn picture(&self) -> Picture {
         Picture {
+            source_id: self.source.id.clone(),
             aspect: self.aspect,
             deinterlace: self.deinterlace,
+            deinterlace_chosen: self.deinterlace_chosen,
             secondary_subtitle: self.secondary_subtitle,
             ab_loop: self.ab_loop,
         }
@@ -942,6 +967,7 @@ impl PlaybackManager {
             mpv: true,
             aspect: Aspect::Fit,
             deinterlace: false,
+            deinterlace_chosen: false,
             ab_loop: AbLoop::Off,
             volume: self.volume,
             muted: false,
@@ -1714,6 +1740,7 @@ impl Services {
             return;
         }
         state.deinterlace = on;
+        state.deinterlace_chosen = true;
         state.send(UiCommand::SetDeinterlace(on));
     }
 
@@ -1890,6 +1917,7 @@ impl Services {
                     mpv: running.mpv,
                     aspect: picture.aspect,
                     deinterlace: picture.deinterlace,
+                    deinterlace_chosen: picture.deinterlace_chosen,
                     ab_loop: picture.ab_loop,
                     volume: running.volume,
                     muted: running.muted,
@@ -2739,7 +2767,7 @@ async fn run_session(
         audio,
         subtitle,
         stream: stream.clone(),
-        picture: picture.clone(),
+        picture: Box::new(picture.clone()),
     });
     let details_task = {
         let (client, item, updates) = (client.clone(), item.clone(), channels.updates.clone());
@@ -3328,8 +3356,10 @@ mod tests {
         let direct = StreamInfo::default();
         let at = Duration::from_secs;
         let carried = Picture {
+            source_id: "s".into(),
             aspect: Aspect::Fill,
             deinterlace: false,
+            deinterlace_chosen: true,
             secondary_subtitle: Some(8),
             ab_loop: AbLoop::Loop(at(30), at(60)),
         };
@@ -3358,22 +3388,74 @@ mod tests {
         let sent = Picture::starting(Some(&carried), &source, &transcode, SubtitleChoice::Off);
         assert_eq!(sent.secondary_subtitle, None);
         // The deinterlace choice is the user's, even when the video is interlaced.
-        let interlaced: MediaSourceInfo = serde_json::from_value(serde_json::json!({
-            "Id": "s",
-            "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": true }],
-        }))
-        .unwrap();
+        let interlaced = interlaced_source("s");
         assert!(!Picture::starting(Some(&carried), &interlaced, &direct, SubtitleChoice::Off).deinterlace);
+        // One the user never made is worked out again, and follows the stream.
+        let unchosen = Picture {
+            deinterlace_chosen: false,
+            ..carried.clone()
+        };
+        let worked_out = Picture::starting(Some(&unchosen), &interlaced, &direct, SubtitleChoice::Off);
+        assert!(worked_out.deinterlace && !worked_out.deinterlace_chosen);
 
         // Without anything carried (another item), the defaults, and the stream's own deinterlacing.
         let fresh = Picture::starting(None, &interlaced, &direct, SubtitleChoice::Off);
         assert_eq!(
             fresh,
             Picture {
+                source_id: "s".into(),
                 deinterlace: true,
                 ..Picture::default()
             }
         );
+    }
+
+    fn interlaced_source(id: &str) -> MediaSourceInfo {
+        serde_json::from_value(serde_json::json!({
+            "Id": id,
+            "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": true }],
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_version_switch_carries_only_the_aspect() {
+        use super::{AbLoop, Aspect, Picture, StreamInfo, SubtitleChoice};
+
+        let direct = StreamInfo::default();
+        let at = Duration::from_secs;
+        // Version "s" was progressive, and the user never touched deinterlacing.
+        let carried = Picture {
+            source_id: "s".into(),
+            aspect: Aspect::Fill,
+            deinterlace: false,
+            deinterlace_chosen: false,
+            secondary_subtitle: Some(8),
+            ab_loop: AbLoop::Loop(at(30), at(60)),
+        };
+        // Version "t" is interlaced and has a text track under the same index.
+        let other: MediaSourceInfo = serde_json::from_value(serde_json::json!({
+            "Id": "t",
+            "MediaStreams": [
+                { "Index": 0, "Type": "Video", "IsInterlaced": true },
+                { "Index": 8, "Type": "Subtitle", "IsTextSubtitleStream": true },
+            ],
+        }))
+        .unwrap();
+        let started = Picture::starting(Some(&carried), &other, &direct, SubtitleChoice::Off);
+        assert_eq!(started.aspect, Aspect::Fill);
+        assert!(started.deinterlace, "worked out afresh for the new version");
+        assert_eq!(started.secondary_subtitle, None);
+        assert_eq!(started.ab_loop, AbLoop::Off);
+        assert_eq!(started.source_id, "t");
+
+        // Even a deinterlace choice the user made belongs to the old file.
+        let chosen = Picture {
+            deinterlace_chosen: true,
+            ..carried
+        };
+        let started = Picture::starting(Some(&chosen), &other, &direct, SubtitleChoice::Off);
+        assert!(started.deinterlace && !started.deinterlace_chosen);
     }
 
     #[test]

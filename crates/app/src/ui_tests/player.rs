@@ -624,24 +624,28 @@ fn a_restart_of_the_item_keeps_the_picture_choices() {
     use crate::playback::{AbLoop, Aspect, Picture, PlayOptions};
 
     let _config = ConfigDir::new("player-picture-restart");
-    let kept = Picture {
-        aspect: Aspect::Fill,
-        deinterlace: true,
-        secondary_subtitle: Some(6),
-        ab_loop: AbLoop::Loop(Duration::from_secs(30), Duration::from_secs(60)),
-    };
+    // Chooses the picture on the running session, and returns what a restart then carries.
     let choose = |harness: &mut Harness<'static, PlayerRun>| {
         let state = harness.state_mut().now_playing_mut().expect("the session");
         state.aspect = Aspect::Fill;
         state.deinterlace = true;
+        state.deinterlace_chosen = true;
         state.secondary_subtitle = Some(6);
         state.ab_loop = AbLoop::Loop(Duration::from_secs(30), Duration::from_secs(60));
+        Picture {
+            source_id: state.source.id.clone(),
+            aspect: Aspect::Fill,
+            deinterlace: true,
+            deinterlace_chosen: true,
+            secondary_subtitle: Some(6),
+            ab_loop: AbLoop::Loop(Duration::from_secs(30), Duration::from_secs(60)),
+        }
     };
 
     // A restart, as a version switch or a track switch on a transcode makes it.
     let server = FixtureServer::start();
     let mut harness = desktop_player(&server);
-    choose(&mut harness);
+    let kept = choose(&mut harness);
     let services = harness.state_mut().services_mut().expect("the services");
     services.reload(PlayOptions::default());
     assert_eq!(
@@ -651,7 +655,7 @@ fn a_restart_of_the_item_keeps_the_picture_choices() {
 
     // A lost stream waits to reconnect, with the choices too.
     let mut harness = desktop_player(&server);
-    choose(&mut harness);
+    let kept = choose(&mut harness);
     let services = harness.state_mut().services_mut().expect("the services");
     services.lose_for_test();
     assert_eq!(
