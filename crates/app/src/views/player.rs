@@ -306,7 +306,9 @@ impl PlayerPage {
             && !state.cues.cues.is_empty()
         {
             let scale = state.adjustments.subtitle_scale as f32;
-            self.subtitles.show(ui, safe, &state.cues, state.cues_changed, scale);
+            let position = state.adjustments.subtitle_position;
+            self.subtitles
+                .show(ui, safe, &state.cues, state.cues_changed, scale, position);
         }
         let Some(view) = view else {
             // Between sessions (a reconnect, or the next item still loading): the last frame
@@ -2164,6 +2166,20 @@ fn settings_body(
                         Step::Up => adjustments.subtitle_scale += Adjustments::SCALE_STEP,
                         Step::Reset => adjustments.subtitle_scale = 1.,
                     }
+                    adjusted = true;
+                }
+                // How far up from the bottom, in percent of the picture: Up lifts them, which
+                // is a smaller `sub-pos`.
+                let position = adjustments.subtitle_position;
+                let lifted = format!("{}%", Adjustments::BOTTOM.saturating_sub(position));
+                let label = tr!("player-position");
+                let moved = position != Adjustments::BOTTOM;
+                if let Some(step) = stepper::row(ui, &label, None, &lifted, moved, stepper_colours()) {
+                    adjustments.subtitle_position = match step {
+                        Step::Up => position.saturating_sub(Adjustments::POSITION_STEP),
+                        Step::Down => position.saturating_add(Adjustments::POSITION_STEP),
+                        Step::Reset => Adjustments::BOTTOM,
+                    };
                     adjusted = true;
                 }
             }

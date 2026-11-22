@@ -633,3 +633,9 @@ subtitle-search-downloads = { $count ->
   }
 subtitle-search-rating = Rated { $rating }
 subtitle-search-row-label = { $name }, { $detail }
+player-position = Position
+settings-subtitle-position = Position
+settings-subtitle-position-description = How high up the picture subtitles sit. Shared with the player's settings menu. Goes to the playback manager at once, so a running session changes with it.
+settings-subtitle-position-unset = Bottom
+settings-subtitle-position-bottom = Bottom
+settings-subtitle-position-raised = { $percent } % higher

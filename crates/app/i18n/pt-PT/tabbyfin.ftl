@@ -630,3 +630,9 @@ subtitle-search-downloads = { $count ->
   }
 subtitle-search-rating = Classificação { $rating }
 subtitle-search-row-label = { $name }, { $detail }
+player-position = Posição
+settings-subtitle-position = Posição
+settings-subtitle-position-description = A que altura do ecrã ficam as legendas. Partilhada com o menu de definições do leitor. Chega de imediato ao gestor de reprodução, por isso uma sessão em curso muda com ela.
+settings-subtitle-position-unset = Em baixo
+settings-subtitle-position-bottom = Em baixo
+settings-subtitle-position-raised = { $percent } % mais acima

@@ -80,6 +80,8 @@ pub struct Adjustments {
     pub audio_delay: f64,
     /// 1.0 is the subtitles' own size.
     pub subtitle_scale: f64,
+    /// mpv's `sub-pos`: 100 is the bottom, and less is higher up the picture.
+    pub subtitle_position: u8,
 }
 
 impl Default for Adjustments {
@@ -89,6 +91,7 @@ impl Default for Adjustments {
             subtitle_delay: 0.,
             audio_delay: 0.,
             subtitle_scale: 1.,
+            subtitle_position: Self::BOTTOM,
         }
     }
 }
@@ -99,6 +102,11 @@ impl Adjustments {
     pub const SCALE_STEP: f64 = 0.1;
     const MAX_DELAY: f64 = 30.;
     const SCALE_RANGE: (f64, f64) = (0.5, 3.);
+    /// `sub-pos` at the bottom, where subtitles start. Lower is higher up; mpv cuts text
+    /// subtitles off below it (above 100), so the menu doesn't offer that.
+    pub const BOTTOM: u8 = 100;
+    pub const POSITION_STEP: u8 = 5;
+    const POSITION_RANGE: (u8, u8) = (0, Self::BOTTOM);
 
     /// The next speed in [`Self::SPEEDS`] above (`up`) or below the current one.
     pub fn step_speed(self, up: bool) -> f64 {
@@ -125,14 +133,18 @@ impl Adjustments {
             subtitle_delay: tenths(self.subtitle_delay.clamp(-Self::MAX_DELAY, Self::MAX_DELAY)),
             audio_delay: tenths(self.audio_delay.clamp(-Self::MAX_DELAY, Self::MAX_DELAY)),
             subtitle_scale: tenths(self.subtitle_scale.clamp(Self::SCALE_RANGE.0, Self::SCALE_RANGE.1)),
+            subtitle_position: self
+                .subtitle_position
+                .clamp(Self::POSITION_RANGE.0, Self::POSITION_RANGE.1),
         }
     }
 
-    /// For the next item: the same speed and subtitle size, no delays.
+    /// For the next item: the same speed and subtitle size and position, no delays.
     fn for_next_item(self) -> Self {
         Self {
             speed: self.speed,
             subtitle_scale: self.subtitle_scale,
+            subtitle_position: self.subtitle_position,
             ..Self::default()
         }
     }
@@ -155,6 +167,8 @@ pub enum UiCommand {
     /// Seconds.
     SetAudioDelay(f64),
     SetSubtitleScale(f64),
+    /// mpv's `sub-pos`, 100 at the bottom ([`Adjustments::subtitle_position`]).
+    SetSubtitlePosition(u8),
     ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
@@ -466,6 +480,7 @@ impl PlaybackManager {
         let volume = config.volume.unwrap_or(DEFAULT_VOLUME);
         let adjustments = Adjustments {
             subtitle_scale: config.subtitle_scale.unwrap_or(1.),
+            subtitle_position: config.subtitle_position.unwrap_or(Adjustments::BOTTOM),
             ..Adjustments::default()
         }
         .clamped();
@@ -509,6 +524,16 @@ impl PlaybackManager {
     pub fn set_subtitle_scale(&mut self, scale: f64) {
         self.adjustments = Adjustments {
             subtitle_scale: scale,
+            ..self.adjustments
+        }
+        .clamped();
+    }
+
+    /// Sets the subtitle position for the next items, as [`Self::set_subtitle_scale`] sets the
+    /// size.
+    pub fn set_subtitle_position(&mut self, position: u8) {
+        self.adjustments = Adjustments {
+            subtitle_position: position,
             ..self.adjustments
         }
         .clamped();
@@ -769,9 +794,11 @@ impl Drop for PlaybackManager {
 fn save_preferences(volume: f64, adjustments: Adjustments) {
     let mut config = Config::load();
     let scale = Some(adjustments.subtitle_scale).filter(|&scale| scale != 1.);
-    if config.volume != Some(volume) || config.subtitle_scale != scale {
+    let position = Some(adjustments.subtitle_position).filter(|&position| position != Adjustments::BOTTOM);
+    if config.volume != Some(volume) || config.subtitle_scale != scale || config.subtitle_position != position {
         config.volume = Some(volume);
         config.subtitle_scale = scale;
+        config.subtitle_position = position;
         if let Err(err) = config.save() {
             tracing::warn!("failed to save config: {err:#}");
         }
@@ -1049,6 +1076,8 @@ impl Services {
             (new.subtitle_delay != old.subtitle_delay).then_some(UiCommand::SetSubtitleDelay(new.subtitle_delay)),
             (new.audio_delay != old.audio_delay).then_some(UiCommand::SetAudioDelay(new.audio_delay)),
             (new.subtitle_scale != old.subtitle_scale).then_some(UiCommand::SetSubtitleScale(new.subtitle_scale)),
+            (new.subtitle_position != old.subtitle_position)
+                .then_some(UiCommand::SetSubtitlePosition(new.subtitle_position)),
         ];
         for command in changes.into_iter().flatten() {
             state.send(command);
@@ -1799,6 +1828,13 @@ async fn run_session(
             tracing::debug!("mpv didn't take {name}={value}: {err}");
         }
     }
+    // Cosmetic too: a setting that fails leaves subtitles where mpv puts them.
+    if let Err(err) = player
+        .set_property("sub-pos", i64::from(adjustments.subtitle_position))
+        .await
+    {
+        tracing::debug!("mpv didn't take sub-pos: {err}");
+    }
     for (name, value) in [
         ("speed", adjustments.speed),
         ("sub-delay", adjustments.subtitle_delay),
@@ -2128,6 +2164,7 @@ async fn apply_command(
         UiCommand::SetSubtitleDelay(seconds) => player.set_property("sub-delay", seconds).await,
         UiCommand::SetAudioDelay(seconds) => player.set_property("audio-delay", seconds).await,
         UiCommand::SetSubtitleScale(scale) => player.set_property("sub-scale", scale).await,
+        UiCommand::SetSubtitlePosition(position) => player.set_property("sub-pos", i64::from(position)).await,
         UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
         // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
         UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),
@@ -2386,12 +2423,15 @@ mod tests {
             subtitle_delay: 0.1 + 0.2,
             audio_delay: -100.,
             subtitle_scale: 0.1,
+            subtitle_position: 250,
         }
         .clamped();
         assert_eq!(wild.speed, 2.);
         assert_eq!(wild.subtitle_delay, 0.3);
         assert_eq!(wild.audio_delay, -30.);
         assert_eq!(wild.subtitle_scale, 0.5);
+        // Nothing lower than the bottom, where mpv would cut text subtitles off.
+        assert_eq!(wild.subtitle_position, 100);
     }
 
     #[test]
@@ -2401,9 +2441,11 @@ mod tests {
             subtitle_delay: 1.2,
             audio_delay: -0.3,
             subtitle_scale: 1.4,
+            subtitle_position: 85,
         }
         .for_next_item();
         assert_eq!((next.speed, next.subtitle_scale), (1.5, 1.4));
+        assert_eq!(next.subtitle_position, 85);
         assert_eq!((next.subtitle_delay, next.audio_delay), (0., 0.));
     }
 

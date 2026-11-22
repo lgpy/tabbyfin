@@ -630,3 +630,9 @@ subtitle-search-downloads = { $count ->
   }
 subtitle-search-rating = Valoración { $rating }
 subtitle-search-row-label = { $name }, { $detail }
+player-position = Posición
+settings-subtitle-position = Posición
+settings-subtitle-position-description = A qué altura de la imagen se colocan los subtítulos. Compartida con el menú de ajustes del reproductor. Pasa al gestor de reproducción al momento, así que una sesión en curso cambia con ella.
+settings-subtitle-position-unset = Abajo
+settings-subtitle-position-bottom = Abajo
+settings-subtitle-position-raised = { $percent } % más arriba

@@ -45,6 +45,11 @@ pub struct Config {
     /// means 1.0.
     #[serde(default)]
     pub subtitle_scale: Option<f64>,
+    /// Where subtitles sit, as mpv's `sub-pos`: a percentage of the picture's height from the
+    /// top, so 100 is the bottom and less is higher. `None` means 100. Set in Settings and in
+    /// the player's menu, like the size.
+    #[serde(default)]
+    pub subtitle_position: Option<u8>,
     /// The player on Android: Media3 or mpv. `None` means Media3. mpv everywhere else.
     #[serde(default)]
     pub android_player: Option<AndroidPlayer>,

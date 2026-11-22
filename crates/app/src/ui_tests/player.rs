@@ -273,3 +273,26 @@ fn shift_n_plays_the_next_episode() {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
 }
+
+/// A new subtitle position goes to the player as mpv's `sub-pos`, and is kept for the next item.
+#[test]
+fn the_subtitle_position_goes_to_the_player() {
+    use crate::playback::Adjustments;
+
+    let _config = ConfigDir::new("player-sub-pos");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    harness.state_mut().adjust(Adjustments {
+        subtitle_position: 90,
+        ..Adjustments::default()
+    });
+    harness.step();
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SetSubtitlePosition(90)]),
+        "{sent:?}"
+    );
+    assert_eq!(harness.state().now_playing().unwrap().adjustments.subtitle_position, 90);
+}
