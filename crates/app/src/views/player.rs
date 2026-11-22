@@ -535,6 +535,7 @@ impl PlayerPage {
     /// What the settings menu shows of the sleep timer and the overlay.
     fn fill_menu(&self, menu: &mut SettingsMenu, cx: &PageCx) {
         menu.info = self.info_shown;
+        menu.sleep_offered = cx.services.sleep_timer_offered();
         let sleep = cx.services.playback.sleep();
         menu.sleep = self.sleep_choice(sleep);
         menu.sleep_text = match sleep {
@@ -1826,6 +1827,9 @@ struct SettingsMenu {
     can_search: bool,
     /// The playback info overlay shows.
     info: bool,
+    /// The menu has the sleep timer (`Services::sleep_timer_offered`, the page's own `set_sleep`
+    /// refuses it otherwise).
+    sleep_offered: bool,
     /// Where the sleep timer is, and its words ("off", "12 min left").
     sleep: SleepChoice,
     sleep_text: String,
@@ -2012,6 +2016,7 @@ impl View {
                     default_subtitle: state.source.default_subtitle_stream_index,
                     can_search,
                     info: false,
+                    sleep_offered: true,
                     sleep: SleepChoice::Off,
                     sleep_text: String::new(),
                     night_available: state.night_available,
@@ -2165,6 +2170,7 @@ impl View {
                 default_subtitle,
                 can_search: false,
                 info: false,
+                sleep_offered: true,
                 sleep: SleepChoice::Off,
                 sleep_text: String::new(),
                 night_available: false,
@@ -2636,7 +2642,7 @@ fn settings_body(
                 }
             }
             // A group's pause is every member's, so its menu has no timer.
-            if !menu.in_group {
+            if menu.sleep_offered {
                 popup::separator_in(ui, over_video::MENU_BORDER);
                 let label = tr!("player-sleep");
                 let moved = menu.sleep != SleepChoice::Off;
