@@ -75,12 +75,23 @@ pub enum Action {
     /// The skip button or the up-next card's Play now.
     Skip,
     ToggleFullscreen,
+    /// The playback info overlay.
+    ToggleInfo,
     /// Fullscreen first, then the up-next card, then stop.
     ExitPlayer,
     SpeedUp,
     SpeedDown,
     SubtitleDelayUp,
     SubtitleDelayDown,
+    /// The queue panel.
+    ToggleQueue,
+    /// Fit, fill, stretch, 16:9, 4:3.
+    CycleAspect,
+    /// While paused: one frame forward or back.
+    FrameForward,
+    FrameBack,
+    /// Sets the A–B loop's start, then its end, then clears it.
+    CycleAbLoop,
 }
 
 pub struct Binding {
@@ -141,11 +152,17 @@ pub const BINDINGS: &[Binding] = {
         bind(Player, NONE, Key::Enter, Skip),
         bind(Player, NONE, Key::S, Skip),
         bind(Player, NONE, Key::F, ToggleFullscreen),
+        bind(Player, NONE, Key::I, ToggleInfo),
         bind(Player, NONE, Key::Escape, ExitPlayer),
         bind(Player, NONE, Key::CloseBracket, SpeedUp),
         bind(Player, NONE, Key::OpenBracket, SpeedDown),
         bind(Player, NONE, Key::X, SubtitleDelayUp),
         bind(Player, NONE, Key::Z, SubtitleDelayDown),
+        bind(Player, NONE, Key::Q, ToggleQueue),
+        bind(Player, NONE, Key::A, CycleAspect),
+        bind(Player, NONE, Key::Period, FrameForward),
+        bind(Player, NONE, Key::Comma, FrameBack),
+        bind(Player, NONE, Key::L, CycleAbLoop),
     ]
 };
 
@@ -337,6 +354,16 @@ mod tests {
         assert_eq!(press(Key::W, Modifiers::NONE).action(Scope::Player), None);
         assert_eq!(press(Key::Delete, Modifiers::NONE).action(Scope::Shell), None);
         assert_eq!(press(Key::W, Modifiers::NONE).action(Scope::Shell), None);
+    }
+
+    #[test]
+    fn q_opens_the_queue_in_the_player_alone() {
+        assert_eq!(
+            press(Key::Q, Modifiers::NONE).action(Scope::Player),
+            Some(Action::ToggleQueue)
+        );
+        assert_eq!(press(Key::Q, Modifiers::NONE).action(Scope::Browse), None);
+        assert_eq!(press(Key::Q, Modifiers::NONE).action(Scope::Shell), None);
     }
 
     #[test]

@@ -4,7 +4,10 @@
 
 use std::time::Duration;
 
-use jellyfin::{Client, ClientInfo, Download, Error, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
+use jellyfin::{
+    Client, ClientInfo, Download, Error, PlayMethod, PlaybackInfoRequest, PlaybackOrder, PlaybackReport, RepeatMode,
+    Ticks,
+};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -39,6 +42,8 @@ fn report() -> PlaybackReport {
         play_method: PlayMethod::DirectPlay,
         volume_level: 80,
         is_muted: false,
+        repeat_mode: RepeatMode::RepeatAll,
+        playback_order: PlaybackOrder::Shuffle,
     }
 }
 
@@ -95,17 +100,20 @@ async fn playback_reports_carry_the_session_and_position() {
     assert_eq!(start["SubtitleStreamIndex"], json!(-1));
     assert_eq!(start["VolumeLevel"], json!(80));
     assert_eq!(start["CanSeek"], json!(true));
+    // The queue's modes, which the dashboard's remote shows.
+    assert_eq!(start["RepeatMode"], "RepeatAll");
+    assert_eq!(start["PlaybackOrder"], "Shuffle");
 
     let progress = body(&requests[1]);
     assert_eq!(progress["IsPaused"], json!(true));
     assert_eq!(progress["PositionTicks"], json!(950_000_000));
 
-    // `PlaybackStopInfo` has no paused, volume or track fields.
+    // `PlaybackStopInfo` has no paused, volume, track or queue mode fields.
     let stop = body(&requests[2]);
     assert_eq!(stop["PositionTicks"], json!(950_000_000));
     assert_eq!(stop["PlaySessionId"], "session");
     assert!(
-        stop.get("IsPaused").is_none() && stop.get("VolumeLevel").is_none(),
+        stop.get("IsPaused").is_none() && stop.get("VolumeLevel").is_none() && stop.get("RepeatMode").is_none(),
         "{stop}"
     );
 }
@@ -132,6 +140,7 @@ async fn playback_info_offers_direct_play_under_the_bitrate_cap() {
         subtitle_stream_index: None,
         max_streaming_bitrate: Some(8_000_000),
         prefer_hevc: false,
+        passthrough_eac3: false,
     };
     let info = client.playback_info("item", &request).await.expect("playback info");
     assert!(info.play_session_id.is_some());
@@ -344,4 +353,116 @@ async fn a_failed_download_maps_to_the_error() {
     let client = client(&server).await;
     let err = client.download(client.download_url("item"), 0).await.err();
     assert!(matches!(err, Some(Error::Unauthorized)), "{err:?}");
+}
+
+/// Taking an item out of Continue Watching sends only the position, so the watched state stays.
+#[tokio::test]
+async fn clearing_a_resume_position_sends_only_the_position() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/UserItems/item/UserData"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "PlaybackPositionTicks": 0, "Played": false })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    client.set_resume_position("item", Ticks(0)).await.expect("cleared");
+    let requests = server.received_requests().await.expect("recording is on");
+    assert_eq!(body(&requests[0]), json!({ "PlaybackPositionTicks": 0 }));
+}
+
+/// Approving a device sends its code as a query parameter, and the server's refusals keep their
+/// meaning: `404` for a code it doesn't know, `401` when Quick Connect is off.
+#[tokio::test]
+async fn authorising_a_device_sends_the_code_and_maps_the_refusals() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "123456"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(true))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "000000"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "off"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("Quick connect is disabled"))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    client.quick_connect_authorize("123456").await.expect("approved");
+    assert!(matches!(
+        client.quick_connect_authorize("000000").await,
+        Err(Error::NotFound)
+    ));
+    assert!(matches!(
+        client.quick_connect_authorize("off").await,
+        Err(Error::Unauthorized)
+    ));
+}
+
+/// The search names the language in the path and asks for exact matches only when told to;
+/// the result's optional fields may be missing or `null`.
+#[tokio::test]
+async fn subtitle_search_decodes_results() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/por"))
+        .and(query_param("isPerfectMatch", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"Id": "os_a/b+c==", "Name": "Movie.2020.1080p", "ProviderName": "Open Subtitles", "Format": "srt",
+             "ThreeLetterISOLanguageName": "por", "DownloadCount": 1200, "CommunityRating": 7.5, "IsHashMatch": true},
+            {"Id": "x", "Name": "Other", "ProviderName": null, "DownloadCount": null, "IsHashMatch": null}
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/eng"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = client(&server).await;
+    let found = client.search_subtitles("item1", "por", true).await.unwrap();
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0].id, "os_a/b+c==");
+    assert_eq!(found[0].download_count, Some(1200));
+    assert!(found[0].is_hash_match);
+    assert_eq!(found[1].provider_name, None);
+    assert!(!found[1].is_hash_match);
+
+    assert!(client.search_subtitles("item1", "eng", false).await.unwrap().is_empty());
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests[1].url.query(), None, "no isPerfectMatch unless asked");
+}
+
+/// The download id is one path segment, however odd, and a user without the permission
+/// gets `Forbidden`.
+#[tokio::test]
+async fn subtitle_download_posts_the_encoded_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/os_a%2Fb%2Bc%3D%3D"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item2/RemoteSearch/Subtitles/eng"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+
+    let client = client(&server).await;
+    client.download_subtitle("item1", "os_a/b+c==").await.unwrap();
+    let err = client.search_subtitles("item2", "eng", false).await.unwrap_err();
+    assert!(matches!(err, Error::Forbidden), "{err:?}");
 }

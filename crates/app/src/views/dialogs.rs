@@ -1,5 +1,5 @@
-//! Dialogs over a page: *Add to playlist*, *Edit playlist*, and the confirmation before
-//! deleting a playlist.
+//! Dialogs over a page: *Add to playlist*, *Edit playlist*, the confirmation before
+//! deleting a playlist, and the player's *Save queue as playlist*.
 //!
 //! A page keeps the dialog it opened and draws it every frame; [`show`](AddToPlaylist::show)
 //! returns `false` once it's done, and the page drops it. They're `egui::Modal`s, so their
@@ -308,6 +308,104 @@ impl AddToPlaylist {
     }
 }
 
+/// The player's "Save queue as playlist" dialog: a name to start with the show's or item's, and
+/// Enter (or *Save*) makes a playlist of what's playing and what's queued.
+pub struct SaveQueue {
+    /// The items to put in it, in order.
+    ids: Vec<String>,
+    typed: String,
+    busy: bool,
+    /// The create request while it runs, with the name it was made under.
+    saving: Option<Task<(String, jellyfin::Result<String>)>>,
+    /// The text field asks for the keyboard on the next frame.
+    focus: bool,
+}
+
+impl SaveQueue {
+    /// Opens the dialog for `ids`, with `name` typed in already.
+    pub fn new(ids: Vec<String>, name: String) -> Self {
+        Self {
+            ids,
+            typed: name,
+            busy: false,
+            saving: None,
+            focus: true,
+        }
+    }
+
+    /// Draws the dialog: `false` once it should be dropped (saved, or closed).
+    pub fn show(&mut self, cx: &mut PageCx) -> bool {
+        if let Some((name, result)) = self.saving.as_mut().and_then(Task::poll) {
+            self.saving = None;
+            self.busy = false;
+            match result {
+                Ok(_) => {
+                    cx.services
+                        .toast(Toast::success(tr!("dialog-created", name = name.as_str())));
+                    // Playlist pages and libraries show the new one.
+                    cx.services.user_data += 1;
+                    return false;
+                }
+                Err(err) => {
+                    let message = cx.services.handle_error(&err);
+                    cx.services.toast(Toast::error(message));
+                }
+            }
+        }
+
+        let ctx = cx.ctx;
+        let mut save = false;
+        let id = egui::Id::unique("save_queue");
+        let subtitle = tr!("dialog-save-queue-count", count = self.ids.len());
+        let modal = dialog::show(ctx, id, WIDTH, &tr!("dialog-save-queue"), Some(&subtitle), |ui| {
+            // Enter saves; the field never sees it.
+            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+            field::label(ui, &tr!("dialog-name"));
+            let field = ui.add(field::single_line(ui, id.with("name"), &mut self.typed, "").interactive(!self.busy));
+            field::shown(&field, Kind::Name);
+            if std::mem::take(&mut self.focus) {
+                field.request_focus();
+            }
+            ui.add_space(surface::GAP_FIELD);
+            dialog::buttons(ui, |ui| {
+                let state = if self.busy {
+                    State::Loading
+                } else if self.typed.trim().is_empty() {
+                    State::Disabled
+                } else {
+                    State::Ready
+                };
+                if dialog::main(ui, &tr!("dialog-save"), state).clicked() {
+                    save = true;
+                }
+                dialog::cancel(ui);
+            });
+            if enter && !self.busy && !self.typed.trim().is_empty() {
+                save = true;
+            }
+        });
+
+        if save {
+            self.save(cx);
+        }
+        !modal.should_close()
+    }
+
+    fn save(&mut self, cx: &mut PageCx) {
+        let name = self.typed.trim().to_owned();
+        if self.busy || name.is_empty() {
+            return;
+        }
+        self.busy = true;
+        let client = cx.services.session.client.clone();
+        let ids = self.ids.clone();
+        self.saving = Some(Task::spawn(cx.ctx, async move {
+            let result = client.create_playlist(&name, &ids).await;
+            (name, result)
+        }));
+    }
+}
+
 /// The "Edit playlist" dialog: rename a playlist, and share it with everyone on the server or
 /// keep it to yourself. Down moves from the name to the sharing switch (Space, Left or Right
 /// flip it), Up goes back, and Enter saves only what changed.
@@ -586,6 +684,120 @@ impl DeletePlaylist {
             cx.ctx,
             async move { client.delete_item(&playlist_id).await },
         ));
+    }
+}
+
+/// *Authorise a device…*: the Quick Connect code another device shows, typed here and approved
+/// for the signed-in user, which signs that device in as them. Enter authorises. A refusal is
+/// worded under the field and keeps the dialog open, so a mistyped code can be fixed.
+pub struct AuthoriseDevice {
+    typed: String,
+    /// What went wrong with the last try, in words.
+    error: Option<String>,
+    focus: bool,
+    /// The authorise request while it runs.
+    authorising: Option<Task<Authorised>>,
+}
+
+/// How the authorise request ended.
+enum Authorised {
+    Done,
+    /// A `401` and the server says Quick Connect is off.
+    Off,
+    /// The request failed, or the `401` was a dead token, or asking whether Quick Connect is off
+    /// failed (with its own error).
+    Failed(jellyfin::Error),
+}
+
+impl AuthoriseDevice {
+    pub fn new() -> Self {
+        Self {
+            typed: String::new(),
+            error: None,
+            focus: true,
+            authorising: None,
+        }
+    }
+
+    /// Draws the dialog: `false` once it should be dropped (authorised, or closed).
+    pub fn show(&mut self, cx: &mut PageCx) -> bool {
+        if let Some(result) = self.authorising.as_mut().and_then(Task::poll) {
+            self.authorising = None;
+            match result {
+                Authorised::Done => {
+                    cx.services.toast(Toast::success(tr!("dialog-authorise-done")));
+                    return false;
+                }
+                Authorised::Off => self.error = Some(tr!("dialog-authorise-off")),
+                Authorised::Failed(jellyfin::Error::NotFound) => self.error = Some(tr!("dialog-authorise-wrong")),
+                Authorised::Failed(jellyfin::Error::Status { .. }) => {
+                    self.error = Some(tr!("dialog-authorise-failed"));
+                }
+                // A `401` that Quick Connect being on doesn't explain is a dead token, and ends
+                // the session here as anywhere.
+                Authorised::Failed(err) => self.error = Some(cx.services.handle_error(&err)),
+            }
+            self.focus = true;
+        }
+
+        let ctx = cx.ctx;
+        let busy = self.authorising.is_some();
+        let mut authorise = false;
+        let id = egui::Id::unique("authorise_device");
+        let note = tr!("dialog-authorise-note", name = cx.services.session.user.name.as_str());
+        let modal = dialog::show(ctx, id, WIDTH, &tr!("dialog-authorise-title"), Some(&note), |ui| {
+            // Enter authorises; the field never sees it.
+            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+            field::label(ui, &tr!("dialog-authorise-code"));
+            let field = ui.add(field::single_line(ui, id.with("code"), &mut self.typed, "").interactive(!busy));
+            field::shown(&field, Kind::Text);
+            if std::mem::take(&mut self.focus) {
+                field.request_focus();
+            }
+            if let Some(error) = &self.error {
+                ui.add_space(surface::GAP_FIELD);
+                ui.label(label::muted(ui, error.clone()));
+            }
+            let ready = !self.typed.trim().is_empty();
+            dialog::buttons(ui, |ui| {
+                let state = if busy {
+                    State::Loading
+                } else if ready {
+                    State::Ready
+                } else {
+                    State::Disabled
+                };
+                if dialog::main(ui, &tr!("dialog-authorise"), state).clicked() {
+                    authorise = true;
+                }
+                dialog::cancel(ui);
+            });
+            if enter && ready && !busy {
+                authorise = true;
+            }
+        });
+
+        if authorise {
+            self.error = None;
+            let client = cx.services.session.client.clone();
+            // The code's spaces (it's often read out in groups) aren't part of it.
+            let code: String = self.typed.split_whitespace().collect();
+            self.authorising = Some(Task::spawn(cx.ctx, async move {
+                match client.quick_connect_authorize(&code).await {
+                    Ok(()) => Authorised::Done,
+                    // The server answers `401` when Quick Connect is off, and for a dead token
+                    // too: ask which. If asking fails, that failure is the answer (the network
+                    // may have dropped), not a reason to end the session.
+                    Err(jellyfin::Error::Unauthorized) => match client.quick_connect_enabled().await {
+                        Ok(false) => Authorised::Off,
+                        Ok(true) => Authorised::Failed(jellyfin::Error::Unauthorized),
+                        Err(err) => Authorised::Failed(err),
+                    },
+                    Err(err) => Authorised::Failed(err),
+                }
+            }));
+        }
+        !modal.should_close()
     }
 }
 

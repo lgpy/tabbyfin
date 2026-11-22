@@ -45,6 +45,12 @@ pub enum Kind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToastAction {
     OpenUrl(String),
+    /// Puts a resume position back, for the undo of *Remove from Continue Watching*.
+    RestoreResume {
+        item_id: String,
+        name: String,
+        position: jellyfin::Ticks,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +93,12 @@ impl Toast {
     pub fn action(mut self, label: impl Into<String>, action: ToastAction) -> Self {
         self.action = Some((label.into(), action));
         self
+    }
+
+    /// The button's action, for tests to read.
+    #[cfg(test)]
+    pub(crate) fn attached_action(&self) -> Option<&ToastAction> {
+        self.action.as_ref().map(|(_, action)| action)
     }
 
     fn shown_for(&self) -> Duration {

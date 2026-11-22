@@ -375,7 +375,10 @@ fn picture(
 ) -> (Response, Rect) {
     let (rect, response) = ui.allocate_exact_size(vec2(size.x, size.y + text_height(ui)), Sense::click());
     let image = Rect::from_min_size(rect.min, size);
-    image::show(ui, cache, image, request, item, image::RADIUS);
+    match item {
+        Some(item) => image::show_item(ui, cache, image, request, item, image::RADIUS),
+        None => image::show(ui, cache, image, request, None, image::RADIUS),
+    }
     // `hovered` rather than a bare rectangle test: it also needs the card to be the widget under the
     // pointer, clipped to what's visible, so a card half hidden by its shelf's edge or covered by
     // something else doesn't dim (and flicker as the two disagree from frame to frame).

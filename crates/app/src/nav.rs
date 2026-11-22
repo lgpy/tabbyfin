@@ -32,6 +32,8 @@ pub enum Route {
     Search,
     /// What's downloaded and on its way, from the account menu.
     Downloads,
+    /// What the user has watched, newest first, from the account menu.
+    History,
     Settings,
     /// One section of Settings on a page of its own: a phone's Settings is a list of them.
     SettingsSection(crate::views::settings::Section),

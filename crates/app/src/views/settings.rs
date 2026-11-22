@@ -41,19 +41,24 @@ use egui::{Align, Align2, Rect, RichText, Role, Sense, Ui, UiBuilder, WidgetInfo
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ACCOUNT_CIRCLE, ICON_CHEVRON_RIGHT, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_DOWNLOAD, ICON_HOME,
-    ICON_INFO, ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
+    ICON_INFO, ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO, ICON_VOLUME_UP,
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
-use crate::config::{self, AndroidPlayer, Config, SubtitleColor, SubtitleStyle, ThemePreference};
+use crate::config::{
+    self, AndroidPlayer, Config, SkipAction, SkipActions, SubtitleColor, SubtitleStyle, ThemePreference,
+};
 use crate::i18n::{self, tr};
+use crate::markers::SegmentKind;
 use crate::nav::{NavRequest, Route};
+use crate::playback::{Adjustments, DEFAULT_SEEK_STEP, SEEK_STEPS};
 use crate::services::AppEvent;
 use crate::task::Task;
 use crate::theme;
 use crate::theme::SPACE;
 use crate::theme::text;
 use crate::toasts::Toast;
+use crate::views::player::speed_text;
 use crate::views::{Page, PageCx};
 use crate::widgets::avatar_row::AvatarRow;
 use crate::widgets::button::{self, Focus, State};
@@ -102,6 +107,10 @@ fn subtitle_modes() -> [(SubtitleMode, String); 5] {
 
 /// Subtitle sizes offered here; the player's menu sets any size in 10 % steps.
 const SUBTITLE_SCALES: [f64; 6] = [0.75, 1., 1.25, 1.5, 1.75, 2.];
+
+/// Subtitle positions offered here, as mpv's `sub-pos`: the bottom, then higher up the picture.
+/// The player's menu sets any position in 5 % steps.
+const SUBTITLE_POSITIONS: [u8; 10] = [100, 95, 90, 85, 80, 70, 60, 50, 40, 30];
 
 /// Max streaming bitrate choices in Mbit/s; 0 is no limit.
 const BITRATES_MBPS: [i32; 10] = [0, 120, 60, 40, 20, 10, 8, 4, 2, 1];
@@ -170,6 +179,8 @@ impl Store {
 pub(crate) enum Section {
     Appearance,
     Playback,
+    /// Desktop only ([`Section::shown`]): Android's audio output is the system's.
+    Audio,
     Subtitles,
     /// Android only ([`Section::shown`]).
     Downloads,
@@ -183,9 +194,10 @@ pub(crate) enum Section {
 impl Section {
     /// In the menu's order: the device's, then the server's. Not all of them are on every
     /// platform: [`Section::shown`] has the ones this one has.
-    pub(crate) const ALL: [Section; 9] = [
+    pub(crate) const ALL: [Section; 10] = [
         Section::Appearance,
         Section::Playback,
+        Section::Audio,
         Section::Subtitles,
         Section::Downloads,
         Section::Storage,
@@ -196,17 +208,19 @@ impl Section {
     ];
 
     /// The sections this platform has, in the menu's order: *Downloads* holds only Android's
-    /// settings.
+    /// settings, and *Audio* only the desktop's.
     pub(crate) fn shown() -> impl Iterator<Item = Section> {
         Self::ALL
             .into_iter()
             .filter(|&section| section != Section::Downloads || cfg!(target_os = "android"))
+            .filter(|&section| section != Section::Audio || !cfg!(target_os = "android"))
     }
 
     fn store(self) -> Store {
         match self {
             Section::Appearance
             | Section::Playback
+            | Section::Audio
             | Section::Subtitles
             | Section::Downloads
             | Section::Storage
@@ -219,6 +233,7 @@ impl Section {
         match self {
             Section::Appearance => tr!("settings-section-appearance"),
             Section::Playback => tr!("settings-section-playback"),
+            Section::Audio => tr!("settings-section-audio"),
             Section::Subtitles => tr!("settings-section-subtitles"),
             Section::Downloads => tr!("settings-section-downloads"),
             Section::Storage => tr!("settings-section-storage"),
@@ -234,6 +249,7 @@ impl Section {
         match self {
             Section::Appearance => tr!("settings-section-appearance-summary"),
             Section::Playback => tr!("settings-section-playback-summary"),
+            Section::Audio => tr!("settings-section-audio-summary"),
             Section::Subtitles => tr!("settings-section-subtitles-summary"),
             Section::Downloads => tr!("settings-section-downloads-summary"),
             Section::Storage => tr!("settings-section-storage-summary"),
@@ -248,6 +264,7 @@ impl Section {
         match self {
             Section::Appearance => ICON_PALETTE,
             Section::Playback => ICON_PLAY_CIRCLE,
+            Section::Audio => ICON_VOLUME_UP,
             Section::Subtitles => ICON_SUBTITLES,
             Section::Downloads => ICON_DOWNLOAD,
             Section::Storage => ICON_STORAGE,
@@ -316,6 +333,16 @@ fn animations_row() -> Row {
     }
 }
 
+fn spoilers_row() -> Row {
+    Row {
+        section: Section::Appearance,
+        label: tr!("settings-spoilers"),
+        description: tr!("settings-spoilers-description"),
+        key: "hide_spoilers",
+        unset: tr!("settings-spoilers-unset"),
+    }
+}
+
 fn tracks_note_row() -> Row {
     note_row(Section::Playback, tr!("settings-tracks-note"))
 }
@@ -328,13 +355,71 @@ fn autoplay_row() -> Row {
         unset: tr!("settings-autoplay-unset"),
     }
 }
-fn skip_intro_row() -> Row {
+/// One row per kind of segment: what to do when it starts.
+fn skip_row(kind: SegmentKind) -> Row {
+    let (label, description, key, unset) = match kind {
+        SegmentKind::Intro => (
+            tr!("settings-skip-intro"),
+            tr!("settings-skip-intro-description"),
+            "skip_actions.intro",
+            tr!("settings-skip-intro-unset"),
+        ),
+        SegmentKind::Recap => (
+            tr!("settings-skip-recap"),
+            tr!("settings-skip-recap-description"),
+            "skip_actions.recap",
+            tr!("settings-skip-recap-unset"),
+        ),
+        SegmentKind::Preview => (
+            tr!("settings-skip-preview"),
+            tr!("settings-skip-preview-description"),
+            "skip_actions.preview",
+            tr!("settings-skip-preview-unset"),
+        ),
+        SegmentKind::Commercial => (
+            tr!("settings-skip-commercial"),
+            tr!("settings-skip-commercial-description"),
+            "skip_actions.commercial",
+            tr!("settings-skip-commercial-unset"),
+        ),
+        SegmentKind::Outro => (
+            tr!("settings-skip-credits"),
+            tr!("settings-skip-credits-description"),
+            "skip_actions.outro",
+            tr!("settings-skip-credits-unset"),
+        ),
+    };
     Row {
         section: Section::Playback,
-        label: tr!("settings-skip-intro"),
-        description: tr!("settings-skip-intro-description"),
-        key: "auto_skip_intro",
-        unset: tr!("settings-skip-intro-unset"),
+        label,
+        description,
+        key,
+        unset,
+    }
+}
+const SKIP_KINDS: [SegmentKind; 5] = [
+    SegmentKind::Intro,
+    SegmentKind::Recap,
+    SegmentKind::Preview,
+    SegmentKind::Commercial,
+    SegmentKind::Outro,
+];
+fn seek_step_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-seek-step"),
+        description: tr!("settings-seek-step-description"),
+        key: "seek_step",
+        unset: tr!("settings-seek-step-unset"),
+    }
+}
+fn default_speed_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-default-speed"),
+        description: tr!("settings-default-speed-description"),
+        key: "default_speed",
+        unset: tr!("settings-default-speed-unset"),
     }
 }
 fn bitrate_row() -> Row {
@@ -374,6 +459,91 @@ fn hevc_row() -> Row {
     }
 }
 
+fn audio_device_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-audio-device"),
+        description: tr!("settings-audio-device-description"),
+        key: "audio_device",
+        unset: tr!("settings-audio-device-unset"),
+    }
+}
+
+fn audio_channels_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-audio-channels"),
+        description: tr!("settings-audio-channels-description"),
+        key: "audio_channels",
+        unset: tr!("settings-audio-channels-unset"),
+    }
+}
+
+fn passthrough_ac3_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-ac3"),
+        description: tr!("settings-passthrough-ac3-description"),
+        key: "passthrough_ac3",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_eac3_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-eac3"),
+        description: tr!("settings-passthrough-eac3-description"),
+        key: "passthrough_eac3",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_dts_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-dts"),
+        description: tr!("settings-passthrough-dts-description"),
+        key: "passthrough_dts",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_dts_hd_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-dts-hd"),
+        description: tr!("settings-passthrough-dts-hd-description"),
+        key: "passthrough_dts_hd",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_truehd_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-truehd"),
+        description: tr!("settings-passthrough-truehd-description"),
+        key: "passthrough_truehd",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn audio_exclusive_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-audio-exclusive"),
+        description: tr!("settings-audio-exclusive-description"),
+        key: "audio_exclusive",
+        unset: tr!("settings-audio-exclusive-unset"),
+    }
+}
+
+fn night_mode_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-night-mode"),
+        description: tr!("settings-night-mode-description"),
+        key: "night_mode",
+        unset: tr!("settings-night-mode-unset"),
+    }
+}
+
 fn subtitles_note_row() -> Row {
     note_row(Section::Subtitles, tr!("settings-subtitles-note"))
 }
@@ -405,6 +575,16 @@ fn subtitle_size_row() -> Row {
         description: tr!("settings-subtitle-size-description"),
         key: "subtitle_scale",
         unset: tr!("settings-subtitle-size-unset"),
+    }
+}
+
+fn subtitle_position_row() -> Row {
+    Row {
+        section: Section::Subtitles,
+        label: tr!("settings-subtitle-position"),
+        description: tr!("settings-subtitle-position-description"),
+        key: "subtitle_position",
+        unset: tr!("settings-subtitle-position-unset"),
     }
 }
 
@@ -553,19 +733,36 @@ fn all_rows() -> Vec<Row> {
         theme_row(),
         text_size_row(),
         animations_row(),
+        spoilers_row(),
         language_row(),
         tracks_note_row(),
         autoplay_row(),
-        skip_intro_row(),
+        skip_row(SegmentKind::Intro),
+        skip_row(SegmentKind::Recap),
+        skip_row(SegmentKind::Preview),
+        skip_row(SegmentKind::Commercial),
+        skip_row(SegmentKind::Outro),
+        seek_step_row(),
+        default_speed_row(),
         bitrate_row(),
         cast_bitrate_row(),
         hevc_row(),
         player_row(),
+        audio_device_row(),
+        audio_channels_row(),
+        passthrough_ac3_row(),
+        passthrough_eac3_row(),
+        passthrough_dts_row(),
+        passthrough_dts_hd_row(),
+        passthrough_truehd_row(),
+        audio_exclusive_row(),
+        night_mode_row(),
         subtitles_note_row(),
         subtitle_tracks_note_row(),
         subtitle_color_row(),
         subtitle_style_row(),
         subtitle_size_row(),
+        subtitle_position_row(),
         wifi_only_row(),
         downloads_folder_row(),
         image_cache_row(),
@@ -675,6 +872,8 @@ pub struct SettingsPage {
     job: Option<Task<Job>>,
     /// Left and Right on a focused picker.
     pickers: Pickers,
+    /// The audio devices mpv found, for the Audio section's picker.
+    devices: Devices,
     /// The section the menu marks: the one at the top of the column when it was last drawn.
     section: Section,
     /// A menu entry's section, scrolled to the top when the column draws next.
@@ -693,6 +892,21 @@ pub struct SettingsPage {
     push: Option<Section>,
 }
 
+// How many times a test's page asked for the audio devices (the page asks none in tests, and
+// lists none): per thread, so tests don't count each other's.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static DEVICES_ASKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The audio devices, asked of mpv the first time the Audio section is on screen.
+enum Devices {
+    Unasked,
+    Loading(Task<player::Result<Vec<player::AudioDevice>>>),
+    /// Empty when mpv couldn't say.
+    Ready(Vec<player::AudioDevice>),
+}
+
 /// What a button on the page asked for, with how it went.
 enum Job {
     /// Cleared the image cache's folder.
@@ -707,6 +921,7 @@ impl SettingsPage {
             config: Config::load(),
             job: None,
             pickers: Pickers::default(),
+            devices: Devices::Unasked,
             section: Section::Appearance,
             scroll_to: None,
             arriving: None,
@@ -1082,6 +1297,7 @@ impl SettingsPage {
         card(ui, |ui| match section {
             Section::Appearance => self.appearance(ui, cx),
             Section::Playback => self.playback(ui, cx),
+            Section::Audio => self.audio(ui, cx),
             Section::Subtitles => self.subtitles(ui, cx),
             Section::Downloads => self.downloads(ui, cx),
             Section::Storage => self.storage(ui, cx),
@@ -1137,6 +1353,13 @@ impl SettingsPage {
             self.save_appearance(cx, |config| config.animations = edit.or_unset());
         }
 
+        let current = self.config.hide_spoilers.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, spoilers_row(), current, Some(false)) {
+            let hide = edit.or_unset();
+            self.save(|config| config.hide_spoilers = hide);
+            crate::spoilers::set(cx.ctx, hide.unwrap_or(false));
+        }
+
         // Each language by its own name; following the system says which one that is.
         let system = tr!("settings-language-system", language = i18n::Language::system().name());
         let languages: Vec<(Option<i18n::Language>, String)> = std::iter::once((None, system))
@@ -1167,9 +1390,70 @@ impl SettingsPage {
             self.save(|config| config.autoplay_next_episode = edit.or_unset());
         }
 
-        let current = self.config.auto_skip_intro.unwrap_or(false);
-        if let Some(edit) = toggle(ui, &self.search, skip_intro_row(), current, Some(false)) {
-            self.save(|config| config.auto_skip_intro = edit.or_unset());
+        let actions = [
+            (SkipAction::Ask, tr!("settings-skip-ask")),
+            (SkipAction::Skip, tr!("settings-skip-skip")),
+            (SkipAction::Off, tr!("settings-skip-off")),
+        ];
+        for (kind, id) in SKIP_KINDS.into_iter().zip([
+            "settings_skip_intro",
+            "settings_skip_recap",
+            "settings_skip_preview",
+            "settings_skip_commercial",
+            "settings_skip_outro",
+        ]) {
+            let current = self.config.skip_actions.get(kind);
+            let default = Some(SkipActions::default_for(kind));
+            let picked = self
+                .pickers
+                .choose(ui, &self.search, skip_row(kind), id, &actions, current, default);
+            if let Some(edit) = picked {
+                self.save(|config| config.skip_actions.set(kind, edit.or_unset()));
+            }
+        }
+
+        let steps: Vec<(u32, String)> = SEEK_STEPS
+            .iter()
+            .map(|&seconds| (seconds, format!("{seconds} s")))
+            .collect();
+        let current = self
+            .config
+            .seek_step
+            .filter(|s| SEEK_STEPS.contains(s))
+            .unwrap_or(DEFAULT_SEEK_STEP);
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            seek_step_row(),
+            "settings_seek_step",
+            &steps,
+            current,
+            Some(DEFAULT_SEEK_STEP),
+        );
+        if let Some(edit) = picked {
+            let seconds = edit.or_unset().filter(|&seconds| seconds != DEFAULT_SEEK_STEP);
+            self.save(|config| config.seek_step = seconds);
+            cx.services.playback.set_seek_step(seconds);
+        }
+
+        let speeds: Vec<(f64, String)> = Adjustments::SPEEDS
+            .iter()
+            .map(|&speed| (speed, speed_text(speed)))
+            .collect();
+        let current = self.config.default_speed.unwrap_or(1.);
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            default_speed_row(),
+            "settings_default_speed",
+            &speeds,
+            current,
+            Some(1.),
+        );
+        if let Some(edit) = picked {
+            let speed = edit.or_unset().filter(|&speed| speed != 1.);
+            self.save(|config| config.default_speed = speed);
+            cx.services.playback.set_default_speed(speed.unwrap_or(1.));
         }
 
         // `AUTOMATIC` measures the connection before playing instead.
@@ -1250,6 +1534,121 @@ impl SettingsPage {
         }
     }
 
+    fn audio(&mut self, ui: &mut Ui, cx: &mut PageCx) {
+        // Asked once per visit, and only when the section is on screen: the list is mpv's, which
+        // runs in a process of its own, and every section is in the one column.
+        let top = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 1.));
+        if matches!(self.devices, Devices::Unasked) && ui.is_rect_visible(top) {
+            self.devices = if cfg!(test) {
+                #[cfg(test)]
+                DEVICES_ASKED.with(|asked| asked.set(asked.get() + 1));
+                Devices::Ready(Vec::new())
+            } else {
+                Devices::Loading(Task::spawn(ui.ctx(), player::list_audio_devices()))
+            };
+        }
+        if let Devices::Loading(task) = &mut self.devices
+            && let Some(result) = task.poll()
+        {
+            self.devices = match result {
+                Ok(devices) => Devices::Ready(devices),
+                Err(err) => {
+                    tracing::warn!("couldn't list the audio devices: {err}");
+                    Devices::Ready(Vec::new())
+                }
+            };
+        }
+
+        // Automatic first, then what mpv found. A saved device that's gone stays listed, so the
+        // picker shows what's saved; playback goes to Automatic without it.
+        let saved = self.config.audio_device.clone();
+        let mut choices: Vec<(Option<&str>, String)> = vec![(None, tr!("settings-audio-device-auto"))];
+        if let Devices::Ready(devices) = &self.devices {
+            choices.extend(
+                devices
+                    .iter()
+                    .map(|device| (Some(device.name.as_str()), device.description.clone())),
+            );
+            if let Some(name) = saved.as_deref()
+                && !devices.iter().any(|device| device.name == name)
+            {
+                choices.push((Some(name), tr!("settings-audio-device-missing", name = name)));
+            }
+        } else if let Some(name) = saved.as_deref() {
+            choices.push((Some(name), name.to_owned()));
+        }
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            audio_device_row(),
+            "settings_audio_device",
+            &choices,
+            saved.as_deref(),
+            Some(None),
+        );
+        if let Some(edit) = picked {
+            let device = edit.or_unset().flatten().map(str::to_owned);
+            self.save(|config| config.audio_device = device);
+        }
+
+        let channels = [
+            (player::Channels::Auto, tr!("settings-audio-channels-auto")),
+            (player::Channels::Stereo, tr!("settings-audio-channels-stereo")),
+            (player::Channels::Surround5_1, "5.1".to_owned()),
+            (player::Channels::Surround7_1, "7.1".to_owned()),
+        ];
+        let current = self.config.audio_channels.unwrap_or_default();
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            audio_channels_row(),
+            "settings_audio_channels",
+            &channels,
+            current,
+            Some(player::Channels::Auto),
+        );
+        if let Some(edit) = picked {
+            self.save(|config| config.audio_channels = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_ac3.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_ac3_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_ac3 = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_eac3.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_eac3_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_eac3 = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_dts.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_dts_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_dts = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_dts_hd.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_dts_hd_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_dts_hd = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_truehd.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_truehd_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_truehd = edit.or_unset());
+        }
+
+        let current = self.config.audio_exclusive.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, audio_exclusive_row(), current, Some(false)) {
+            self.save(|config| config.audio_exclusive = edit.or_unset());
+        }
+
+        let current = self.config.night_mode.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, night_mode_row(), current, Some(false)) {
+            let night = edit.or_unset();
+            self.save(|config| config.night_mode = night);
+            cx.services.playback.set_night_mode(night.unwrap_or(false));
+        }
+    }
+
     fn subtitles(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         note(ui, &self.search, subtitles_note_row(), None);
         if note(ui, &self.search, subtitle_tracks_note_row(), Some(Section::Languages)) {
@@ -1303,6 +1702,27 @@ impl SettingsPage {
             let scale = edit.or_unset().unwrap_or(1.);
             self.save(|config| config.subtitle_scale = Some(scale).filter(|&scale| scale != 1.));
             cx.services.playback.set_subtitle_scale(scale);
+        }
+
+        // A position set in the player that isn't one of the steps here is listed too.
+        let current = self.config.subtitle_position.unwrap_or(Adjustments::BOTTOM);
+        let positions: Vec<(u8, String)> = subtitle_positions(current)
+            .into_iter()
+            .map(|position| (position, subtitle_position_label(position)))
+            .collect();
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            subtitle_position_row(),
+            "settings_subtitle_position",
+            &positions,
+            current,
+            Some(Adjustments::BOTTOM),
+        );
+        if let Some(edit) = picked {
+            let position = edit.or_unset().unwrap_or(Adjustments::BOTTOM);
+            self.save(|config| config.subtitle_position = Some(position).filter(|&p| p != Adjustments::BOTTOM));
+            cx.services.playback.set_subtitle_position(position);
         }
     }
 
@@ -1660,7 +2080,7 @@ impl ServerSettings {
 }
 
 /// The server's cultures as (code, name), sorted by name, one per code.
-fn language_list(cultures: Vec<Culture>) -> Vec<(String, String)> {
+pub(crate) fn language_list(cultures: Vec<Culture>) -> Vec<(String, String)> {
     let mut languages: Vec<(String, String)> = cultures
         .into_iter()
         .filter_map(|culture| {
@@ -2161,6 +2581,24 @@ fn subtitle_scales(current: f64) -> Vec<f64> {
     scales
 }
 
+/// The positions the picker offers: the steps, plus the one set in the player when it isn't one.
+fn subtitle_positions(current: u8) -> Vec<u8> {
+    let mut positions = SUBTITLE_POSITIONS.to_vec();
+    if !positions.contains(&current) {
+        positions.push(current);
+        positions.sort_by(|a, b| b.cmp(a));
+    }
+    positions
+}
+
+/// A position as the picker names it: the bottom, or how far up from it.
+fn subtitle_position_label(position: u8) -> String {
+    match Adjustments::BOTTOM.saturating_sub(position) {
+        0 => tr!("settings-subtitle-position-bottom"),
+        percent => tr!("settings-subtitle-position-raised", percent = percent),
+    }
+}
+
 /// Opens a folder in the desktop's file manager. Not the `opener` crate: it's one program per
 /// OS, and this is the only place the app opens anything on the desktop. Waits for the launcher,
 /// which exits once the file manager has the folder, so a missing one is reported.
@@ -2182,8 +2620,8 @@ mod tests {
     use crate::config::{Config, ThemePreference};
 
     use super::{
-        AUTOMATIC, BITRATES_MBPS, SUBTITLE_SCALES, Search, Section, Store, all_rows, apply_bitrate, bitrate_choice,
-        language_list, stepped, subtitle_scales, themes,
+        AUTOMATIC, BITRATES_MBPS, SUBTITLE_POSITIONS, SUBTITLE_SCALES, Search, Section, Store, all_rows, apply_bitrate,
+        bitrate_choice, language_list, stepped, subtitle_positions, subtitle_scales, themes,
     };
 
     #[test]
@@ -2237,6 +2675,12 @@ mod tests {
     }
 
     #[test]
+    fn the_players_subtitle_position_joins_the_steps() {
+        assert_eq!(subtitle_positions(100), SUBTITLE_POSITIONS.to_vec());
+        assert_eq!(subtitle_positions(75), [100, 95, 90, 85, 80, 75, 70, 60, 50, 40, 30]);
+    }
+
+    #[test]
     fn the_players_subtitle_size_joins_the_steps() {
         assert_eq!(subtitle_scales(1.), SUBTITLE_SCALES.to_vec());
         assert_eq!(subtitle_scales(1.15), [0.75, 1., 1.15, 1.25, 1.5, 1.75, 2.]);
@@ -2250,14 +2694,35 @@ mod tests {
         assert_eq!(config.theme, ThemePreference::System);
         assert_eq!(config.text_size, None); // the system's
         assert_eq!(config.animations, None); // on
+        assert_eq!(config.hide_spoilers, None); // off
         assert_eq!(config.autoplay_next_episode, None); // on
-        assert_eq!(config.auto_skip_intro, None); // off
+        assert!(config.skip_actions.is_default()); // ask, credits off
+        assert_eq!(config.seek_step, None); // 10 s
+        assert_eq!(config.default_speed, None); // 1×
         assert_eq!(config.prefer_hevc, None); // off
         assert_eq!(config.check_for_updates, None); // on
         assert_eq!(config.subtitle_color, None); // white
         assert_eq!(config.subtitle_style, None); // outline
         assert_eq!(config.subtitle_scale, None); // 100 %
+        assert_eq!(config.subtitle_position, None); // the bottom
         assert_eq!(bitrate_choice(&config), 0); // no limit
+    }
+
+    /// The player preferences go to the config file and come back as they were saved.
+    #[test]
+    fn the_seek_step_and_default_speed_are_saved() {
+        use crate::playback::{Adjustments, DEFAULT_SEEK_STEP, SEEK_STEPS};
+
+        assert!(SEEK_STEPS.contains(&DEFAULT_SEEK_STEP));
+        assert!(Adjustments::SPEEDS.contains(&1.));
+        let config = Config {
+            seek_step: Some(30),
+            default_speed: Some(1.5),
+            ..Default::default()
+        };
+        let text = toml::to_string(&config).unwrap();
+        let read: Config = toml::from_str(&text).unwrap();
+        assert_eq!((read.seek_step, read.default_speed), (Some(30), Some(1.5)));
     }
 
     fn search(text: &str) -> Search {
@@ -2290,10 +2755,12 @@ mod tests {
             [Section::Playback, Section::Subtitles, Section::Languages]
         );
         assert_eq!(found("bitrate"), [Section::Playback]);
+        assert_eq!(found("night mode"), [Section::Audio]);
+        assert_eq!(found("passthrough"), [Section::Audio]);
         assert_eq!(found("subtitle mode"), [Section::Languages]);
         assert_eq!(found("hevc transcodes"), [Section::Playback]);
         // A config key, and a server field.
-        assert_eq!(found("auto_skip_intro"), [Section::Playback]);
+        assert_eq!(found("skip_actions.intro"), [Section::Playback]);
         assert_eq!(found("hideplayedinlatest"), [Section::Home]);
         assert!(found("nothing like this").is_empty());
     }

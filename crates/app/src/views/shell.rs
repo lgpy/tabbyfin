@@ -60,7 +60,7 @@ use crate::theme::{self, over_video, text};
 use crate::toasts::{Toast, ToastAction};
 use crate::update::{self, Update};
 use crate::views::casting::{self, CastEntry, GroupAction, StopCastFirst};
-use crate::views::{self, Page, PageCx, UnderBar, player};
+use crate::views::{self, Page, PageCx, UnderBar, dialogs, player};
 use crate::widgets::avatar_row::{self, AvatarRow};
 use crate::widgets::button::{self, Focus, State};
 use crate::widgets::focus::{self, Place};
@@ -203,6 +203,17 @@ fn bar_step(items: &[BarItem], current: Option<BarItem>, step: i32) -> Option<Ba
     items.get((index + step).clamp(0, last) as usize).copied()
 }
 
+/// What an account-menu entry after the saved accounts does.
+#[derive(Clone, Copy)]
+enum AccountAction {
+    Downloads,
+    History,
+    AuthoriseDevice,
+    AddAccount,
+    Settings,
+    SignOut,
+}
+
 pub struct Shell {
     /// Never empty: Home is at the bottom, or Downloads offline.
     stack: Vec<StackEntry>,
@@ -246,6 +257,12 @@ pub struct Shell {
     cast_highlight: Option<CastEntry>,
     /// The question before joining a SyncPlay group while casting.
     stop_cast_first: Option<StopCastFirst>,
+    /// Whether the server has Quick Connect on, asked once when the shell opens: the account
+    /// menu offers *Authorise a device…* only when it does. `None` while it's unknown.
+    quick_connect: Option<bool>,
+    quick_connect_check: Option<Task<bool>>,
+    /// The *Authorise a device* dialog, while it's open.
+    authorise: Option<dialogs::AuthoriseDevice>,
     /// The app icon at the start of the bar.
     logo: Option<egui::TextureHandle>,
     /// The compact layout's bottom bar, hidden while the page scrolls down.
@@ -343,6 +360,15 @@ impl Shell {
             syncplay_scroll: false,
             cast_highlight: None,
             stop_cast_first: None,
+            quick_connect: None,
+            quick_connect_check: online.then(|| {
+                let client = cx.services.session.client.clone();
+                Task::spawn(
+                    cx.ctx,
+                    async move { client.quick_connect_enabled().await.unwrap_or(false) },
+                )
+            }),
+            authorise: None,
             logo: load_logo(cx.ctx),
             bottom_bar: BottomBar::default(),
         };
@@ -352,6 +378,12 @@ impl Shell {
         #[cfg(debug_assertions)]
         shell.debug_start(cx);
         shell
+    }
+
+    /// Whether the server has said if Quick Connect is on yet.
+    #[cfg(test)]
+    pub(crate) fn quick_connect_known(&self) -> bool {
+        self.quick_connect.is_some()
     }
 
     /// The scopes whose keys the app takes from egui (`keys.rs`): the top page's, then the
@@ -910,6 +942,15 @@ impl Shell {
         {
             self.stop_cast_first = None;
         }
+        if let Some(result) = self.quick_connect_check.as_mut().and_then(Task::poll) {
+            self.quick_connect_check = None;
+            self.quick_connect = Some(result);
+        }
+        if let Some(dialog) = &mut self.authorise
+            && !dialog.show(cx)
+        {
+            self.authorise = None;
+        }
         if !casting::has_bar(cx.services) {
             return;
         }
@@ -1413,11 +1454,25 @@ impl Shell {
                     .checked(account.credential_account() == current)
             })
             .collect();
+        // What follows the accounts, in order; the menu returns an index into the whole list.
+        let mut actions = vec![AccountAction::Downloads];
         entries.push(Entry::new(tr!("shell-downloads")).checked(false).separated());
+        // Both need the server: Downloads is what an offline session has.
+        if self.online {
+            actions.push(AccountAction::History);
+            entries.push(Entry::new(tr!("shell-history")).checked(false));
+        }
+        if self.online && self.quick_connect == Some(true) {
+            actions.push(AccountAction::AuthoriseDevice);
+            entries.push(Entry::new(tr!("shell-authorise-device")).checked(false));
+        }
+        actions.push(AccountAction::AddAccount);
         entries.push(Entry::new(tr!("shell-add-account")).checked(false).separated());
         if layout::compact(ui.ctx()) {
+            actions.push(AccountAction::Settings);
             entries.push(Entry::new(tr!("shell-settings")).checked(false).separated());
         }
+        actions.push(AccountAction::SignOut);
         entries.push(Entry::new(tr!("shell-sign-out")).checked(false));
         let shown = PopupMenu::new(id)
             .hung()
@@ -1428,15 +1483,13 @@ impl Shell {
             self.focus_search(cx);
         }
         if let Some(index) = shown.chosen {
-            self.choose_account(index, cx);
+            self.choose_account(index, &actions, cx);
         }
     }
 
-    /// Does what an account-menu entry says: switch to that account, open Downloads, add an
-    /// account, open Settings or sign out. The app carries the account events out after the
-    /// frame.
-    fn choose_account(&mut self, index: usize, cx: &mut PageCx) {
-        let actions = self.accounts.len();
+    /// Does what an account-menu entry says: switch to that account, or one of `actions`, which
+    /// follow the accounts. The app carries the account events out after the frame.
+    fn choose_account(&mut self, index: usize, actions: &[AccountAction], cx: &mut PageCx) {
         // A page already on the stack isn't opened twice.
         let mut open = |route: Route, shell: &mut Self| {
             if !shell.stack.iter().any(|entry| entry.route == route) {
@@ -1444,11 +1497,8 @@ impl Shell {
                 cx.nav.push(NavRequest::Push(route));
             }
         };
-        if index == actions {
-            open(Route::Downloads, self);
-        } else if layout::compact(cx.ctx) && index == actions + 2 {
-            open(Route::Settings, self);
-        } else if index < actions {
+        let accounts = self.accounts.len();
+        if index < accounts {
             let account = self.accounts[index].clone();
             // Choosing the account already signed in just closes the menu: switching to it
             // would end the session and lose the page stack. The keyboard stays in the bar,
@@ -1457,13 +1507,23 @@ impl Shell {
                 self.bar_key = None;
                 cx.services.events.push(AppEvent::SwitchAccount(account));
             }
-        } else {
+            return;
+        }
+        match actions[index - accounts] {
+            AccountAction::Downloads => open(Route::Downloads, self),
+            AccountAction::History => open(Route::History, self),
+            AccountAction::Settings => open(Route::Settings, self),
+            AccountAction::AuthoriseDevice => {
+                self.bar_key = None;
+                self.authorise = Some(dialogs::AuthoriseDevice::new());
+            }
             // The screen changes: the bar's keyboard goes with it.
-            self.bar_key = None;
-            if index == actions + 1 {
+            AccountAction::AddAccount => {
+                self.bar_key = None;
                 cx.services.events.push(AppEvent::AddAccount);
-            } else {
-                // Sign out, the last entry.
+            }
+            AccountAction::SignOut => {
+                self.bar_key = None;
                 cx.services.events.push(AppEvent::SignOut);
             }
         }

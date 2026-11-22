@@ -162,6 +162,38 @@ fn the_menu_scrolls_to_a_section() {
     });
 }
 
+/// The audio devices are asked of mpv (a player host process) once the Audio section is on
+/// screen, not when the page opens, and once per visit however the page is scrolled after.
+#[test]
+fn the_audio_devices_are_asked_once_the_audio_section_is_on_screen() {
+    use crate::views::settings::DEVICES_ASKED;
+
+    let _config = ConfigDir::new("settings-audio-devices");
+    let server = FixtureServer::start();
+    serve_the_users_settings(&server);
+    DEVICES_ASKED.with(|asked| asked.set(0));
+    let asked = || DEVICES_ASKED.with(std::cell::Cell::get);
+    let mut ui = settings_harness(&server);
+    for _ in 0..5 {
+        ui.step();
+    }
+    let (audio_top, _) = section_state(ui.harness(), "Audio");
+    assert!(audio_top > 720., "Audio starts below the window: {audio_top}");
+    assert_eq!(asked(), 0, "opening Settings doesn't ask");
+
+    click_menu_entry(&mut ui, "Audio");
+    ui.step_until("Audio at the top", |harness| section_state(harness, "Audio").0 < 80.);
+    assert_eq!(asked(), 1, "the Audio section on screen asks");
+
+    click_menu_entry(&mut ui, "Appearance");
+    ui.step_until("Appearance at the top", |harness| {
+        section_state(harness, "Appearance").0 < 80.
+    });
+    click_menu_entry(&mut ui, "Audio");
+    ui.step_until("Audio at the top", |harness| section_state(harness, "Audio").0 < 80.);
+    assert_eq!(asked(), 1, "once per visit");
+}
+
 /// A setting off its default has an undo button, and the button leaves its key out of the file
 /// again, so the default applies; a setting on its default has none.
 #[test]
@@ -295,4 +327,56 @@ fn enter_opens_a_pickers_list_and_the_keyboard_picks_from_it() {
     ui.step();
     assert_eq!(Config::load().theme, ThemePreference::Light);
     assert!(ui.harness().query_by_label("Dark").is_none(), "the list closed");
+}
+
+/// Spoiler protection is off by default, and its switch saves and applies at once to the
+/// widgets that draw episodes (`spoilers`).
+#[test]
+fn the_spoiler_protection_switch_saves_and_applies() {
+    let _config = ConfigDir::new("settings-spoilers");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    let episode: jellyfin::models::BaseItemDto = serde_json::from_value(serde_json::json!({
+        "Id": "e", "Name": "e", "Type": "Episode",
+        "UserData": { "Played": false, "PlaybackPositionTicks": 0 },
+    }))
+    .expect("an episode");
+    let ctx = ui.harness().ctx.clone();
+    assert!(!crate::spoilers::hides(&ctx, &episode));
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Spoiler protection");
+    assert_eq!(
+        switch.accesskit_node().toggled(),
+        Some(Toggled::False),
+        "off by default"
+    );
+    switch.click();
+    ui.step();
+    assert_eq!(Config::load().hide_spoilers, Some(true));
+    assert!(crate::spoilers::hides(&ctx, &episode));
+}
+
+/// The subtitle position is a picker beside the size; stepping it saves mpv's `sub-pos` to the
+/// config, where the bottom (its default) is the key's absence, and the undo button puts it back.
+#[test]
+fn the_subtitle_position_saves_to_the_config() {
+    let _config = ConfigDir::new("settings-sub-pos");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    // The word is in this row's description only among the device's settings.
+    ui.search("how high");
+    ui.step_until("the position row", |harness| {
+        harness.query_all_by_label("Position").next().is_some() && harness.query_all_by_label("Theme").next().is_none()
+    });
+    tab_past_the_menu(&mut ui);
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().subtitle_position, Some(95));
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().subtitle_position, Some(90));
+    ui.press(Key::ArrowLeft);
+    ui.press(Key::ArrowLeft);
+    assert_eq!(Config::load().subtitle_position, None, "the bottom is the default");
 }

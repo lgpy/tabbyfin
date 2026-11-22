@@ -8,6 +8,8 @@ use anyhow::Context;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::markers::SegmentKind;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     /// Generated once per install. Jellyfin ties sessions to it.
@@ -45,6 +47,11 @@ pub struct Config {
     /// means 1.0.
     #[serde(default)]
     pub subtitle_scale: Option<f64>,
+    /// Where subtitles sit, as mpv's `sub-pos`: a percentage of the picture's height from the
+    /// top, so 100 is the bottom and less is higher. `None` means 100. Set in Settings and in
+    /// the player's menu, like the size.
+    #[serde(default)]
+    pub subtitle_position: Option<u8>,
     /// The player on Android: Media3 or mpv. `None` means Media3. mpv everywhere else.
     #[serde(default)]
     pub android_player: Option<AndroidPlayer>,
@@ -70,15 +77,54 @@ pub struct Config {
     /// to the receiver, which measures the connection itself.
     #[serde(default)]
     pub cast_max_bitrate: Option<u64>,
+    /// The audio output's mpv device name (`audio-device`). `None` is automatic. A device
+    /// that's gone plays through the automatic one.
+    #[serde(default)]
+    pub audio_device: Option<String>,
+    /// The channel layout sent to the device. `None` is automatic (mpv's `auto-safe`).
+    #[serde(default)]
+    pub audio_channels: Option<player::Channels>,
+    /// Formats passed through to a receiver undecoded. `None` means no, for each.
+    #[serde(default)]
+    pub passthrough_ac3: Option<bool>,
+    #[serde(default)]
+    pub passthrough_eac3: Option<bool>,
+    #[serde(default)]
+    pub passthrough_dts: Option<bool>,
+    #[serde(default)]
+    pub passthrough_dts_hd: Option<bool>,
+    #[serde(default)]
+    pub passthrough_truehd: Option<bool>,
+    /// Exclusive access to the audio device, where the output has such a mode. `None` means no.
+    #[serde(default)]
+    pub audio_exclusive: Option<bool>,
+    /// Compress loud scenes and lift quiet ones; the player's menu changes it per session.
+    /// `None` means off.
+    #[serde(default)]
+    pub night_mode: Option<bool>,
     /// Play the next episode when one ends. `None` means yes.
     #[serde(default)]
     pub autoplay_next_episode: Option<bool>,
-    /// Skip intros and recaps without asking. `None` means no.
+    /// Seconds a seek key, skip button or double tap jumps: 5, 10, 15 or 30. `None` means 10.
     #[serde(default)]
+    pub seek_step: Option<u32>,
+    /// The speed playback starts at, one of the player menu's. `None` means 1.0.
+    #[serde(default)]
+    pub default_speed: Option<f64>,
+    /// The old "skip intros and recaps automatically" switch. Only read: [`Config::load`] turns
+    /// it into [`Config::skip_actions`] and it's never written back.
+    #[serde(default, skip_serializing)]
     pub auto_skip_intro: Option<bool>,
+    /// What the player does at each kind of segment (intro, credits…).
+    #[serde(default, skip_serializing_if = "SkipActions::is_default")]
+    pub skip_actions: SkipActions,
     /// Animations, smooth scrolling included. `None` means on.
     #[serde(default)]
     pub animations: Option<bool>,
+    /// Unwatched episodes show a blurred picture and no summary in lists (`spoilers.rs`).
+    /// `None` means off.
+    #[serde(default)]
+    pub hide_spoilers: Option<bool>,
     /// The interface's language. `None` follows the system's (`i18n.rs`).
     #[serde(default)]
     pub language: Option<crate::i18n::Language>,
@@ -127,6 +173,80 @@ pub enum SubtitleStyle {
     Outline,
     /// A translucent dark box behind the text.
     Box,
+}
+
+/// What the player does when a segment starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkipAction {
+    /// Offer a button to skip it.
+    Ask,
+    /// Skip it as it starts, with a notice that can undo it.
+    Skip,
+    /// Leave it alone.
+    Off,
+}
+
+/// The [`SkipAction`] for each kind of segment; `None` means the kind's default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkipActions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intro: Option<SkipAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recap: Option<SkipAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<SkipAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commercial: Option<SkipAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outro: Option<SkipAction>,
+}
+
+impl SkipActions {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// What to do at a `kind` segment. Credits default to Off: the up-next card is what
+    /// they offer, not a skip button.
+    pub fn get(&self, kind: SegmentKind) -> SkipAction {
+        self.setting(kind).unwrap_or_else(|| Self::default_for(kind))
+    }
+
+    pub fn default_for(kind: SegmentKind) -> SkipAction {
+        match kind {
+            SegmentKind::Outro => SkipAction::Off,
+            _ => SkipAction::Ask,
+        }
+    }
+
+    pub fn setting(&self, kind: SegmentKind) -> Option<SkipAction> {
+        *self.slot_ref(kind)
+    }
+
+    pub fn set(&mut self, kind: SegmentKind, action: Option<SkipAction>) {
+        *self.slot(kind) = action;
+    }
+
+    fn slot_ref(&self, kind: SegmentKind) -> &Option<SkipAction> {
+        match kind {
+            SegmentKind::Intro => &self.intro,
+            SegmentKind::Recap => &self.recap,
+            SegmentKind::Preview => &self.preview,
+            SegmentKind::Commercial => &self.commercial,
+            SegmentKind::Outro => &self.outro,
+        }
+    }
+
+    fn slot(&mut self, kind: SegmentKind) -> &mut Option<SkipAction> {
+        match kind {
+            SegmentKind::Intro => &mut self.intro,
+            SegmentKind::Recap => &mut self.recap,
+            SegmentKind::Preview => &mut self.preview,
+            SegmentKind::Commercial => &mut self.commercial,
+            SegmentKind::Outro => &mut self.outro,
+        }
+    }
 }
 
 /// The player on Android (docs/android.md, *Decision*).
@@ -326,6 +446,24 @@ impl Config {
         cfg!(target_os = "android") && self.download_wifi_only.unwrap_or(true)
     }
 
+    /// The audio output's settings for a player.
+    pub fn audio_settings(&self) -> player::AudioSettings {
+        let on = |setting: Option<bool>| setting.unwrap_or(false);
+        player::AudioSettings {
+            device: self.audio_device.clone(),
+            channels: self.audio_channels.unwrap_or_default(),
+            passthrough: player::Passthrough {
+                ac3: on(self.passthrough_ac3),
+                eac3: on(self.passthrough_eac3),
+                dts: on(self.passthrough_dts),
+                dts_hd: on(self.passthrough_dts_hd),
+                truehd: on(self.passthrough_truehd),
+            },
+            exclusive: on(self.audio_exclusive),
+            night_mode: on(self.night_mode),
+        }
+    }
+
     /// Loads the config, creating it (with a fresh device id) if missing or unreadable.
     pub fn load() -> Self {
         let mut config = match std::fs::read_to_string(path()) {
@@ -348,6 +486,7 @@ impl Config {
             Err(_) => Config::default(),
         };
         config.list_current_account();
+        config.upgrade_skip_actions();
         // The views older versions saved keep their one genre in `genre`, which is never written
         // back out: upgrade them here, before anything saves the config again (the restore, the
         // window's placement and the library pages all save it).
@@ -361,6 +500,18 @@ impl Config {
             }
         }
         config
+    }
+
+    /// The old switch for skipping intros and recaps automatically becomes those two kinds'
+    /// action, unless they were set already.
+    fn upgrade_skip_actions(&mut self) {
+        if self.auto_skip_intro.take() == Some(true) {
+            for kind in [SegmentKind::Intro, SegmentKind::Recap] {
+                if self.skip_actions.setting(kind).is_none() {
+                    self.skip_actions.set(kind, Some(SkipAction::Skip));
+                }
+            }
+        }
     }
 
     /// Configs from before multiple accounts have only the current one; it joins the list.
@@ -405,7 +556,49 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, LibraryView, SavedServer};
+    use super::{Config, LibraryView, SavedServer, SkipAction};
+    use crate::markers::SegmentKind;
+
+    #[test]
+    fn the_old_auto_skip_switch_becomes_the_intro_and_recap_actions() {
+        let mut on: Config = toml::from_str(
+            "device_id = \"d\"
+auto_skip_intro = true
+",
+        )
+        .expect("parses");
+        on.upgrade_skip_actions();
+        assert_eq!(on.skip_actions.get(SegmentKind::Intro), SkipAction::Skip);
+        assert_eq!(on.skip_actions.get(SegmentKind::Recap), SkipAction::Skip);
+        assert_eq!(on.skip_actions.get(SegmentKind::Preview), SkipAction::Ask);
+        assert_eq!(on.skip_actions.get(SegmentKind::Outro), SkipAction::Off);
+        // Never written back, so it can't override a later choice.
+        let saved = toml::to_string(&on).expect("serializes");
+        assert!(!saved.contains("auto_skip_intro"), "{saved}");
+        assert!(saved.contains("intro = \"skip\""), "{saved}");
+
+        let mut off: Config = toml::from_str(
+            "device_id = \"d\"
+auto_skip_intro = false
+",
+        )
+        .expect("parses");
+        off.upgrade_skip_actions();
+        assert!(off.skip_actions.is_default());
+
+        // A choice made since wins over the old switch.
+        let mut both: Config = toml::from_str(
+            "device_id = \"d\"
+auto_skip_intro = true
+[skip_actions]
+intro = \"off\"
+",
+        )
+        .expect("parses");
+        both.upgrade_skip_actions();
+        assert_eq!(both.skip_actions.get(SegmentKind::Intro), SkipAction::Off);
+        assert_eq!(both.skip_actions.get(SegmentKind::Recap), SkipAction::Skip);
+    }
 
     #[test]
     fn a_library_view_with_one_genre_upgrades_to_the_list() {
@@ -438,6 +631,38 @@ mod tests {
         config.list_current_account();
         config.list_current_account();
         assert_eq!(config.accounts, [account("s1", "u1")]);
+    }
+
+    #[test]
+    fn a_config_from_before_the_audio_settings_plays_as_mpv_does() {
+        let config: Config = toml::from_str(
+            "device_id = \"d\"
+volume = 80.0
+",
+        )
+        .expect("parses");
+        assert_eq!(config.audio_settings(), player::AudioSettings::default());
+    }
+
+    #[test]
+    fn the_audio_settings_are_saved_and_read_back() {
+        let config = Config {
+            audio_device: Some("wasapi/{abc}".into()),
+            audio_channels: Some(player::Channels::Surround5_1),
+            passthrough_eac3: Some(true),
+            passthrough_truehd: Some(true),
+            audio_exclusive: Some(true),
+            night_mode: Some(true),
+            ..Default::default()
+        };
+        let saved = toml::to_string(&config).expect("serializes");
+        assert!(saved.contains("audio_channels = \"5.1\""), "{saved}");
+        let read: Config = toml::from_str(&saved).expect("parses");
+        let settings = read.audio_settings();
+        assert_eq!(settings.device.as_deref(), Some("wasapi/{abc}"));
+        assert_eq!(settings.channels, player::Channels::Surround5_1);
+        assert_eq!(settings.passthrough.mpv(), "eac3,truehd");
+        assert!(settings.exclusive && settings.night_mode);
     }
 
     #[test]

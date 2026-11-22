@@ -290,6 +290,20 @@ impl SyncPlay {
         self.call(move |client| async move { client.syncplay_set_shuffle(mode).await });
     }
 
+    /// The group's repeat mode.
+    pub fn repeat_mode(&self) -> RepeatMode {
+        self.queue.as_ref().map_or(RepeatMode::RepeatNone, |q| q.repeat_mode)
+    }
+
+    pub fn set_repeat(&self, mode: RepeatMode) {
+        self.call(move |client| async move { client.syncplay_set_repeat(mode).await });
+    }
+
+    pub fn set_shuffle(&self, on: bool) {
+        let mode = if on { ShuffleMode::Shuffle } else { ShuffleMode::Sorted };
+        self.call(move |client| async move { client.syncplay_set_shuffle(mode).await });
+    }
+
     /// None, all, one.
     pub fn cycle_repeat(&self) {
         let mode = self
@@ -579,12 +593,15 @@ impl Services {
                 self.toast(Toast::info(tr!("syncplay-joined", group = group.group_name.clone())));
                 self.syncplay.group = Some(group);
                 self.syncplay.start_clock();
+                // The group's queue is what plays now, not the local one's history.
+                self.refresh_next();
             }
             GroupUpdate::GroupLeft | GroupUpdate::NotInGroup => {
                 if let Some(group) = self.syncplay.group.take() {
                     self.toast(Toast::info(tr!("syncplay-left", group = group.group_name)));
                 }
                 self.leave_group_playback();
+                self.refresh_next();
             }
             GroupUpdate::GroupDoesNotExist => {
                 self.toast(Toast::info(tr!("syncplay-gone")));

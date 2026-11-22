@@ -5,7 +5,7 @@ use url::Url;
 
 use crate::client::Query;
 use crate::models::{MediaSourceInfo, MediaStream};
-use crate::{Client, Result, Ticks};
+use crate::{Client, RepeatMode, Result, Ticks};
 
 #[derive(Debug, Clone, Default)]
 pub struct PlaybackInfoRequest {
@@ -19,6 +19,10 @@ pub struct PlaybackInfoRequest {
     /// bandwidth. Only used when the server allows HEVC encoding, which is off by default
     /// because it costs the server much more.
     pub prefer_hevc: bool,
+    /// The player passes E-AC-3 through to a receiver: a transcode keeps that audio as it is
+    /// instead of converting it to AC-3 (a direct play never touches the audio). DTS and TrueHD
+    /// can't ride in the HLS stream a transcode makes, so those are converted whatever this is.
+    pub passthrough_eac3: bool,
 }
 
 /// No limit: high enough that the server never transcodes for bitrate.
@@ -53,6 +57,14 @@ pub struct PlaybackInfoResponse {
     pub error_code: Option<String>,
 }
 
+/// The order a client plays its queue in, for progress reports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub enum PlaybackOrder {
+    #[default]
+    Default,
+    Shuffle,
+}
+
 /// Progress for the `/Sessions/Playing*` endpoints.
 #[derive(Debug, Clone, Default)]
 pub struct PlaybackReport {
@@ -68,6 +80,9 @@ pub struct PlaybackReport {
     pub volume_level: i32,
     /// Whether the player is muted.
     pub is_muted: bool,
+    /// What the client's queue does at the end of an item, for the dashboard's remote.
+    pub repeat_mode: RepeatMode,
+    pub playback_order: PlaybackOrder,
 }
 
 #[derive(Serialize)]
@@ -87,6 +102,8 @@ struct ProgressBody<'a> {
     subtitle_stream_index: Option<i32>,
     volume_level: i32,
     is_muted: bool,
+    repeat_mode: RepeatMode,
+    playback_order: PlaybackOrder,
 }
 
 /// The stop endpoint's body. The server's `PlaybackStopInfo` has no volume or mute fields,
@@ -115,6 +132,8 @@ impl PlaybackReport {
             subtitle_stream_index: self.subtitle_stream_index,
             volume_level: self.volume_level,
             is_muted: self.is_muted,
+            repeat_mode: self.repeat_mode,
+            playback_order: self.playback_order,
         }
     }
 }
@@ -123,7 +142,7 @@ impl PlaybackReport {
 /// codec. The server only transcodes (to H.264/AAC over HLS) when it won't direct play, e.g.
 /// above `max_bitrate`. External text subtitles are delivered as files; anything else stays
 /// embedded (or is burned into a transcode).
-fn device_profile(max_bitrate: u64, prefer_hevc: bool) -> serde_json::Value {
+fn device_profile(max_bitrate: u64, prefer_hevc: bool, passthrough_eac3: bool) -> serde_json::Value {
     let external = ["srt", "subrip", "ass", "ssa", "vtt", "webvtt", "sub", "smi", "ttml"];
     let mut subtitle_profiles: Vec<serde_json::Value> = external
         .iter()
@@ -153,7 +172,7 @@ fn device_profile(max_bitrate: u64, prefer_hevc: bool) -> serde_json::Value {
                 // (listed second) when it isn't allowed to encode HEVC.
                 "Container": if prefer_hevc { "mp4" } else { "ts" },
                 "VideoCodec": if prefer_hevc { "hevc,h264" } else { "h264" },
-                "AudioCodec": "aac,mp3,ac3",
+                "AudioCodec": if passthrough_eac3 { "aac,mp3,ac3,eac3" } else { "aac,mp3,ac3" },
                 "MaxAudioChannels": "6",
                 "BreakOnNonKeyFrames": true,
             },
@@ -193,7 +212,7 @@ impl Client {
             enable_direct_play: true,
             enable_direct_stream: true,
             enable_transcoding: true,
-            device_profile: device_profile(max_bitrate, req.prefer_hevc),
+            device_profile: device_profile(max_bitrate, req.prefer_hevc, req.passthrough_eac3),
         };
         self.post(&format!("/Items/{item_id}/PlaybackInfo"), &Query::new(), Some(&body))
             .await
@@ -295,16 +314,28 @@ impl Client {
 mod tests {
     use serde_json::json;
 
-    use super::{PlayMethod, PlaybackReport, device_profile};
+    use super::{PlayMethod, PlaybackOrder, PlaybackReport, device_profile};
+    use crate::RepeatMode;
 
     #[test]
     fn hevc_transcodes_use_fragmented_mp4() {
-        let profile = &device_profile(8_000_000, true)["TranscodingProfiles"][0];
+        let profile = &device_profile(8_000_000, true, false)["TranscodingProfiles"][0];
         assert_eq!(profile["VideoCodec"], "hevc,h264");
         assert_eq!(profile["Container"], "mp4");
-        let profile = &device_profile(8_000_000, false)["TranscodingProfiles"][0];
+        let profile = &device_profile(8_000_000, false, false)["TranscodingProfiles"][0];
         assert_eq!(profile["VideoCodec"], "h264");
         assert_eq!(profile["Container"], "ts");
+    }
+
+    /// Direct play allows every audio codec, so passthrough formats are never converted there;
+    /// a transcode keeps E-AC-3 only when it's passed through.
+    #[test]
+    fn passthrough_keeps_eac3_in_transcodes() {
+        let profile = device_profile(8_000_000, false, false);
+        assert_eq!(profile["TranscodingProfiles"][0]["AudioCodec"], "aac,mp3,ac3");
+        assert!(profile["DirectPlayProfiles"][0].get("AudioCodec").is_none());
+        let profile = device_profile(8_000_000, false, true);
+        assert_eq!(profile["TranscodingProfiles"][0]["AudioCodec"], "aac,mp3,ac3,eac3");
     }
 
     /// The bodies the server actually receives, as JSON. `PlaybackStartInfo` and
@@ -321,5 +352,21 @@ mod tests {
         let body = serde_json::to_value(report.progress_body()).expect("serializes");
         assert_eq!(body["VolumeLevel"], json!(55));
         assert_eq!(body["IsMuted"], json!(true));
+    }
+
+    #[test]
+    fn progress_carries_the_queues_modes() {
+        let body = serde_json::to_value(PlaybackReport::default().progress_body()).expect("serializes");
+        assert_eq!(body["RepeatMode"], json!("RepeatNone"));
+        assert_eq!(body["PlaybackOrder"], json!("Default"));
+
+        let report = PlaybackReport {
+            repeat_mode: RepeatMode::RepeatOne,
+            playback_order: PlaybackOrder::Shuffle,
+            ..Default::default()
+        };
+        let body = serde_json::to_value(report.progress_body()).expect("serializes");
+        assert_eq!(body["RepeatMode"], json!("RepeatOne"));
+        assert_eq!(body["PlaybackOrder"], json!("Shuffle"));
     }
 }

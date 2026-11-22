@@ -265,8 +265,13 @@ fn row(
     let selected = cursor.is_selected(section, index);
     let phone = !playlist && crate::layout::compact(ui.ctx());
     let (heading, detail) = if phone { phone_row_text(item) } else { row_text(item) };
+    // An unwatched episode's summary waits behind spoiler protection, as its picture does.
+    let overview = item
+        .overview
+        .as_deref()
+        .filter(|_| !crate::spoilers::hides(ui.ctx(), item));
     let mut row = MediaRow::new(item, landscape_image(item), &heading, &detail)
-        .overview(item.overview.as_deref())
+        .overview(overview)
         .played(is_played(item))
         .highlighted(selected)
         .compact(!playlist)
@@ -299,8 +304,12 @@ fn row(
     } else if response.row.clicked() {
         asked.open = Some(Route::for_item(item));
     }
-    if let Some(action) = menu::item_menu(&response.row, item, downloads) {
-        asked.menu = Some((action, item.clone()));
+    if let Some(action) = menu::item_menu_in(&response.row, item, downloads, true) {
+        if matches!(action, menu::MenuAction::PlayFromHere) {
+            asked.play_from_here = Some(items[index..].to_vec());
+        } else {
+            asked.menu = Some((action, item.clone()));
+        }
     }
 }
 

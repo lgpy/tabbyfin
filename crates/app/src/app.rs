@@ -151,6 +151,10 @@ pub struct App {
     focused: bool,
     /// That read, while it runs.
     text_size_check: Option<Task<f32>>,
+    /// The display kept awake, the system's media controls and the window's title while
+    /// something plays (`desktop/`). Not on Android, which has its own.
+    #[cfg(not(target_os = "android"))]
+    desktop: crate::desktop::Desktop,
     #[cfg(debug_assertions)]
     debug_keys: Option<crate::debug::KeyScript>,
     /// Whether the pass before the current one ran [`Self::ui`] (eframe also runs logic-only
@@ -201,6 +205,8 @@ impl App {
             // the system's text size, so the first focused frame isn't a reason for another.
             focused: true,
             text_size_check: None,
+            #[cfg(not(target_os = "android"))]
+            desktop: crate::desktop::Desktop::new(ctx),
             #[cfg(debug_assertions)]
             debug_keys: crate::debug::KeyScript::from_env(),
             #[cfg(debug_assertions)]
@@ -760,6 +766,16 @@ impl eframe::App for App {
             Some(Screen::SignIn(login)) => login.tick(ctx),
             Some(Screen::Restoring { .. }) | None => {}
         }
+        // What the OS is told about playback, and what it asks (media keys), follow the
+        // signed-in session, whatever screen is up.
+        #[cfg(not(target_os = "android"))]
+        {
+            let services = match self.screen.as_mut() {
+                Some(Screen::SignedIn(signed_in)) => Some(&mut signed_in.services),
+                _ => None,
+            };
+            self.desktop.update(ctx, frame, services);
+        }
         // The volume keys the phone's activity took for the TV while casting arrive as steps
         // (`android.rs`): it answers the key before this frame, so they wait for it.
         #[cfg(target_os = "android")]
@@ -876,12 +892,23 @@ impl eframe::App for App {
         if let Some(action) = self.toasts.show(&ctx) {
             match action {
                 ToastAction::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
+                ToastAction::RestoreResume {
+                    item_id,
+                    name,
+                    position,
+                } => {
+                    if let Some(Screen::SignedIn(signed_in)) = &mut self.screen {
+                        signed_in.services.restore_resume(item_id, name, position);
+                    }
+                }
             }
         }
     }
 
     fn on_exit(&mut self) {
         self.placement.save_now();
+        #[cfg(not(target_os = "android"))]
+        self.desktop.shut_down();
         // Ending a session drops its services, which stops playback in the background; quitting
         // has to wait for that, for the signed-in session and a parked one alike.
         let current = match self.screen.as_mut() {

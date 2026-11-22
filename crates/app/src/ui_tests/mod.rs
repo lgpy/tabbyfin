@@ -39,6 +39,7 @@ pub mod controller;
 pub mod dialogs;
 #[cfg(feature = "mockup")]
 pub mod gallery;
+pub mod history;
 pub mod home;
 pub mod item;
 pub mod library;
@@ -47,10 +48,12 @@ pub mod menus;
 #[cfg(feature = "mockup")]
 pub mod mockups;
 pub mod player;
+pub mod queue;
 pub mod settings;
 pub mod shelf;
 pub mod shell;
 pub mod states;
+pub mod subtitle_search;
 pub mod theme;
 pub mod toasts;
 pub mod touch;
@@ -173,6 +176,42 @@ impl FixtureServer {
         )
     }
 
+    /// Answers `route` with `body` after `delay`: a state that shows while the answer is on its
+    /// way.
+    pub fn json_delayed(
+        &self,
+        http_method: &'static str,
+        route: &'static str,
+        body: &serde_json::Value,
+        delay: Duration,
+    ) {
+        self.respond(
+            http_method,
+            route,
+            ResponseTemplate::new(200)
+                .set_body_string(body.to_string())
+                .set_delay(delay),
+        )
+    }
+
+    /// Answers the first request to `route` with `body`, and the ones after it by whatever else
+    /// is mounted there: an item before and after the server's refresh adds a stream to it.
+    /// Mount this before the answer for the rest.
+    pub fn json_once(&self, http_method: &'static str, route: &'static str, body: &serde_json::Value) {
+        let template = ResponseTemplate::new(200)
+            .set_body_string(body.to_string())
+            .insert_header("content-type", "application/json");
+        let mock = self.mock.clone();
+        block_on(async move {
+            Mock::given(method(http_method))
+                .and(path(route))
+                .respond_with(template)
+                .up_to_n_times(1)
+                .mount(&mock)
+                .await;
+        });
+    }
+
     /// Answers `route` with fixture `name`, only for a request whose JSON body has `body`'s
     /// fields: a sign-in mock that only matches the credentials the test typed.
     pub fn json_for_body(&self, http_method: &'static str, route: &'static str, name: &str, body: serde_json::Value) {
@@ -200,9 +239,40 @@ impl FixtureServer {
         )
     }
 
+    /// Answers `route` with `body` from now on, over whatever answered it before.
+    pub fn json_value_now(&self, http_method: &'static str, route: &'static str, body: &serde_json::Value) {
+        let mock = self.mock.clone();
+        let body = body.to_string();
+        block_on(async move {
+            Mock::given(method(http_method))
+                .and(path(route))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(body)
+                        .insert_header("content-type", "application/json"),
+                )
+                .with_priority(1)
+                .mount(&mock)
+                .await;
+        });
+    }
+
     /// Answers `route` with a bare status, e.g. a 401 for a wrong password.
     pub fn status(&self, http_method: &'static str, route: &'static str, status: u16) {
         self.respond(http_method, route, ResponseTemplate::new(status))
+    }
+
+    /// Answers `route` with a bare status from now on, over whatever answered it before.
+    pub fn status_now(&self, http_method: &'static str, route: &'static str, status: u16) {
+        let mock = self.mock.clone();
+        block_on(async move {
+            Mock::given(method(http_method))
+                .and(path(route))
+                .respond_with(ResponseTemplate::new(status))
+                .with_priority(1)
+                .mount(&mock)
+                .await;
+        });
     }
 
     fn respond(&self, http_method: &'static str, route: &'static str, template: ResponseTemplate) {
@@ -330,6 +400,11 @@ pub struct PageRun {
 type OpenPage = Box<dyn FnOnce(&mut PageCx) -> Box<dyn Page>>;
 
 impl PageRun {
+    /// The services the page draws with.
+    pub fn services(&self) -> &Services {
+        self.services.as_ref().expect("the services are made")
+    }
+
     fn new(session: Session, open: impl FnOnce(&mut PageCx) -> Box<dyn Page> + 'static) -> Self {
         Self {
             session: Some(session),
@@ -340,6 +415,11 @@ impl PageRun {
             keys: Vec::new(),
             handled: Vec::new(),
         }
+    }
+
+    /// The services the page draws with, for a test to read what they raised.
+    pub fn services_mut(&mut self) -> &mut Services {
+        self.services.as_mut().expect("the services are made")
     }
 
     /// One frame: the app's logic (the services' work), then the keys the shell routes, then
@@ -408,6 +488,15 @@ impl PageHarness {
 
     pub fn state(&self) -> &PageRun {
         self.harness.state()
+    }
+
+    /// The services the page draws with, once its first frame made them.
+    pub fn services(&mut self) -> &mut Services {
+        self.harness
+            .state_mut()
+            .services
+            .as_mut()
+            .expect("the services are made")
     }
 
     /// The harness itself, for a test that reads what a frame drew (a node's rectangle).

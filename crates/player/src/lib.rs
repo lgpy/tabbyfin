@@ -13,6 +13,7 @@
 
 #[cfg(target_os = "android")]
 pub mod android;
+mod audio;
 mod events;
 pub mod host;
 pub mod libmpv;
@@ -27,6 +28,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
+pub use audio::{AudioDevice, AudioSettings, Channels, MAX_VOLUME, Passthrough, night_filter};
 pub use events::{Cue, CueImage, Cues, EndReason, PlayerEvent};
 
 #[derive(Debug, thiserror::Error)]
@@ -150,6 +152,54 @@ impl Player {
         }
     }
 
+    /// mpv's properties as text (`hwdec-current`, `video-params/w`…), in the order asked; `None`
+    /// for one with no value now, and for all of them where the player has none to give
+    /// (Media3, or an mpv that's gone). For the playback info, so the app asks only while it's
+    /// shown.
+    pub async fn properties(&self, names: &[&str]) -> Vec<Option<String>> {
+        match &self.0 {
+            Backend::Embedded(player) => {
+                let (player, names): (_, Vec<String>) =
+                    (player.clone(), names.iter().map(|n| (*n).to_owned()).collect());
+                tokio::task::spawn_blocking(move || player.properties(&names))
+                    .await
+                    .unwrap_or_default()
+            }
+            Backend::Remote(player) => player.properties(names).await,
+            #[cfg(target_os = "android")]
+            Backend::Media3(_) => vec![None; names.len()],
+        }
+        .into_iter()
+        .chain(std::iter::repeat(None))
+        .take(names.len())
+        .collect()
+    }
+
+    /// An mpv property as text; a list or map (`audio-device-list`) comes as JSON. mpv only:
+    /// Media3 has no such properties.
+    pub async fn get_property(&self, name: &str) -> Result<String> {
+        match &self.0 {
+            Backend::Embedded(player) => {
+                let (player, name) = (player.clone(), name.to_owned());
+                tokio::task::spawn_blocking(move || player.get_property(&name))
+                    .await
+                    .map_err(|_| Error::Closed)?
+            }
+            Backend::Remote(player) => player.get_property(name).await,
+            #[cfg(target_os = "android")]
+            Backend::Media3(_) => Err(Error::Command {
+                command: format!("get {name}"),
+                message: "Media3 has no mpv properties".into(),
+            }),
+        }
+    }
+
+    /// The audio outputs mpv found, from `audio-device-list`.
+    pub async fn audio_devices(&self) -> Result<Vec<AudioDevice>> {
+        let list = self.get_property("audio-device-list").await?;
+        audio::parse_devices(&list)
+    }
+
     /// Loads a file. Options are set as properties first so this works with every mpv
     /// version (the `loadfile` argument list changed in 0.38).
     pub async fn load(&self, req: LoadRequest) -> Result<()> {
@@ -194,4 +244,13 @@ pub const HOST_CRASHED: &str = "the player process stopped unexpectedly";
 /// first thing in `main` and then calls [`host::run`] instead of starting its UI.
 pub fn is_host_process() -> bool {
     std::env::args().nth(1).as_deref() == Some(host::HOST_ARG)
+}
+
+/// The audio outputs on this machine, asked of a player started just for it (the device list
+/// is mpv's, and mpv runs in its own process). Fails where libmpv can't start.
+pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
+    let (player, _events, _video) = Player::spawn(libmpv::VideoImport::Pixels, Engine::Mpv).await?;
+    let devices = player.audio_devices().await;
+    let _ = player.quit().await;
+    devices
 }

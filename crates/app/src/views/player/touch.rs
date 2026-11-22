@@ -14,7 +14,7 @@ use egui_material_icons::icons::{
     ICON_BRIGHTNESS_MEDIUM, ICON_FAST_FORWARD, ICON_FAST_REWIND, ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 
-use super::{PREVIEW_W, PlayerPage, SEEK_STEP, TRACK_H, View};
+use super::{PREVIEW_W, PlayerPage, TRACK_H, View};
 use crate::playback::UiCommand;
 use crate::theme::{self, over_video};
 use crate::views::PageCx;
@@ -207,7 +207,7 @@ impl PlayerPage {
         if let Some(streak) = &self.touch.streak {
             let age = now - streak.last;
             if age < STREAK {
-                skip_bubble(ui, rect, streak, age);
+                skip_bubble(ui, rect, streak, age, view.seek_step);
                 ui.ctx().request_repaint();
             } else {
                 self.touch.streak = None;
@@ -245,9 +245,10 @@ fn side_of(rect: Rect, pos: egui::Pos2) -> Option<Side> {
 }
 
 fn skip(cx: &mut PageCx, side: Side) {
+    let step = cx.services.playback.seek_step();
     let by = match side {
-        Side::Back => -SEEK_STEP,
-        Side::Forward => SEEK_STEP,
+        Side::Back => -step,
+        Side::Forward => step,
     };
     cx.services.control(UiCommand::SeekBy(by));
 }
@@ -276,7 +277,7 @@ fn decide(rect: Rect, origin: egui::Pos2, moved: Vec2, view: &View) -> Drag {
 }
 
 /// The round bubble on the skipping side: the arrows over the seconds skipped, fading out.
-fn skip_bubble(ui: &Ui, rect: Rect, streak: &Streak, age: f64) {
+fn skip_bubble(ui: &Ui, rect: Rect, streak: &Streak, age: f64, step: f64) {
     let (x, icon, sign) = match streak.side {
         Side::Back => (rect.left() + rect.width() / 6., ICON_FAST_REWIND, "−"),
         Side::Forward => (rect.right() - rect.width() / 6., ICON_FAST_FORWARD, "+"),
@@ -288,7 +289,7 @@ fn skip_bubble(ui: &Ui, rect: Rect, streak: &Streak, age: f64) {
     painter.circle_filled(center, BUBBLE / 2., over_video::SURFACE_SUBTLE.gamma_multiply(fade));
     let ink = over_video::FOREGROUND.gamma_multiply(fade);
     round_button::glyph(ui, center - vec2(0., 12.), icon, 28., ink);
-    let seconds = f64::from(streak.skips) * SEEK_STEP;
+    let seconds = f64::from(streak.skips) * step;
     painter.text(
         center + vec2(0., 18.),
         Align2::CENTER_CENTER,

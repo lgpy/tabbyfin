@@ -23,6 +23,8 @@ finish-args:
   - --socket=pulseaudio
   # Sign-in tokens live in the Secret Service (the keychain), as outside the Flatpak.
   - --talk-name=org.freedesktop.secrets
+  # The media keys and the desktop's media widgets (MPRIS, `desktop/linux/mpris.rs`).
+  - --own-name=org.mpris.MediaPlayer2.tabbyfin
 
 modules:
   - name: libass

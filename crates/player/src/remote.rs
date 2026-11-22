@@ -26,12 +26,52 @@ use crate::{EndReason, Error, PlayerEvent, Result};
 #[cfg(target_os = "linux")]
 pub(crate) const FD_ENV: &str = "TABBYFIN_PLAYER_FD";
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<()>>>>>;
+/// Requests waiting for the host's answer, by id. Closed once the host's output has ended: nothing
+/// answers after that, so a request made then must fail at once. Checking and adding happen under
+/// the same lock as closing, so none slips in between.
+struct Waiting<T> {
+    closed: bool,
+    replies: HashMap<u64, oneshot::Sender<T>>,
+}
+
+impl<T> Default for Waiting<T> {
+    fn default() -> Self {
+        Self {
+            closed: false,
+            replies: HashMap::new(),
+        }
+    }
+}
+
+impl<T> Waiting<T> {
+    /// Waits for the answer to `id`; `false` (and nothing waits) if the host is gone.
+    fn add(&mut self, id: u64, reply: oneshot::Sender<T>) -> bool {
+        if self.closed {
+            return false;
+        }
+        self.replies.insert(id, reply);
+        true
+    }
+
+    fn take(&mut self, id: u64) -> Option<oneshot::Sender<T>> {
+        self.replies.remove(&id)
+    }
+
+    /// The host is gone: returns everything that waited, and refuses what comes after.
+    fn close(&mut self) -> Vec<oneshot::Sender<T>> {
+        self.closed = true;
+        self.replies.drain().map(|(_, reply)| reply).collect()
+    }
+}
+
+type Pending = Arc<Mutex<Waiting<Result<Option<String>>>>>;
+type PendingProperties = Arc<Mutex<Waiting<Vec<Option<String>>>>>;
 
 pub struct RemotePlayer {
     requests: mpsc::UnboundedSender<Request>,
     next_id: AtomicU64,
     pending: Pending,
+    properties: PendingProperties,
     /// Killed when dropped, in case closing its stdin didn't end it.
     _child: Child,
 }
@@ -81,11 +121,12 @@ impl RemotePlayer {
         let (events_tx, events) = mpsc::unbounded_channel();
         let (frames_tx, frames) = watch::channel(None);
         let pending: Pending = Default::default();
+        let properties: PendingProperties = Default::default();
         tokio::spawn(read_messages(
             stdout,
             events_tx,
             frames_tx,
-            pending.clone(),
+            (pending.clone(), properties.clone()),
             #[cfg(target_os = "linux")]
             fds,
         ));
@@ -106,26 +147,54 @@ impl RemotePlayer {
             requests,
             next_id: AtomicU64::new(1),
             pending,
+            properties,
             _child: child,
         };
         Ok((player, events, video))
     }
 
     pub async fn command(&self, args: Vec<Value>) -> Result<()> {
-        self.call(|id| Request::Command { id, args }).await
+        self.call(|id| Request::Command { id, args }).await.map(|_| ())
     }
 
     pub async fn set_property(&self, name: &str, value: Value) -> Result<()> {
         let name = name.to_owned();
-        self.call(|id| Request::SetProperty { id, name, value }).await
+        self.call(|id| Request::SetProperty { id, name, value })
+            .await
+            .map(|_| ())
     }
 
-    async fn call(&self, request: impl FnOnce(u64) -> Request) -> Result<()> {
+    /// mpv properties as text, in the order asked; `None` for one mpv has no value for, and for
+    /// all of them if the host is gone.
+    pub async fn properties(&self, names: &[&str]) -> Vec<Option<String>> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (reply_tx, reply) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, reply_tx);
+        if !self.properties.lock().unwrap().add(id, reply_tx) {
+            return vec![None; names.len()];
+        }
+        let names_owned = names.iter().map(|name| (*name).to_owned()).collect();
+        let request = Request::GetProperties { id, names: names_owned };
+        if self.requests.send(request).is_err() {
+            self.properties.lock().unwrap().take(id);
+            return vec![None; names.len()];
+        }
+        reply.await.unwrap_or_else(|_| vec![None; names.len()])
+    }
+
+    pub async fn get_property(&self, name: &str) -> Result<String> {
+        let name = name.to_owned();
+        let reply = self.call(|id| Request::GetProperty { id, name }).await?;
+        reply.ok_or_else(|| Error::Host("the player process sent no value".into()))
+    }
+
+    async fn call(&self, request: impl FnOnce(u64) -> Request) -> Result<Option<String>> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (reply_tx, reply) = oneshot::channel();
+        if !self.pending.lock().unwrap().add(id, reply_tx) {
+            return Err(Error::Closed);
+        }
         if self.requests.send(request(id)).is_err() {
-            self.pending.lock().unwrap().remove(&id);
+            self.pending.lock().unwrap().take(id);
             return Err(Error::Closed);
         }
         reply.await.map_err(|_| Error::Closed)?
@@ -145,7 +214,7 @@ async fn read_messages(
     mut stdout: BufReader<tokio::process::ChildStdout>,
     events: mpsc::UnboundedSender<PlayerEvent>,
     frames: watch::Sender<Option<Frame>>,
-    pending: Pending,
+    (pending, properties): (Pending, PendingProperties),
     #[cfg(target_os = "linux")] fds: Arc<FdTable>,
 ) {
     let mut exited = false;
@@ -164,8 +233,13 @@ async fn read_messages(
                 let _ = events.send(event);
             }
             Message::Reply { id, result } => {
-                if let Some(reply) = pending.lock().unwrap().remove(&id) {
+                if let Some(reply) = pending.lock().unwrap().take(id) {
                     let _ = reply.send(result.map_err(Error::from));
+                }
+            }
+            Message::Properties { id, values } => {
+                if let Some(reply) = properties.lock().unwrap().take(id) {
+                    let _ = reply.send(values);
                 }
             }
             Message::Pixels { width, height } => {
@@ -224,9 +298,12 @@ async fn read_messages(
         let _ = events.send(PlayerEvent::EndFile(reason));
         let _ = events.send(PlayerEvent::Exited);
     }
-    for (_, reply) in pending.lock().unwrap().drain() {
+    let waiting = pending.lock().unwrap().close();
+    for reply in waiting {
         let _ = reply.send(Err(Error::Closed));
     }
+    // Dropping the senders answers the property queries with nothing.
+    drop(properties.lock().unwrap().close());
 }
 
 /// Logs what the host writes to stderr (its own log, already formatted) under `player`.
@@ -346,5 +423,79 @@ impl FdTable {
                 return None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    /// A host that does nothing and exits, so its output ends at once.
+    fn exiting_host() -> Command {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "exit"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = Command::new("true");
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).kill_on_drop(true);
+        command
+    }
+
+    /// A request made after the host's output has ended (the reader has already answered what was
+    /// waiting) fails at once. Its write can still succeed, since the writer only learns of the
+    /// dead pipe on a later write, and nothing would ever answer it: the playback info overlay
+    /// asks every second from inside the session's loop, so a hang here would stall that loop.
+    #[test]
+    fn requests_after_the_host_is_gone_fail_instead_of_waiting() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let (done, result) = std::sync::mpsc::channel();
+        // On its own thread, so that a hang fails the test instead of hanging it.
+        std::thread::spawn(move || {
+            let outcome = runtime.block_on(async {
+                let mut child = exiting_host().spawn().expect("a child process");
+                let stdout = BufReader::new(child.stdout.take().expect("its output"));
+                let (events, _events_rx) = mpsc::unbounded_channel();
+                let (frames, _frames_rx) = watch::channel(None);
+                let (pending, properties): (Pending, PendingProperties) = Default::default();
+                read_messages(
+                    stdout,
+                    events,
+                    frames,
+                    (pending.clone(), properties.clone()),
+                    #[cfg(target_os = "linux")]
+                    Arc::new(FdTable::default()),
+                )
+                .await;
+
+                // The writer's channel is still open, as it is until a write to the pipe fails.
+                let (requests, _requests_rx) = mpsc::unbounded_channel();
+                let player = RemotePlayer {
+                    requests,
+                    next_id: AtomicU64::new(1),
+                    pending,
+                    properties,
+                    _child: child,
+                };
+                let values = player.properties(&["a", "b"]).await;
+                let set = player.set_property("pause", Value::Bool(true)).await;
+                let command = player.command(vec![Value::from("stop")]).await;
+                (values, set, command)
+            });
+            let _ = done.send(outcome);
+        });
+        let (values, set, command) = result
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a request after the host's output ended never completed");
+        assert_eq!(values, [None, None]);
+        assert!(matches!(set, Err(Error::Closed)), "{set:?}");
+        assert!(matches!(command, Err(Error::Closed)), "{command:?}");
     }
 }

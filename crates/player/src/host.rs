@@ -98,8 +98,17 @@ async fn serve() -> i32 {
                 video.set_target_size(width, height);
                 continue;
             }
-            Request::Command { id, args } => (id, player.command(Value::Array(args)).await),
-            Request::SetProperty { id, name, value } => (id, player.set_property(&name, value).await),
+            Request::GetProperties { id, names } => {
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                let values = player.properties(&names).await;
+                if send(&out, &Message::Properties { id, values }, &[]).await.is_err() {
+                    break;
+                }
+                continue;
+            }
+            Request::Command { id, args } => (id, player.command(Value::Array(args)).await.map(|()| None)),
+            Request::SetProperty { id, name, value } => (id, player.set_property(&name, value).await.map(|()| None)),
+            Request::GetProperty { id, name } => (id, player.get_property(&name).await.map(Some)),
         };
         let reply = Message::Reply {
             id,
