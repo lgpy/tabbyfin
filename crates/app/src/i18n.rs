@@ -57,16 +57,19 @@ pub enum Language {
     English,
     #[serde(rename = "pt-PT")]
     PortuguesePortugal,
+    #[serde(rename = "es")]
+    Spanish,
 }
 
 impl Language {
-    pub const ALL: [Language; 2] = [Language::English, Language::PortuguesePortugal];
+    pub const ALL: [Language; 3] = [Language::English, Language::PortuguesePortugal, Language::Spanish];
 
     /// Its translations' folder, and the language id Fluent's plural rules go by.
     pub fn id(self) -> &'static str {
         match self {
             Language::English => "en",
             Language::PortuguesePortugal => "pt-PT",
+            Language::Spanish => "es",
         }
     }
 
@@ -76,11 +79,13 @@ impl Language {
         match self {
             Language::English => "English",
             Language::PortuguesePortugal => "Português (Portugal)",
+            Language::Spanish => "Español",
         }
     }
 
     /// The language that stands in for a system locale (`pt-BR`, `en_US.UTF-8`, `pt`): ours in
-    /// the same language. Any Portuguese gets Portugal's, the only one there is.
+    /// the same language. Any Portuguese gets Portugal's and any Spanish Spain's, the only ones
+    /// there are.
     fn for_locale(locale: &str) -> Option<Language> {
         let language = locale.split(['-', '_', '.', '@']).next()?.to_ascii_lowercase();
         Language::ALL
@@ -128,7 +133,8 @@ impl Language {
                 // English groups four digits: "1,284".
                 group_from: 4,
             },
-            Language::PortuguesePortugal => Separators {
+            // Spain's norm (RAE) writes numbers the way Portugal's does.
+            Language::PortuguesePortugal | Language::Spanish => Separators {
                 decimal: ',',
                 // A no-break space keeps a number together across a line break. The app draws
                 // with egui's built-in Ubuntu, which has U+00A0; U+202F, the narrow space the
@@ -151,7 +157,7 @@ pub fn current() -> Language {
 }
 
 /// A number Rust formatted with `.` before its fraction, in the interface's language: `4,3`
-/// for Portuguese, `4.3` for English.
+/// for Portuguese and Spanish, `4.3` for English.
 pub fn decimal(text: impl AsRef<str>) -> String {
     decimal_in(current(), text)
 }
@@ -258,6 +264,7 @@ mod tests {
         assert_eq!(Language::for_locale("pt-PT"), Some(Language::PortuguesePortugal));
         assert_eq!(Language::for_locale("pt_BR.UTF-8"), Some(Language::PortuguesePortugal));
         assert_eq!(Language::for_locale("en-US"), Some(Language::English));
+        assert_eq!(Language::for_locale("es-MX"), Some(Language::Spanish));
         assert_eq!(Language::for_locale("de-DE"), None);
     }
 
@@ -273,6 +280,8 @@ mod tests {
         assert_eq!(grouped_in(Language::English, 1284), "1,284");
         assert_eq!(grouped_in(Language::English, 1_000_000), "1,000,000");
         assert_eq!(grouped_in(Language::PortuguesePortugal, 1284), "1284");
+        assert_eq!(decimal_in(Language::Spanish, "4.3"), "4,3");
+        assert_eq!(grouped_in(Language::Spanish, 12_840), "12\u{a0}840");
         assert_eq!(grouped_in(Language::PortuguesePortugal, 12_840), "12\u{a0}840");
         assert_eq!(
             grouped_in(Language::PortuguesePortugal, 1_000_000),

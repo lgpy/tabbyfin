@@ -93,7 +93,7 @@ The harness presses keys from inside the app and the UI tests click headless, so
 - **Window placement on Windows at 150 % and in mixed DPI** (the machine's monitors are both at 100 %): one monitor at 150 % (the config's `scale` is 1.5, `x`/`y` are physical pixels, no visible move); a window saved on the other-scaled monitor reopens there after one jump, maximized too, and un-maximizes to its saved spot; a spot between monitors of different heights opens centred; un-maximizing after a maximized launch at 150 % restores the saved size, not 1.5× it; a maximized window at 150 % reopening maximized with no flicker.
 - **Window placement on Linux** (a real window manager, X11 and Wayland, where only the size is kept) and **macOS**: a saved spot reopens as saved, a maximized window reopens maximized, and one saved on a missing monitor still opens on screen.
 
-- **Portuguese** (*Settings → Appearance → Language*, or a Portuguese system): the longer labels fit on buttons, pills, the player's controls, the top bar and Settings' rows on the desktop and a phone, and nothing still shows in English but the server's own text.
+- **Portuguese and Spanish** (*Settings → Appearance → Language*, or a Portuguese or Spanish system): the longer labels fit on buttons, pills, the player's controls, the top bar and Settings' rows on the desktop and a phone, and nothing still shows in English but the server's own text.
 
 ## 9. Jellyfin 10.11
 

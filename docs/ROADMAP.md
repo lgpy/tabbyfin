@@ -65,7 +65,7 @@ Done: an Inno Setup installer for Windows, an AppImage and a Flatpak bundle besi
 
 ## 6. Quality and engineering
 
-Done: an integration job in CI against 12.2 and 10.11, error messages for the common failures, bounded image memory and a loading queue, the interface in English and European Portuguese (Fluent, following the system language or the one Settings picks).
+Done: an integration job in CI against 12.2 and 10.11, error messages for the common failures, bounded image memory and a loading queue, the interface in English, European Portuguese and Spanish (Fluent, following the system language or the one Settings picks).
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
