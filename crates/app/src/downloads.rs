@@ -259,10 +259,11 @@ struct Entry {
 static UNMETERED: LazyLock<watch::Sender<bool>> = LazyLock::new(|| watch::Sender::new(true));
 
 /// Whether an unmetered network is there now, from the platform's network callback. Workers
-/// held for Wi-Fi wake on it, with or without a frame.
+/// held for Wi-Fi wake on it, with or without a frame. Returns whether it changed: the callback
+/// repeats the same answer every few seconds as the signal strength moves.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub fn set_unmetered(unmetered: bool) {
-    UNMETERED.send_replace(unmetered);
+pub fn set_unmetered(unmetered: bool) -> bool {
+    UNMETERED.send_if_modified(|now| std::mem::replace(now, unmetered) != unmetered)
 }
 
 /// What the workers share with [`Downloads`]. Each worker takes its next item from `waiting`
