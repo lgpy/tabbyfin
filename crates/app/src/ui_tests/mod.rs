@@ -262,6 +262,19 @@ impl FixtureServer {
         self.respond(http_method, route, ResponseTemplate::new(status))
     }
 
+    /// Answers `route` with a bare status from now on, over whatever answered it before.
+    pub fn status_now(&self, http_method: &'static str, route: &'static str, status: u16) {
+        let mock = self.mock.clone();
+        block_on(async move {
+            Mock::given(method(http_method))
+                .and(path(route))
+                .respond_with(ResponseTemplate::new(status))
+                .with_priority(1)
+                .mount(&mock)
+                .await;
+        });
+    }
+
     fn respond(&self, http_method: &'static str, route: &'static str, template: ResponseTemplate) {
         let mock = self.mock.clone();
         block_on(async move {

@@ -695,8 +695,18 @@ pub struct AuthoriseDevice {
     /// What went wrong with the last try, in words.
     error: Option<String>,
     focus: bool,
-    /// The authorise request while it runs, and for a `401` whether Quick Connect is off.
-    authorising: Option<Task<(jellyfin::Result<()>, bool)>>,
+    /// The authorise request while it runs.
+    authorising: Option<Task<Authorised>>,
+}
+
+/// How the authorise request ended.
+enum Authorised {
+    Done,
+    /// A `401` and the server says Quick Connect is off.
+    Off,
+    /// The request failed, or the `401` was a dead token, or asking whether Quick Connect is off
+    /// failed (with its own error).
+    Failed(jellyfin::Error),
 }
 
 impl AuthoriseDevice {
@@ -711,19 +721,21 @@ impl AuthoriseDevice {
 
     /// Draws the dialog: `false` once it should be dropped (authorised, or closed).
     pub fn show(&mut self, cx: &mut PageCx) -> bool {
-        if let Some((result, off)) = self.authorising.as_mut().and_then(Task::poll) {
+        if let Some(result) = self.authorising.as_mut().and_then(Task::poll) {
             self.authorising = None;
             match result {
-                Ok(()) => {
+                Authorised::Done => {
                     cx.services.toast(Toast::success(tr!("dialog-authorise-done")));
                     return false;
                 }
-                // The server answers `401` when Quick Connect is off, and for a dead token too;
-                // only the first is worded here, the second is an expired session.
-                Err(jellyfin::Error::Unauthorized) if off => self.error = Some(tr!("dialog-authorise-off")),
-                Err(jellyfin::Error::NotFound) => self.error = Some(tr!("dialog-authorise-wrong")),
-                Err(jellyfin::Error::Status { .. }) => self.error = Some(tr!("dialog-authorise-failed")),
-                Err(err) => self.error = Some(cx.services.handle_error(&err)),
+                Authorised::Off => self.error = Some(tr!("dialog-authorise-off")),
+                Authorised::Failed(jellyfin::Error::NotFound) => self.error = Some(tr!("dialog-authorise-wrong")),
+                Authorised::Failed(jellyfin::Error::Status { .. }) => {
+                    self.error = Some(tr!("dialog-authorise-failed"));
+                }
+                // A `401` that Quick Connect being on doesn't explain is a dead token, and ends
+                // the session here as anywhere.
+                Authorised::Failed(err) => self.error = Some(cx.services.handle_error(&err)),
             }
             self.focus = true;
         }
@@ -771,10 +783,18 @@ impl AuthoriseDevice {
             // The code's spaces (it's often read out in groups) aren't part of it.
             let code: String = self.typed.split_whitespace().collect();
             self.authorising = Some(Task::spawn(cx.ctx, async move {
-                let result = client.quick_connect_authorize(&code).await;
-                let off = matches!(result, Err(jellyfin::Error::Unauthorized))
-                    && matches!(client.quick_connect_enabled().await, Ok(false));
-                (result, off)
+                match client.quick_connect_authorize(&code).await {
+                    Ok(()) => Authorised::Done,
+                    // The server answers `401` when Quick Connect is off, and for a dead token
+                    // too: ask which. If asking fails, that failure is the answer (the network
+                    // may have dropped), not a reason to end the session.
+                    Err(jellyfin::Error::Unauthorized) => match client.quick_connect_enabled().await {
+                        Ok(false) => Authorised::Off,
+                        Ok(true) => Authorised::Failed(jellyfin::Error::Unauthorized),
+                        Err(err) => Authorised::Failed(err),
+                    },
+                    Err(err) => Authorised::Failed(err),
+                }
             }));
         }
         !modal.should_close()
