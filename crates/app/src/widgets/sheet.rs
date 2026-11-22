@@ -57,6 +57,20 @@ pub fn show<R>(
     title_inset: f32,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
+    show_pinned(ctx, id, title, pad, title_inset, |_| (), |ui, ()| content(ui))
+}
+
+/// [`show`] with `header` pinned under the title, `pad` in from the sides, and the contents
+/// scrolling under it (a long menu's filter field). What `header` returns goes to `content`.
+pub fn show_pinned<H, R>(
+    ctx: &egui::Context,
+    id: Id,
+    title: Option<&str>,
+    pad: f32,
+    title_inset: f32,
+    header: impl FnOnce(&mut Ui) -> H,
+    content: impl FnOnce(&mut Ui, H) -> R,
+) -> Option<R> {
     if !egui::Popup::is_id_open(ctx, id) {
         return None;
     }
@@ -168,6 +182,14 @@ pub fn show<R>(
                 close = state.pulled > height * DISMISS_SHARE || speed > DISMISS_SPEED;
             }
 
+            let pinned = egui::Frame::new()
+                .inner_margin(Margin::symmetric(pad as i8, 0))
+                .show(ui, |ui| {
+                    ui.set_width(width - 2. * pad);
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), header)
+                        .inner
+                })
+                .inner;
             let max = (content_rect.height() * MAX_SHARE - (ui.cursor().top() - grab_top)).max(120.);
             egui::ScrollArea::vertical()
                 .id_salt(area_id.with("scroll"))
@@ -179,7 +201,7 @@ pub fn show<R>(
                             ui.set_width(width - 2. * pad);
                             ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
                                 ui.spacing_mut().item_spacing.y = 0.;
-                                content(ui)
+                                content(ui, pinned)
                             })
                             .inner
                         })

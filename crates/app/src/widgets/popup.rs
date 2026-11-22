@@ -3,8 +3,12 @@
 //! the version pickers, the account menu), so they look and behave alike:
 //!
 //! - the pointer and the keyboard share one highlight, a filled row. A menu opened from the
-//!   keyboard starts on its first row; one opened with a click starts on none, until the pointer
-//!   or an arrow picks one;
+//!   keyboard starts on its checked row, or its first; one opened with a click starts on none,
+//!   until the pointer or an arrow picks one. A list taller than its panel or sheet opens
+//!   scrolled to its checked row;
+//! - a long menu (more than [`FILTER_AT`] rows) has a filter field over them, which has the
+//!   keyboard: there Backspace, Space, Home, End and Left/Right edit it, and Enter picks the
+//!   highlighted match, the first after each change;
 //! - Up and Down move it, wrapping round, Home and End jump to the ends, Enter or Space picks;
 //! - Esc, Backspace, Alt+Left and a click outside close it; Ctrl/Cmd+F closes it and tells the
 //!   caller to open the search box;
@@ -34,13 +38,15 @@ use egui::{
     Sense, SetOpenCommand, Stroke, TextFormat, Ui, WidgetInfo, pos2, vec2,
 };
 use egui_material_icons::MaterialIcon;
-use egui_material_icons::icons::ICON_CHECK;
+use egui_material_icons::icons::{ICON_CHECK, ICON_SEARCH};
 
+use crate::i18n::tr;
+use crate::keyboard;
 use crate::keys;
 use crate::motion;
 use crate::theme::{self, text};
 use crate::widgets::focus;
-use crate::widgets::{badge, label, sheet};
+use crate::widgets::{badge, field, label, sheet};
 
 /// A menu's width unless the caller sets one.
 pub const WIDTH: f32 = 220.;
@@ -61,6 +67,8 @@ const GAP: f32 = 6.;
 /// How far the panel travels out of its button as it opens, and how long it takes.
 const SLIDE: f32 = 4.;
 const OPEN: f64 = 0.120;
+/// A menu with more rows than this has a field over them that filters them by name.
+const FILTER_AT: usize = 12;
 /// Past this height the rows scroll.
 const MAX_H: f32 = 420.;
 /// On a sheet: the room either side of the rows, a row's height at the default text size, the
@@ -166,11 +174,19 @@ pub struct MenuResponse {
 }
 
 /// What a menu remembers between frames, in egui's temp data.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct State {
     highlight: Option<usize>,
     /// The pointer put the highlight where it is, so it goes when the pointer leaves the rows.
     by_pointer: bool,
+    /// The menu has been drawn since it opened. On its first frame a long list (the Settings
+    /// languages) scrolls to its checked row, so the choice isn't a scroll away.
+    shown: bool,
+    /// What's typed in a long menu's filter field.
+    filter: String,
+    /// The anchor had egui's focus as the menu opened (a Settings picker opened from the
+    /// keyboard). A filter field takes it while the menu is open; it goes back when it closes.
+    anchor_focused: bool,
 }
 
 /// A popup menu under `id`, opened with [`PopupMenu::open`] or [`PopupMenu::toggle`] (or
@@ -265,66 +281,101 @@ impl<'a> PopupMenu<'a> {
         if self.opening {
             reset(&ctx, id, Opened::Pointer);
         } else if !Self::is_open(&ctx, id) {
+            closed(anchor, id);
             return out;
         }
         let mut state = ctx.data(|data| data.get_temp::<State>(state_id(id)).unwrap_or_default());
+        let first_frame = !state.shown;
+        if first_frame {
+            state.anchor_focused = anchor.has_focus();
+            state.shown = true;
+            ctx.data_mut(|data| data.insert_temp(state_id(id), state.clone()));
+        }
+        // A long menu has a filter field over its rows, which takes the keys that edit text.
+        let filtering = entries.len() > FILTER_AT;
 
         // The menu's keys. egui gives them to nothing else while a popup is open, but would still
         // move its focus behind the menu with Tab or an arrow.
         let take = |modifiers, key| keys::take_exact(&ctx, modifiers, key);
-        if take(Modifiers::NONE, Key::Tab)
-            | take(Modifiers::SHIFT, Key::Tab)
-            | take(Modifiers::NONE, Key::ArrowLeft)
-            | take(Modifiers::NONE, Key::ArrowRight)
-        {
+        let sideways = !filtering && (take(Modifiers::NONE, Key::ArrowLeft) | take(Modifiers::NONE, Key::ArrowRight));
+        if take(Modifiers::NONE, Key::Tab) | take(Modifiers::SHIFT, Key::Tab) | sideways {
             cancel_focus(&ctx);
         }
-        if take(Modifiers::NONE, Key::Backspace) | take(Modifiers::ALT, Key::ArrowLeft) {
+        if (!filtering && take(Modifiers::NONE, Key::Backspace)) | take(Modifiers::ALT, Key::ArrowLeft) {
             Self::close(&ctx, id);
+            closed(anchor, id);
             return out;
         }
         if take(Modifiers::COMMAND, Key::F) {
             Self::close(&ctx, id);
+            closed(anchor, id);
             out.search = true;
             return out;
         }
+        // Opened from the keyboard, the highlight starts on the checked row rather than the first.
+        let checked = entries.iter().position(|entry| entry.checked == Some(true));
+        if first_frame && state.highlight.is_some() && checked.is_some() {
+            state.highlight = checked;
+        }
+        // The keys walk the rows the filter showed last frame: none of them change it.
+        let shown = matching(entries, &state.filter);
         let mut moved = false;
         let down = take(Modifiers::NONE, Key::ArrowDown);
         let up = take(Modifiers::NONE, Key::ArrowUp);
         if down | up {
-            state.highlight = step(state.highlight, if down { 1 } else { -1 }, entries.len());
+            let at = state
+                .highlight
+                .and_then(|index| shown.iter().position(|&row| row == index));
+            state.highlight = step(at, if down { 1 } else { -1 }, shown.len()).map(|at| shown[at]);
             moved = true;
         }
-        if take(Modifiers::NONE, Key::Home) {
-            state.highlight = (!entries.is_empty()).then_some(0);
+        if !filtering && take(Modifiers::NONE, Key::Home) {
+            state.highlight = shown.first().copied();
             moved = true;
         }
-        if take(Modifiers::NONE, Key::End) {
-            state.highlight = entries.len().checked_sub(1);
+        if !filtering && take(Modifiers::NONE, Key::End) {
+            state.highlight = shown.last().copied();
             moved = true;
         }
         if moved {
             state.by_pointer = false;
             cancel_focus(&ctx);
         }
-        if (take(Modifiers::NONE, Key::Enter) | take(Modifiers::NONE, Key::Space))
-            && let Some(index) = state.highlight.filter(|&index| index < entries.len())
-        {
+        let pick = take(Modifiers::NONE, Key::Enter) | (!filtering && take(Modifiers::NONE, Key::Space));
+        if pick && let Some(index) = state.highlight.filter(|index| shown.contains(index)) {
             out.chosen = Some(index);
         }
 
         let slot = entries.iter().any(Entry::has_slot);
         let touch = crate::layout::touch(&ctx);
         let on_sheet = touch && !self.hung;
+        // The filter field, pinned over the rows. It takes the keyboard as the menu opens, but
+        // not with touch, where that would raise the soft keyboard over the list: a tap does.
+        let filter = std::mem::take(&mut state.filter);
+        let focus_filter = first_frame && !touch;
+        let header = move |ui: &mut Ui| {
+            let mut filter = filter;
+            let changed = filtering && filter_field(ui, id.with("filter"), &mut filter, focus_filter);
+            (filter, changed)
+        };
         // The rows, in a menu's panel or on a sheet. With touch they're a finger's size, and a
         // row is filled while a finger is on it, not by hover: the pointer stays where the last
         // tap left it.
-        let mut rows = |ui: &mut Ui| {
+        let mut rows = |ui: &mut Ui, (filter, changed): (String, bool)| {
+            let shown = matching(entries, &filter);
+            if changed {
+                // A different filter: the highlight goes to its first match, for Enter to pick.
+                state.highlight = shown.first().copied();
+                state.by_pointer = false;
+                ui.ctx().request_repaint();
+            }
+            let reveal = moved || changed;
             let inner = ui.available_width();
             let pointer_moved = ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO);
             let mut hovered = None;
-            for (index, entry) in entries.iter().enumerate() {
-                if entry.separated && index > 0 {
+            for (at, &index) in shown.iter().enumerate() {
+                let entry = &entries[index];
+                if entry.separated && at > 0 {
                     if on_sheet {
                         sheet::separator(ui, SHEET_PAD, theme::tokens_of(ui).surface_border);
                     } else {
@@ -341,8 +392,10 @@ impl<'a> PopupMenu<'a> {
                     }
                 }
                 let highlighted = state.highlight == Some(index) || (touch && response.is_pointer_button_down_on());
-                if highlighted && moved {
+                if highlighted && reveal {
                     ui.scroll_to_rect(rect, None);
+                } else if first_frame && checked == Some(index) {
+                    ui.scroll_to_rect(rect, Some(Align::Center));
                 }
                 paint_row(
                     ui,
@@ -357,9 +410,16 @@ impl<'a> PopupMenu<'a> {
                     out.chosen = Some(index);
                 }
             }
+            if shown.is_empty() {
+                let message = tr!("menu-no-matches", search = filter.trim());
+                egui::Frame::new()
+                    .inner_margin(Margin::symmetric(ROW_INSET as i8, 8))
+                    .show(ui, |ui| ui.label(label::muted(ui, message)));
+            }
             if hovered.is_none() && pointer_moved && state.by_pointer {
                 state.highlight = None;
             }
+            state.filter = filter;
         };
 
         if on_sheet {
@@ -367,7 +427,7 @@ impl<'a> PopupMenu<'a> {
                 egui::Popup::open_id(&ctx, id);
             }
             let inset = SHEET_PAD + SHEET_ROW_INSET;
-            sheet::show(&ctx, id, self.title, SHEET_PAD, inset, rows);
+            sheet::show_pinned(&ctx, id, self.title, SHEET_PAD, inset, header, rows);
         } else {
             // Larger rows need more room, though never more than the window has.
             let width = if touch {
@@ -386,19 +446,64 @@ impl<'a> PopupMenu<'a> {
                 None
             };
             show_panel(id, anchor, anchor_at, open_memory, self.align, width, PAD, |ui| {
+                let filter = header(ui);
                 egui::ScrollArea::vertical().max_height(MAX_H).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.;
-                    rows(ui);
+                    rows(ui, filter);
                 });
             });
         }
 
+        ctx.data_mut(|data| data.insert_temp(state_id(id), state));
         if out.chosen.is_some() {
             Self::close(&ctx, id);
+            closed(anchor, id);
         }
-        ctx.data_mut(|data| data.insert_temp(state_id(id), state));
         out
     }
+}
+
+/// A long menu's filter field, `ui`'s width with room under it, focused when `focus`. Returns
+/// whether its text changed.
+fn filter_field(ui: &mut Ui, id: Id, filter: &mut String, focus: bool) -> bool {
+    let edit = field::with_leading(ui, id, filter, &tr!("menu-filter"));
+    let response = ui.add(edit);
+    field::shown(&response, keyboard::Kind::Search);
+    if focus {
+        response.request_focus();
+    }
+    field::leading(ui, &response, ICON_SEARCH);
+    ui.add_space(PAD);
+    response.changed()
+}
+
+/// The indices of the `entries` whose labels contain `filter`, ignoring case: all of them while
+/// it's empty.
+fn matching(entries: &[Entry], filter: &str) -> Vec<usize> {
+    let filter = filter.trim().to_lowercase();
+    (0..entries.len())
+        .filter(|&index| filter.is_empty() || entries[index].label.to_lowercase().contains(&filter))
+        .collect()
+}
+
+/// Once a menu has closed, however it closed (a pick, Esc, a click outside), the keyboard goes
+/// back to its anchor if that had it when the menu opened, as it would from a short menu: a long
+/// menu's filter field took it.
+fn closed(anchor: &Response, id: Id) {
+    let ctx = &anchor.ctx;
+    let Some(mut state) = ctx.data(|data| data.get_temp::<State>(state_id(id))) else {
+        return;
+    };
+    if !state.shown {
+        return;
+    }
+    if state.anchor_focused {
+        anchor.request_focus();
+    } else {
+        ctx.memory_mut(|memory| memory.surrender_focus(id.with("filter")));
+    }
+    state.shown = false;
+    ctx.data_mut(|data| data.insert_temp(state_id(id), state));
 }
 
 /// A menu's panel hung from `anchor` while popup `id` is open, with contents of the caller's own
@@ -576,6 +681,7 @@ fn reset(ctx: &egui::Context, id: Id, opened: Opened) {
     let state = State {
         highlight: (opened == Opened::Keyboard).then_some(0),
         by_pointer: false,
+        ..State::default()
     };
     ctx.data_mut(|data| data.insert_temp(state_id(id), state));
 }

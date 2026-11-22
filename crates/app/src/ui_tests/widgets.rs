@@ -429,3 +429,76 @@ fn a_panel_heading_shows_its_title_and_status() {
     assert!(ui.query_by_label("Watch together").is_some());
     assert!(ui.query_by_label("Playing").is_some());
 }
+
+/// A select over a list longer than its menu opens scrolled to the checked choice, on a sheet
+/// with touch and in the panel hung from its box without, so the choice isn't a scroll away.
+#[test]
+fn a_long_select_opens_at_its_choice() {
+    for touch in [true, false] {
+        let labels: Vec<String> = (0..80).map(|index| format!("Language {index}")).collect();
+        let mut ui = build_harness(egui::vec2(400., 700.), (), move |ui, _| {
+            crate::layout::set_touch(ui.ctx(), touch);
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            let id = ui.make_persistent_id("long");
+            crate::widgets::select::select(ui, id, 200., "Language", &labels, 60, false);
+        });
+        ui.get_by_role_and_label(Role::ComboBox, "Language").click();
+        for _ in 0..30 {
+            ui.step();
+        }
+        let window = ui.ctx.input(|input| input.viewport_rect());
+        let checked = ui.get_by_label("Language 60").rect();
+        assert!(window.contains_rect(checked), "touch {touch}: {checked:?} off screen");
+    }
+}
+
+/// A long menu has a filter field that has the keyboard as it opens: typing narrows the rows,
+/// Enter picks the first match, and the keyboard goes back to the select once it has.
+#[test]
+fn typing_filters_a_long_select() {
+    let labels: Vec<String> = (0..80).map(|index| format!("Language {index}")).collect();
+    let mut ui = build_harness(egui::vec2(400., 700.), 60usize, move |ui, selected| {
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let id = ui.make_persistent_id("long");
+        let (_, chosen) = crate::widgets::select::select(ui, id, 200., "Language", &labels, *selected, true);
+        if let Some(chosen) = chosen {
+            *selected = chosen;
+        }
+    });
+    // Opened from the keyboard, as a Settings picker is.
+    ui.key_press(egui::Key::Tab);
+    ui.key_press(egui::Key::Enter);
+    ui.run();
+    ui.event(egui::Event::Text("uage 7".into()));
+    ui.run();
+    let shown: Vec<String> = ui
+        .query_all_by_role(Role::MenuItemRadio)
+        .filter_map(|node| node.accesskit_node().label())
+        .collect();
+    assert_eq!(shown.len(), 11, "Language 7 and 70 to 79, not {shown:?}");
+    ui.key_press(egui::Key::ArrowDown);
+    ui.key_press(egui::Key::Enter);
+    ui.run();
+    assert_eq!(*ui.state(), 70, "Down from the first match, then Enter");
+    assert!(ui.query_by_label("Language 3").is_none(), "the menu closed");
+    assert!(
+        ui.get_by_role_and_label(Role::ComboBox, "Language")
+            .accesskit_node()
+            .is_focused(),
+        "the keyboard is back on the select"
+    );
+
+    // Nothing matching says so.
+    ui.get_by_role_and_label(Role::ComboBox, "Language").click();
+    ui.run();
+    ui.event(egui::Event::Text("Klingon".into()));
+    ui.run();
+    assert!(ui.query_by_label_contains("Nothing matches").is_some());
+    // Esc closes it from the field.
+    ui.key_press(egui::Key::Escape);
+    ui.run();
+    assert!(
+        ui.query_by_label_contains("Nothing matches").is_none(),
+        "the menu closed"
+    );
+}
