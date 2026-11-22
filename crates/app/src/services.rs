@@ -284,6 +284,8 @@ impl Services {
             stopping.extend(services.playback.stop_for_exit());
             stopping.extend(services.syncplay.leave_for_exit());
             stopping.extend(services.cast.disconnect_for_exit());
+            // The queue's last change is written here, not left to a write on another thread.
+            services.downloads.pause();
         }
         playback::wait_for_exit(stopping);
     }

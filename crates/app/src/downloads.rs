@@ -75,6 +75,13 @@ const NOTICE_INTERVAL: Duration = Duration::from_secs(1);
 /// changed: leaving Wi-Fi breaks the connection a moment before it's reported (about 250 ms on
 /// the emulator).
 const NETWORK_SETTLE: Duration = Duration::from_secs(3);
+/// How many more times a transfer that stalled is tried before its item fails. A server that
+/// is slow to start answering (a library spun down, or on cloud storage) comes round in this
+/// time, and each attempt resumes from the `.part`. Only a stall is tried again: any other
+/// error says something a retry wouldn't change.
+const STALL_RETRIES: u32 = 2;
+/// How long a stalled transfer waits before its next attempt.
+const STALL_PAUSE: Duration = Duration::from_secs(5);
 /// Image widths kept for offline pages: a poster for a card, a backdrop for a header (twice
 /// what's drawn, as `images.rs` asks for).
 const PRIMARY_WIDTH: u32 = 600;
@@ -153,8 +160,16 @@ pub struct LocalItem {
     pub backdrop_image: Option<String>,
     /// The media file's name, `media.<container>`.
     pub file: String,
-    /// Its size in bytes, as the server gave it; `0` when it didn't.
+    /// Its size in bytes, as `PlaybackInfo` gave it while the transfer ran, and the length that
+    /// arrived once it finished; `0` when the server didn't say. Only a hint until the file is
+    /// finished: the server's figure can differ from the bytes it serves.
     pub size: u64,
+    /// The length of the finished media file as this transfer counted it, written before the file
+    /// takes its name. A file of any other length is damaged. Absent in an `item.json` from before:
+    /// those downloads were accepted when the bytes matched `Content-Length`, whatever `size`
+    /// says, so the only check they can pass is that the file is there and isn't empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -225,6 +240,10 @@ pub struct Downloads {
     unmetered: watch::Receiver<bool>,
     updates: task::Receiver<Update>,
     updates_from: task::Sender<Update>,
+    /// What `index.json`'s writes share, and the number of the newest snapshot asked for: see
+    /// [`Downloads::save`].
+    index_writes: Arc<IndexWrites>,
+    index_asked: u64,
 }
 
 struct Entry {
@@ -261,6 +280,26 @@ struct Queue {
     /// When the platform's notice last heard of the downloads, to tell it at most every
     /// [`NOTICE_INTERVAL`] of mere progress.
     told: Option<Instant>,
+    /// What the transfers wait for, which the tests shorten.
+    patience: Patience,
+}
+
+/// How long a transfer waits: for a byte before it counts as stalled, and between the attempts
+/// that follow a stall.
+#[derive(Clone, Copy)]
+struct Patience {
+    /// `None` is the client's own limit ([`Client::download_resuming`]).
+    stall: Option<Duration>,
+    pause: Duration,
+}
+
+impl Default for Patience {
+    fn default() -> Self {
+        Self {
+            stall: None,
+            pause: STALL_PAUSE,
+        }
+    }
 }
 
 struct Worker {
@@ -403,7 +442,15 @@ struct Reporter {
 }
 
 impl Reporter {
-    fn send(&self, update: Update) {
+    fn send(&self, mut update: Update) {
+        if let Update::Progress { done, total, .. } = &mut update {
+            // A total the bytes have passed was wrong (`PlaybackInfo`'s size, with the server
+            // saying none of its own): the transfer has no total to show, rather than a bar
+            // beyond full.
+            if total.is_some_and(|total| *done > total) {
+                *total = None;
+            }
+        }
         if let Update::Progress { done, total, .. } = &update {
             let mut queue = lock(&self.queue);
             if let Some(current) = queue.worker(self.worker).and_then(|worker| worker.current.as_mut()) {
@@ -506,6 +553,8 @@ impl Downloads {
             unmetered: UNMETERED.subscribe(),
             updates,
             updates_from,
+            index_writes: Arc::default(),
+            index_asked: 0,
         };
         downloads.load();
         downloads
@@ -867,8 +916,11 @@ impl Downloads {
         }
         // Reports already on their way would show up as a transfer with nothing behind it.
         self.updates.drain().for_each(drop);
-        if stopped {
-            self.save();
+        // The session is ending (sign-out, a switch, quitting): the write is made here, as it
+        // may be the last thing this process does, and a change saved on a thread a moment ago
+        // that hasn't landed goes with it.
+        if stopped || self.unsaved() {
+            self.save_now();
         }
     }
 
@@ -915,13 +967,36 @@ impl Downloads {
         }
     }
 
-    /// Writes the queue and each item's persisted state, atomically like the config.
-    fn save(&self) {
-        let path = account_dir(&self.account).join(INDEX_FILE);
-        if self.entries.is_empty() && !path.exists() {
-            // Nothing queued yet: don't leave an empty queue behind for every account signed in.
-            return;
-        }
+    /// Writes the queue and each item's persisted state, atomically like the config, on a
+    /// blocking thread: the write waits for the disk, which another transfer may be keeping busy,
+    /// and a frame mustn't. The snapshot is numbered, and [`write_index`] drops one a newer
+    /// snapshot has already replaced, so writes landing out of order can't bring back old state.
+    fn save(&mut self) {
+        let (seq, path, index) = self.index_snapshot();
+        let writes = self.index_writes.clone();
+        crate::runtime::detach(async move {
+            if let Err(err) = tokio::task::spawn_blocking(move || write_index(&writes, seq, &path, &index)).await {
+                tracing::warn!("couldn't save the download queue: {err}");
+            }
+        });
+    }
+
+    /// [`Downloads::save`] on this thread, for the last write of a session: nothing can be left
+    /// waiting on a thread that may not run again before the process ends. It takes its turn
+    /// behind a write already under way, and any older snapshot still queued is dropped after it.
+    fn save_now(&mut self) {
+        let (seq, path, index) = self.index_snapshot();
+        write_index(&self.index_writes, seq, &path, &index);
+    }
+
+    /// Whether a snapshot asked for hasn't reached the disk yet.
+    fn unsaved(&self) -> bool {
+        self.index_writes.written.load(Ordering::Acquire) < self.index_asked
+    }
+
+    /// The queue as it is now, numbered after the ones before it.
+    fn index_snapshot(&mut self) -> (u64, PathBuf, Index) {
+        self.index_asked += 1;
         let index = Index {
             entries: self
                 .entries
@@ -940,9 +1015,45 @@ impl Downloads {
                 })
                 .collect(),
         };
-        if let Err(err) = write_json(&path, &index) {
-            tracing::warn!("couldn't save the download queue: {err}");
+        (self.index_asked, account_dir(&self.account).join(INDEX_FILE), index)
+    }
+
+    /// Waits until every snapshot asked for is on the disk, for the tests that read it.
+    #[cfg(test)]
+    fn wait_saved(&self) {
+        let start = Instant::now();
+        while self.unsaved() {
+            assert!(start.elapsed() < Duration::from_secs(10), "the queue was never saved");
+            std::thread::sleep(Duration::from_millis(5));
         }
+    }
+}
+
+/// What the writes of one account's `index.json` share: the lock that makes them take turns, and
+/// the number of the newest snapshot written (readable without the lock, which a write holds
+/// through its fsync).
+#[derive(Default)]
+struct IndexWrites {
+    writing: Mutex<()>,
+    written: AtomicU64,
+}
+
+/// Writes snapshot `seq` of the queue unless a newer one has been written already. A save waits
+/// for the lock, so a slow older write can't land its rename after a newer one's; the one that
+/// finds a newer snapshot on the disk just goes.
+fn write_index(writes: &IndexWrites, seq: u64, path: &Path, index: &Index) {
+    let _writing = writes.writing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if writes.written.load(Ordering::Acquire) >= seq {
+        return;
+    }
+    if index.entries.is_empty() && !path.exists() {
+        // Nothing queued yet: don't leave an empty queue behind for every account signed in.
+        writes.written.store(seq, Ordering::Release);
+        return;
+    }
+    match write_json(path, index) {
+        Ok(()) => writes.written.store(seq, Ordering::Release),
+        Err(err) => tracing::warn!("couldn't save the download queue: {err}"),
     }
 }
 
@@ -1365,9 +1476,59 @@ async fn download(client: &Client, item: &BaseItemDto, dir: &Path, updates: &Rep
         backdrop_image,
         file,
         size,
+        verified_size: None,
     };
     let local = save_item(dir, local).await?;
-    fetch_media(client, &local, dir, updates).await
+    let Patience { stall, pause } = lock(&updates.queue).patience;
+    let mut stalls = 0;
+    loop {
+        match fetch_media(client, &local, dir, stall, updates).await {
+            Ok(()) => return Ok(()),
+            Err(Fetch::Failed(message)) => return Err(message),
+            Err(Fetch::Stalled(message)) if stalls >= STALL_RETRIES => return Err(message),
+            Err(Fetch::Stalled(_)) => {
+                stalls += 1;
+                tracing::info!(item = %item.name, attempt = stalls, "the download stalled; trying again shortly");
+                // Cancelling or pausing aborts the worker, and with it this wait.
+                tokio::time::sleep(pause).await;
+            }
+        }
+    }
+}
+
+/// Why an attempt at the media file ended without it.
+enum Fetch {
+    /// The server went quiet ([`jellyfin::Error::Stalled`]): worth another attempt.
+    Stalled(String),
+    Failed(String),
+}
+
+impl From<String> for Fetch {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+fn fetch_error(err: &jellyfin::Error) -> Fetch {
+    let message = describe_error(err);
+    match err {
+        jellyfin::Error::Stalled => Fetch::Stalled(message),
+        _ => Fetch::Failed(message),
+    }
+}
+
+/// The media request, with the stall limit the transfer waits for (`None`: the client's own).
+async fn request_media(
+    client: &Client,
+    url: Url,
+    offset: u64,
+    if_range: Option<&str>,
+    stall: Option<Duration>,
+) -> Result<jellyfin::Download, jellyfin::Error> {
+    match stall {
+        Some(stall) => client.download_with(url, offset, if_range, stall).await,
+        None => client.download_resuming(url, offset, if_range).await,
+    }
 }
 
 /// Writes `item.json` on a blocking thread, since `write_json` waits for the disk to have it.
@@ -1383,25 +1544,27 @@ async fn save_item(dir: &Path, local: LocalItem) -> Result<LocalItem, String> {
 /// The media file itself: from the end of an unfinished `.part` when there is one, and renamed
 /// into place once all of its bytes are here.
 ///
+/// What the `.part` holds decides where to ask from, and the server's answer whether that
+/// holds: `bytes=N-` for N bytes, where a 206 carries on and a 200 or 416 starts the file over.
+/// The size `PlaybackInfo` gave (`local.size`) is what the server's library believes, which its
+/// file can differ from, so it only feeds the free-space check and the progress bar.
+///
 /// The first response's validator (`ETag`, else `Last-Modified`) is kept beside the `.part`
 /// ([`validator_path`]) and sent back as `If-Range` on a resume, so a file the server replaced
 /// since comes whole (a 200) and starts the file over, rather than its tail being appended to
 /// the old head.
-async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &Reporter) -> Result<(), String> {
+async fn fetch_media(
+    client: &Client,
+    local: &LocalItem,
+    dir: &Path,
+    stall: Option<Duration>,
+    updates: &Reporter,
+) -> Result<(), Fetch> {
     let item_id = &local.item.id;
     let part = dir.join(format!("{}.part", local.file));
     let finished = dir.join(&local.file);
     let mut offset = tokio::fs::metadata(&part).await.map(|meta| meta.len()).unwrap_or(0);
     let mut restart = false;
-    if local.size > 0 && offset >= local.size {
-        if offset == local.size {
-            // Everything arrived but the rename didn't (a crash in between): finish it now.
-            return finish(&part, &finished, local.size, local.poster(dir), updates, item_id).await;
-        }
-        // Longer than the file can be: a corrupt leftover, not something to resume.
-        offset = 0;
-        restart = true;
-    }
     if local.size > 0 {
         check_space(dir, local.size.saturating_sub(offset))?;
     }
@@ -1415,19 +1578,23 @@ async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &R
     } else {
         None
     };
-    let mut download = match client.download_resuming(url.clone(), offset, saved.as_deref()).await {
-        // Nothing left to ask for: a `.part` that already holds the whole file, when its size
-        // wasn't known to notice, or more than the file has now. A 416 doesn't prove the bytes
-        // are right, so the file starts over.
+    let mut download = match request_media(client, url.clone(), offset, saved.as_deref(), stall).await {
+        // Nothing left to ask for: the `.part` holds the whole file, or more than the file has
+        // now. A 416 doesn't prove the bytes are right, so the file starts over.
         Err(err) if offset > 0 && err.is_range_not_satisfiable() => {
             tracing::info!(item = %local.item.name, "the server has nothing past the `.part`; starting over");
             offset = 0;
             restart = true;
-            client.download(url, 0).await.map_err(|err| describe_error(&err))?
+            request_media(client, url, 0, None, stall)
+                .await
+                .map_err(|err| fetch_error(&err))?
         }
-        other => other.map_err(|err| describe_error(&err))?,
+        other => other.map_err(|err| fetch_error(&err))?,
     };
-    let total = download.total.or((local.size > 0).then_some(local.size));
+    // The server's own word for the file's length ends the transfer when the bytes reach it;
+    // `PlaybackInfo`'s only stands in for it on the bar.
+    let total = download.total;
+    let shown = total.or((local.size > 0).then_some(local.size));
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -1466,10 +1633,10 @@ async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &R
     updates.send(Update::Progress {
         item_id: item_id.clone(),
         done,
-        total,
+        total: shown,
     });
     let mut reported = Instant::now();
-    while let Some(chunk) = download.chunk().await.map_err(|err| describe_error(&err))? {
+    while let Some(chunk) = download.chunk().await.map_err(|err| fetch_error(&err))? {
         file.write_all(&chunk)
             .await
             .map_err(|err| tr!("downloads-error-write", error = err.to_string()))?;
@@ -1479,7 +1646,7 @@ async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &R
             updates.send(Update::Progress {
                 item_id: item_id.clone(),
                 done,
-                total,
+                total: shown,
             });
         }
     }
@@ -1489,16 +1656,16 @@ async fn fetch_media(client: &Client, local: &LocalItem, dir: &Path, updates: &R
     drop(file);
     if let Some(total) = total.filter(|total| done != *total) {
         // The `.part` stays: the retry resumes from here.
-        return Err(tr!("downloads-error-partial", done = done, total = total));
+        return Err(tr!("downloads-error-partial", done = done, total = total).into());
     }
-    if local.size != done {
-        // The server's file isn't the length `PlaybackInfo` said (or it didn't say): `item.json`
-        // names the one that came, or the finished file would never match its recorded size.
-        let mut corrected = local.clone();
-        corrected.size = done;
-        save_item(dir, corrected).await?;
-    }
-    finish(&part, &finished, done, local.poster(dir), updates, item_id).await
+    // `item.json` names the length that came, and says it was counted, before the file takes
+    // its name: from then on a file of another length is a damaged one. (`PlaybackInfo`'s size
+    // can differ from what the server sends.)
+    let mut counted = local.clone();
+    counted.size = done;
+    counted.verified_size = Some(done);
+    save_item(dir, counted).await?;
+    Ok(finish(&part, &finished, done, local.poster(dir), updates, item_id).await?)
 }
 
 /// Where a `.part`'s validator is kept: the `ETag` or `Last-Modified` its download began with.
@@ -1688,12 +1855,14 @@ fn finished(dir: &Path) -> Option<Finished> {
     })
 }
 
-/// The length of the item's media file in `dir` when it's all there: as long as the size
-/// `item.json` recorded, or any length but none when the server gave no size. A shorter or empty
-/// file is what a power loss can leave behind a rename, and it mustn't play or count as done.
+/// The length of the item's media file in `dir` when it's all there: as long as the transfer
+/// that finished it counted (`verified_size`), or any length but none for a download from before
+/// that was recorded. A shorter or empty file is what a power loss can leave behind a rename,
+/// and it mustn't play or count as done. `size` isn't a check: it can be the library's figure
+/// for a file the server serves at another length.
 fn media_length(dir: &Path, local: &LocalItem) -> Option<u64> {
     let meta = std::fs::metadata(dir.join(&local.file)).ok()?;
-    let whole = meta.is_file() && meta.len() > 0 && (local.size == 0 || meta.len() == local.size);
+    let whole = meta.is_file() && meta.len() > 0 && local.verified_size.is_none_or(|verified| meta.len() == verified);
     whole.then_some(meta.len())
 }
 
@@ -2035,7 +2204,10 @@ mod tests {
             Some(dir(ITEM).join("primary.png")),
             "the page draws the saved poster, not the server's"
         );
+        // The length that arrived is on record, as what a finished file is checked against.
+        assert_eq!(saved.verified_size, Some(5));
         // Done downloads are found on disk, not in the index.
+        downloads.wait_saved();
         let index: Index = read_json(&account_dir(ACCOUNT).join(INDEX_FILE)).expect("index.json");
         assert!(index.entries.is_empty());
     }
@@ -2389,6 +2561,7 @@ mod tests {
                 "source": {"Id": "source", "Container": "mkv", "MediaStreams": []},
                 "file": "media.mkv",
                 "size": 5,
+                "verified_size": 5,
             }))
             .expect("a local item"),
         )
@@ -2408,8 +2581,9 @@ mod tests {
     }
 
     /// A power loss can leave the rename without the data: a media file that's empty or shorter
-    /// than `item.json`'s size doesn't count as done, and comes again with the queue. With no
-    /// size recorded, any file with something in it passes.
+    /// than the length `item.json` has on record doesn't count as done, and comes again with the
+    /// queue. With no length on record (a download from before it was kept), any file with
+    /// something in it passes.
     #[test]
     fn a_cut_short_download_is_queued_again_instead_of_played() {
         let _config = ConfigDir::new("downloads-cut-short");
@@ -2426,14 +2600,257 @@ mod tests {
 
         let path = dir(ITEM).join(ITEM_FILE);
         let mut local: LocalItem = read_json(&path).expect("item.json");
-        local.size = 0;
+        local.verified_size = None;
         write_json(&path, &local).expect("item.json");
         assert!(
             find_local(ACCOUNT, ITEM).is_some(),
-            "no size recorded: the file is taken as it is"
+            "no length on record: the file is taken as it is"
         );
         std::fs::write(dir(ITEM).join("media.mkv"), b"").expect("an empty file");
         assert!(find_local(ACCOUNT, ITEM).is_none(), "but not an empty one");
+    }
+
+    /// A download from before the length was recorded: its `item.json` has the size
+    /// `PlaybackInfo` gave, which was never checked against the bytes that came (the transfer was
+    /// accepted when they matched `Content-Length`). A library that reported another size than
+    /// the file it served left a download that plays: it isn't invisible offline, and isn't
+    /// downloaded again.
+    #[test]
+    fn a_download_from_before_the_length_was_recorded_is_taken_as_it_is() {
+        let _config = ConfigDir::new("downloads-old-shape");
+        std::fs::create_dir_all(dir(ITEM)).expect("the item's folder");
+        // As an older version wrote it: no `verified_size`, and a size that isn't the file's.
+        let old = json!({
+            "item": item_json(ITEM),
+            "source": {"Id": "source", "Container": "mkv", "MediaStreams": []},
+            "subtitles": [],
+            "segments": [],
+            "file": "media.mkv",
+            "size": 9,
+        });
+        std::fs::write(dir(ITEM).join(ITEM_FILE), old.to_string()).expect("item.json");
+        std::fs::write(dir(ITEM).join("media.mkv"), b"hello").expect("the media file");
+
+        let local = find_local(ACCOUNT, ITEM).expect("it plays");
+        assert_eq!(std::fs::read(local.path).expect("the file"), b"hello");
+        assert!(has_downloads(ACCOUNT));
+        let ctx = egui::Context::default();
+        let downloads = Downloads::new(client_at("http://127.0.0.1:1/"), ACCOUNT, &ctx, false);
+        assert_eq!(downloads.state(ITEM), Some(DownloadState::Done { size: 5 }));
+        assert!(lock(&downloads.queue).waiting.is_empty(), "not queued again");
+
+        // The same sizes from a transfer that counted the bytes are another matter: that file is
+        // not the length it recorded.
+        let mut counted: LocalItem = read_json(&dir(ITEM).join(ITEM_FILE)).expect("item.json");
+        counted.verified_size = Some(9);
+        write_json(&dir(ITEM).join(ITEM_FILE), &counted).expect("item.json");
+        assert!(find_local(ACCOUNT, ITEM).is_none());
+    }
+
+    /// A `.part` longer than the size `PlaybackInfo` gave is resumed all the same: the server
+    /// has the file, and says where it goes on.
+    #[test]
+    fn a_part_longer_than_the_reported_size_resumes_and_finishes_as_the_whole_file() {
+        let _config = ConfigDir::new("downloads-long-part");
+        let server = start();
+        // `PlaybackInfo` says 5 bytes; the file is 10.
+        serve_item(&server, ITEM);
+        std::fs::create_dir_all(dir(ITEM)).expect("the item's folder");
+        std::fs::write(dir(ITEM).join("media.mkv.part"), b"hello!!").expect("seven bytes of it");
+        mount(
+            &server,
+            Mock::given(method("GET"))
+                .and(path(format!("/Items/{ITEM}/Download")))
+                .and(wiremock::matchers::header("range", "bytes=7-"))
+                .respond_with(
+                    ResponseTemplate::new(206)
+                        .insert_header("content-range", "bytes 7-9/10")
+                        .set_body_bytes(b"!!!"),
+                )
+                .expect(1),
+        );
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
+        downloads.request(&item(ITEM)).expect("queued");
+        let notices = tick_until(&mut downloads, |downloads| {
+            matches!(
+                downloads.state(ITEM),
+                Some(DownloadState::Done { .. } | DownloadState::Failed(_))
+            )
+        });
+        assert!(matches!(notices[..], [Notice::Downloaded { .. }]), "{notices:?}");
+        assert_eq!(downloads.state(ITEM), Some(DownloadState::Done { size: 10 }));
+        assert_eq!(find_dir_contents(&dir(ITEM)), b"hello!!!!!");
+        let local: LocalItem = read_json(&dir(ITEM).join(ITEM_FILE)).expect("item.json");
+        assert_eq!((local.size, local.verified_size), (10, Some(10)));
+        let server = server.clone();
+        block_on(async move { server.verify().await });
+    }
+
+    /// Bytes past the total the bar has (the server gave none of its own) leave the transfer
+    /// without a total, not a bar past full.
+    #[test]
+    fn progress_past_the_total_has_no_total() {
+        let ctx = egui::Context::default();
+        let (updates, mut reports) = task::channel(&ctx);
+        let reporter = Reporter {
+            updates,
+            queue: Arc::default(),
+            worker: 0,
+        };
+        for (done, total) in [(4, Some(5)), (5, Some(5)), (7, Some(5)), (7, None)] {
+            reporter.send(Update::Progress {
+                item_id: ITEM.into(),
+                done,
+                total,
+            });
+        }
+        let totals: Vec<_> = reports
+            .drain()
+            .filter_map(|update| match update {
+                Update::Progress { total, .. } => Some(total),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(totals, [Some(5), Some(5), None, None]);
+    }
+
+    /// A server that answers once the first try has given up: the transfer asks again by itself,
+    /// and the item doesn't fail.
+    #[test]
+    fn a_stalled_download_is_tried_again() {
+        let _config = ConfigDir::new("downloads-stall-once");
+        let server = start();
+        serve_item(&server, ITEM);
+        mount(
+            &server,
+            Mock::given(method("GET"))
+                .and(path(format!("/Items/{ITEM}/Download")))
+                .respond_with(Stalls::times(1)),
+        );
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
+        lock(&downloads.queue).patience = quick();
+        downloads.request(&item(ITEM)).expect("queued");
+        let notices = tick_until(&mut downloads, |downloads| {
+            matches!(
+                downloads.state(ITEM),
+                Some(DownloadState::Done { .. } | DownloadState::Failed(_))
+            )
+        });
+        assert!(matches!(notices[..], [Notice::Downloaded { .. }]), "{notices:?}");
+        assert_eq!(find_dir_contents(&dir(ITEM)), b"hello");
+        assert_eq!(media_requests(&server), 2, "the stalled try and the one that worked");
+    }
+
+    /// A server that never answers fails the item after the retries, not before and not never.
+    #[test]
+    fn a_download_that_keeps_stalling_fails_after_its_retries() {
+        let _config = ConfigDir::new("downloads-stall-always");
+        let server = start();
+        serve_item(&server, ITEM);
+        mount(
+            &server,
+            Mock::given(method("GET"))
+                .and(path(format!("/Items/{ITEM}/Download")))
+                .respond_with(Stalls::times(usize::MAX)),
+        );
+        let ctx = egui::Context::default();
+        let mut downloads = Downloads::new(client(&server), ACCOUNT, &ctx, false);
+        lock(&downloads.queue).patience = quick();
+        downloads.request(&item(ITEM)).expect("queued");
+        let notices = tick_until(&mut downloads, |downloads| {
+            matches!(downloads.state(ITEM), Some(DownloadState::Failed(_)))
+        });
+        assert!(matches!(notices[..], [Notice::Failed { .. }]), "{notices:?}");
+        assert_eq!(media_requests(&server), 1 + STALL_RETRIES as usize);
+    }
+
+    /// Waits that fit a test: a stall is 400 ms of nothing, and the pause after it a few.
+    fn quick() -> Patience {
+        Patience {
+            stall: Some(Duration::from_millis(400)),
+            pause: Duration::from_millis(20),
+        }
+    }
+
+    /// How many times the media file was asked for.
+    fn media_requests(server: &Arc<MockServer>) -> usize {
+        let asked = server.clone();
+        let requests = block_on(async move { asked.received_requests().await.expect("recorded") });
+        requests
+            .iter()
+            .filter(|request| request.url.path() == format!("/Items/{ITEM}/Download"))
+            .count()
+    }
+
+    /// Answers "hello", but leaves the first `times` requests waiting far past the stall limit.
+    struct Stalls {
+        times: usize,
+        asked: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Stalls {
+        fn times(times: usize) -> Self {
+            Self {
+                times,
+                asked: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl wiremock::Respond for Stalls {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            let template = ResponseTemplate::new(200).set_body_bytes(b"hello");
+            if self.asked.fetch_add(1, Ordering::SeqCst) < self.times {
+                template.set_delay(Duration::from_secs(4))
+            } else {
+                template
+            }
+        }
+    }
+
+    /// Two snapshots of the queue written out of turn leave the newer one on disk, whichever
+    /// reaches the file last.
+    #[test]
+    fn an_older_queue_snapshot_never_replaces_a_newer_one() {
+        let _config = ConfigDir::new("downloads-index-order");
+        let path = account_dir(ACCOUNT).join(INDEX_FILE);
+        let snapshot = |ids: &[&str]| Index {
+            entries: ids
+                .iter()
+                .map(|id| IndexEntry {
+                    item: item(id),
+                    state: SavedState::Queued,
+                })
+                .collect(),
+        };
+        let writes = IndexWrites::default();
+        write_index(&writes, 2, &path, &snapshot(&[ITEM, OTHERS[0]]));
+        write_index(&writes, 1, &path, &snapshot(&[ITEM]));
+        let index: Index = read_json(&path).expect("index.json");
+        assert_eq!(index.entries.len(), 2, "the later snapshot stays");
+        write_index(&writes, 3, &path, &snapshot(&[]));
+        let index: Index = read_json(&path).expect("index.json");
+        assert!(index.entries.is_empty(), "a newer one still goes through");
+    }
+
+    /// A change made right before the session ends is on disk when it has: sign-out and quitting
+    /// don't wait for the thread that was to write it.
+    #[test]
+    fn the_last_queue_change_is_written_when_the_session_ends() {
+        let _config = ConfigDir::new("downloads-index-last");
+        let ctx = egui::Context::default();
+        let (_network, unmetered) = watch::channel(false);
+        let mut downloads =
+            Downloads::new(client_at("http://127.0.0.1:1/"), ACCOUNT, &ctx, true).with_network(unmetered);
+        downloads.queue(vec![item(ITEM)]);
+        downloads.queue(vec![item(OTHERS[0])]);
+        downloads.cancel(ITEM);
+        downloads.pause();
+        let index: Index = read_json(&account_dir(ACCOUNT).join(INDEX_FILE)).expect("index.json");
+        let ids: Vec<_> = index.entries.iter().map(|entry| entry.item.id.as_str()).collect();
+        assert_eq!(ids, [OTHERS[0]]);
     }
 
     #[test]
@@ -2452,6 +2869,7 @@ mod tests {
             "source": {"Id": "source", "Container": "mkv", "MediaStreams": []},
             "file": "media.mkv",
             "size": 5,
+            "verified_size": 5,
         }))
         .expect("a local item");
         write_json(&dir(ITEM).join(ITEM_FILE), &local).expect("item.json");
