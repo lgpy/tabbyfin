@@ -15,7 +15,7 @@ use std::time::Duration;
 use jellyfin::models::BaseItemDto;
 use jellyfin::{Client, GeneralCommand, ItemsQuery, PlayCommand, PlayRequest, PlaystateCommand, PlaystateRequest};
 
-use crate::playback::{PlayOptions, SubtitleChoice, UiCommand};
+use crate::playback::{PlayOptions, SubtitleChoice, UiCommand, volume_max};
 use crate::services::{AppEvent, Services};
 use crate::task::Task;
 use crate::toasts::Toast;
@@ -252,11 +252,11 @@ impl Services {
             (None, Some(state)) => state.volume,
             (None, None) => return,
         };
-        let set_volume = |volume: f64| UiCommand::SetVolume(volume.clamp(0., 100.));
+        let casting = self.cast.casting().is_some();
         let command = match command {
-            GeneralCommand::VolumeUp => set_volume(volume + VOLUME_STEP),
-            GeneralCommand::VolumeDown => set_volume(volume - VOLUME_STEP),
-            GeneralCommand::SetVolume(volume) => set_volume(f64::from(volume)),
+            GeneralCommand::VolumeUp => UiCommand::SetVolume(stepped_volume(volume, VOLUME_STEP, casting)),
+            GeneralCommand::VolumeDown => UiCommand::SetVolume(stepped_volume(volume, -VOLUME_STEP, casting)),
+            GeneralCommand::SetVolume(volume) => UiCommand::SetVolume(f64::from(volume).clamp(0., 100.)),
             GeneralCommand::Mute => UiCommand::SetMute(true),
             GeneralCommand::Unmute => UiCommand::SetMute(false),
             GeneralCommand::ToggleMute => UiCommand::ToggleMute,
@@ -287,12 +287,29 @@ impl Services {
     }
 }
 
+/// The volume a remote step command asks for: up to the player's boost for local playback,
+/// 100 on a cast (a TV has none). `SetVolume` from the server stays within 0 to 100.
+fn stepped_volume(volume: f64, step: f64, casting: bool) -> f64 {
+    let max = if casting { 100. } else { volume_max() };
+    (volume + step).clamp(0., max)
+}
+
 #[cfg(test)]
 mod tests {
     use jellyfin::PlayCommand;
     use jellyfin::models::BaseItemDto;
 
-    use super::{Placement, in_order, placement};
+    use super::{Placement, in_order, placement, stepped_volume};
+    use crate::playback::volume_max;
+
+    #[test]
+    fn volume_steps_reach_the_boost_locally_and_stop_at_100_casting() {
+        let step = crate::views::player::VOLUME_STEP;
+        assert_eq!(stepped_volume(120., step, false), (120. + step).min(volume_max()));
+        assert_eq!(stepped_volume(volume_max(), -step, false), volume_max() - step);
+        assert_eq!(stepped_volume(100., step, true), 100.);
+        assert_eq!(stepped_volume(0., -step, false), 0.);
+    }
 
     fn item(id: &str) -> BaseItemDto {
         serde_json::from_value(serde_json::json!({ "Id": id, "Name": id })).expect("item")
