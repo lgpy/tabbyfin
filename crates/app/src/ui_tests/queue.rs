@@ -435,3 +435,150 @@ fn save_is_the_last_stop_of_the_panels_keys() {
     }
     assert_eq!(server.requests("POST", "/Playlists"), 1);
 }
+
+/// Adding to the queue while the player waits to reconnect puts the items in the queue that's
+/// there, and the interrupted item plays on when the reconnect starts.
+#[test]
+fn adding_while_a_reconnect_waits_keeps_the_queue_and_the_reconnect() {
+    let _config = ConfigDir::new("queue-reconnect");
+    let (_server, mut harness) = playing();
+    let id = |index: usize| episode(index).id;
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(2)], false);
+    services.lose_for_test();
+    assert!(services.reconnect_pending_for_test());
+
+    services.enqueue(vec![movie()], false);
+    assert!(services.reconnect_pending_for_test(), "the reconnect goes ahead");
+    assert_eq!(queued(&mut harness), [id(2), movie().id]);
+    // Play next goes the same way.
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(0)], true);
+    assert!(services.reconnect_pending_for_test());
+    assert_eq!(queued(&mut harness), [id(0), id(2), movie().id]);
+}
+
+/// Asking for something to play next or adding to the queue undoes dismissing the up-next card,
+/// so the queued item plays when this one ends.
+#[test]
+fn queueing_after_dismissing_the_up_next_card_plays_the_queued_item() {
+    let _config = ConfigDir::new("queue-after-dismissed");
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    {
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.autoplay = true;
+        state.next_cancelled = true;
+    }
+    services.enqueue(vec![episode(2)], false);
+    assert!(!services.playback.now_playing().expect("the session").next_cancelled);
+    assert_eq!(services.end_for_test(), Some(episode(2).id));
+}
+
+/// Repeat all starts over at the end of what the queue holds, a lone item included, rather than
+/// moving on to the series' following episode.
+#[test]
+fn repeat_all_wraps_before_the_following_episode() {
+    use jellyfin::RepeatMode;
+
+    let _config = ConfigDir::new("queue-repeat-all-wrap");
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.set_repeat(RepeatMode::RepeatAll);
+    {
+        // As the details leave a mid-season episode: a following one, and nothing queued.
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.autoplay = true;
+        state.next = Some(episode(2));
+    }
+    assert_eq!(
+        services.end_for_test(),
+        Some(episode(1).id),
+        "the lone item plays again"
+    );
+
+    // Without repeat the following episode plays, as before.
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    {
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.autoplay = true;
+        state.next = Some(episode(2));
+    }
+    assert_eq!(services.end_for_test(), Some(episode(2).id));
+}
+
+/// Playing the item again with repeat one keeps its version and tracks.
+#[test]
+fn repeat_one_keeps_the_version_and_tracks() {
+    use jellyfin::RepeatMode;
+
+    use crate::playback::{PlayOptions, SubtitleChoice};
+
+    let _config = ConfigDir::new("queue-repeat-one-tracks");
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.set_repeat(RepeatMode::RepeatOne);
+    let source_id = {
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.audio = Some(3);
+        state.subtitle = SubtitleChoice::Stream(5);
+        state.source.id.clone()
+    };
+    // It was started with the defaults and the user chose since; what plays again is the choice.
+    assert_eq!(services.end_with_for_test(PlayOptions::default()), Some(episode(1).id));
+    let (_, options) = services.last_started_for_test();
+    let options = options.expect("a new session");
+    assert_eq!(options.media_source_id, Some(source_id));
+    assert_eq!(options.audio_stream_index, Some(3));
+    assert_eq!(options.subtitle, SubtitleChoice::Stream(5));
+    assert!(options.start.is_none(), "from its start");
+}
+
+/// Previous goes back to what the queue played, and keeps the queue: the item it left is next
+/// again. Without anything played it's the series' previous episode, as before.
+#[test]
+fn previous_goes_back_within_the_queue_and_keeps_it() {
+    let _config = ConfigDir::new("queue-previous");
+    let (_server, mut harness) = playing();
+    let id = |index: usize| episode(index).id;
+    let source = movie().media_sources[0].clone();
+    let services = harness.state_mut().services();
+    services.enqueue(vec![movie(), episode(2)], false);
+    services.playback.now_playing_mut().expect("the session").autoplay = true;
+    // The first queued item plays, and the page's neighbours are the series'.
+    assert_eq!(services.end_for_test(), Some(movie().id));
+    services.playback.start_for_test(movie(), source);
+    services.playback.now_playing_mut().expect("the session").previous = Some(episode(0));
+    assert_eq!(queued(&mut harness), [id(2)]);
+
+    let services = harness.state_mut().services();
+    services.play_previous();
+    assert_eq!(services.last_started_for_test().0, Some(id(1)), "back to what played");
+    assert_eq!(queued(&mut harness), [movie().id, id(2)], "the queue is whole again");
+
+    // With nothing played from a queue, Previous is the series' previous episode.
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.playback.now_playing_mut().expect("the session").previous = Some(episode(0));
+    services.play_previous();
+    assert_eq!(services.last_started_for_test().0, Some(id(0)));
+}
+
+/// The Previous button follows the queue too: with what it played to go back to, that's the
+/// previous item, even for a movie that has no neighbours of its own.
+#[test]
+fn the_previous_button_offers_what_the_queue_played() {
+    let _config = ConfigDir::new("queue-previous-button");
+    let (_server, mut harness) = playing();
+    let source = movie().media_sources[0].clone();
+    let services = harness.state_mut().services();
+    services.enqueue(vec![movie()], false);
+    services.playback.now_playing_mut().expect("the session").autoplay = true;
+    assert_eq!(services.end_for_test(), Some(movie().id));
+    services.playback.start_for_test(movie(), source);
+    // Something queued or removed while it plays refreshes the card and the button.
+    services.enqueue(vec![episode(2)], false);
+    let previous = harness.state().now_playing().and_then(|state| state.previous.clone());
+    assert_eq!(previous.map(|item| item.id), Some(episode(1).id));
+}

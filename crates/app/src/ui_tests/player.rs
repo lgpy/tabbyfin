@@ -210,6 +210,108 @@ fn a_segment_set_to_skip_is_skipped_and_undo_goes_back() {
     assert!(harness.state_mut().commands().is_empty(), "not skipped again");
 }
 
+/// After Undo the segment isn't skipped again by a restart of the same item (a reconnect, a
+/// track switch on a transcode), only for another item.
+#[test]
+fn undo_is_remembered_across_a_restart_of_the_item_but_not_for_another_item() {
+    use crate::config::SkipAction;
+    use crate::markers::SegmentKind;
+
+    let _config = ConfigDir::new("player-undo-restart");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let (item, source, next, segments) = {
+        let state = harness.state_mut().now_playing_mut().expect("the session");
+        state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+        (
+            state.item.clone(),
+            state.source.clone(),
+            state.next.clone().expect("a next episode"),
+            state.segments.clone(),
+        )
+    };
+    harness.step();
+    harness.get_by_label("Undo").click();
+    harness.step();
+    harness.step();
+    harness.state_mut().commands();
+
+    // The same item again, in a new session: back inside the intro, and left alone.
+    let restart = |harness: &mut Harness<'static, PlayerRun>, item: &jellyfin::models::BaseItemDto| {
+        let services = harness.state_mut().services_mut().expect("the services");
+        let sent = services.playback.start_for_test(item.clone(), source.clone());
+        let state = services.playback.now_playing_mut().expect("the new session");
+        state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+        state.segments = segments.clone();
+        harness.state_mut().sent = Some(sent);
+        harness.step();
+        harness.step();
+        harness.state_mut().commands()
+    };
+    let sent = restart(&mut harness, &item);
+    assert!(sent.is_empty(), "not skipped again: {sent:?}");
+
+    // Another item's intro is skipped as usual.
+    let sent = restart(&mut harness, &next);
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 13 * 60),
+        "{sent:?}"
+    );
+}
+
+/// A session that's still loading, or hasn't reported where it is, doesn't skip an intro that
+/// starts at zero: it may be resuming at 40:00 and would seek away from it.
+#[test]
+fn a_resuming_session_is_not_skipped_before_it_reports_its_position() {
+    use std::time::Duration;
+
+    use player::PlayerEvent;
+
+    use crate::config::SkipAction;
+    use crate::markers::{Segment, SegmentKind};
+
+    let _config = ConfigDir::new("player-skip-resume");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    {
+        let state = harness.state_mut().now_playing_mut().expect("the session");
+        state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+        state.segments = vec![Segment {
+            kind: SegmentKind::Intro,
+            start: Duration::ZERO,
+            end: Duration::from_secs(90),
+        }];
+        // As a new session starts, resuming at 40:00 with the intro's details already in.
+        state.loading = true;
+        state.position_known = false;
+        state.position = Duration::ZERO;
+    }
+    harness.state_mut().commands();
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty(), "loading");
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.player_event_for_test(PlayerEvent::FileLoaded);
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty(), "loaded, but no position yet");
+
+    // The first position is the resume point: past the intro, nothing to skip.
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.player_event_for_test(PlayerEvent::Position(Duration::from_secs(40 * 60)));
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty(), "resumed past the intro");
+
+    // From the start, the intro is skipped once the position says so.
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.player_event_for_test(PlayerEvent::Position(Duration::from_secs(1)));
+    harness.step();
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 90),
+        "{sent:?}"
+    );
+}
+
 /// A kind set to Off has no button and isn't skipped; Enter leaves it alone.
 #[test]
 fn a_segment_set_to_off_is_left_alone() {
@@ -366,12 +468,208 @@ fn the_sleep_timers_end_of_item_holds_the_next_episode() {
     let services = harness.state_mut().services_mut().expect("the services");
     let state = services.playback.now_playing_mut().expect("the session");
     state.autoplay = true;
-    let session = state.session;
+    let item = state.item.clone();
     assert!(state.next.is_some());
 
-    services.playback.set_sleep(Some(SleepTimer::EndOfItem(session)));
-    assert!(services.playback.take_next(session).is_none(), "held back");
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    assert_eq!(services.end_for_test(), None, "held back");
     assert_eq!(services.playback.sleep(), None, "and spent");
+}
+
+/// With the timer holding the end of an item, nothing plays after it: not the item again with
+/// repeat one, nor the queue started over with repeat all, and the queue stays as it was.
+#[test]
+fn the_sleep_timers_end_of_item_holds_repeat_too() {
+    use jellyfin::RepeatMode;
+
+    use crate::playback::SleepTimer;
+
+    for (name, mode) in [("one", RepeatMode::RepeatOne), ("all", RepeatMode::RepeatAll)] {
+        let _config = ConfigDir::new(&format!("player-sleep-repeat-{name}"));
+        let server = FixtureServer::start();
+        let mut harness = desktop_player(&server);
+        let services = harness.state_mut().services_mut().expect("the services");
+        let item = services.playback.now_playing().expect("the session").item.clone();
+        services.set_repeat(mode);
+        services
+            .playback
+            .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+        assert_eq!(services.end_for_test(), None, "repeat {name}: nothing plays after it");
+        assert!(
+            services
+                .events
+                .iter()
+                .any(|event| matches!(event, crate::services::AppEvent::PlaybackEnded)),
+            "repeat {name}: playback ends"
+        );
+        assert_eq!(services.playback.sleep(), None, "repeat {name}: and the timer is spent");
+        assert_eq!(services.playback.modes().0, mode);
+        assert!(services.playback.now_playing().is_none());
+    }
+}
+
+/// A restart of the same item (a dropped connection, another audio track on a transcode, a
+/// version) keeps the end-of-item timer; another item starting clears it.
+#[test]
+fn the_sleep_timers_end_of_item_survives_a_restart_of_its_item() {
+    use crate::playback::{PlayOptions, SleepTimer};
+
+    let _config = ConfigDir::new("player-sleep-restart");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let services = harness.state_mut().services_mut().expect("the services");
+    let state = services.playback.now_playing_mut().expect("the session");
+    state.autoplay = true;
+    let (item, source) = (state.item.clone(), state.source.clone());
+    let next = state.next.clone().expect("a next episode");
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+
+    // The same item again, as a restart does it.
+    services.reload(PlayOptions::default());
+    drop(services.playback.start_for_test(item.clone(), source.clone()));
+    assert!(services.playback.sleep().is_some(), "kept for its item");
+    let state = services.playback.now_playing_mut().expect("the new session");
+    state.autoplay = true;
+    state.next = Some(next.clone());
+    assert_eq!(
+        services.end_for_test(),
+        None,
+        "so nothing plays after the restarted session"
+    );
+    assert_eq!(services.playback.sleep(), None);
+
+    // Another item starting takes it away.
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    services.play(&next, PlayOptions::default());
+    assert_eq!(services.playback.sleep(), None, "not for another item");
+}
+
+/// A timed timer that comes due while no session is live (a reconnect waits, the next item
+/// loads) stays due, and pauses once a session is up; the notice shows when it paused.
+#[test]
+fn a_sleep_timer_due_between_sessions_pauses_the_next_one() {
+    use std::time::Instant;
+
+    use crate::playback::{PlayOptions, SleepTimer};
+
+    let _config = ConfigDir::new("player-sleep-between");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let services = harness.state_mut().services_mut().expect("the services");
+    let state = services.playback.now_playing().expect("the session");
+    let (item, source) = (state.item.clone(), state.source.clone());
+    services.reload(PlayOptions::default());
+    services.events.clear();
+    services.playback.set_sleep(Some(SleepTimer::In(Instant::now())));
+
+    services.tick_playback();
+    assert!(services.playback.sleep().is_some(), "still due");
+    assert!(
+        !services
+            .events
+            .iter()
+            .any(|event| matches!(event, crate::services::AppEvent::Toast(_))),
+        "nothing was paused, so nothing is announced"
+    );
+
+    let mut sent = services.playback.start_for_test(item, source);
+    services.tick_playback();
+    assert_eq!(services.playback.sleep(), None);
+    assert!(matches!(sent.try_recv(), Ok(UiCommand::SetPause(true))));
+    assert!(
+        services
+            .events
+            .iter()
+            .any(|event| matches!(event, crate::services::AppEvent::Toast(_))),
+        "announced once paused"
+    );
+}
+
+/// A SyncPlay group's pause is every member's, so a timer running when a group is joined is
+/// dropped, without pausing the group.
+#[test]
+fn a_sleep_timer_is_cancelled_in_a_syncplay_group() {
+    use std::time::Instant;
+
+    use crate::playback::SleepTimer;
+
+    let _config = ConfigDir::new("player-sleep-group");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    let services = harness.state_mut().services_mut().expect("the services");
+    let item = services.playback.now_playing().expect("the session").item.clone();
+    for timer in [SleepTimer::In(Instant::now()), SleepTimer::EndOfItem(item.id)] {
+        services.playback.set_sleep(Some(timer));
+        services.playback.now_playing_mut().expect("the session").group_item = Some("queue-item".into());
+        services.tick_playback();
+        assert_eq!(services.playback.sleep(), None);
+        services.playback.now_playing_mut().expect("the session").group_item = None;
+    }
+    assert!(harness.state_mut().commands().is_empty(), "no pause for the group");
+}
+
+/// The picture choices belong to the item: a restart of it (a lost stream, another track on a
+/// transcode, a version) takes them to the new player, and another item starts without.
+#[test]
+fn a_restart_of_the_item_keeps_the_picture_choices() {
+    use std::time::Duration;
+
+    use crate::playback::{AbLoop, Aspect, Picture, PlayOptions};
+
+    let _config = ConfigDir::new("player-picture-restart");
+    let kept = Picture {
+        aspect: Aspect::Fill,
+        deinterlace: true,
+        secondary_subtitle: Some(6),
+        ab_loop: AbLoop::Loop(Duration::from_secs(30), Duration::from_secs(60)),
+    };
+    let choose = |harness: &mut Harness<'static, PlayerRun>| {
+        let state = harness.state_mut().now_playing_mut().expect("the session");
+        state.aspect = Aspect::Fill;
+        state.deinterlace = true;
+        state.secondary_subtitle = Some(6);
+        state.ab_loop = AbLoop::Loop(Duration::from_secs(30), Duration::from_secs(60));
+    };
+
+    // A restart, as a version switch or a track switch on a transcode makes it.
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    choose(&mut harness);
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.reload(PlayOptions::default());
+    assert_eq!(
+        services.last_started_for_test().1.and_then(|o| o.picture),
+        Some(kept.clone())
+    );
+
+    // A lost stream waits to reconnect, with the choices too.
+    let mut harness = desktop_player(&server);
+    choose(&mut harness);
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.lose_for_test();
+    assert_eq!(
+        services.reconnect_options_for_test().and_then(|o| o.picture),
+        Some(kept)
+    );
+
+    // Another item starts as a new one does.
+    let mut harness = desktop_player(&server);
+    choose(&mut harness);
+    let services = harness.state_mut().services_mut().expect("the services");
+    let next = services
+        .playback
+        .now_playing()
+        .and_then(|s| s.next.clone())
+        .expect("a next episode");
+    services.play(&next, PlayOptions::default());
+    assert_eq!(services.last_started_for_test().1.and_then(|o| o.picture), None);
 }
 
 /// The bracket keys step the speed up and down through the menu's speeds.

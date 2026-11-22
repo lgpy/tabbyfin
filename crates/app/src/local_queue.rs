@@ -112,6 +112,22 @@ impl LocalQueue {
         true
     }
 
+    /// What played from this queue right before the current item, which Previous goes back to.
+    pub fn last_played(&self) -> Option<&BaseItemDto> {
+        self.played.last()
+    }
+
+    /// Goes back one: the entry that played last is to play now, and `current` is the first of
+    /// what's coming again. `None` with nothing played.
+    pub fn step_back(&mut self, current: &BaseItemDto) -> Option<BaseItemDto> {
+        let previous = self.played.pop()?;
+        if self.shuffled {
+            self.unshuffled.insert(0, current.id.clone());
+        }
+        self.upcoming.push_front(current.clone());
+        Some(previous)
+    }
+
     /// Takes the entry at `index` to play now: `previous`, the item playing, and the entries
     /// before it join what played. `None` past the end.
     pub fn jump(&mut self, index: usize, previous: Option<&BaseItemDto>) -> Option<BaseItemDto> {
@@ -183,21 +199,22 @@ impl LocalQueue {
     }
 
     /// What follows an item that played to its end, by the repeat mode: the same item again for
-    /// *repeat one*; otherwise `next` (the queue's front, or the following episode, when the
-    /// setting lets it start by itself); at the end of the queue, *repeat all* starts it over.
+    /// *repeat one*; with *repeat all*, the queue starts over once nothing is waiting in it, even
+    /// when `next` is the series' following episode, which isn't the queue's; otherwise `next`
+    /// (the queue's front, or the following episode, when the setting lets it start by itself).
     pub fn after_end(&mut self, current: &BaseItemDto, next: Option<BaseItemDto>) -> AfterEnd {
         if self.repeat == RepeatMode::RepeatOne {
             return AfterEnd::Replay;
-        }
-        if let Some(next) = next {
-            return AfterEnd::Next(next);
         }
         if self.repeat == RepeatMode::RepeatAll
             && let Some(first) = self.restart(current)
         {
             return AfterEnd::Restart(first);
         }
-        AfterEnd::Stop
+        match next {
+            Some(next) => AfterEnd::Next(next),
+            None => AfterEnd::Stop,
+        }
     }
 
     /// Repeating the whole queue, at its end: everything that played plus `current` again, the
@@ -293,6 +310,38 @@ mod tests {
     }
 
     #[test]
+    fn stepping_back_plays_what_played_and_puts_the_current_item_first_again() {
+        let mut queue = queue(&["b", "c"]);
+        queue.advance(&item("b"), Some(&item("a")));
+        queue.advance(&item("c"), Some(&item("b")));
+        assert_eq!(queue.last_played().map(|item| item.id.as_str()), Some("b"));
+        assert!(queue.is_empty());
+
+        assert_eq!(queue.step_back(&item("c")).map(|item| item.id), Some("b".to_owned()));
+        assert_eq!(ids(&queue), ["c"]);
+        assert_eq!(queue.step_back(&item("b")).map(|item| item.id), Some("a".to_owned()));
+        assert_eq!(ids(&queue), ["b", "c"]);
+        // Nothing before the first: nothing to go back to.
+        assert!(queue.step_back(&item("a")).is_none());
+        assert_eq!(ids(&queue), ["b", "c"]);
+    }
+
+    #[test]
+    fn stepping_back_in_a_shuffled_queue_keeps_the_way_back_to_its_order() {
+        let mut queue = queue(&["b", "c", "d"]);
+        queue.set_shuffle(true);
+        queue.advance(
+            &item(queue.front().expect("an entry").id.clone().as_str()),
+            Some(&item("a")),
+        );
+        let playing = item("x");
+        queue.step_back(&playing);
+        assert_eq!(queue.front().map(|item| item.id.as_str()), Some("x"));
+        queue.set_shuffle(false);
+        assert_eq!(queue.front().map(|item| item.id.as_str()), Some("x"));
+    }
+
+    #[test]
     fn repeating_the_queue_waits_for_its_end() {
         let mut queue = queue(&["b"]);
         queue.advance(&item("b"), Some(&item("a")));
@@ -362,6 +411,34 @@ mod tests {
             "{after:?}"
         );
         assert_eq!(ids(&queue), ["b", "c"]);
+    }
+
+    #[test]
+    fn repeat_all_wraps_even_when_a_following_episode_is_offered() {
+        // A lone item, with the series' next episode as `next`: it plays again.
+        let mut lone = LocalQueue {
+            repeat: RepeatMode::RepeatAll,
+            ..LocalQueue::default()
+        };
+        let after = lone.after_end(&item("a"), Some(item("episode-after")));
+        assert!(
+            matches!(&after, AfterEnd::Restart(first) if first.id == "a"),
+            "{after:?}"
+        );
+
+        // With entries waiting, they come first.
+        let mut waiting = queue(&["b"]);
+        waiting.repeat = RepeatMode::RepeatAll;
+        let after = waiting.after_end(&item("a"), Some(item("b")));
+        assert!(matches!(&after, AfterEnd::Next(next) if next.id == "b"), "{after:?}");
+
+        // Without repeat all, the following episode plays.
+        let mut off = LocalQueue::default();
+        let after = off.after_end(&item("a"), Some(item("episode-after")));
+        assert!(
+            matches!(&after, AfterEnd::Next(next) if next.id == "episode-after"),
+            "{after:?}"
+        );
     }
 
     #[test]
