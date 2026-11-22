@@ -1347,6 +1347,9 @@ impl PlayerPage {
             cx.services
                 .change_secondary_subtitle((index != SUBTITLES_OFF).then_some(index));
         }
+        if let Some(on) = choice.deinterlace {
+            cx.services.set_deinterlace(on);
+        }
         if let Some(aspect) = choice.aspect {
             cx.services.set_aspect(aspect);
             self.show_controls();
@@ -1543,6 +1546,8 @@ struct SettingsMenu {
     secondary_choices: Vec<Choice>,
     /// How the picture fills the window, when libmpv plays (Media3 can't change it).
     aspect: Option<Aspect>,
+    /// Deinterlacing on or off, when libmpv plays.
+    deinterlace: Option<bool>,
 }
 
 impl SettingsMenu {
@@ -1688,6 +1693,7 @@ impl View {
                     default_subtitle: state.source.default_subtitle_stream_index,
                     secondary: state.secondary_subtitle,
                     aspect: state.mpv.then_some(state.aspect),
+                    deinterlace: state.mpv.then_some(state.deinterlace),
                     secondary_choices: if state.mpv {
                         let files = state.is_transcoding().then_some(state.stream.subtitle_files.as_slice());
                         tracks::secondary_choices(&state.source, files, subtitle_shown)
@@ -1834,6 +1840,7 @@ impl View {
                 secondary: None,
                 secondary_choices: Vec::new(),
                 aspect: None,
+                deinterlace: None,
             }),
             audio_button: count(MediaStreamType::Audio) > 1,
             subtitles_button: count(MediaStreamType::Subtitle) > 0,
@@ -2103,6 +2110,7 @@ struct SettingsChoice {
     /// The second subtitle: a stream index, or `SUBTITLES_OFF`.
     secondary: Option<i32>,
     aspect: Option<Aspect>,
+    deinterlace: Option<bool>,
     adjustments: Option<Adjustments>,
 }
 
@@ -2247,6 +2255,15 @@ fn settings_body(
                     );
                 }
                 choice.aspect = aspect_group(ui, aspect);
+            }
+            if let Some(on) = menu.deinterlace {
+                ui.add_space(8.);
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                let label = tr!("player-deinterlace");
+                let entry = Entry::new(label.as_str()).checked(on).tint(over_video::BRAND);
+                if popup::row(ui, &entry, true, false, over_video::ROW_HOVER).clicked() {
+                    choice.deinterlace = Some(!on);
+                }
             }
         }
     }

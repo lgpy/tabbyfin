@@ -401,3 +401,26 @@ fn a_cycles_the_aspect_modes() {
         ("video-aspect-override", serde_json::json!("16:9"))
     );
 }
+
+/// Deinterlacing is the menu's switch, and starts on only for an interlaced stream that mpv gets
+/// as it is.
+#[test]
+fn deinterlacing_is_a_switch_that_starts_on_for_interlaced_video() {
+    let _config = ConfigDir::new("player-deinterlace");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.set_deinterlace(true);
+    services.set_deinterlace(true);
+    services.set_deinterlace(false);
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [UiCommand::SetDeinterlace(true), UiCommand::SetDeinterlace(false)]
+        ),
+        "{sent:?}"
+    );
+}

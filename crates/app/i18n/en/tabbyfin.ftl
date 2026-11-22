@@ -214,6 +214,7 @@ player-aspect = Aspect ratio
 player-aspect-fit = Fit
 player-aspect-fill = Fill
 player-aspect-stretch = Stretch
+player-deinterlace = Deinterlace
 player-normal-in-syncplay = Normal in SyncPlay
 player-badge-syncplay = SyncPlay
 player-badge-transcoding = Transcoding

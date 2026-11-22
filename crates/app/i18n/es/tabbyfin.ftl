@@ -214,6 +214,7 @@ player-aspect = Relación de aspecto
 player-aspect-fit = Ajustar
 player-aspect-fill = Rellenar
 player-aspect-stretch = Estirar
+player-deinterlace = Desentrelazar
 player-normal-in-syncplay = Normal en SyncPlay
 player-badge-syncplay = SyncPlay
 player-badge-transcoding = Transcodificando

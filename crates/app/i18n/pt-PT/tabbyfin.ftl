@@ -214,6 +214,7 @@ player-aspect = Formato da imagem
 player-aspect-fit = Ajustar
 player-aspect-fill = Preencher
 player-aspect-stretch = Esticar
+player-deinterlace = Desentrelaçar
 player-normal-in-syncplay = Normal em SyncPlay
 player-badge-syncplay = SyncPlay
 player-badge-transcoding = Transcodificação

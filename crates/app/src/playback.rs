@@ -209,6 +209,7 @@ pub enum UiCommand {
     /// A second text track shown with the first (a stream index), or none.
     SetSecondarySubtitle(Option<i32>),
     SetAspect(Aspect),
+    SetDeinterlace(bool),
     Stop,
 }
 
@@ -293,6 +294,8 @@ pub struct NowPlaying {
     pub mpv: bool,
     /// How the picture fills the window. Belongs to this item.
     pub aspect: Aspect,
+    /// mpv deinterlaces the picture: on from the start when the video stream is interlaced.
+    pub deinterlace: bool,
     pub volume: f64,
     pub muted: bool,
     pub adjustments: Adjustments,
@@ -628,6 +631,7 @@ impl PlaybackManager {
             secondary_subtitle: None,
             mpv: true,
             aspect: Aspect::Fit,
+            deinterlace: false,
             volume: self.volume,
             muted: false,
             adjustments: self.adjustments,
@@ -1105,6 +1109,21 @@ impl Services {
         state.send(UiCommand::SetAspect(aspect));
     }
 
+    /// Turns mpv's deinterlacing on or off (the player's menu). mpv only, and not on a TV.
+    pub fn set_deinterlace(&mut self, on: bool) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.deinterlace == on {
+            return;
+        }
+        state.deinterlace = on;
+        state.send(UiCommand::SetDeinterlace(on));
+    }
+
     /// Applies changes from the settings menu. Speed stays at normal in a SyncPlay group,
     /// whose drift correction uses it.
     pub fn adjust(&mut self, adjustments: Adjustments) {
@@ -1211,6 +1230,7 @@ impl Services {
                 let Some(running) = playback.sessions.iter().find(|s| s.generation == generation) else {
                     return;
                 };
+                let deinterlace = deinterlaces_by_default(&source, stream.method);
                 playback.now_playing = Some(NowPlaying {
                     session: generation,
                     item: running.item.clone(),
@@ -1226,6 +1246,7 @@ impl Services {
                     secondary_subtitle: None,
                     mpv: running.mpv,
                     aspect: Aspect::Fit,
+                    deinterlace,
                     volume: running.volume,
                     muted: running.muted,
                     adjustments: running.adjustments,
@@ -1423,6 +1444,17 @@ fn mpv_subtitle_id(source: &MediaSourceInfo, index: i32) -> Option<usize> {
     };
     let position = subtitles(true).position(|s| s.index == index)?;
     Some(subtitles(false).count() + position + 1)
+}
+
+/// Whether a session starts with deinterlacing on: when the server says the video stream is
+/// interlaced, and mpv gets the stream as it is. A transcode comes out of the server's encoder
+/// already progressive.
+fn deinterlaces_by_default(source: &MediaSourceInfo, method: PlayMethod) -> bool {
+    method == PlayMethod::DirectPlay
+        && source
+            .media_streams
+            .iter()
+            .any(|stream| stream.kind == MediaStreamType::Video && stream.is_interlaced)
 }
 
 /// mpv's id for the subtitle with Jellyfin stream `index`. A transcode has only the tracks sent as
@@ -1848,6 +1880,11 @@ async fn run_session(
             tracing::debug!("mpv didn't take {name}={value}: {err}");
         }
     }
+    // Before the file loads, like the rest, so the first frame is already deinterlaced.
+    player
+        .set_property("deinterlace", deinterlaces_by_default(&source, method))
+        .await
+        .map_err(|err| err.to_string())?;
     for (name, value) in [
         ("speed", adjustments.speed),
         ("sub-delay", adjustments.subtitle_delay),
@@ -2204,6 +2241,7 @@ async fn apply_command(
             }
             Ok(())
         }
+        UiCommand::SetDeinterlace(on) => player.set_property("deinterlace", on).await,
         UiCommand::Stop => player.quit().await,
     }
 }
@@ -2347,6 +2385,31 @@ mod tests {
             ],
             ..source
         }
+    }
+
+    #[test]
+    fn deinterlacing_starts_on_for_an_interlaced_stream_played_as_it_is() {
+        use super::deinterlaces_by_default;
+        use jellyfin::PlayMethod;
+
+        let source = |interlaced: bool| -> MediaSourceInfo {
+            serde_json::from_value(serde_json::json!({
+                "Id": "s",
+                "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": interlaced }],
+            }))
+            .unwrap()
+        };
+        assert!(deinterlaces_by_default(&source(true), PlayMethod::DirectPlay));
+        assert!(!deinterlaces_by_default(&source(false), PlayMethod::DirectPlay));
+        // A transcode is already progressive.
+        assert!(!deinterlaces_by_default(&source(true), PlayMethod::Transcode));
+        // The server leaves the field out of a stream it didn't probe.
+        let unknown: MediaSourceInfo = serde_json::from_value(serde_json::json!({
+            "Id": "s",
+            "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": null }],
+        }))
+        .unwrap();
+        assert!(!deinterlaces_by_default(&unknown, PlayMethod::DirectPlay));
     }
 
     #[test]
