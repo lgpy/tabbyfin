@@ -29,8 +29,8 @@ use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 use jellyfin::{
-    BufferReport, Client, ClockSample, Command, CommandKind, GroupInfo, GroupUpdate, ItemsQuery, PlayQueue, RepeatMode,
-    ServerClock, ShuffleMode, Ticks,
+    BufferReport, Client, ClockSample, Command, CommandKind, GroupInfo, GroupUpdate, ItemsQuery, PlayQueue, QueueItem,
+    RepeatMode, ServerClock, ShuffleMode, Ticks,
 };
 use tokio::sync::mpsc;
 
@@ -112,8 +112,12 @@ pub struct SyncPlay {
     pub queue: Option<PlayQueue>,
     /// Names of the queue's items, by item id (fetched as they're queued).
     pub names: HashMap<String, String>,
-    /// The queue entry the local player has loaded (or is loading).
+    /// The queue entry the local player has loaded (or is loading). `None` too once the group
+    /// stopped, which is why [`Self::current`] is kept apart.
     loaded: Option<String>,
+    /// The queue entry the group last had as its current one, stopped or not: what tells a
+    /// queue edit after a stop (same entry) from a new item to load ([`should_load`]).
+    current: Option<String>,
     /// The queue entry's item being fetched before it's loaded. Replacing it cancels the fetch.
     loading: Option<Loading>,
     /// The group session's player, once it has started.
@@ -155,6 +159,7 @@ impl SyncPlay {
             queue: None,
             names: HashMap::new(),
             loaded: None,
+            current: None,
             loading: None,
             watched: None,
             ready_due: false,
@@ -336,6 +341,26 @@ impl SyncPlay {
         });
     }
 
+    /// Starts loading the queue's current `entry` here, paused at `start`: reports `Buffering`,
+    /// and fetches the item (`load_group_item` plays it). The session before it is no longer
+    /// watched, or its next restart (a drift seek, an unpause seek) would report `Ready` for
+    /// an item that hasn't loaded.
+    fn begin_load(&mut self, entry: QueueItem, start: Ticks) {
+        self.loaded = Some(entry.playlist_item_id.clone());
+        self.scheduled = None;
+        self.watched = None;
+        self.timeline = None;
+        self.drift.cancel();
+        self.report(false, start, false);
+        let client = self.client.clone();
+        let item_id = entry.item_id;
+        self.loading = Some(Loading {
+            playlist_item_id: entry.playlist_item_id,
+            start,
+            item: Task::spawn(&self.ctx, async move { client.item(&item_id, &[]).await }),
+        });
+    }
+
     /// Fetches the names of queued items not seen yet, for the queue list. Replacing an earlier
     /// fetch loses nothing: the names it would have brought are still missing, so they're asked
     /// for again.
@@ -453,6 +478,22 @@ fn correction(drift: f64) -> Correction {
     }
 }
 
+/// Whether a queue update with this `reason` says "play the current entry now", as opposed to
+/// editing the queue around it (`RemoveItems`, `MoveItem`, `Queue`, `QueueNext`, `RepeatMode`,
+/// `ShuffleMode`). `NextItem` counts even when the entry is the same one (repeat one, or a
+/// queue of one on repeat all).
+fn starts_playback(reason: &str) -> bool {
+    matches!(reason, "NewPlaylist" | "SetCurrentItem" | "NextItem" | "PreviousItem")
+}
+
+/// Whether a queue update loads its current entry `current` here, from the entry the group last
+/// had as current (`last`), the one loaded, and the update's `reason`. Not merely because
+/// nothing is loaded: that's also so after a stop, when the server keeps the queue and the same
+/// current entry, and a shuffle toggle or an added entry must not bring the finished item back.
+fn should_load(last: Option<&str>, loaded: Option<&str>, reason: &str, current: &str) -> bool {
+    loaded != Some(current) && (last != Some(current) || starts_playback(reason))
+}
+
 /// How to carry out an `Unpause`, from the local position, the group's position and how far
 /// ahead (`Ok`) or late (`Err`) the command's time is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -539,6 +580,8 @@ impl Services {
     /// The group's item ended here: move the group on to the next one (the server ignores
     /// the duplicate reports from other members).
     pub(crate) fn group_item_ended(&mut self, playlist_item_id: &str) {
+        // `current` stays: the next item is another entry, and with nothing next the group
+        // stops with this one still the queue's current.
         self.syncplay.loaded = None;
         let id = playlist_item_id.to_owned();
         self.syncplay
@@ -616,6 +659,33 @@ impl Services {
         }
     }
 
+    /// A `Seek` or `Unpause` for the entry the group stopped on: someone resumed it. The queue
+    /// doesn't change then, so no update brings the item back; load it here, paused, and report
+    /// `Ready`, which the server answers by resuming everyone (or this member alone, when the
+    /// group is already playing).
+    fn resume_stopped_item(&mut self, command: &Command) {
+        let syncplay = &mut self.syncplay;
+        let stopped = syncplay.loaded.is_none() && syncplay.current.as_deref() == Some(&command.playlist_item_id);
+        if !stopped || !matches!(command.kind, CommandKind::Seek | CommandKind::Unpause) {
+            return;
+        }
+        let Some(entry) = syncplay
+            .queue
+            .as_ref()
+            .and_then(|queue| {
+                queue
+                    .playlist
+                    .iter()
+                    .find(|e| e.playlist_item_id == command.playlist_item_id)
+            })
+            .cloned()
+        else {
+            return;
+        };
+        tracing::info!("SyncPlay: resuming the item the group stopped on");
+        syncplay.begin_load(entry, command.position);
+    }
+
     /// A `SyncPlayCommand` from the session websocket, carried out on the group session's
     /// player at the command's time.
     pub fn on_syncplay_command(&mut self, command: Command) {
@@ -635,6 +705,7 @@ impl Services {
             "SyncPlay command"
         );
         if self.syncplay.loaded.as_deref() != Some(command.playlist_item_id.as_str()) {
+            self.resume_stopped_item(&command);
             tracing::debug!(loaded = ?self.syncplay.loaded, "SyncPlay command for another item");
             return;
         }
@@ -788,24 +859,22 @@ impl Services {
         syncplay.fetch_names(&queue);
         let current = queue.current().cloned();
         let start = queue.start_position_ticks;
+        let reason = queue.reason.clone();
         syncplay.queue = Some(queue);
         let Some(current) = current else {
             self.leave_group_playback();
             return;
         };
-        if syncplay.loaded.as_ref() == Some(&current.playlist_item_id) {
-            return;
+        let load = should_load(
+            syncplay.current.as_deref(),
+            syncplay.loaded.as_deref(),
+            &reason,
+            &current.playlist_item_id,
+        );
+        syncplay.current = Some(current.playlist_item_id.clone());
+        if load {
+            syncplay.begin_load(current, start);
         }
-        syncplay.loaded = Some(current.playlist_item_id.clone());
-        syncplay.scheduled = None;
-        syncplay.report(false, start, false);
-        let client = syncplay.client.clone();
-        let item_id = current.item_id;
-        syncplay.loading = Some(Loading {
-            playlist_item_id: current.playlist_item_id,
-            start,
-            item: Task::spawn(&syncplay.ctx, async move { client.item(&item_id, &[]).await }),
-        });
     }
 
     /// Stops following the group: cancels scheduled commands and stops a group playback.
@@ -813,6 +882,7 @@ impl Services {
         let syncplay = &mut self.syncplay;
         syncplay.scheduled = None;
         syncplay.queue = None;
+        syncplay.current = None;
         syncplay.loading = None;
         syncplay.ready_due = false;
         syncplay.drift.cancel();
@@ -932,7 +1002,7 @@ fn debug_skew() -> Duration {
 mod tests {
     use std::time::Duration;
 
-    use super::{Correction, UnpausePlan, correction, plan_unpause};
+    use super::{Correction, UnpausePlan, correction, plan_unpause, should_load};
 
     fn secs(s: f64) -> Duration {
         Duration::from_secs_f64(s)
@@ -992,5 +1062,92 @@ mod tests {
         let plan = plan_unpause(secs(10.), secs(10.), Err(secs(0.1)));
         assert_eq!(plan.seek, None);
         assert_eq!(plan.from, secs(10.1));
+    }
+
+    /// Loads for an update the way `on_group_queue` does: `last` and `loaded` move with it, and
+    /// a stop clears `loaded` only.
+    struct Member {
+        last: Option<String>,
+        loaded: Option<String>,
+    }
+
+    impl Member {
+        fn queue(&mut self, reason: &str, current: &str) -> bool {
+            let load = should_load(self.last.as_deref(), self.loaded.as_deref(), reason, current);
+            self.last = Some(current.to_owned());
+            if load {
+                self.loaded = Some(current.to_owned());
+            }
+            load
+        }
+
+        fn stop(&mut self) {
+            self.loaded = None;
+        }
+    }
+
+    fn member() -> Member {
+        Member {
+            last: None,
+            loaded: None,
+        }
+    }
+
+    #[test]
+    fn the_first_update_loads_and_the_same_entry_again_does_not() {
+        let mut m = member();
+        assert!(m.queue("NewPlaylist", "a"));
+        assert!(!m.queue("ShuffleMode", "a"));
+        assert!(!m.queue("Queue", "a"));
+        // Even a start-playback reason, while it's the entry already loaded.
+        assert!(!m.queue("SetCurrentItem", "a"));
+    }
+
+    #[test]
+    fn joining_a_group_loads_whatever_its_reason() {
+        for reason in ["NewPlaylist", "SetCurrentItem", "Queue", "RepeatMode"] {
+            assert!(member().queue(reason, "a"), "{reason}");
+        }
+    }
+
+    #[test]
+    fn queue_edits_after_a_stop_do_not_bring_the_item_back() {
+        for reason in [
+            "ShuffleMode",
+            "RepeatMode",
+            "Queue",
+            "QueueNext",
+            "RemoveItems",
+            "MoveItem",
+        ] {
+            let mut m = member();
+            assert!(m.queue("NewPlaylist", "a"));
+            m.stop();
+            assert!(!m.queue(reason, "a"), "{reason}");
+            // Nor the next edit.
+            assert!(!m.queue(reason, "a"), "{reason}");
+        }
+    }
+
+    #[test]
+    fn a_new_current_entry_loads() {
+        let mut m = member();
+        assert!(m.queue("NewPlaylist", "a"));
+        assert!(m.queue("NextItem", "b"));
+        // An edit that moves the current entry (removing the playing one) loads the new one.
+        assert!(m.queue("RemoveItems", "c"));
+        // Also after a stop.
+        m.stop();
+        assert!(m.queue("Queue", "d"));
+    }
+
+    #[test]
+    fn a_play_request_for_the_stopped_entry_loads_it_again() {
+        for reason in ["NewPlaylist", "SetCurrentItem", "NextItem", "PreviousItem"] {
+            let mut m = member();
+            assert!(m.queue("NewPlaylist", "a"));
+            m.stop();
+            assert!(m.queue(reason, "a"), "{reason}");
+        }
     }
 }

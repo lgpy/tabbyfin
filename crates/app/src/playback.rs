@@ -390,6 +390,12 @@ pub struct PlaybackManager {
     online: bool,
     /// Stops the running session when sent or dropped.
     stop: Option<oneshot::Sender<()>>,
+    /// The session the user last stopped. A session's loop is over once it has quit, but it still
+    /// reports its stop to the server (up to 30 s when the network is what failed), so the stop
+    /// is remembered here for `Services::session_ended`: a stopped session doesn't reconnect or
+    /// autoplay when its end arrives. Sessions are numbered, so it never applies to the one a
+    /// later start creates.
+    stopped: Option<u64>,
     /// Counts sessions, so the end of a replaced session doesn't close its successor's player.
     generation: u64,
     /// A session is running (from `play` until its end is handled).
@@ -457,6 +463,7 @@ impl PlaybackManager {
             account,
             online: true,
             stop: None,
+            stopped: None,
             generation: 0,
             active: false,
             sessions: Vec::new(),
@@ -580,12 +587,28 @@ impl PlaybackManager {
     /// which closes the player (a running session closes it when it ends).
     fn stop(&mut self) -> bool {
         self.stop = None;
+        self.note_stop();
         self.reconnect.take().is_some()
     }
 
+    /// Remembers that the user stopped the current session, for when its end arrives.
+    fn note_stop(&mut self) {
+        self.stopped = Some(self.generation);
+    }
+
+    /// The user stopped the session numbered `generation`.
+    fn was_stopped(&self, generation: u64) -> bool {
+        self.stopped == Some(generation)
+    }
+
     /// Takes the queue's front when `item` is it, moving the queue on; playing anything else
-    /// drops the queue, unless a SyncPlay group plays it.
+    /// drops the queue, unless a SyncPlay group plays it. The item that's already playing
+    /// leaves the queue alone: it's loaded again (another version, other tracks, software
+    /// frames) and what was queued after it is still wanted.
     fn advance_queue(&mut self, item: &BaseItemDto, options: &PlayOptions) {
+        if self.now_playing.as_ref().is_some_and(|state| state.item.id == item.id) {
+            return;
+        }
         if self.queue.front().is_some_and(|next| next.id == item.id) {
             self.queue.pop_front();
         } else if options.group_item.is_none() {
@@ -784,7 +807,11 @@ impl Services {
             self.group_request(request);
             return;
         }
+        let stop = matches!(command, UiCommand::Stop);
         state.send(command);
+        if stop {
+            self.playback.note_stop();
+        }
     }
 
     /// Stops the current session, if any, or a pending reconnect (closing the player).
@@ -1150,15 +1177,17 @@ impl Services {
         if running.generation != self.playback.generation {
             return;
         }
+        let stopped = self.playback.was_stopped(running.generation);
         let playback = &mut self.playback;
         playback.active = false;
-        let next = playback
+        // The session's last state: what plays next, and the tracks a reconnect keeps.
+        let last = playback
             .now_playing
             .take()
-            .filter(|state| state.session == running.generation)
-            .and_then(|state| state.autoplay_next());
+            .filter(|state| state.session == running.generation);
+        let next = last.as_ref().and_then(|state| state.autoplay_next());
         let group_item = running.options.group_item.clone();
-        match result {
+        match settle(result, stopped) {
             // In a group, every member reports the end and the server moves the queue on
             // (once); the next item then comes as a queue update.
             Ok(Ended::Finished) if let Some(group_item) = &group_item => {
@@ -1188,11 +1217,7 @@ impl Services {
                 self.playback.reconnect = Some(Reconnect {
                     due,
                     item: running.item,
-                    options: PlayOptions {
-                        start: Some(position),
-                        resumed: false,
-                        ..running.options
-                    },
+                    options: reconnect_options(running.options, position, last.as_ref()),
                     attempt: running.attempt + 1,
                 });
             }
@@ -1231,6 +1256,33 @@ enum Ended {
         /// The player process crashed, rather than the stream failing.
         crashed: bool,
     },
+}
+
+/// How a session's end counts: one the user stopped is a stop, whatever the stream was doing
+/// when it quit. Without it a lost stream would reconnect, and the end of a file would play the
+/// next episode, after the user had left.
+fn settle(result: Result<Ended, String>, stopped: bool) -> Result<Ended, String> {
+    match result {
+        Ok(Ended::Finished | Ended::Lost { .. }) if stopped => Ok(Ended::Stopped),
+        result => result,
+    }
+}
+
+/// What a reconnect after a lost stream plays: from `position`, on the version and tracks the
+/// dying session `last` had. A track switched during playback (direct play only sends a
+/// command) isn't in the options the session started with.
+fn reconnect_options(options: PlayOptions, position: Ticks, last: Option<&NowPlaying>) -> PlayOptions {
+    let mut options = PlayOptions {
+        start: Some(position),
+        resumed: false,
+        ..options
+    };
+    if let Some(state) = last {
+        options.media_source_id = Some(state.source.id.clone());
+        options.audio_stream_index = state.audio.or(options.audio_stream_index);
+        options.subtitle = state.subtitle;
+    }
+    options
 }
 
 /// Waits before each reconnect attempt after a lost stream.
@@ -2111,9 +2163,12 @@ mod tests {
     use jellyfin::PlaybackReport;
     use player::PlayerEvent;
 
+    use jellyfin::Ticks;
+    use jellyfin::models::BaseItemDto;
+
     use super::{
-        Adjustments, Outgoing, Reporting, UiCommand, VOLUME_REPORT_AFTER, adjacent, mpv_subtitle_id, mpv_track_id,
-        volume_level,
+        Adjustments, Ended, Outgoing, PlayOptions, PlaybackManager, Reporting, SubtitleChoice, UiCommand,
+        VOLUME_REPORT_AFTER, adjacent, mpv_subtitle_id, mpv_track_id, reconnect_options, settle, volume_level,
     };
 
     #[test]
@@ -2279,5 +2334,122 @@ mod tests {
         assert_eq!(ids(adjacent(items(), "a")), (None, Some("b".into())));
         assert_eq!(ids(adjacent(items(), "c")), (Some("b".into()), None));
         assert_eq!(ids(adjacent(items(), "x")), (None, None));
+    }
+
+    fn item(id: &str) -> BaseItemDto {
+        serde_json::from_value(serde_json::json!({ "Id": id, "Name": id })).expect("item")
+    }
+
+    fn manager() -> PlaybackManager {
+        let client = jellyfin::Client::new("http://localhost:1/", crate::session::client_info("test")).expect("client");
+        PlaybackManager::new(&egui::Context::default(), client, "account".into())
+    }
+
+    fn queued(manager: &PlaybackManager) -> Vec<String> {
+        manager.queued().map(|item| item.id.clone()).collect()
+    }
+
+    /// Play all on a season: A plays, B, C and D wait.
+    fn playing_a_season() -> PlaybackManager {
+        let mut manager = manager();
+        manager.queue = ["b", "c", "d"].map(item).into();
+        manager.start_for_test(item("a"), source());
+        manager
+    }
+
+    #[test]
+    fn loading_the_playing_item_again_keeps_the_queue() {
+        // A version switch, a transcode's audio change, a burned-in subtitle and the fall back
+        // to software frames all play the same item again, from `Services::reload`.
+        let mut manager = playing_a_season();
+        manager.advance_queue(&item("a"), &PlayOptions::default());
+        assert_eq!(queued(&manager), ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn playing_something_else_moves_or_drops_the_queue() {
+        let mut manager = playing_a_season();
+        manager.advance_queue(&item("b"), &PlayOptions::default());
+        assert_eq!(queued(&manager), ["c", "d"], "the queue's front moves it on");
+        manager.advance_queue(&item("x"), &PlayOptions::default());
+        assert!(queued(&manager).is_empty(), "anything else drops it");
+
+        // A SyncPlay group has its own queue; this one stays out of it.
+        let mut manager = playing_a_season();
+        let group = PlayOptions {
+            group_item: Some("entry".into()),
+            ..PlayOptions::default()
+        };
+        manager.advance_queue(&item("x"), &group);
+        assert_eq!(queued(&manager), ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn a_reconnect_keeps_the_tracks_switched_during_playback() {
+        let mut manager = manager();
+        manager.start_for_test(item("a"), source());
+        let started = PlayOptions {
+            start: Some(Ticks(0)),
+            resumed: true,
+            ..PlayOptions::default()
+        };
+        // The session started on its default tracks; the user then switched both (direct play
+        // only sends a command, so the options it started with don't know).
+        let state = manager.now_playing_mut().expect("the session");
+        state.audio = Some(3);
+        state.subtitle = SubtitleChoice::Stream(4);
+
+        let position = Ticks::from(Duration::from_secs(90));
+        let options = reconnect_options(started.clone(), position, manager.now_playing());
+        assert_eq!(options.start, Some(position));
+        assert!(!options.resumed);
+        assert_eq!(options.media_source_id.as_deref(), Some("s"));
+        assert_eq!(options.audio_stream_index, Some(3));
+        assert_eq!(options.subtitle, SubtitleChoice::Stream(4));
+
+        // Without the session's state (it never started), the options stand.
+        let kept = PlayOptions {
+            audio_stream_index: Some(2),
+            subtitle: SubtitleChoice::Off,
+            ..started
+        };
+        let options = reconnect_options(kept, position, None);
+        assert_eq!(options.audio_stream_index, Some(2));
+        assert_eq!(options.subtitle, SubtitleChoice::Off);
+    }
+
+    fn lost() -> Result<Ended, String> {
+        Ok(Ended::Lost {
+            position: Ticks(1),
+            message: "gone".into(),
+            crashed: false,
+        })
+    }
+
+    #[test]
+    fn a_stopped_session_neither_reconnects_nor_autoplays() {
+        assert!(matches!(settle(lost(), true), Ok(Ended::Stopped)));
+        assert!(matches!(settle(Ok(Ended::Finished), true), Ok(Ended::Stopped)));
+        // Not stopped: the end is what it was.
+        assert!(matches!(settle(lost(), false), Ok(Ended::Lost { .. })));
+        assert!(matches!(settle(Ok(Ended::Finished), false), Ok(Ended::Finished)));
+        // A failure is still shown.
+        assert!(settle(Err("no".into()), true).is_err());
+    }
+
+    #[test]
+    fn a_stop_is_remembered_for_its_session_only() {
+        let mut manager = manager();
+        manager.start_for_test(item("a"), source());
+        let first = manager.generation;
+        assert!(!manager.was_stopped(first));
+        // Esc after the loop quit: nothing is running to signal, but the end that arrives later
+        // still counts as a stop.
+        manager.stop();
+        assert!(manager.was_stopped(first));
+        // The next session is a deliberate start; the old stop isn't its own.
+        manager.start_for_test(item("b"), source());
+        assert!(!manager.was_stopped(manager.generation));
+        assert!(manager.was_stopped(first));
     }
 }
