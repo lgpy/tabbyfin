@@ -29,6 +29,8 @@ const SEARCH_ID: &str = "top_bar_search";
 /// The signed-in shell as the app runs it, carrying the keys the app took into the frame.
 struct ShellRun {
     session: Option<Session>,
+    /// Whether the services are the offline ones (a server that couldn't be reached).
+    offline: bool,
     services: Option<Services>,
     shell: Option<Shell>,
     /// The presses [`keys::take`] took from egui, for the next frame.
@@ -40,7 +42,11 @@ impl ShellRun {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
-            self.services = Some(Services::new(session, &ctx));
+            self.services = Some(if self.offline {
+                Services::offline(session, &ctx)
+            } else {
+                Services::new(session, &ctx)
+            });
         }
         let services = self.services.as_mut().expect("the services are made");
         services.tick(&ctx);
@@ -65,8 +71,13 @@ struct Bar {
 
 impl Bar {
     fn new(server: &FixtureServer) -> Self {
+        Self::with(server, false)
+    }
+
+    fn with(server: &FixtureServer, offline: bool) -> Self {
         let run = ShellRun {
             session: Some(session(server)),
+            offline,
             services: None,
             shell: None,
             keys: Vec::new(),
@@ -520,4 +531,31 @@ fn authorising_with_quick_connect_turned_off_since_says_so() {
     bar.step_until("the explanation", |harness| {
         harness.query_by_label_contains("turned off").is_some()
     });
+}
+
+/// Offline the account menu keeps what works without the server (Downloads) and leaves out
+/// *Watch history*, which would open to an error.
+#[test]
+fn watch_history_is_left_out_of_the_account_menu_offline() {
+    let _config = config_dir("shell-history-offline");
+    let server = home_server();
+    let mut bar = Bar::with(&server, true);
+    bar.step();
+    let auth: AuthenticationResult = fixture_json("authenticate");
+    bar.harness.get_by_label_contains(&auth.user.name).click();
+    bar.step_until("the account menu", |harness| {
+        harness
+            .query_by_role_and_label(Role::MenuItemRadio, "Sign out")
+            .is_some()
+    });
+    assert!(
+        bar.harness
+            .query_by_role_and_label(Role::MenuItemRadio, "Downloads")
+            .is_some()
+    );
+    assert!(
+        bar.harness
+            .query_by_role_and_label(Role::MenuItemRadio, "Watch history")
+            .is_none()
+    );
 }
