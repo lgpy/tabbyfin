@@ -121,6 +121,20 @@ item-delete-playlist = Eliminar lista de reprodução…
 item-version = Versão
 item-version-number = Versão { $number }
 item-nothing-to-play = Não há nada para reproduzir.
+item-play-next = Reproduzir a seguir
+item-play-from-here = Reproduzir a partir daqui
+item-add-to-queue = Adicionar à fila
+item-nothing-to-queue = Não há nada para adicionar à fila.
+queue-played-next = { $name } será reproduzido a seguir.
+queue-added = { $name } adicionado à fila.
+queue-played-next-count = { $count ->
+    [one] { $count } item de { $name } será reproduzido a seguir.
+   *[other] { $count } itens de { $name } serão reproduzidos a seguir.
+    }
+queue-added-count = { $count ->
+    [one] { $count } item de { $name } adicionado à fila.
+   *[other] { $count } itens de { $name } adicionados à fila.
+    }
 item-download = Transferir
 item-downloading = A transferir
 item-downloaded = Transferido
@@ -187,6 +201,9 @@ player-settings = Definições de reprodução
 player-subtitles = Legendas
 player-audio = Áudio
 player-chapters = Capítulos
+player-queue = Fila (Q)
+player-queue-empty = Não há nada na fila a seguir a este.
+player-queue-save = Guardar como lista de reprodução…
 player-seek = Posição
 player-volume = Volume
 player-cast = Transmitir para uma TV
@@ -501,6 +518,11 @@ dialog-sharing = Todos neste servidor podem vê-la
 dialog-delete-note = A lista de reprodução é removida do servidor para todos com quem está partilhada. O que está nela fica nas suas bibliotecas.
 dialog-added = Adicionado a { $name }.
 dialog-created = Lista de reprodução { $name } criada.
+dialog-save-queue = Guardar a fila como lista de reprodução
+dialog-save-queue-count = { $count ->
+    [one] Uma lista com { $count } item: o que está a reproduzir e o que está na fila.
+   *[other] Uma lista com { $count } itens: o que está a reproduzir e o que está na fila.
+    }
 dialog-already-there = { $item } já está em { $name }.
 dialog-cant-change = Não pode alterar { $name }; pertence a outra pessoa.
 dialog-add-to-playlist = Adicionar à lista de reprodução

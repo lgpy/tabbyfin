@@ -27,7 +27,7 @@ pub use download::Download;
 pub use error::{Error, Result};
 pub use images::ImageRequest;
 pub use items::{ItemsQuery, SortOrder};
-pub use playback::{PlayMethod, PlaybackInfoRequest, PlaybackInfoResponse, PlaybackReport};
+pub use playback::{PlayMethod, PlaybackInfoRequest, PlaybackInfoResponse, PlaybackOrder, PlaybackReport};
 pub use remote::{Capabilities, GeneralCommand, PlayCommand, PlayRequest, PlaystateCommand, PlaystateRequest};
 pub use socket::{ServerMessage, SocketEvent};
 pub use syncplay::{

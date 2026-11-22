@@ -304,8 +304,12 @@ fn row(
     } else if response.row.clicked() {
         asked.open = Some(Route::for_item(item));
     }
-    if let Some(action) = menu::item_menu(&response.row, item, downloads) {
-        asked.menu = Some((action, item.clone()));
+    if let Some(action) = menu::item_menu_in(&response.row, item, downloads, true) {
+        if matches!(action, menu::MenuAction::PlayFromHere) {
+            asked.play_from_here = Some(items[index..].to_vec());
+        } else {
+            asked.menu = Some((action, item.clone()));
+        }
     }
 }
 

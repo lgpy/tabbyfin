@@ -113,6 +113,29 @@ pub fn can_mark(item: &BaseItemDto) -> bool {
     can_add_to_playlist(item) || item.kind == BaseItemKind::BoxSet
 }
 
+/// What *Play next* and *Add to queue* take: an item, or what holds items to play in order.
+pub fn can_queue(item: &BaseItemDto) -> bool {
+    is_playable(item)
+        || matches!(
+            item.kind,
+            BaseItemKind::Series | BaseItemKind::Season | BaseItemKind::BoxSet | BaseItemKind::Playlist
+        )
+}
+
+/// The items `item` queues, in the order they play: itself, or a series' or season's episodes, a
+/// collection's movies by release date, a playlist's entries. Only what plays is kept (a
+/// collection may hold shows).
+pub async fn items_to_queue(client: &Client, item: &BaseItemDto) -> jellyfin::Result<Vec<BaseItemDto>> {
+    let mut items = match item.kind {
+        BaseItemKind::Series | BaseItemKind::Season => episodes_of(client, item).await?,
+        BaseItemKind::BoxSet => crate::views::item::collection_items(client, &item.id, &[]).await?,
+        BaseItemKind::Playlist => client.playlist_items(&item.id, &[]).await?.items,
+        _ => vec![item.clone()],
+    };
+    items.retain(is_playable);
+    Ok(items)
+}
+
 /// A change to a playlist's entries, by entry id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PlaylistEdit {

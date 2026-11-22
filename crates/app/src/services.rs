@@ -58,6 +58,10 @@ pub struct Services {
     /// so it outlives the page, and played by `apply_menu_requests` when it arrives.
     pub(crate) shuffles: task::Receiver<Shuffled>,
     pub(crate) shuffle_from: task::Sender<Shuffled>,
+    /// The items *Play next* and *Add to queue* of a series, season, collection or playlist
+    /// fetched: `apply_menu_requests` queues them when they arrive.
+    pub(crate) queued: task::Receiver<Queued>,
+    pub(crate) queue_from: task::Sender<Queued>,
     /// Playback sessions, the play queue and what carries over between items. Playing and the
     /// player's controls are methods on `Services` (`playback.rs`), since SyncPlay may take
     /// them over.
@@ -104,6 +108,10 @@ pub(crate) type UpNext = jellyfin::Result<Option<jellyfin::models::BaseItemDto>>
 
 /// All of a series' or season's episodes, once they're fetched for *Shuffle*.
 pub(crate) type Shuffled = jellyfin::Result<Vec<jellyfin::models::BaseItemDto>>;
+
+/// The items a menu queues, once they're fetched: whether they go next (rather than last), the
+/// name of what they came from, and the items.
+pub(crate) type Queued = (bool, String, jellyfin::Result<Vec<jellyfin::models::BaseItemDto>>);
 
 /// Something signed-in code can't handle itself, for the app or the shell.
 #[derive(Debug)]
@@ -169,6 +177,7 @@ impl Services {
         let (resuming, resumed) = task::channel(ctx);
         let (up_next_from, up_next) = task::channel(ctx);
         let (shuffle_from, shuffles) = task::channel(ctx);
+        let (queue_from, queued) = task::channel(ctx);
         let account = session.account_key();
         let config = crate::config::Config::load();
         crate::spoilers::set(ctx, config.hide_spoilers.unwrap_or(false));
@@ -206,6 +215,8 @@ impl Services {
             up_next_from,
             shuffles,
             shuffle_from,
+            queued,
+            queue_from,
         }
     }
 
@@ -216,6 +227,7 @@ impl Services {
     pub fn tick(&mut self, ctx: &egui::Context) {
         self.images.tick();
         self.prefetch.tick(ctx, &self.session.client, self.user_data);
+        crate::widgets::menu::set_queueing(ctx, self.queueing());
         self.apply_menu_requests();
         self.tick_playlist_edits();
         self.tick_downloads();

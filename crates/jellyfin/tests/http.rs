@@ -4,7 +4,10 @@
 
 use std::time::Duration;
 
-use jellyfin::{Client, ClientInfo, Download, Error, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
+use jellyfin::{
+    Client, ClientInfo, Download, Error, PlayMethod, PlaybackInfoRequest, PlaybackOrder, PlaybackReport, RepeatMode,
+    Ticks,
+};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -39,6 +42,8 @@ fn report() -> PlaybackReport {
         play_method: PlayMethod::DirectPlay,
         volume_level: 80,
         is_muted: false,
+        repeat_mode: RepeatMode::RepeatAll,
+        playback_order: PlaybackOrder::Shuffle,
     }
 }
 
@@ -95,17 +100,20 @@ async fn playback_reports_carry_the_session_and_position() {
     assert_eq!(start["SubtitleStreamIndex"], json!(-1));
     assert_eq!(start["VolumeLevel"], json!(80));
     assert_eq!(start["CanSeek"], json!(true));
+    // The queue's modes, which the dashboard's remote shows.
+    assert_eq!(start["RepeatMode"], "RepeatAll");
+    assert_eq!(start["PlaybackOrder"], "Shuffle");
 
     let progress = body(&requests[1]);
     assert_eq!(progress["IsPaused"], json!(true));
     assert_eq!(progress["PositionTicks"], json!(950_000_000));
 
-    // `PlaybackStopInfo` has no paused, volume or track fields.
+    // `PlaybackStopInfo` has no paused, volume, track or queue mode fields.
     let stop = body(&requests[2]);
     assert_eq!(stop["PositionTicks"], json!(950_000_000));
     assert_eq!(stop["PlaySessionId"], "session");
     assert!(
-        stop.get("IsPaused").is_none() && stop.get("VolumeLevel").is_none(),
+        stop.get("IsPaused").is_none() && stop.get("VolumeLevel").is_none() && stop.get("RepeatMode").is_none(),
         "{stop}"
     );
 }

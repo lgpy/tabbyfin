@@ -48,6 +48,7 @@ pub mod menus;
 #[cfg(feature = "mockup")]
 pub mod mockups;
 pub mod player;
+pub mod queue;
 pub mod settings;
 pub mod shelf;
 pub mod shell;
@@ -331,6 +332,11 @@ pub struct PageRun {
 type OpenPage = Box<dyn FnOnce(&mut PageCx) -> Box<dyn Page>>;
 
 impl PageRun {
+    /// The services the page draws with.
+    pub fn services(&self) -> &Services {
+        self.services.as_ref().expect("the services are made")
+    }
+
     fn new(session: Session, open: impl FnOnce(&mut PageCx) -> Box<dyn Page> + 'static) -> Self {
         Self {
             session: Some(session),
@@ -414,6 +420,15 @@ impl PageHarness {
 
     pub fn state(&self) -> &PageRun {
         self.harness.state()
+    }
+
+    /// The services the page draws with, once its first frame made them.
+    pub fn services(&mut self) -> &mut Services {
+        self.harness
+            .state_mut()
+            .services
+            .as_mut()
+            .expect("the services are made")
     }
 
     /// The harness itself, for a test that reads what a frame drew (a node's rectangle).

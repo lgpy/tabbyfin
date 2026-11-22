@@ -81,6 +81,8 @@ pub enum Action {
     SpeedDown,
     SubtitleDelayUp,
     SubtitleDelayDown,
+    /// The queue panel.
+    ToggleQueue,
 }
 
 pub struct Binding {
@@ -146,6 +148,7 @@ pub const BINDINGS: &[Binding] = {
         bind(Player, NONE, Key::OpenBracket, SpeedDown),
         bind(Player, NONE, Key::X, SubtitleDelayUp),
         bind(Player, NONE, Key::Z, SubtitleDelayDown),
+        bind(Player, NONE, Key::Q, ToggleQueue),
     ]
 };
 
@@ -337,6 +340,16 @@ mod tests {
         assert_eq!(press(Key::W, Modifiers::NONE).action(Scope::Player), None);
         assert_eq!(press(Key::Delete, Modifiers::NONE).action(Scope::Shell), None);
         assert_eq!(press(Key::W, Modifiers::NONE).action(Scope::Shell), None);
+    }
+
+    #[test]
+    fn q_opens_the_queue_in_the_player_alone() {
+        assert_eq!(
+            press(Key::Q, Modifiers::NONE).action(Scope::Player),
+            Some(Action::ToggleQueue)
+        );
+        assert_eq!(press(Key::Q, Modifiers::NONE).action(Scope::Browse), None);
+        assert_eq!(press(Key::Q, Modifiers::NONE).action(Scope::Shell), None);
     }
 
     #[test]

@@ -545,6 +545,11 @@ impl PlayerRun {
         self.keys.extend(presses);
     }
 
+    /// The services the player draws with.
+    pub fn services(&mut self) -> &mut Services {
+        self.services.as_mut().expect("the services are made")
+    }
+
     /// The running session's state, as the page reads it.
     pub fn now_playing(&self) -> Option<&crate::playback::NowPlaying> {
         self.services.as_ref()?.playback.now_playing()

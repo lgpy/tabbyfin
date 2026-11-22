@@ -17,7 +17,7 @@ use jellyfin::models::{
     BaseItemDto, BaseItemKind, ChapterInfo, ItemField, MediaSegmentDto, MediaSourceInfo, MediaStream, MediaStreamType,
     TrickplayInfo,
 };
-use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
+use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackOrder, PlaybackReport, RepeatMode, Ticks};
 use player::libmpv::{VideoImport, VideoOutput};
 use player::{Cues, EndReason, LoadRequest, Player, PlayerEvent};
 use serde_json::json;
@@ -26,6 +26,7 @@ use url::Url;
 
 use crate::config::{Config, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
 use crate::i18n::tr;
+use crate::local_queue::{AfterEnd, LocalQueue};
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::services::{AppEvent, Services};
@@ -158,6 +159,8 @@ pub enum UiCommand {
     ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
+    /// The queue's repeat and shuffle, which the progress reports carry to the server.
+    SetQueueModes(RepeatMode, PlaybackOrder),
     Stop,
 }
 
@@ -248,6 +251,12 @@ pub struct NowPlaying {
     /// What plays next: the queue's next item, the following episode, or the following movie
     /// of the item's collection.
     pub next: Option<BaseItemDto>,
+    /// `next` is the queue's front, not the following episode or movie.
+    next_queued: bool,
+    /// The following episode or movie, which `next` falls back to when the queue runs dry, and
+    /// whether it's the next movie of a collection, which is offered but not autoplayed.
+    following: Option<BaseItemDto>,
+    following_in_collection: bool,
     /// The user dismissed the up-next card: don't play the next episode at the end.
     pub next_cancelled: bool,
     /// Play the next episode at the end (the setting, at session start).
@@ -315,9 +324,22 @@ impl NowPlaying {
         window.contains(&self.position).then_some(from)
     }
 
+    /// Whether the next item starts by itself at the end: the setting allows it, and it isn't a
+    /// collection's next movie (a sequel isn't started without asking; the card offers it).
+    pub fn autoplays(&self) -> bool {
+        self.autoplay && (self.next_queued || !self.following_in_collection)
+    }
+
     /// What plays after this item ends by itself.
     fn autoplay_next(&self) -> Option<BaseItemDto> {
-        self.next.clone().filter(|_| self.autoplay && !self.next_cancelled)
+        self.next.clone().filter(|_| self.autoplays() && !self.next_cancelled)
+    }
+
+    /// What plays next now that the queue's front is `front`: that, or the following episode
+    /// when the queue is empty.
+    fn follow_queue(&mut self, front: Option<&BaseItemDto>) {
+        self.next_queued = front.is_some();
+        self.next = front.cloned().or_else(|| self.following.clone());
     }
 
     pub fn is_transcoding(&self) -> bool {
@@ -366,10 +388,10 @@ impl NowPlaying {
         self.versions = details.versions;
         self.trickplay = details.trickplay;
         self.previous = details.previous;
+        self.following = details.next;
+        self.following_in_collection = details.next_in_collection;
         if !queued {
-            self.next = details.next;
-            // A sequel isn't started without asking; the card offers it.
-            self.autoplay &= !details.next_in_collection;
+            self.next = self.following.clone();
         }
         self.chapters = details.chapters;
         self.segments = details.segments;
@@ -401,7 +423,9 @@ pub struct PlaybackManager {
     reconnect: Option<Reconnect>,
     /// What plays after the current item ("Play all" on a playlist or collection). Takes the
     /// place of the next episode for the up-next card and autoplay.
-    queue: VecDeque<BaseItemDto>,
+    queue: LocalQueue,
+    /// The item the last session was started for, which is the one before what starts next.
+    started: Option<BaseItemDto>,
     /// The running session's state, once it has started. A replaced session's stays until its
     /// successor starts, so the player has something to show meanwhile.
     now_playing: Option<NowPlaying>,
@@ -461,7 +485,8 @@ impl PlaybackManager {
             active: false,
             sessions: Vec::new(),
             reconnect: None,
-            queue: VecDeque::new(),
+            queue: LocalQueue::default(),
+            started: None,
             now_playing: None,
             volume,
             muted: false,
@@ -497,8 +522,8 @@ impl PlaybackManager {
     }
 
     /// What plays after the current item, in order.
-    pub(crate) fn queued(&self) -> impl Iterator<Item = &BaseItemDto> {
-        self.queue.iter()
+    pub(crate) fn queued(&self) -> impl ExactSizeIterator<Item = &BaseItemDto> {
+        self.queue.upcoming()
     }
 
     /// Forgets the queue (it went to the TV with a cast).
@@ -529,6 +554,7 @@ impl PlaybackManager {
         let (commands, received) = mpsc::unbounded_channel();
         self.generation += 1;
         self.active = true;
+        self.started = Some(item.clone());
         self.now_playing = Some(NowPlaying {
             session: self.generation,
             item,
@@ -548,6 +574,9 @@ impl PlaybackManager {
             trickplay: TrickplayTiles::new(),
             previous: None,
             next: None,
+            next_queued: false,
+            following: None,
+            following_in_collection: false,
             next_cancelled: false,
             autoplay: false,
             chapters: Vec::new(),
@@ -583,25 +612,44 @@ impl PlaybackManager {
         self.reconnect.take().is_some()
     }
 
-    /// Takes the queue's front when `item` is it, moving the queue on; playing anything else
-    /// drops the queue, unless a SyncPlay group plays it.
+    /// Takes the queue's front when `item` is it, moving the queue on; playing the same item
+    /// again (another version, a restart) leaves it be, and playing anything else drops it,
+    /// unless a SyncPlay group plays it.
     fn advance_queue(&mut self, item: &BaseItemDto, options: &PlayOptions) {
-        if self.queue.front().is_some_and(|next| next.id == item.id) {
-            self.queue.pop_front();
-        } else if options.group_item.is_none() {
+        if self.queue.advance(item, self.started.as_ref()) {
+            return;
+        }
+        let again = self.started.as_ref().is_some_and(|started| started.id == item.id);
+        if !again && options.group_item.is_none() {
             self.queue.clear();
+        }
+    }
+
+    /// Repeat, and whether the queue is shuffled.
+    pub(crate) fn modes(&self) -> (RepeatMode, bool) {
+        (self.queue.repeat, self.queue.is_shuffled())
+    }
+
+    /// Shows the playing item's `next` as the queue's front, or the following episode once the
+    /// queue is empty.
+    fn refresh_next(&mut self) {
+        let front = self.queue.front().cloned();
+        if let Some(state) = &mut self.now_playing {
+            state.follow_queue(front.as_ref());
         }
     }
 
     /// Starts a session; `attempt` counts reconnects after a lost stream.
     fn start_session(&mut self, item: &BaseItemDto, options: PlayOptions, attempt: usize) {
         self.reconnect = None;
+        self.started = Some(item.clone());
         // Dropping the previous sender stops that session; it still reports its final position.
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
         self.generation += 1;
         self.active = true;
         let (volume, muted, import, online) = (self.volume, self.muted, self.video_import, self.online);
+        let modes = self.queue.modes();
         if self.adjusted_item.as_ref() != Some(&item.id) {
             self.adjustments = self.adjustments.for_next_item();
             self.adjusted_item = Some(item.id.clone());
@@ -634,6 +682,7 @@ impl PlaybackManager {
                     adjustments,
                     (account, online),
                     import,
+                    modes,
                     channels,
                 );
                 let result = AssertUnwindSafe(session).catch_unwind().await;
@@ -806,24 +855,20 @@ impl Services {
 
     /// Plays an item from its resume point, with default tracks (e.g. the next episode).
     pub fn play_from_resume(&mut self, item: &BaseItemDto) {
-        let start = item
-            .user_data
-            .as_ref()
-            .map(|d| d.playback_position_ticks)
-            .filter(|t| t.0 > 0);
-        self.play(
-            item,
-            PlayOptions {
-                start,
-                resumed: start.is_some(),
-                ..Default::default()
-            },
-        );
+        self.play(item, resume_options(item));
     }
 
     /// Plays `items` in order: the first now, the rest as a queue.
     pub fn play_all(&mut self, items: Vec<BaseItemDto>) {
         self.play_all_with(items, PlayOptions::default());
+    }
+
+    /// Plays the first of `items` from its resume point and the rest after it, as *Play from
+    /// here* on an episode of a season or an entry of a playlist.
+    pub fn play_from_here(&mut self, items: Vec<BaseItemDto>) {
+        let Some(first) = items.first() else { return };
+        let options = resume_options(first);
+        self.play_all_with(items, options);
     }
 
     /// Plays `items` in order, the first with `options`. A SyncPlay group gets them as its
@@ -841,7 +886,7 @@ impl Services {
             self.group_start_items(&all);
             return;
         }
-        self.playback.queue = items;
+        self.playback.queue.start(items);
         self.play_now(&first, options);
     }
 
@@ -862,16 +907,118 @@ impl Services {
             return;
         }
         if next {
-            for item in items.into_iter().rev() {
-                playback.queue.push_front(item);
-            }
+            playback.queue.push_next(items);
         } else {
-            playback.queue.extend(items);
+            playback.queue.push_last(items);
         }
         // The queue takes the place of the next episode for the up-next card and autoplay.
-        if let (Some(state), Some(front)) = (&mut playback.now_playing, playback.queue.front()) {
-            state.next = Some(front.clone());
+        playback.refresh_next();
+    }
+
+    /// Sets what the queue does at the end of an item (the panel's repeat button, or remote
+    /// control). In a SyncPlay group it's the group's, set on the server; while casting it's the
+    /// TV's, which has no such control.
+    pub fn set_repeat(&mut self, mode: RepeatMode) {
+        if self.is_casting() {
+            return;
         }
+        if self.in_group() {
+            self.syncplay.set_repeat(mode);
+            return;
+        }
+        self.playback.queue.repeat = mode;
+        self.queue_modes_changed();
+    }
+
+    /// Off, all, one.
+    pub fn cycle_repeat(&mut self) {
+        let next = if self.in_group() {
+            self.syncplay.repeat_mode().next()
+        } else {
+            self.playback.queue.repeat.next()
+        };
+        self.set_repeat(next);
+    }
+
+    /// Shuffles what's queued, or puts it back in order (the panel's shuffle button, or remote
+    /// control). A group's and a cast's, as [`Services::set_repeat`].
+    pub fn set_shuffle(&mut self, on: bool) {
+        if self.is_casting() {
+            return;
+        }
+        if self.in_group() {
+            self.syncplay.set_shuffle(on);
+            return;
+        }
+        self.playback.queue.set_shuffle(on);
+        self.queue_modes_changed();
+    }
+
+    pub fn toggle_shuffle(&mut self) {
+        let on = !self.playback.queue.is_shuffled();
+        self.set_shuffle(on);
+    }
+
+    /// The modes changed: the session reports them, and the up-next card follows the new order.
+    fn queue_modes_changed(&mut self) {
+        let (repeat, order) = self.playback.queue.modes();
+        if let Some(state) = self.playback.current() {
+            state.send(UiCommand::SetQueueModes(repeat, order));
+        }
+        self.playback.refresh_next();
+    }
+
+    /// Takes the queue's entry at `index` out, from the player's queue panel.
+    pub fn queue_remove(&mut self, index: usize) {
+        if self.playback.queue.remove(index).is_some() {
+            self.playback.refresh_next();
+        }
+    }
+
+    /// Moves the queue's entry at `index` up (`-1`) or down (`1`). Returns where it went.
+    pub fn queue_move(&mut self, index: usize, by: isize) -> Option<usize> {
+        let to = self.playback.queue.move_entry(index, by)?;
+        self.playback.refresh_next();
+        Some(to)
+    }
+
+    /// The running session playing to its end, as the session reports it, for tests of what
+    /// follows. Returns the item a new session was started for, if one was.
+    #[cfg(test)]
+    pub fn end_for_test(&mut self) -> Option<String> {
+        let state = self.playback.now_playing()?;
+        let generation = self.playback.generation;
+        let (commands, _) = mpsc::unbounded_channel();
+        let (_, updates) = task::channel(&self.playback.ctx);
+        let running = Running {
+            generation,
+            item: state.item.clone(),
+            attempt: 0,
+            options: PlayOptions::default(),
+            updates,
+            commands,
+            volume: self.playback.volume,
+            muted: false,
+            adjustments: Adjustments::default(),
+            autoplay: true,
+            resumed_from: None,
+        };
+        self.session_ended(running, Ok(Ended::Finished));
+        (self.playback.generation != generation)
+            .then(|| self.playback.started.as_ref().map(|item| item.id.clone()))
+            .flatten()
+    }
+
+    /// Plays the queue's entry at `index` now. What's before it counts as played.
+    pub fn queue_jump(&mut self, index: usize) {
+        if self.is_casting() || self.in_group() {
+            return;
+        }
+        let previous = self.playback.started.clone();
+        let Some(item) = self.playback.queue.jump(index, previous.as_ref()) else {
+            return;
+        };
+        self.play_now(&item, resume_options(&item));
     }
 
     fn play_now(&mut self, item: &BaseItemDto, options: PlayOptions) {
@@ -1093,6 +1240,9 @@ impl Services {
                     // Read when the session starts, not when it was asked for: a remote play
                     // next or last queued while it was loading counts too.
                     next: playback.queue.front().cloned(),
+                    next_queued: !playback.queue.is_empty(),
+                    following: None,
+                    following_in_collection: false,
                     next_cancelled: false,
                     autoplay: running.autoplay,
                     chapters: Vec::new(),
@@ -1158,6 +1308,12 @@ impl Services {
             .filter(|state| state.session == running.generation)
             .and_then(|state| state.autoplay_next());
         let group_item = running.options.group_item.clone();
+        // What the queue's modes make of an item that played to its end; a group's queue is the
+        // server's, so its modes are too.
+        let after = match result {
+            Ok(Ended::Finished) if group_item.is_none() => self.playback.queue.after_end(&running.item, next),
+            _ => AfterEnd::Stop,
+        };
         match result {
             // In a group, every member reports the end and the server moves the queue on
             // (once); the next item then comes as a queue update.
@@ -1165,10 +1321,23 @@ impl Services {
                 self.group_item_ended(group_item);
                 self.events.push(AppEvent::PlaybackEnded);
             }
-            Ok(Ended::Finished) if let Some(next) = next => {
-                tracing::info!(next = %next.name, "playing the next episode");
-                self.play_from_resume(&next);
-            }
+            Ok(Ended::Finished) if !matches!(after, AfterEnd::Stop) => match after {
+                AfterEnd::Replay => {
+                    tracing::info!(item = %running.item.name, "repeating the item");
+                    self.play(&running.item, PlayOptions::default());
+                }
+                AfterEnd::Next(next) => {
+                    tracing::info!(next = %next.name, "playing the next episode");
+                    self.play_from_resume(&next);
+                }
+                // The queue is made again from what played, so the first of it plays without
+                // asking the queue to move on.
+                AfterEnd::Restart(first) => {
+                    tracing::info!(first = %first.name, "repeating the queue");
+                    self.play_now(&first, PlayOptions::default());
+                }
+                AfterEnd::Stop => self.events.push(AppEvent::PlaybackEnded),
+            },
             // Keep the player up and try again from where it stopped.
             Ok(Ended::Lost {
                 position,
@@ -1215,6 +1384,20 @@ impl Services {
                 self.events.push(AppEvent::PlaybackEnded);
             }
         }
+    }
+}
+
+/// Plays `item` from its resume point, with the player offering to start over.
+fn resume_options(item: &BaseItemDto) -> PlayOptions {
+    let start = item
+        .user_data
+        .as_ref()
+        .map(|d| d.playback_position_ticks)
+        .filter(|t| t.0 > 0);
+    PlayOptions {
+        start,
+        resumed: start.is_some(),
+        ..Default::default()
     }
 }
 
@@ -1553,6 +1736,7 @@ async fn run_session(
     adjustments: Adjustments,
     (account, online): (String, bool),
     import: VideoImport,
+    (repeat_mode, playback_order): (RepeatMode, PlaybackOrder),
     mut channels: Channels,
 ) -> Result<Ended, String> {
     // Offline, nothing goes to the server: each call would only wait to fail.
@@ -1745,6 +1929,8 @@ async fn run_session(
         play_method: method,
         volume_level: volume_level(volume),
         is_muted: muted,
+        repeat_mode,
+        playback_order,
         ..Default::default()
     };
     let mut reporting = Reporting::default();
@@ -1944,7 +2130,8 @@ impl Reporting {
             | UiCommand::SeekBy(_)
             | UiCommand::SeekTo(_)
             | UiCommand::Audio(_)
-            | UiCommand::Subtitle(_) => self.progress(),
+            | UiCommand::Subtitle(_)
+            | UiCommand::SetQueueModes(..) => self.progress(),
             _ => Outgoing::Nothing,
         }
     }
@@ -2039,6 +2226,11 @@ async fn apply_command(
                 player.set_property("sid", sid).await?;
                 report.subtitle_stream_index = subtitle_index(choice);
             }
+            Ok(())
+        }
+        UiCommand::SetQueueModes(repeat_mode, playback_order) => {
+            report.repeat_mode = repeat_mode;
+            report.playback_order = playback_order;
             Ok(())
         }
         UiCommand::Stop => player.quit().await,
@@ -2144,6 +2336,18 @@ mod tests {
         assert_eq!(reporting.on_command(&UiCommand::Audio(2)), Outgoing::Progress);
         assert_eq!(reporting.on_command(&UiCommand::SetSpeed(1.5)), Outgoing::Nothing);
         assert_eq!(reporting.on_command(&UiCommand::SetVolume(50.)), Outgoing::Nothing);
+    }
+
+    #[test]
+    fn the_queues_modes_are_reported_once_applied() {
+        use jellyfin::{PlaybackOrder, RepeatMode};
+
+        let (mut reporting, mut report) = (Reporting::default(), PlaybackReport::default());
+        let command = UiCommand::SetQueueModes(RepeatMode::RepeatAll, PlaybackOrder::Shuffle);
+        // Before the start report, which carries the modes itself.
+        assert_eq!(reporting.on_command(&command), Outgoing::Nothing);
+        reporting.on_event(&PlayerEvent::FileLoaded, &mut report, tokio::time::Instant::now());
+        assert_eq!(reporting.on_command(&command), Outgoing::Progress);
     }
 
     #[test]

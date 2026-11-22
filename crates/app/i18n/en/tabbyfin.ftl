@@ -121,6 +121,20 @@ item-delete-playlist = Delete playlist…
 item-version = Version
 item-version-number = Version { $number }
 item-nothing-to-play = Nothing here to play.
+item-play-next = Play next
+item-play-from-here = Play from here
+item-add-to-queue = Add to queue
+item-nothing-to-queue = Nothing here to add to the queue.
+queue-played-next = { $name } plays next.
+queue-added = Added { $name } to the queue.
+queue-played-next-count = { $count ->
+    [one] { $count } item from { $name } plays next.
+   *[other] { $count } items from { $name } play next.
+    }
+queue-added-count = { $count ->
+    [one] Added { $count } item from { $name } to the queue.
+   *[other] Added { $count } items from { $name } to the queue.
+    }
 item-download = Download
 item-downloading = Downloading
 item-downloaded = Downloaded
@@ -187,6 +201,9 @@ player-settings = Playback settings
 player-subtitles = Subtitles
 player-audio = Audio
 player-chapters = Chapters
+player-queue = Queue (Q)
+player-queue-empty = Nothing is queued after this.
+player-queue-save = Save as playlist…
 player-seek = Seek
 player-volume = Volume
 player-cast = Cast to a TV
@@ -501,6 +518,11 @@ dialog-sharing = Everyone on this server can see it
 dialog-delete-note = The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.
 dialog-added = Added to { $name }.
 dialog-created = Made the playlist { $name }.
+dialog-save-queue = Save the queue as a playlist
+dialog-save-queue-count = { $count ->
+    [one] A playlist of { $count } item: what's playing and what's queued.
+   *[other] A playlist of { $count } items: what's playing and what's queued.
+    }
 dialog-already-there = { $item } is already in { $name }.
 dialog-cant-change = You can't change { $name }; it belongs to someone else.
 dialog-add-to-playlist = Add to playlist

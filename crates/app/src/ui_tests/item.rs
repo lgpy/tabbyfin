@@ -382,3 +382,65 @@ fn a_failed_load_is_asked_again_by_the_page() {
     });
     assert_eq!(server.requests("GET", SIMILAR_ROUTE), 2);
 }
+
+/// *Play from here* on a playlist's entry plays it and queues the entries after it.
+#[test]
+fn play_from_here_queues_the_rest_of_the_playlist() {
+    let _config = ConfigDir::new("item-play-from-here");
+    let server = FixtureServer::start();
+    let playlist = serde_json::json!({ "Id": PLAYLIST, "Name": "Watchlist", "Type": "Playlist" });
+    server.json_value("GET", "/Items/5a1e7c0ffee0000000000000000000aa", &playlist);
+    let mut entries: serde_json::Value = fixture_json("episodes");
+    for entry in entries["Items"].as_array_mut().expect("episodes") {
+        entry["PlaylistItemId"] = entry["Id"].clone();
+    }
+    let ids: Vec<String> = entries["Items"]
+        .as_array()
+        .expect("episodes")
+        .iter()
+        .map(|entry| entry["Id"].as_str().expect("an id").to_owned())
+        .collect();
+    server.json_value("GET", "/Playlists/5a1e7c0ffee0000000000000000000aa/Items", &entries);
+    let mut ui = PageHarness::new(session(&server), move |cx| {
+        crate::views::open(
+            Route::Item {
+                id: PLAYLIST.to_owned(),
+                name: "Watchlist".to_owned(),
+            },
+            cx,
+        )
+    });
+    ui.step_until("the playlist's rows", |harness| {
+        harness.query_by_label("Playlist").is_some()
+    });
+
+    // The second entry's menu has it; the queue is what comes after.
+    ui.harness()
+        .query_all_by_label_contains("Test Show S01E02")
+        .next()
+        .expect("the second entry")
+        .click_secondary();
+    for _ in 0..3 {
+        ui.step();
+    }
+    let rows: Vec<String> = ui
+        .harness()
+        .query_all_by_role(Role::MenuItem)
+        .filter_map(|node| node.accesskit_node().label())
+        .collect();
+    assert!(rows.iter().any(|row| row == "Play from here"), "{rows:?}");
+    ui.harness()
+        .get_by_role_and_label(Role::MenuItem, "Play from here")
+        .click();
+    for _ in 0..3 {
+        ui.step();
+    }
+    let queued: Vec<&str> = ui
+        .state()
+        .services()
+        .playback
+        .queued()
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(queued, [ids[2].as_str()]);
+}
