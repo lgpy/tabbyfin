@@ -240,7 +240,9 @@ fn undo_is_remembered_across_a_restart_of_the_item_but_not_for_another_item() {
     let restart = |harness: &mut Harness<'static, PlayerRun>, item: &jellyfin::models::BaseItemDto, continues: bool| {
         let services = harness.state_mut().services_mut().expect("the services");
         let sent = if continues {
-            services.playback.start_continuing_for_test(item.clone(), source.clone())
+            services
+                .playback
+                .start_continuing_for_test(item.clone(), source.clone())
         } else {
             services.playback.start_for_test(item.clone(), source.clone())
         };

@@ -488,9 +488,8 @@ fn queueing_that_leaves_the_next_item_keeps_the_up_next_card_dismissed() {
         state.autoplay = true;
         state.next_cancelled = true;
     }
-    let cancelled = |services: &mut crate::services::Services| {
-        services.playback.now_playing().expect("the session").next_cancelled
-    };
+    let cancelled =
+        |services: &mut crate::services::Services| services.playback.now_playing().expect("the session").next_cancelled;
     // Last in a queue that already has a front, and nothing at all.
     services.enqueue(vec![movie()], false);
     assert!(cancelled(services), "the front is the same");
@@ -634,7 +633,8 @@ fn a_solo_queues_history_is_not_previous_in_a_syncplay_group() {
     };
     assert_eq!(previous(services), Some(episode(1).id), "solo: what the queue played");
 
-    let group = serde_json::from_value(serde_json::json!({"GroupId": "g", "GroupName": "Movie night"})).expect("a group");
+    let group =
+        serde_json::from_value(serde_json::json!({"GroupId": "g", "GroupName": "Movie night"})).expect("a group");
     services.on_syncplay_update(GroupUpdate::GroupJoined(group));
     assert_eq!(previous(services), None, "in a group: not the solo history");
     // Changing the queue's order doesn't bring it back.
