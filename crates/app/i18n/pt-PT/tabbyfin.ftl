@@ -119,6 +119,7 @@ item-version = Versão
 item-version-number = Versão { $number }
 item-nothing-to-play = Não há nada para reproduzir.
 item-play-next = Reproduzir a seguir
+item-play-from-here = Reproduzir a partir daqui
 item-add-to-queue = Adicionar à fila
 item-nothing-to-queue = Não há nada para adicionar à fila.
 queue-played-next = { $name } será reproduzido a seguir.

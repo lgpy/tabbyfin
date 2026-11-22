@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use egui::{Id, Response};
 use egui_material_icons::icons::{
     ICON_ADD_TO_QUEUE, ICON_CHECK, ICON_CHECK_CIRCLE, ICON_CLOSE, ICON_DELETE, ICON_DOWNLOAD, ICON_FAVORITE,
-    ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_QUEUE_PLAY_NEXT, ICON_REFRESH, ICON_REPLAY,
+    ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_PLAYLIST_PLAY, ICON_QUEUE_PLAY_NEXT, ICON_REFRESH, ICON_REPLAY,
 };
 
 use jellyfin::models::{BaseItemDto, BaseItemKind};
@@ -56,6 +56,9 @@ pub enum MenuAction {
     PlayNext,
     /// Put it at the end of the play queue.
     AddToQueue,
+    /// Play the item with the rest of the list it's in queued after it: a season's episodes or
+    /// a playlist's entries. The list's page carries it out, as it knows the list.
+    PlayFromHere,
     /// Start, stop, delete or retry its download.
     Download(Offer),
 }
@@ -63,11 +66,22 @@ pub enum MenuAction {
 /// The menu worn by `response`: right-click it to open it. `downloads` says which download
 /// entry it has. Kinds with none of the entries (libraries, people) get no menu.
 pub fn item_menu(response: &Response, item: &BaseItemDto, downloads: &Downloads) -> Option<MenuAction> {
+    item_menu_in(response, item, downloads, false)
+}
+
+/// [`item_menu`] for a row of a list (a season's episodes, a playlist's entries): `in_list` adds
+/// *Play from here*.
+pub fn item_menu_in(
+    response: &Response,
+    item: &BaseItemDto,
+    downloads: &Downloads,
+    in_list: bool,
+) -> Option<MenuAction> {
     let queue = queueing(&response.ctx) && can_queue(item);
     if !can_mark(item) && !queue {
         return None;
     }
-    menu(response, item, downloads, queue)
+    menu(response, item, downloads, queue, in_list && is_playable(item))
 }
 
 /// Whether the menus offer *Play next* and *Add to queue*: something is playing or queued.
@@ -82,7 +96,13 @@ fn queueing(ctx: &egui::Context) -> bool {
         .unwrap_or(false)
 }
 
-fn menu(response: &Response, item: &BaseItemDto, downloads: &Downloads, queue: bool) -> Option<MenuAction> {
+fn menu(
+    response: &Response,
+    item: &BaseItemDto,
+    downloads: &Downloads,
+    queue: bool,
+    from_here: bool,
+) -> Option<MenuAction> {
     let ctx = &response.ctx;
     let id = Id::unique("item_context_menu");
     let owner = id.with("owner");
@@ -115,6 +135,10 @@ fn menu(response: &Response, item: &BaseItemDto, downloads: &Downloads, queue: b
         // it, and this asks the page to play it.
         actions.push(MenuAction::UpNext);
         entries.push(Entry::new(tr!("item-play")).icon(ICON_PLAY_ARROW));
+    }
+    if from_here {
+        actions.push(MenuAction::PlayFromHere);
+        entries.push(Entry::new(tr!("item-play-from-here")).icon(ICON_PLAYLIST_PLAY));
     }
     if queue {
         actions.push(MenuAction::PlayNext);
@@ -255,7 +279,7 @@ impl Services {
                 self.mark(item.id.clone(), mark);
                 None
             }
-            MenuAction::AddToPlaylist => Some(action),
+            MenuAction::AddToPlaylist | MenuAction::PlayFromHere => Some(action),
             MenuAction::PlayNext => {
                 self.queue_item(item, true);
                 None

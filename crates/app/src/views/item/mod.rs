@@ -1100,6 +1100,9 @@ impl ItemPage {
         {
             self.add_to_playlist = Some(AddToPlaylist::new(cx, &item));
         }
+        if let Some(items) = asked.play_from_here {
+            cx.services.play_from_here(items);
+        }
         if let Some(route) = asked.hovered {
             cx.services.prefetch.hover(route);
         }
@@ -1168,6 +1171,8 @@ struct Asked {
     hovered: Option<Route>,
     /// A card's context menu was used.
     menu: Option<(MenuAction, BaseItemDto)>,
+    /// *Play from here* on a row: it and the rows after it, to play in order.
+    play_from_here: Option<Vec<BaseItemDto>>,
     /// A season card was clicked: its episodes open under the seasons, or close.
     season: Option<BaseItemDto>,
     /// A playlist entry's buttons were used: move or remove the entry at the index.

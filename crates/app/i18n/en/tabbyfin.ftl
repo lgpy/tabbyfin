@@ -119,6 +119,7 @@ item-version = Version
 item-version-number = Version { $number }
 item-nothing-to-play = Nothing here to play.
 item-play-next = Play next
+item-play-from-here = Play from here
 item-add-to-queue = Add to queue
 item-nothing-to-queue = Nothing here to add to the queue.
 queue-played-next = { $name } plays next.

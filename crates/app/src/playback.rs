@@ -863,6 +863,14 @@ impl Services {
         self.play_all_with(items, PlayOptions::default());
     }
 
+    /// Plays the first of `items` from its resume point and the rest after it, as *Play from
+    /// here* on an episode of a season or an entry of a playlist.
+    pub fn play_from_here(&mut self, items: Vec<BaseItemDto>) {
+        let Some(first) = items.first() else { return };
+        let options = resume_options(first);
+        self.play_all_with(items, options);
+    }
+
     /// Plays `items` in order, the first with `options`. A SyncPlay group gets them as its
     /// new queue instead, from the start; a cast plays them on the TV.
     pub fn play_all_with(&mut self, items: Vec<BaseItemDto>, options: PlayOptions) {
