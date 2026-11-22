@@ -37,6 +37,7 @@
 
 mod controller;
 mod phone;
+mod queue;
 mod touch;
 
 use std::time::Duration;
@@ -48,8 +49,9 @@ use egui::{
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_FAST_FORWARD,
-    ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT,
-    ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_PLAYLIST_PLAY,
+    ICON_RESTART_ALT, ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF,
+    ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
@@ -199,6 +201,8 @@ pub struct PlayerPage {
     sheet: Option<phone::Sheet>,
     /// The subtitle track the phone's subtitles button last turned off, which it turns back on.
     last_subtitle: Option<i32>,
+    /// The queue panel's keyboard highlight.
+    queue: queue::QueuePanel,
 }
 
 impl PlayerPage {
@@ -230,6 +234,7 @@ impl PlayerPage {
             touch: touch::Touch::default(),
             sheet: None,
             last_subtitle: None,
+            queue: queue::QueuePanel::default(),
         };
         this.show_controls();
         this
@@ -251,6 +256,7 @@ impl PlayerPage {
             return;
         }
         self.sync_video(cx);
+        self.queue_keys(cx);
         if let Some(session) = cx.services.playback.now_playing().map(|state| state.session) {
             self.follow_session(ui.ctx(), session);
             self.auto_skip(cx);
@@ -486,6 +492,7 @@ impl PlayerPage {
         let open = egui::Popup::is_id_open(ctx, settings_id())
             || egui::Popup::is_id_open(ctx, chapters_id())
             || egui::Popup::is_id_open(ctx, versions_id())
+            || egui::Popup::is_id_open(ctx, queue_id())
             || self.sheet.is_some();
         if open != self.menu_open {
             self.menu_open = open;
@@ -701,6 +708,9 @@ impl PlayerPage {
             }
             Action::ToggleFullscreen => toggle_fullscreen(cx.ctx),
             Action::ExitPlayer => self.exit(cx),
+            // Q: the queue panel, for the solo player (a group's queue is in its own panel).
+            Action::ToggleQueue if cx.services.in_group() => return false,
+            Action::ToggleQueue => self.toggle_queue(cx, true),
             Action::SpeedUp | Action::SpeedDown => {
                 self.adjust(cx, |a| a.speed = a.step_speed(action == Action::SpeedUp));
             }
@@ -875,6 +885,7 @@ impl PlayerPage {
         );
 
         let mut chapters_button = None;
+        let mut queue_button = None;
         let mut settings_button = None;
         let mut versions_button = None;
         let mut pressed = None;
@@ -948,6 +959,15 @@ impl PlayerPage {
                     }
                     chapters_button = Some(chapters);
                 }
+                if !casting && !view.group {
+                    let open = egui::Popup::is_id_open(ui.ctx(), queue_id());
+                    let tip = tr!("player-queue");
+                    let queue = menu_button(ui, ICON_PLAYLIST_PLAY, &tip, open);
+                    if queue.clicked() {
+                        self.toggle_queue(cx, false);
+                    }
+                    queue_button = Some(queue);
+                }
                 if let Some(name) = view.version_picker() {
                     let picker = version_picker(ui, &name);
                     if picker.clicked() {
@@ -970,6 +990,9 @@ impl PlayerPage {
 
         if let Some(response) = &chapters_button {
             self.chapters_menu(response, view, cx);
+        }
+        if let Some(response) = &queue_button {
+            self.queue_menu(response, cx);
         }
         if let Some(response) = &settings_button {
             self.settings_menu(response, view, cx);
@@ -1619,7 +1642,7 @@ impl View {
             show_up_next: state.show_up_next(),
             next_label,
             autoplay_in: state
-                .autoplay
+                .autoplays()
                 .then(|| state.up_next_from().zip(state.duration))
                 .flatten()
                 .map(|(from, end)| {
@@ -1903,6 +1926,11 @@ fn chapter_colours() -> media_row::ChapterColours {
         ink: over_video::FOREGROUND,
         ink_muted: over_video::MUTED_FOREGROUND,
     }
+}
+
+/// The queue panel, in egui's popup memory.
+fn queue_id() -> Id {
+    Id::unique("player_queue")
 }
 
 /// The version picker's menu.

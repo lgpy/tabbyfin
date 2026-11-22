@@ -74,11 +74,11 @@ pub fn item_menu(response: &Response, item: &BaseItemDto, downloads: &Downloads)
 /// [`Services::tick`] keeps it current, since the cards that draw the menus only have their
 /// `Response`.
 pub fn set_queueing(ctx: &egui::Context, queueing: bool) {
-    ctx.data_mut(|data| data.insert_temp(Id::new("item_menu_queueing"), queueing));
+    ctx.data_mut(|data| data.insert_temp(Id::unique("item_menu_queueing"), queueing));
 }
 
 fn queueing(ctx: &egui::Context) -> bool {
-    ctx.data(|data| data.get_temp::<bool>(Id::new("item_menu_queueing")))
+    ctx.data(|data| data.get_temp::<bool>(Id::unique("item_menu_queueing")))
         .unwrap_or(false)
 }
 

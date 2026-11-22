@@ -19,6 +19,7 @@ mod keyboard;
 mod keys;
 mod layout;
 mod live;
+mod local_queue;
 mod markers;
 mod motion;
 mod nav;

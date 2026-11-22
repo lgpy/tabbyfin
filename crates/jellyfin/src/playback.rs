@@ -5,7 +5,7 @@ use url::Url;
 
 use crate::client::Query;
 use crate::models::{MediaSourceInfo, MediaStream};
-use crate::{Client, Result, Ticks};
+use crate::{Client, RepeatMode, Result, Ticks};
 
 #[derive(Debug, Clone, Default)]
 pub struct PlaybackInfoRequest {
@@ -53,6 +53,14 @@ pub struct PlaybackInfoResponse {
     pub error_code: Option<String>,
 }
 
+/// The order a client plays its queue in, for progress reports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub enum PlaybackOrder {
+    #[default]
+    Default,
+    Shuffle,
+}
+
 /// Progress for the `/Sessions/Playing*` endpoints.
 #[derive(Debug, Clone, Default)]
 pub struct PlaybackReport {
@@ -68,6 +76,9 @@ pub struct PlaybackReport {
     pub volume_level: i32,
     /// Whether the player is muted.
     pub is_muted: bool,
+    /// What the client's queue does at the end of an item, for the dashboard's remote.
+    pub repeat_mode: RepeatMode,
+    pub playback_order: PlaybackOrder,
 }
 
 #[derive(Serialize)]
@@ -87,6 +98,8 @@ struct ProgressBody<'a> {
     subtitle_stream_index: Option<i32>,
     volume_level: i32,
     is_muted: bool,
+    repeat_mode: RepeatMode,
+    playback_order: PlaybackOrder,
 }
 
 /// The stop endpoint's body. The server's `PlaybackStopInfo` has no volume or mute fields,
@@ -115,6 +128,8 @@ impl PlaybackReport {
             subtitle_stream_index: self.subtitle_stream_index,
             volume_level: self.volume_level,
             is_muted: self.is_muted,
+            repeat_mode: self.repeat_mode,
+            playback_order: self.playback_order,
         }
     }
 }
@@ -295,7 +310,8 @@ impl Client {
 mod tests {
     use serde_json::json;
 
-    use super::{PlayMethod, PlaybackReport, device_profile};
+    use super::{PlayMethod, PlaybackOrder, PlaybackReport, device_profile};
+    use crate::RepeatMode;
 
     #[test]
     fn hevc_transcodes_use_fragmented_mp4() {
@@ -321,5 +337,21 @@ mod tests {
         let body = serde_json::to_value(report.progress_body()).expect("serializes");
         assert_eq!(body["VolumeLevel"], json!(55));
         assert_eq!(body["IsMuted"], json!(true));
+    }
+
+    #[test]
+    fn progress_carries_the_queues_modes() {
+        let body = serde_json::to_value(PlaybackReport::default().progress_body()).expect("serializes");
+        assert_eq!(body["RepeatMode"], json!("RepeatNone"));
+        assert_eq!(body["PlaybackOrder"], json!("Default"));
+
+        let report = PlaybackReport {
+            repeat_mode: RepeatMode::RepeatOne,
+            playback_order: PlaybackOrder::Shuffle,
+            ..Default::default()
+        };
+        let body = serde_json::to_value(report.progress_body()).expect("serializes");
+        assert_eq!(body["RepeatMode"], json!("RepeatOne"));
+        assert_eq!(body["PlaybackOrder"], json!("Shuffle"));
     }
 }

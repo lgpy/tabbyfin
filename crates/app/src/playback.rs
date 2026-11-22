@@ -26,6 +26,7 @@ use url::Url;
 
 use crate::config::{Config, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
 use crate::i18n::tr;
+use crate::local_queue::LocalQueue;
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::services::{AppEvent, Services};
@@ -248,6 +249,12 @@ pub struct NowPlaying {
     /// What plays next: the queue's next item, the following episode, or the following movie
     /// of the item's collection.
     pub next: Option<BaseItemDto>,
+    /// `next` is the queue's front, not the following episode or movie.
+    next_queued: bool,
+    /// The following episode or movie, which `next` falls back to when the queue runs dry, and
+    /// whether it's the next movie of a collection, which is offered but not autoplayed.
+    following: Option<BaseItemDto>,
+    following_in_collection: bool,
     /// The user dismissed the up-next card: don't play the next episode at the end.
     pub next_cancelled: bool,
     /// Play the next episode at the end (the setting, at session start).
@@ -315,9 +322,22 @@ impl NowPlaying {
         window.contains(&self.position).then_some(from)
     }
 
+    /// Whether the next item starts by itself at the end: the setting allows it, and it isn't a
+    /// collection's next movie (a sequel isn't started without asking; the card offers it).
+    pub fn autoplays(&self) -> bool {
+        self.autoplay && (self.next_queued || !self.following_in_collection)
+    }
+
     /// What plays after this item ends by itself.
     fn autoplay_next(&self) -> Option<BaseItemDto> {
-        self.next.clone().filter(|_| self.autoplay && !self.next_cancelled)
+        self.next.clone().filter(|_| self.autoplays() && !self.next_cancelled)
+    }
+
+    /// What plays next now that the queue's front is `front`: that, or the following episode
+    /// when the queue is empty.
+    fn follow_queue(&mut self, front: Option<&BaseItemDto>) {
+        self.next_queued = front.is_some();
+        self.next = front.cloned().or_else(|| self.following.clone());
     }
 
     pub fn is_transcoding(&self) -> bool {
@@ -366,10 +386,10 @@ impl NowPlaying {
         self.versions = details.versions;
         self.trickplay = details.trickplay;
         self.previous = details.previous;
+        self.following = details.next;
+        self.following_in_collection = details.next_in_collection;
         if !queued {
-            self.next = details.next;
-            // A sequel isn't started without asking; the card offers it.
-            self.autoplay &= !details.next_in_collection;
+            self.next = self.following.clone();
         }
         self.chapters = details.chapters;
         self.segments = details.segments;
@@ -401,7 +421,9 @@ pub struct PlaybackManager {
     reconnect: Option<Reconnect>,
     /// What plays after the current item ("Play all" on a playlist or collection). Takes the
     /// place of the next episode for the up-next card and autoplay.
-    queue: VecDeque<BaseItemDto>,
+    queue: LocalQueue,
+    /// The item the last session was started for, which is the one before what starts next.
+    started: Option<BaseItemDto>,
     /// The running session's state, once it has started. A replaced session's stays until its
     /// successor starts, so the player has something to show meanwhile.
     now_playing: Option<NowPlaying>,
@@ -461,7 +483,8 @@ impl PlaybackManager {
             active: false,
             sessions: Vec::new(),
             reconnect: None,
-            queue: VecDeque::new(),
+            queue: LocalQueue::default(),
+            started: None,
             now_playing: None,
             volume,
             muted: false,
@@ -497,8 +520,8 @@ impl PlaybackManager {
     }
 
     /// What plays after the current item, in order.
-    pub(crate) fn queued(&self) -> impl Iterator<Item = &BaseItemDto> {
-        self.queue.iter()
+    pub(crate) fn queued(&self) -> impl ExactSizeIterator<Item = &BaseItemDto> {
+        self.queue.upcoming()
     }
 
     /// Forgets the queue (it went to the TV with a cast).
@@ -529,6 +552,7 @@ impl PlaybackManager {
         let (commands, received) = mpsc::unbounded_channel();
         self.generation += 1;
         self.active = true;
+        self.started = Some(item.clone());
         self.now_playing = Some(NowPlaying {
             session: self.generation,
             item,
@@ -548,6 +572,9 @@ impl PlaybackManager {
             trickplay: TrickplayTiles::new(),
             previous: None,
             next: None,
+            next_queued: false,
+            following: None,
+            following_in_collection: false,
             next_cancelled: false,
             autoplay: false,
             chapters: Vec::new(),
@@ -583,19 +610,32 @@ impl PlaybackManager {
         self.reconnect.take().is_some()
     }
 
-    /// Takes the queue's front when `item` is it, moving the queue on; playing anything else
-    /// drops the queue, unless a SyncPlay group plays it.
+    /// Takes the queue's front when `item` is it, moving the queue on; playing the same item
+    /// again (another version, a restart) leaves it be, and playing anything else drops it,
+    /// unless a SyncPlay group plays it.
     fn advance_queue(&mut self, item: &BaseItemDto, options: &PlayOptions) {
-        if self.queue.front().is_some_and(|next| next.id == item.id) {
-            self.queue.pop_front();
-        } else if options.group_item.is_none() {
+        if self.queue.advance(item, self.started.as_ref()) {
+            return;
+        }
+        let again = self.started.as_ref().is_some_and(|started| started.id == item.id);
+        if !again && options.group_item.is_none() {
             self.queue.clear();
+        }
+    }
+
+    /// Shows the playing item's `next` as the queue's front, or the following episode once the
+    /// queue is empty.
+    fn refresh_next(&mut self) {
+        let front = self.queue.front().cloned();
+        if let Some(state) = &mut self.now_playing {
+            state.follow_queue(front.as_ref());
         }
     }
 
     /// Starts a session; `attempt` counts reconnects after a lost stream.
     fn start_session(&mut self, item: &BaseItemDto, options: PlayOptions, attempt: usize) {
         self.reconnect = None;
+        self.started = Some(item.clone());
         // Dropping the previous sender stops that session; it still reports its final position.
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
@@ -806,19 +846,7 @@ impl Services {
 
     /// Plays an item from its resume point, with default tracks (e.g. the next episode).
     pub fn play_from_resume(&mut self, item: &BaseItemDto) {
-        let start = item
-            .user_data
-            .as_ref()
-            .map(|d| d.playback_position_ticks)
-            .filter(|t| t.0 > 0);
-        self.play(
-            item,
-            PlayOptions {
-                start,
-                resumed: start.is_some(),
-                ..Default::default()
-            },
-        );
+        self.play(item, resume_options(item));
     }
 
     /// Plays `items` in order: the first now, the rest as a queue.
@@ -841,7 +869,7 @@ impl Services {
             self.group_start_items(&all);
             return;
         }
-        self.playback.queue = items;
+        self.playback.queue.start(items);
         self.play_now(&first, options);
     }
 
@@ -862,16 +890,38 @@ impl Services {
             return;
         }
         if next {
-            for item in items.into_iter().rev() {
-                playback.queue.push_front(item);
-            }
+            playback.queue.push_next(items);
         } else {
-            playback.queue.extend(items);
+            playback.queue.push_last(items);
         }
         // The queue takes the place of the next episode for the up-next card and autoplay.
-        if let (Some(state), Some(front)) = (&mut playback.now_playing, playback.queue.front()) {
-            state.next = Some(front.clone());
+        playback.refresh_next();
+    }
+
+    /// Takes the queue's entry at `index` out, from the player's queue panel.
+    pub fn queue_remove(&mut self, index: usize) {
+        if self.playback.queue.remove(index).is_some() {
+            self.playback.refresh_next();
         }
+    }
+
+    /// Moves the queue's entry at `index` up (`-1`) or down (`1`). Returns where it went.
+    pub fn queue_move(&mut self, index: usize, by: isize) -> Option<usize> {
+        let to = self.playback.queue.move_entry(index, by)?;
+        self.playback.refresh_next();
+        Some(to)
+    }
+
+    /// Plays the queue's entry at `index` now. What's before it counts as played.
+    pub fn queue_jump(&mut self, index: usize) {
+        if self.is_casting() || self.in_group() {
+            return;
+        }
+        let previous = self.playback.started.clone();
+        let Some(item) = self.playback.queue.jump(index, previous.as_ref()) else {
+            return;
+        };
+        self.play_now(&item, resume_options(&item));
     }
 
     fn play_now(&mut self, item: &BaseItemDto, options: PlayOptions) {
@@ -1093,6 +1143,9 @@ impl Services {
                     // Read when the session starts, not when it was asked for: a remote play
                     // next or last queued while it was loading counts too.
                     next: playback.queue.front().cloned(),
+                    next_queued: !playback.queue.is_empty(),
+                    following: None,
+                    following_in_collection: false,
                     next_cancelled: false,
                     autoplay: running.autoplay,
                     chapters: Vec::new(),
@@ -1215,6 +1268,20 @@ impl Services {
                 self.events.push(AppEvent::PlaybackEnded);
             }
         }
+    }
+}
+
+/// Plays `item` from its resume point, with the player offering to start over.
+fn resume_options(item: &BaseItemDto) -> PlayOptions {
+    let start = item
+        .user_data
+        .as_ref()
+        .map(|d| d.playback_position_ticks)
+        .filter(|t| t.0 > 0);
+    PlayOptions {
+        start,
+        resumed: start.is_some(),
+        ..Default::default()
     }
 }
 
