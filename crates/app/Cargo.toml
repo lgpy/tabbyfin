@@ -36,7 +36,8 @@ keyring.workspace = true
 # `fl!` checks message ids and arguments against the English file when it compiles.
 i18n-embed = { version = "0.16", features = ["fluent-system"] }
 i18n-embed-fl = "0.10"
-rust-embed = "8"
+# `debug-embed`: a debug build reads the folder from disk otherwise, which a phone doesn't have.
+rust-embed = { version = "8", features = ["debug-embed"] }
 # The system's languages, which the interface follows unless Settings picks one.
 sys-locale = "0.3"
 # The update check (`update.rs`).
