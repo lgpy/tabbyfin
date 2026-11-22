@@ -189,6 +189,14 @@ impl FakeDevice {
         self.state.lock().unwrap().launch_delay = delay;
     }
 
+    /// Hangs up the connection right after answering the next `LAUNCH`, once: the receiver is
+    /// running, but the sender never gets to join it. That is a first connect that has to be
+    /// retried, rather than a connection that was up and dropped. The app can still win the race
+    /// to join before it notices the hang-up. Not with a launch delay: the hang-up comes first.
+    pub fn drop_after_next_launch(&self) {
+        self.state.lock().unwrap().drop_after_launch = true;
+    }
+
     fn control(&self, command: Control) {
         if let Some(control) = self.control.lock().unwrap().as_ref() {
             let _ = control.send(command);
@@ -228,6 +236,9 @@ struct State {
     muted: bool,
     answer_pings: bool,
     launch_delay: Duration,
+    /// Hang up after the next `LAUNCH`'s answers (`hang_up` says it's time).
+    drop_after_launch: bool,
+    hang_up: bool,
     /// The app that's running, if any, and what it plays.
     running: Option<Running>,
 }
@@ -262,6 +273,8 @@ impl Default for State {
             muted: false,
             answer_pings: true,
             launch_delay: Duration::ZERO,
+            drop_after_launch: false,
+            hang_up: false,
             running: None,
         }
     }
@@ -317,6 +330,10 @@ async fn serve(
                     }
                 }
                 outbox.sort_by_key(|(due, _)| *due);
+                if std::mem::take(&mut state.lock().unwrap().hang_up) {
+                    // Whatever was due now is written; the rest of the outbox goes with the connection.
+                    return;
+                }
             }
             command = commands.recv() => match command {
                 Some(Control::Ping) => {
@@ -434,7 +451,10 @@ fn handle(frame: CastMessage, state: &Arc<Mutex<State>>) -> Vec<(Option<Instant>
                     // A real launch takes a moment; delaying it makes reply matching observable.
                     let due = (state.launch_delay > Duration::ZERO).then(|| Instant::now() + state.launch_delay);
                     replies.push((due, reply));
-                    if launched {
+                    if launched && std::mem::take(&mut state.drop_after_launch) {
+                        // Nothing follows the answer: the connection is gone right behind it.
+                        state.hang_up = true;
+                    } else if launched {
                         // A real TV follows a launch with a broadcast that has the volume but no
                         // `applications`: that isn't the app going away.
                         let volume = json!({"volume": {"level": state.level, "muted": state.muted}});

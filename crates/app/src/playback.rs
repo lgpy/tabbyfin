@@ -601,14 +601,44 @@ impl PlaybackManager {
         self.stopped == Some(generation)
     }
 
-    /// Takes the queue's front when `item` is it, moving the queue on; playing anything else
-    /// drops the queue, unless a SyncPlay group plays it. The item that's already playing
-    /// leaves the queue alone: it's loaded again (another version, other tracks, software
-    /// frames) and what was queued after it is still wanted.
-    fn advance_queue(&mut self, item: &BaseItemDto, options: &PlayOptions) {
-        if self.now_playing.as_ref().is_some_and(|state| state.item.id == item.id) {
-            return;
+    /// Whether the current session's stop was noted, for the cast tests.
+    #[cfg(test)]
+    pub fn stop_noted_for_test(&self) -> bool {
+        self.was_stopped(self.generation)
+    }
+
+    /// The running half of a session, with nothing behind it, for the cast tests: it ends when
+    /// [`Services::end_loading_for_test`] says so. After [`Self::start_for_test`] it belongs to
+    /// that session; alone it's a new one, still loading.
+    #[cfg(test)]
+    pub fn start_loading_for_test(&mut self, item: BaseItemDto) {
+        let (_updates_tx, updates) = task::channel(&self.ctx);
+        let (commands, _received) = mpsc::unbounded_channel();
+        if self.now_playing.is_none() {
+            self.generation += 1;
         }
+        self.active = true;
+        self.sessions.push(Running {
+            generation: self.generation,
+            item,
+            attempt: 0,
+            options: PlayOptions::default(),
+            updates,
+            commands,
+            volume: self.volume,
+            muted: false,
+            adjustments: self.adjustments,
+            autoplay: false,
+            resumed_from: None,
+        });
+    }
+
+    /// Takes the queue's front when `item` is it, moving the queue on; playing anything else
+    /// drops the queue, unless a SyncPlay group plays it. Loading the playing item again
+    /// (another version, other tracks, software frames: `Services::reload`) doesn't come through
+    /// here, so it keeps the queue. That is told apart by who asks, not by item id: the same
+    /// item can be queued twice in a row, and Next must move past the first.
+    fn advance_queue(&mut self, item: &BaseItemDto, options: &PlayOptions) {
         if self.queue.front().is_some_and(|next| next.id == item.id) {
             self.queue.pop_front();
         } else if options.group_item.is_none() {
@@ -901,7 +931,9 @@ impl Services {
         }
     }
 
-    fn play_now(&mut self, item: &BaseItemDto, options: PlayOptions) {
+    /// Starts a session for `item` without touching the local queue (`play` moves that first).
+    /// What loads the playing item again comes through here.
+    pub(crate) fn play_now(&mut self, item: &BaseItemDto, options: PlayOptions) {
         if self.is_casting() {
             self.cast_play(std::slice::from_ref(item), &options);
             return;
@@ -1092,7 +1124,8 @@ impl Services {
         if state.group_item.is_some() {
             self.group_reload(&item, options);
         } else {
-            self.play(&item, options);
+            // Not `play`: the queue stays as it is, whatever it holds.
+            self.play_now(&item, options);
         }
     }
 
@@ -1193,6 +1226,16 @@ impl Services {
         }
     }
 
+    /// The end of the session [`PlaybackManager::start_loading_for_test`] started, as a stop.
+    #[cfg(test)]
+    pub fn end_loading_for_test(&mut self) {
+        let current = self.playback.generation;
+        if let Some(index) = self.playback.sessions.iter().position(|s| s.generation == current) {
+            let running = self.playback.sessions.remove(index);
+            self.session_ended(running, Ok(Ended::Stopped));
+        }
+    }
+
     fn session_ended(&mut self, running: Running, result: Result<Ended, String>) {
         self.playback.save_preferences();
         // A downloaded file's playback writes its new watch state to the item's `item.json` on
@@ -1264,8 +1307,9 @@ impl Services {
                     self.group_item_failed(group_item);
                 }
             }
-            // Handed over to a TV: the player stays up, showing the cast.
-            Ok(_) if self.cast.is_handing_over() => {}
+            // The TV has the player: a handover, or a cast playing or starting (the stopped local
+            // session's end can come after the user played something on the TV). Its page stays up.
+            Ok(_) if self.cast.owns_player() => {}
             Ok(_) => self.events.push(AppEvent::PlaybackEnded),
             Err(message) => {
                 tracing::warn!("playback failed: {message}");
@@ -2397,10 +2441,27 @@ mod tests {
     #[test]
     fn loading_the_playing_item_again_keeps_the_queue() {
         // A version switch, a transcode's audio change, a burned-in subtitle and the fall back
-        // to software frames all play the same item again, from `Services::reload`.
+        // to software frames all play the same item again, from `Services::reload`, which starts
+        // the session without asking the queue to advance.
+        let _config = crate::ui_tests::ConfigDir::new("playback-reload-keeps-queue");
         let mut manager = playing_a_season();
-        manager.advance_queue(&item("a"), &PlayOptions::default());
+        manager.start_session(&item("a"), PlayOptions::default(), 0);
         assert_eq!(queued(&manager), ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn next_moves_past_the_same_item_queued_twice_in_a_row() {
+        // Play all on [A, A, B]: A plays with [A, B] waiting.
+        let mut manager = manager();
+        manager.queue = ["a", "b"].map(item).into();
+        manager.start_for_test(item("a"), source());
+        // Next plays the queue's front, the second A, whose own next is B.
+        manager.advance_queue(&item("a"), &PlayOptions::default());
+        assert_eq!(queued(&manager), ["b"]);
+        manager.start_for_test(item("a"), source());
+        // Next again reaches B.
+        manager.advance_queue(&item("b"), &PlayOptions::default());
+        assert!(queued(&manager).is_empty());
     }
 
     #[test]

@@ -165,6 +165,12 @@ pub struct CastSession {
     /// A play made while the connection is being retried, sent once it's back: the connection's
     /// task drops what's sent during an outage.
     pub(crate) replay: Option<PlayRequest>,
+    /// A stop made while the connection is being retried: the connection's task drops it, and
+    /// the TV may still play what it played before, so it goes out with the rejoin.
+    stop_on_rejoin: bool,
+    /// *Play next* and *Add to queue* made while a play hasn't gone out yet (a handover, a play
+    /// kept for the rejoin, a reload): the TV's queue is that play's, so they follow it.
+    pub(crate) queued: Vec<Command>,
     /// The connection dropped while something was starting, which may never have reached the
     /// TV. If the `Identify` after the rejoin finds it idle, the player opened for that play
     /// closes, rather than waiting for a start that isn't coming.
@@ -195,12 +201,41 @@ impl CastSession {
     }
 
     /// Plays `request` on the TV. While the connection is being retried it's kept instead, and
-    /// the last one goes out once the receiver is joined again (`Update::Reconnected`).
+    /// the last one goes out once the receiver is joined again ([`CastSession::send_kept`]).
     fn play_now(&mut self, request: PlayRequest) {
         if self.reconnecting.is_some() {
             self.replay = Some(request);
+            // What was asked for last wins over a stop made before it.
+            self.stop_on_rejoin = false;
         } else {
             self.send(Outgoing::Command(Command::PlayNow(request)));
+            self.flush_queued();
+        }
+    }
+
+    /// What was asked for during an outage, now that the receiver is joined: the kept play, or
+    /// the stop. Called for both ways a connection comes up (`Connected` after a first connect
+    /// that had to be retried, `Reconnected`), after the `Identify` that restores the state.
+    fn send_kept(&mut self) {
+        if let Some(request) = self.replay.take() {
+            // Newer than a handover still waiting, so it wins as a play made while connecting does.
+            self.handover = None;
+            self.play_now(request);
+        } else if std::mem::take(&mut self.stop_on_rejoin) {
+            self.send(Outgoing::Command(Command::Stop));
+        }
+    }
+
+    /// Whether a play hasn't gone out to the TV yet: the handover waiting for the local session's
+    /// stop, a play kept for the rejoin, or a reload waiting for the receiver's stop.
+    fn play_pending(&self) -> bool {
+        self.handover.is_some() || self.replay.is_some() || self.reload.is_some()
+    }
+
+    /// Sends the queue requests that waited for a play, right after it.
+    fn flush_queued(&mut self) {
+        for command in std::mem::take(&mut self.queued) {
+            self.send(Outgoing::Command(command));
         }
     }
 }
@@ -450,6 +485,18 @@ impl Cast {
         self.session.as_ref().is_some_and(|session| session.handover.is_some())
     }
 
+    /// Whether the player page on screen is the cast's: something is on its way to the TV (a
+    /// handover, a play still starting), plays there, or was reported and the player hasn't closed
+    /// for it yet. The end of a local session mustn't close it then (`Services::session_ended`).
+    pub fn owns_player(&self) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            session.handover.is_some()
+                || session.starting
+                || session.casting.playing
+                || session.casting.item_id.is_some()
+        })
+    }
+
     pub fn has_devices(&self) -> bool {
         !self.devices.is_empty() || self.session.is_some()
     }
@@ -509,6 +556,8 @@ impl Cast {
             starting: false,
             reload: None,
             replay: None,
+            stop_on_rejoin: false,
+            queued: Vec::new(),
             play_lost: false,
             reconnecting: None,
             last_event: None,
@@ -834,6 +883,10 @@ impl Services {
 
     /// Plays `items` on the TV, the first with `options`, and opens the player.
     pub(crate) fn cast_play(&mut self, items: &[BaseItemDto], options: &PlayOptions) {
+        // A play replaces the TV's queue, so what waited to be added to the old one is stale.
+        if let Some(session) = &mut self.cast.session {
+            session.queued.clear();
+        }
         if let Some(request) = self.begin_cast_play(items, options) {
             self.cast.send_play(request);
         }
@@ -877,23 +930,65 @@ impl Services {
     }
 
     /// Adds `items` to the TV's queue. The receiver puts *Play next* at the end too.
+    ///
+    /// With nothing on the TV and nothing on its way, they play now. A play that's still on its
+    /// way (the handover of what played here, a play kept for the rejoin, a reload) isn't replaced
+    /// by them: the queue request waits and goes out right after that play. One made once the play
+    /// has gone out, but the TV hasn't reported it yet, follows it at once.
     pub(crate) fn cast_enqueue(&mut self, items: &[BaseItemDto], next: bool) {
-        let nothing_plays = self.cast.casting().is_none_or(|casting| casting.item_id.is_none());
+        let Some(session) = &mut self.cast.session else {
+            return;
+        };
+        let nothing_plays = !session.starting && !session.play_pending() && session.casting.item_id.is_none();
         if nothing_plays {
             self.cast_play(items, &PlayOptions::default());
             return;
         }
         let server_id = self.cast.credentials.server_id.clone();
         let items = items.iter().map(|item| stub(item, &server_id)).collect();
-        self.cast.send(if next {
+        let command = if next {
             Command::PlayNext { items }
         } else {
             Command::PlayLast { items }
-        });
+        };
+        if session.play_pending() {
+            session.queued.push(command);
+        } else {
+            self.cast.send(command);
+        }
+    }
+
+    /// A stop means "not that any more": a play still on its way to the TV (the handover, a play
+    /// kept for the rejoin, a reload) is dropped with what was queued behind it, and the player
+    /// closes as a stop closes it. One made during an outage isn't sent now, as the connection's
+    /// task would throw it away: it goes out once the connection is back, and this returns `true`.
+    fn cancel_pending_play(&mut self) -> bool {
+        let Some(session) = &mut self.cast.session else {
+            return false;
+        };
+        let mut cancelled = session.replay.take().is_some();
+        cancelled |= session.handover.take().is_some();
+        cancelled |= session.reload.take().is_some();
+        session.queued.clear();
+        if cancelled {
+            session.starting = false;
+            session.play_lost = false;
+        }
+        let kept = session.reconnecting.is_some();
+        if kept {
+            session.stop_on_rejoin = true;
+        }
+        if cancelled || kept {
+            self.cast_closed();
+        }
+        kept
     }
 
     /// A player control (or remote control) while casting.
     pub(crate) fn cast_control(&mut self, command: UiCommand) {
+        if matches!(command, UiCommand::Stop) && self.cancel_pending_play() {
+            return;
+        }
         // Other tracks play the item again (see `cast_reload`).
         match command {
             UiCommand::Audio(index) => {
@@ -1045,6 +1140,7 @@ impl Services {
             && let Some((item, request)) = session.handover.take()
         {
             let _ = session.commands.send(Outgoing::Command(Command::PlayNow(request)));
+            session.flush_queued();
             session.casting.name = item.name.clone();
             session.casting.series_name = item.series_name.clone();
             session.casting.duration = item.run_time_ticks.map(Duration::from);
@@ -1068,6 +1164,9 @@ impl Services {
                         "cast-toast-casting",
                         device = session.device.name.clone()
                     )));
+                    // A first connect that had to be retried: what was played meanwhile goes
+                    // out as after a rejoin.
+                    session.send_kept();
                 }
                 // The receiver was still running: `Identify`'s answer restores what it plays,
                 // so only the connection's state changes here.
@@ -1077,9 +1176,7 @@ impl Services {
                     session.casting.apply_volume(&status);
                     // What was played during the outage goes out now that there's a receiver to
                     // take it, after the `Identify` that restored the state.
-                    if let Some(request) = session.replay.take() {
-                        session.play_now(request);
-                    }
+                    session.send_kept();
                 }
                 Update::Reconnecting(attempt) => {
                     // The first of an outage's updates: a play still starting may have gone out
@@ -1087,7 +1184,11 @@ impl Services {
                     // loop. Nothing waits for it any more; the `Identify` after the rejoin says
                     // what the TV plays, and the UI follows that. (Plays made from here on are
                     // kept in `replay`.)
-                    if session.reconnecting.is_none() && std::mem::take(&mut session.starting) {
+                    // (A handover still waiting wasn't sent: it goes out once connected.)
+                    if session.reconnecting.is_none()
+                        && session.handover.is_none()
+                        && std::mem::take(&mut session.starting)
+                    {
                         session.reload = None;
                         session.play_lost = true;
                     }
