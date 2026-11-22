@@ -711,6 +711,14 @@ impl PlayerPage {
             Action::SubtitleDelayDown => {
                 self.adjust(cx, |a| a.subtitle_delay -= Adjustments::DELAY_STEP);
             }
+            Action::FrameForward | Action::FrameBack => {
+                cx.services.frame_step(action == Action::FrameForward);
+                self.show_controls();
+            }
+            Action::CycleAbLoop => {
+                cx.services.cycle_ab_loop();
+                self.show_controls();
+            }
             Action::CycleAspect if state.mpv => {
                 cx.services.set_aspect(state.aspect.next());
                 self.show_controls();
@@ -1014,6 +1022,24 @@ impl PlayerPage {
         painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
         painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::BRAND);
+        // The A–B loop: the stretch between its points lit, and a tick at each.
+        if let Some((a, b)) = view.ab_loop {
+            let x = |fraction: f32| track.left() + track.width() * fraction;
+            if let Some(b) = b {
+                let span = Rect::from_min_max(pos2(x(a), track.top()), pos2(x(b), track.bottom()));
+                painter.rect_filled(span, 0., over_video::FOREGROUND.gamma_multiply(0.45));
+            }
+            for fraction in std::iter::once(a).chain(b) {
+                let half = CHAPTER_MARK_H;
+                painter.line_segment(
+                    [
+                        pos2(x(fraction), track.center().y - half),
+                        pos2(x(fraction), track.center().y + half),
+                    ],
+                    Stroke::new(3., over_video::FOREGROUND),
+                );
+            }
+        }
         for mark in &view.chapter_marks {
             let x = track.left() + track.width() * mark;
             let half = CHAPTER_MARK_H / 2.;
@@ -1464,6 +1490,8 @@ struct View {
     duration: Option<Duration>,
     volume: f64,
     speed: f64,
+    /// The A–B loop's points as fractions of the seek bar: the start, and the end once set.
+    ab_loop: Option<(f32, Option<f32>)>,
     /// How the picture fills the window; the bar names a mode other than the default.
     aspect: Aspect,
     /// Seconds the skip buttons and keys jump (a setting).
@@ -1647,6 +1675,11 @@ impl View {
             volume: state.volume,
             speed: state.adjustments.speed,
             aspect: state.aspect,
+            ab_loop: state.duration.filter(|d| !d.is_zero()).and_then(|duration| {
+                let fraction = |at: Duration| (at.as_secs_f32() / duration.as_secs_f32()).clamp(0., 1.);
+                let (a, b) = state.ab_loop.points()?;
+                Some((fraction(a), b.map(fraction)))
+            }),
             seek_step,
             group: state.group_item.is_some(),
             transcoding: state.is_transcoding(),
@@ -1802,6 +1835,7 @@ impl View {
             volume: casting.volume,
             speed: 1.,
             aspect: Aspect::Fit,
+            ab_loop: None,
             seek_step,
             group: false,
             transcoding: false,

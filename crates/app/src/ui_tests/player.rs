@@ -424,3 +424,80 @@ fn deinterlacing_is_a_switch_that_starts_on_for_interlaced_video() {
         "{sent:?}"
     );
 }
+
+/// The period and comma step a frame forward and back, only while paused.
+#[test]
+fn the_period_and_comma_step_frames_while_paused() {
+    let _config = ConfigDir::new("player-frame-step");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    // Playing: nothing to step.
+    plain(&mut harness, egui::Key::Period);
+    assert!(harness.state_mut().commands().is_empty());
+
+    harness.state_mut().now_playing_mut().unwrap().paused = true;
+    plain(&mut harness, egui::Key::Period);
+    plain(&mut harness, egui::Key::Comma);
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [UiCommand::FrameStep(true), UiCommand::FrameStep(false)]
+        ),
+        "{sent:?}"
+    );
+}
+
+/// L sets the loop's start, then its end, then clears both.
+#[test]
+fn l_cycles_the_ab_loop() {
+    use crate::playback::AbLoop;
+
+    let _config = ConfigDir::new("player-ab-loop");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    plain(&mut harness, egui::Key::L);
+    assert!(matches!(harness.state().now_playing().unwrap().ab_loop, AbLoop::A(_)));
+    plain(&mut harness, egui::Key::L);
+    assert!(matches!(
+        harness.state().now_playing().unwrap().ab_loop,
+        AbLoop::Loop(..)
+    ));
+    plain(&mut harness, egui::Key::L);
+    assert_eq!(harness.state().now_playing().unwrap().ab_loop, AbLoop::Off);
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [UiCommand::CycleAbLoop, UiCommand::CycleAbLoop, UiCommand::CycleAbLoop]
+        ),
+        "{sent:?}"
+    );
+}
+
+/// In a SyncPlay group neither goes anywhere: a frame step or a loop's jump back would move this
+/// member alone.
+#[test]
+fn a_syncplay_group_has_no_frame_step_or_ab_loop() {
+    let _config = ConfigDir::new("player-group-steps");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    let state = harness.state_mut().now_playing_mut().unwrap();
+    state.paused = true;
+    state.group_item = Some("queue-item".into());
+
+    plain(&mut harness, egui::Key::Period);
+    plain(&mut harness, egui::Key::Comma);
+    plain(&mut harness, egui::Key::L);
+    let sent = harness.state_mut().commands();
+    assert!(sent.is_empty(), "{sent:?}");
+    assert_eq!(
+        harness.state().now_playing().unwrap().ab_loop,
+        crate::playback::AbLoop::Off
+    );
+}

@@ -45,6 +45,8 @@ pub const DEFAULT_SEEK_STEP: u32 = 10;
 /// How long quitting the app waits for a running session to report its stop. The next launch
 /// reports it instead if this runs out (`report_unfinished`).
 const EXIT_WAIT: Duration = Duration::from_secs(3);
+/// How long after a frame step the pause and seek it causes go unreported.
+const FRAME_STEP_QUIET: Duration = Duration::from_millis(600);
 
 /// What to play. Stream indexes are Jellyfin's `MediaStream.Index`; `None` leaves the choice
 /// to mpv (and the user's mpv config).
@@ -186,6 +188,38 @@ impl Aspect {
     }
 }
 
+/// The A–B loop's state: the next press of its key sets the point after the one it has.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AbLoop {
+    #[default]
+    Off,
+    /// The start is set, the end isn't.
+    A(Duration),
+    /// Playing from the start to the end and back.
+    Loop(Duration, Duration),
+}
+
+impl AbLoop {
+    /// What a press at `position` makes of this: sets A, then B, then clears both, as mpv's own
+    /// `ab-loop` command does.
+    pub fn next(self, position: Duration) -> Self {
+        match self {
+            Self::Off => Self::A(position),
+            Self::A(a) => Self::Loop(a, position),
+            Self::Loop(..) => Self::Off,
+        }
+    }
+
+    /// The two points, earliest first, for drawing: the end is `None` until it's set.
+    pub fn points(self) -> Option<(Duration, Option<Duration>)> {
+        match self {
+            Self::Off => None,
+            Self::A(a) => Some((a, None)),
+            Self::Loop(a, b) => Some((a.min(b), Some(a.max(b)))),
+        }
+    }
+}
+
 /// Requests from the player UI to the running session.
 #[derive(Debug, Clone)]
 pub enum UiCommand {
@@ -210,6 +244,10 @@ pub enum UiCommand {
     SetSecondarySubtitle(Option<i32>),
     SetAspect(Aspect),
     SetDeinterlace(bool),
+    /// One frame forward (`true`) or back, while paused.
+    FrameStep(bool),
+    /// mpv's `ab-loop`: sets A, then B, then clears both.
+    CycleAbLoop,
     Stop,
 }
 
@@ -296,6 +334,8 @@ pub struct NowPlaying {
     pub aspect: Aspect,
     /// mpv deinterlaces the picture: on from the start when the video stream is interlaced.
     pub deinterlace: bool,
+    /// The loop between two points this item plays.
+    pub ab_loop: AbLoop,
     pub volume: f64,
     pub muted: bool,
     pub adjustments: Adjustments,
@@ -343,6 +383,15 @@ impl NowPlaying {
     /// has ended go nowhere.
     pub(crate) fn commands(&self) -> mpsc::UnboundedSender<UiCommand> {
         self.commands.clone()
+    }
+
+    /// Where playback is now: the last position mpv reported, carried on for the time since while
+    /// it plays.
+    pub fn position_now(&self) -> Duration {
+        if self.paused || self.loading {
+            return self.position;
+        }
+        self.position + self.position_at.elapsed().mul_f64(self.adjustments.speed.max(0.))
     }
 
     /// The segment the skip button would skip, if one is playing.
@@ -632,6 +681,7 @@ impl PlaybackManager {
             mpv: true,
             aspect: Aspect::Fit,
             deinterlace: false,
+            ab_loop: AbLoop::Off,
             volume: self.volume,
             muted: false,
             adjustments: self.adjustments,
@@ -1109,6 +1159,37 @@ impl Services {
         state.send(UiCommand::SetAspect(aspect));
     }
 
+    /// Steps one frame forward or back, while paused (the keys `.` and `,`). Not in a SyncPlay
+    /// group, where the position is the group's, nor on a TV or without mpv.
+    pub fn frame_step(&mut self, forward: bool) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.current() else {
+            return;
+        };
+        if state.mpv && state.paused && state.group_item.is_none() {
+            state.send(UiCommand::FrameStep(forward));
+        }
+    }
+
+    /// Sets the loop's start, then its end, then clears it (the key `L`). The same limits as
+    /// [`Services::frame_step`]: a loop jumps back on its own, which the group wouldn't follow.
+    pub fn cycle_ab_loop(&mut self) {
+        if self.is_casting() {
+            return;
+        }
+        let generation = self.playback.generation;
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.group_item.is_some() || state.session != generation {
+            return;
+        }
+        state.ab_loop = state.ab_loop.next(state.position_now());
+        state.send(UiCommand::CycleAbLoop);
+    }
+
     /// Turns mpv's deinterlacing on or off (the player's menu). mpv only, and not on a TV.
     pub fn set_deinterlace(&mut self, on: bool) {
         if self.is_casting() {
@@ -1247,6 +1328,7 @@ impl Services {
                     mpv: running.mpv,
                     aspect: Aspect::Fit,
                     deinterlace,
+                    ab_loop: AbLoop::Off,
                     volume: running.volume,
                     muted: running.muted,
                     adjustments: running.adjustments,
@@ -1938,6 +2020,9 @@ async fn run_session(
     };
     let mut reporting = Reporting::default();
     let mut stopping = false;
+    // Stepping frames pauses and resumes mpv each time; the server hears of it from the next
+    // progress report instead of a pair for every frame.
+    let mut stepping_until = None;
     let mut finished = false;
     let mut error = None;
     let mut duration = None;
@@ -1969,6 +2054,8 @@ async fn run_session(
                     PlayerEvent::Exited => break,
                     _ => {}
                 }
+                let quiet = stepping_until.is_some_and(|until| tokio::time::Instant::now() < until)
+                    && matches!(event, PlayerEvent::Paused(_) | PlayerEvent::Seeked);
                 match reporting.on_event(&event, &mut report, tokio::time::Instant::now()) {
                     Outgoing::Start => {
                         if online {
@@ -1976,13 +2063,16 @@ async fn run_session(
                         }
                         save_unfinished(Some(&report), &account);
                     }
-                    Outgoing::Progress if online => send(client.report_playback_progress(&report).await),
+                    Outgoing::Progress if online && !quiet => send(client.report_playback_progress(&report).await),
                     Outgoing::Progress => {}
                     Outgoing::Nothing => {}
                 }
             }
             Some(command) = channels.commands.recv() => {
                 tracing::debug!(?command, "player command");
+                if matches!(command, UiCommand::FrameStep(_)) {
+                    stepping_until = Some(tokio::time::Instant::now() + FRAME_STEP_QUIET);
+                }
                 let send_now = reporting.on_command(&command);
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
@@ -2242,6 +2332,9 @@ async fn apply_command(
             Ok(())
         }
         UiCommand::SetDeinterlace(on) => player.set_property("deinterlace", on).await,
+        UiCommand::FrameStep(true) => player.command(json!(["frame-step"])).await,
+        UiCommand::FrameStep(false) => player.command(json!(["frame-back-step"])).await,
+        UiCommand::CycleAbLoop => player.command(json!(["ab-loop"])).await,
         UiCommand::Stop => player.quit().await,
     }
 }
@@ -2385,6 +2478,22 @@ mod tests {
             ],
             ..source
         }
+    }
+
+    #[test]
+    fn the_ab_loop_sets_a_then_b_then_clears() {
+        use super::AbLoop;
+
+        let at = Duration::from_secs;
+        let a = AbLoop::Off.next(at(30));
+        assert_eq!(a, AbLoop::A(at(30)));
+        assert_eq!(a.points(), Some((at(30), None)));
+        let both = a.next(at(10));
+        assert_eq!(both, AbLoop::Loop(at(30), at(10)));
+        // Drawn earliest first, whichever was set first.
+        assert_eq!(both.points(), Some((at(10), Some(at(30)))));
+        assert_eq!(both.next(at(50)), AbLoop::Off);
+        assert_eq!(AbLoop::Off.points(), None);
     }
 
     #[test]
