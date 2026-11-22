@@ -446,6 +446,9 @@ pub struct NowPlaying {
     pub position: Duration,
     /// When `position` was reported, to extrapolate between mpv's (once a second) updates.
     pub position_at: Instant,
+    /// The player has reported a position: until then `position` is the zero a session starts
+    /// with, not where it resumes.
+    pub position_known: bool,
     pub duration: Option<Duration>,
     pub paused: bool,
     /// Until the file has loaded.
@@ -544,8 +547,13 @@ impl NowPlaying {
             .filter(|s| s.kind != SegmentKind::Outro || !self.show_up_next())
     }
 
-    /// The segment to skip by itself right now, if the kind's action is Skip.
+    /// The segment to skip by itself right now, if the kind's action is Skip. Not before the
+    /// player has said where playback is: a session resuming at 40:00 starts at zero, inside an
+    /// intro that begins there, and skipping that would seek away from the resume point.
     pub fn auto_skippable(&self) -> Option<Segment> {
+        if self.loading || !self.position_known {
+            return None;
+        }
         markers::at(&self.segments, self.position, &self.skip_actions, SkipAction::Skip)
     }
 
@@ -642,6 +650,7 @@ impl NowPlaying {
             PlayerEvent::FileLoaded => self.loading = false,
             PlayerEvent::Position(position) => {
                 self.position = *position;
+                self.position_known = true;
                 self.position_at = Instant::now();
             }
             PlayerEvent::Duration(duration) => self.duration = Some(*duration),
@@ -923,6 +932,7 @@ impl PlaybackManager {
             video: VideoOutput::external(),
             position: Duration::from_secs(12 * 60),
             position_at: Instant::now(),
+            position_known: true,
             duration: Some(Duration::from_secs(48 * 60)),
             paused: false,
             loading: false,
@@ -1432,6 +1442,13 @@ impl Services {
         self.end_session_for_test(Ok(lost), PlayOptions::default());
     }
 
+    /// An event from the running session's player, as the session forwards it.
+    #[cfg(test)]
+    pub fn player_event_for_test(&mut self, event: PlayerEvent) {
+        let generation = self.playback.generation;
+        self.on_session_update(generation, SessionUpdate::Player(event));
+    }
+
     /// A reconnect is waiting to start.
     #[cfg(test)]
     pub fn reconnect_pending_for_test(&self) -> bool {
@@ -1856,6 +1873,7 @@ impl Services {
                     video,
                     position: Duration::ZERO,
                     position_at: Instant::now(),
+                    position_known: false,
                     duration: None,
                     paused: false,
                     loading: true,

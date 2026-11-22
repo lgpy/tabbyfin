@@ -259,6 +259,59 @@ fn undo_is_remembered_across_a_restart_of_the_item_but_not_for_another_item() {
     );
 }
 
+/// A session that's still loading, or hasn't reported where it is, doesn't skip an intro that
+/// starts at zero: it may be resuming at 40:00 and would seek away from it.
+#[test]
+fn a_resuming_session_is_not_skipped_before_it_reports_its_position() {
+    use std::time::Duration;
+
+    use player::PlayerEvent;
+
+    use crate::config::SkipAction;
+    use crate::markers::{Segment, SegmentKind};
+
+    let _config = ConfigDir::new("player-skip-resume");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    {
+        let state = harness.state_mut().now_playing_mut().expect("the session");
+        state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+        state.segments = vec![Segment {
+            kind: SegmentKind::Intro,
+            start: Duration::ZERO,
+            end: Duration::from_secs(90),
+        }];
+        // As a new session starts, resuming at 40:00 with the intro's details already in.
+        state.loading = true;
+        state.position_known = false;
+        state.position = Duration::ZERO;
+    }
+    harness.state_mut().commands();
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty(), "loading");
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.player_event_for_test(PlayerEvent::FileLoaded);
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty(), "loaded, but no position yet");
+
+    // The first position is the resume point: past the intro, nothing to skip.
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.player_event_for_test(PlayerEvent::Position(Duration::from_secs(40 * 60)));
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty(), "resumed past the intro");
+
+    // From the start, the intro is skipped once the position says so.
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.player_event_for_test(PlayerEvent::Position(Duration::from_secs(1)));
+    harness.step();
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 90),
+        "{sent:?}"
+    );
+}
+
 /// A kind set to Off has no button and isn't skipped; Enter leaves it alone.
 #[test]
 fn a_segment_set_to_off_is_left_alone() {
