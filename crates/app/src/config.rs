@@ -79,6 +79,10 @@ pub struct Config {
     /// Animations, smooth scrolling included. `None` means on.
     #[serde(default)]
     pub animations: Option<bool>,
+    /// Unwatched episodes show a blurred picture and no summary in lists (`spoilers.rs`).
+    /// `None` means off.
+    #[serde(default)]
+    pub hide_spoilers: Option<bool>,
     /// The interface's language. `None` follows the system's (`i18n.rs`).
     #[serde(default)]
     pub language: Option<crate::i18n::Language>,

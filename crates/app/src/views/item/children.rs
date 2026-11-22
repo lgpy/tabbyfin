@@ -265,8 +265,13 @@ fn row(
     let selected = cursor.is_selected(section, index);
     let phone = !playlist && crate::layout::compact(ui.ctx());
     let (heading, detail) = if phone { phone_row_text(item) } else { row_text(item) };
+    // An unwatched episode's summary waits behind spoiler protection, as its picture does.
+    let overview = item
+        .overview
+        .as_deref()
+        .filter(|_| !crate::spoilers::hides(ui.ctx(), item));
     let mut row = MediaRow::new(item, landscape_image(item), &heading, &detail)
-        .overview(item.overview.as_deref())
+        .overview(overview)
         .played(is_played(item))
         .highlighted(selected)
         .compact(!playlist)
