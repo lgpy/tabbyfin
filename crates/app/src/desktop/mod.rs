@@ -63,7 +63,8 @@ pub enum Command {
     /// Forward (`true`) or backward by this much.
     SeekBy(bool, Duration),
     /// Forward (`true`) or backward by the seek step Settings holds: an OS "seek" without an
-    /// amount.
+    /// amount. MPRIS always names one, so Linux never sends this.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     SeekStep(bool),
     SeekTo(Duration),
 }
