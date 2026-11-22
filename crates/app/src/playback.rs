@@ -2757,7 +2757,7 @@ async fn run_session(
     let mut stopping = false;
     // Stepping frames pauses and resumes mpv each time; the server hears of it from the next
     // progress report instead of a pair for every frame.
-    let mut stepping_until = None;
+    let mut step_quiet = StepQuiet::default();
     let mut finished = false;
     let mut error = None;
     let mut duration = None;
@@ -2809,8 +2809,7 @@ async fn run_session(
                     PlayerEvent::Exited => break,
                     _ => {}
                 }
-                let quiet = stepping_until.is_some_and(|until| tokio::time::Instant::now() < until)
-                    && matches!(event, PlayerEvent::Paused(_) | PlayerEvent::Seeked);
+                let quiet = step_quiet.hushes(&event, tokio::time::Instant::now());
                 match reporting.on_event(&event, &mut report, tokio::time::Instant::now()) {
                     Outgoing::Start => {
                         if online {
@@ -2830,9 +2829,7 @@ async fn run_session(
                     continue;
                 }
                 tracing::debug!(?command, "player command");
-                if matches!(command, UiCommand::FrameStep(_)) {
-                    stepping_until = Some(tokio::time::Instant::now() + FRAME_STEP_QUIET);
-                }
+                step_quiet.on_command(&command, tokio::time::Instant::now());
                 let send_now = reporting.on_command(&command);
                 if let UiCommand::AddSubtitle(added) = &command {
                     match player.add_subtitle(added.url.as_str(), &added.title, added.language.as_deref(), true).await {
@@ -2934,6 +2931,32 @@ async fn run_session(
         }),
         None if finished => Ok(Ended::Finished),
         None => Ok(Ended::Stopped),
+    }
+}
+
+/// The short while after a frame step in which the pause and seek it causes go unreported.
+#[derive(Debug, Default)]
+struct StepQuiet {
+    until: Option<tokio::time::Instant>,
+}
+
+impl StepQuiet {
+    /// A frame step starts the quiet. A pause, unpause or seek the user asks for ends it, since
+    /// what follows is theirs and the server should hear of it (a Space right after a `.` would
+    /// otherwise leave it showing "paused" until the next periodic report).
+    fn on_command(&mut self, command: &UiCommand, now: tokio::time::Instant) {
+        match command {
+            UiCommand::FrameStep(_) => self.until = Some(now + FRAME_STEP_QUIET),
+            UiCommand::TogglePause | UiCommand::SetPause(_) | UiCommand::SeekBy(_) | UiCommand::SeekTo(_) => {
+                self.until = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether `event` is the echo of a frame step, which isn't reported.
+    fn hushes(&self, event: &PlayerEvent, now: tokio::time::Instant) -> bool {
+        self.until.is_some_and(|until| now < until) && matches!(event, PlayerEvent::Paused(_) | PlayerEvent::Seeked)
     }
 }
 
@@ -3180,7 +3203,7 @@ mod tests {
     use player::PlayerEvent;
 
     use super::{
-        Adjustments, Outgoing, Reporting, UiCommand, VOLUME_REPORT_AFTER, added_subtitle, adjacent, mpv_subtitle_id,
+        Adjustments, Outgoing, Reporting, StepQuiet, UiCommand, VOLUME_REPORT_AFTER, added_subtitle, adjacent, mpv_subtitle_id,
         mpv_track_id, volume_level, volume_max,
     };
 
@@ -3341,6 +3364,40 @@ mod tests {
                 ..Picture::default()
             }
         );
+    }
+
+    #[test]
+    fn a_frame_steps_pause_and_seek_go_unreported_but_the_users_own_are_not() {
+        use tokio::time::Instant;
+
+        let now = Instant::now();
+        let later = |millis| now + Duration::from_millis(millis);
+        let (pause, seek) = (PlayerEvent::Paused(false), PlayerEvent::Seeked);
+        let mut quiet = StepQuiet::default();
+        assert!(!quiet.hushes(&pause, now), "no step, no quiet");
+
+        quiet.on_command(&UiCommand::FrameStep(true), now);
+        assert!(quiet.hushes(&pause, later(100)) && quiet.hushes(&seek, later(100)));
+        assert!(!quiet.hushes(&PlayerEvent::Volume(50.), later(100)), "only the pause and the seek");
+        assert!(!quiet.hushes(&pause, later(700)), "and not for long");
+
+        // A pause, unpause or seek the user asks for inside the window ends it: its echo is
+        // reported, as is the one after it.
+        for command in [
+            UiCommand::TogglePause,
+            UiCommand::SetPause(false),
+            UiCommand::SeekBy(10.),
+            UiCommand::SeekTo(Duration::from_secs(5)),
+        ] {
+            quiet.on_command(&UiCommand::FrameStep(true), now);
+            quiet.on_command(&command, later(50));
+            assert!(!quiet.hushes(&pause, later(100)), "{command:?}");
+            assert!(!quiet.hushes(&seek, later(100)), "{command:?}");
+        }
+        // Other commands leave it be.
+        quiet.on_command(&UiCommand::FrameStep(false), now);
+        quiet.on_command(&UiCommand::SetVolume(40.), later(50));
+        assert!(quiet.hushes(&seek, later(100)));
     }
 
     #[test]
