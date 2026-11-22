@@ -25,7 +25,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [egui](ht
 - Multiple servers at once, and admin features.
 - Remote-controlling other sessions (other clients can control this one).
 
-SyncPlay and casting to a Chromecast, first left out, have since been built (§5.4, §5.5).
+SyncPlay (§5.4) and casting to a Chromecast (§5.5) are part of the app, as are downloads and offline mode (§5.6).
 
 ---
 
@@ -62,7 +62,14 @@ tabbyfin/
 │   │   ├── playback.rs       #   PlaybackInfo, stream/subtitle URLs, session reporting
 │   │   ├── images.rs         #   image URL builder
 │   │   ├── ticks.rs          #   Ticks newtype (1 tick = 100 ns) <-> Duration
-│   │   └── models.rs         #   hand-written DTOs, only the fields we use
+│   │   ├── models.rs         #   hand-written DTOs, only the fields we use
+│   │   ├── error.rs          #   Error, the one error type of the crate
+│   │   ├── system.rs         #   probing the server, ServerVersion and the minimum supported one
+│   │   ├── download.rs       #   an item's original file: URL, range requests, the body stream
+│   │   ├── socket.rs         #   the session websocket: keep-alive, reconnect, typed pushes
+│   │   ├── remote.rs         #   remote-control messages and the session's capabilities
+│   │   ├── syncplay.rs       #   SyncPlay requests, group updates and commands
+│   │   └── time.rs           #   ServerClock (/GetUtcTime), UTC timestamp parsing and formatting
 │   ├── cast/                 # CASTV2 (Chromecast) sender and the Jellyfin receiver's contract: no UI (§5.5)
 │   │   ├── codec.rs          #   CastMessage protobuf by hand, length-prefixed frames
 │   │   ├── channel.rs        #   TLS to the device, heartbeat, requestId matching
@@ -73,9 +80,16 @@ tabbyfin/
 │   ├── player/               # mpv via libmpv: no UI
 │   │   ├── lib.rs            #   Player: load, set_property, command, add_subtitle, quit
 │   │   ├── events.rs         #   PlayerEvent enum and event translation
+│   │   ├── host.rs           #   the player host process (`tabbyfin --player-host`): libmpv and its video output
+│   │   ├── remote.rs         #   the app's side of the host: spawns it, relays commands, events and frames
+│   │   ├── wire.rs           #   the messages between the two, over the host's stdin and stdout
 │   │   ├── android.rs        #   Android: JNI context and the video surface under the app's
 │   │   ├── media3.rs         #   Android: Media3 (ExoPlayer) behind the same API
 │   │   └── libmpv/           #   runtime-loaded libmpv: core, event thread, video output
+│   │       ├── embedded.rs   #     libmpv in the calling process (what the host runs; `TABBYFIN_PLAYER=embedded` in the app)
+│   │       ├── video.rs      #     the render thread and what it publishes to the UI
+│   │       ├── opengl.rs     #     what the GPU outputs share: render context, texture ring, render loop
+│   │       └── angle.rs, wgl.rs, d3d11.rs, egl.rs   #  the Windows (ANGLE, WGL, shared D3D11 textures) and Linux (EGL, Vulkan memory) outputs
 │   └── app/                  # the eframe binary, `tabbyfin` (§3.1)
 └── docs/
 ```
@@ -93,6 +107,8 @@ crates/app/src/
 ├── task.rs          Task<T>: a tokio future whose result the UI polls; channel: repaint-on-send; Deadline: a timer
 ├── runtime.rs       the tokio runtime, plus `start` returning the JoinHandle
 ├── keys.rs          every key binding, and who gets a key: egui or the app
+├── keyboard.rs      what a text field holds, for the soft keyboard, and revealing a field the keyboard covers
+├── android.rs       what winit drops on Android, passed on to egui (insets, soft keyboard, Back), and calls into the activity (metered network, the downloads service, the multicast lock)
 ├── toasts.rs        notifications
 ├── nav.rs           Route, NavRequest
 ├── debug.rs         TABBYFIN_KEYS replay, TABBYFIN_ROUTE parsing (compiled in debug builds only)
@@ -100,7 +116,8 @@ crates/app/src/
 ├── smooth_scroll.rs the shelves' glide, touch flings (a row's, and a page's coast), and the wheel's instant step with animations off
 ├── layout.rs        touch and the layout size (compact, medium, expanded) by the window's width; touch targets
 ├── motion.rs        animations: page entry, the shelves' stagger, image fades, toggle pops, the player's prompt and controls
-├── config.rs, credentials.rs, session.rs, update.rs, markers.rs
+├── config.rs, credentials.rs, session.rs, markers.rs
+├── update.rs        the update notice (§6, Update check)
 ├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
 ├── playback.rs, syncplay.rs, remote.rs, live.rs, cast.rs, downloads.rs   services
 ├── images.rs, trickplay.rs   textures
@@ -369,7 +386,7 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 
 - `App` (`app.rs`) is the `eframe::App`. It owns the screens (`Restoring`, `SignIn(Box<Login>)`, `SignedIn(Box<SignedIn>)`), the toasts, the window's `Placement`, the zoom, and the keys `raw_input_hook` took from egui for the app.
 - While signed in, `SignedIn` holds the session's `Services` and the `Shell`. Pages get a `&mut PageCx` each frame: `ctx`, `services`, a `nav: Vec<NavRequest>` to push into, and `render_state` (the player's video needs the wgpu device; `None` in tests). There are no globals and no `Rc<RefCell<…>>`.
-- `Services` (`services.rs`) is everything per signed-in session: the session (client, user, server), `user_data`, `events: Vec<AppEvent>`, `images`, `playback`, `syncplay`, `live`, `remote`, `cast`, the item page's playlist edit queue, and the marks and fetches that outlive a frame (a watched change, a series' next episode, a shuffle). `Services::new(session, ctx)` takes the `egui::Context`, which the services keep to wake the UI. `Services::tick(ctx)` runs each part's background work: images, the item menu's finished requests, playlist edits, then playback's, the websocket's, remote control's, SyncPlay's and the cast's.
+- `Services` (`services.rs`) is everything per signed-in session: the session (client, user, server), `user_data`, `events: Vec<AppEvent>`, `images`, `playback`, `syncplay`, `live`, `remote`, `cast`, `downloads`, the item page's playlist edit queue, and the marks and fetches that outlive a frame (a watched change, a series' next episode, a shuffle). `Services::new(session, ctx)` takes the `egui::Context`, which the services keep to wake the UI. `Services::tick(ctx)` runs each part's background work: images, the item menu's finished requests, playlist edits, the downloads', then playback's, the websocket's, remote control's, SyncPlay's and the cast's.
 - Cross-service calls that would otherwise be globals are methods on `Services` (`control(UiCommand)`, `play(&item, options)`, `play_all_with`, `enqueue`, `reload`, `mark`, `play_up_next`); each part's module adds its own `impl Services` block, so `services.rs` stays small.
 - `AppEvent`s are what the app or the shell must act on: `Toast`, `AppearanceChanged`, `SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `PlaybackStarted`, `PlaybackEnded`, `ToggleFullscreen`, `LeavePlayer` (Back from the player while casting). The app drains them after the shell has drawn.
 - Adding an account parks the signed-in screen in `App::parked`: it keeps ticking (playback, the websocket), its toasts still show, and its screen-changing events (`SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `ToggleFullscreen`) are dropped, while anything else waits in its queue for the shell after *Back to your account*.
@@ -440,6 +457,10 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 
 `window.rs` saves the window's bounds half a second after a move or resize and reopens it there. Eframe lists no displays before the window opens and afterwards names only the monitor the window is on, as a size without a position, so the question is settled before the window exists, where the OS can be asked: on Windows the process is made DPI-aware first (winit would only do it when its event loop starts, and until then Windows reports monitors scaled to 96 DPI), then the saved rectangle's centre is looked up among the monitors (`EnumDisplayMonitors`), and a spot on none of them opens the window centred on the primary. Everywhere else the window manager (or AppKit) keeps a window on screen, and Wayland doesn't let an app place its window at all, so the saved spot is used as saved and the app neither guesses nor moves the window after it's up. The placement is stored as physical pixels for the frame's top-left plus the scale factor they were measured at, with the content size in OS points — what eframe's own window storage keeps — so the UI zoom and a monitor of another scale both reopen right. On Windows winit converts the launch position with the scale factor of the monitor the window is created on, so when the window doesn't open on its saved spot (a mixed-DPI setup) the physical position is set again after the first frame, and a maximized window maximized again after that; otherwise nothing is sent. Configs from before the scale factor (`window_bounds` without `scale`) keep their position in points and are saved anew on the next move.
 
+### Update check
+
+`update.rs` asks GitHub's latest-release API on launch, at most once a day (`update_checked_at` in the config), and a newer tag becomes a toast whose action opens the release page. A failed check is only logged and counts as no check, so the next launch tries again. *Settings → About*'s *Tell me when a new version is out* (`check_for_updates`) turns it off, and Android never checks, since the store updates the app. Debug builds take `TABBYFIN_UPDATE_URL` instead of GitHub's URL and check on every launch.
+
 ### Toasts
 
 `toasts.rs` draws info, success and error notices in the window's bottom-right corner: 5 s (errors 8 s), longer while the pointer is on them, at most four at once, with a close button and optionally one action (`ToastAction::OpenUrl` for the update notice). The app owns `Toasts` and draws them over everything, on every screen; signed-in code raises them through `services.toast(…)`, and API errors through `services.handle_error`. Each toast is logged.
@@ -454,7 +475,7 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 
 ## 7. Dev environment
 
-**Tools and tasks:** `mise install` installs the pinned Rust toolchain (with clippy and rustfmt), Python and `gh`, and `cargo-deb` on Linux. `mise tasks` lists the shortcuts: `run`, `ci`, `smoke`, `dev:setup`, `package`, and so on. The rest comes from the OS:
+**Tools and tasks:** `mise install` installs the pinned Rust toolchain (with clippy, rustfmt and the two Android targets), Python and `gh`, `cargo-deb` on Linux, and for the Android build `cargo-ndk`, Gradle and a Temurin JDK 21 (the SDK and NDK come from `ANDROID_HOME`, `docs/android.md`). `mise tasks` lists the shortcuts: `run`, `ci`, `smoke`, `dev:setup`, `package`, and so on. The rest comes from the OS:
 
 **Windows (current machine):**
 - Rust on the MSVC toolchain, which needs Visual Studio 2022's *Desktop development with C++* workload (`winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools"`). Build from the *x64 Native Tools Command Prompt*, or from a shell whose `PATH` doesn't put another `link.exe` first: Git for Windows (`usr\bin`) and coreutils both ship one, and the build then fails at link time with `link: extra operand`.
@@ -465,7 +486,7 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 - `TABBYFIN_VIDEO=software` forces software video and `=gpu` forces the GPU path, even on software rendering, to compare the two.
 - `TABBYFIN_ROUTE=play:<id>:::<media source id>` plays a specific version, e.g. the 4K HEVC 10-bit one that `dev/make-media.sh` adds to Test Movie.
 - `TABBYFIN_CONFIG_DIR=C:\Temp\jelly-dev\config` gives test runs their own config folder, so your real sign-in isn't touched; an empty string uses the normal one.
-- `TABBYFIN_KEYS="down right enter wait escape"` (debug builds) presses keys inside the app 3 s after sign-in, 250 ms apart; `wait` pauses for a second. Together with a screen capture of the window (Snipping Tool, or PowerShell reading the screen), it tests keyboard navigation without touching the desktop's real keyboard or mouse.
+- `TABBYFIN_KEYS="down right enter wait escape"` (debug builds) presses keys inside the app 3 s after launch, on any screen, 250 ms apart; `wait` pauses for a second. Together with a screen capture of the window (Snipping Tool, or PowerShell reading the screen), it tests keyboard navigation without touching the desktop's real keyboard or mouse.
 
 **Linux:**
 ```sh
