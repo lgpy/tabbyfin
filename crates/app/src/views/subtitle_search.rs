@@ -244,11 +244,31 @@ impl SubtitleSearch {
             ui.label(label::muted(ui, name.as_str()));
             let (response, chosen) = select::select(ui, select_id, LANGUAGE_W, &name, &labels, selected, true);
             picked = chosen.map(|chosen| options[chosen].0.to_owned());
-            // A language chosen hands the keys back to the new results.
-            if picked.is_some() {
+            let list_open = popup::PopupMenu::is_open(ui.ctx(), select_id);
+            // A language chosen hands the keys back to the new results. So do Tab, Shift+Tab and
+            // Escape on the picker with its list closed: it's the dialog's only widget that takes
+            // focus, so egui's Tab would only bring focus back to it, and Escape would close the
+            // whole dialog. The picker asks for Tab itself while it has focus, and acts on the
+            // press only if it had focus before it: the Tab that reaches it from the dialog's start
+            // is egui's, and the Escape that closes the list is the list's. (egui has already let
+            // go of the focus on an Escape by now, hence the frame before.)
+            if response.has_focus() && !list_open {
+                let tab = egui::EventFilter {
+                    tab: true,
+                    ..Default::default()
+                };
+                ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, tab));
+            }
+            let had_focus = ui.data(|data| data.get_temp::<bool>(select_id.with("had-focus"))) == Some(true);
+            let leave = had_focus
+                && !list_open
+                && ui.input_mut(|input| input.key_pressed(Key::Tab) | input.consume_key(Modifiers::NONE, Key::Escape));
+            if picked.is_some() || leave {
                 response.surrender_focus();
             }
-            has_keyboard = response.has_focus() || popup::PopupMenu::is_open(ui.ctx(), select_id);
+            has_keyboard = response.has_focus() || list_open;
+            let focused_closed = response.has_focus() && !list_open;
+            ui.data_mut(|data| data.insert_temp(select_id.with("had-focus"), focused_closed));
         });
         (picked, has_keyboard)
     }
