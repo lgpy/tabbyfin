@@ -11,6 +11,8 @@ mod config;
 mod credentials;
 #[cfg(debug_assertions)]
 mod debug;
+#[cfg(not(target_os = "android"))]
+mod desktop;
 mod downloads;
 mod i18n;
 mod images;

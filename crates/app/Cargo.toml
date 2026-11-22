@@ -70,7 +70,20 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
+    # The display kept awake during playback, and the taskbar button's progress
+    # (`desktop/windows.rs`).
+    "Win32_System_Com",
+    "Win32_System_Power",
+    "Win32_UI_Shell",
 ] }
+# The main window's handle, which Windows' media overlay is attached to (`desktop/windows.rs`).
+raw-window-handle = "0.6"
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+# The system's media controls: Windows' media overlay and Now Playing on macOS (`desktop/`).
+# Without its default features, which are Linux's libdbus backend; Linux's MPRIS is served by
+# `zbus` below, on the app's own runtime.
+souvlaki = { version = "0.9.3", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Reading wgpu's Vulkan device UUID for the player (`widgets/video.rs`). The version wgpu uses.
