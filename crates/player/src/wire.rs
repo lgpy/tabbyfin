@@ -27,6 +27,8 @@ pub enum Request {
     SetProperty { id: u64, name: String, value: Value },
     /// The video's on-screen size in device pixels.
     SetTarget { width: u32, height: u32 },
+    /// mpv properties as text; answered with [`Message::Properties`].
+    GetProperties { id: u64, names: Vec<String> },
 }
 
 /// Host to app.
@@ -39,6 +41,12 @@ pub enum Message {
         result: Result<(), WireError>,
     },
     Event(PlayerEvent),
+    /// The answer to [`Request::GetProperties`]: each property's value, `None` where mpv has
+    /// none (no video, say).
+    Properties {
+        id: u64,
+        values: Vec<Option<String>>,
+    },
     /// A software-rendered frame; the payload is its pixels as a [`crate::libmpv::VideoFrame`]
     /// holds them (RGBA, opaque, tightly packed).
     Pixels {
@@ -167,6 +175,16 @@ mod tests {
             args: vec!["seek".into(), 10.into()],
         };
         write(&mut a, &request, &[]).await.unwrap();
+        let ask = Request::GetProperties {
+            id: 8,
+            names: vec!["hwdec-current".into(), "video-params/w".into()],
+        };
+        write(&mut a, &ask, &[]).await.unwrap();
+        let answer = Message::Properties {
+            id: 8,
+            values: vec![Some("d3d11va".into()), None],
+        };
+        write(&mut a, &answer, &[]).await.unwrap();
         let shared = Message::SharedHandle {
             id: 3,
             name: "Local\\tabbyfin-video-1-2-3".into(),
@@ -193,6 +211,12 @@ mod tests {
         assert!(matches!(message, Message::Event(PlayerEvent::Position(p)) if p == Duration::from_millis(1500)));
         let (request, _): (Request, _) = read(&mut b).await.unwrap().unwrap();
         assert!(matches!(request, Request::Command { id: 7, .. }));
+        let (request, _): (Request, _) = read(&mut b).await.unwrap().unwrap();
+        assert!(matches!(request, Request::GetProperties { id: 8, ref names } if names.len() == 2));
+        let (message, _): (Message, _) = read(&mut b).await.unwrap().unwrap();
+        assert!(
+            matches!(message, Message::Properties { id: 8, ref values } if values[0].as_deref() == Some("d3d11va") && values[1].is_none())
+        );
         let (message, _): (Message, _) = read(&mut b).await.unwrap().unwrap();
         assert!(matches!(
             message,

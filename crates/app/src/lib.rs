@@ -16,6 +16,7 @@ mod desktop;
 mod downloads;
 mod i18n;
 mod images;
+mod info;
 mod item_menu;
 mod keyboard;
 mod keys;

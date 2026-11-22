@@ -242,6 +242,74 @@ player-skip-recap = Skip recap
 player-skip-preview = Skip preview
 player-skip-ad = Skip ad
 player-skip-credits = Skip credits
+player-skipped-intro = Skipped intro
+player-skipped-recap = Skipped recap
+player-skipped-preview = Skipped preview
+player-skipped-ad = Skipped ad
+player-skipped-credits = Skipped credits
+player-undo = Undo
+player-sleep = Sleep timer
+player-sleep-off = Off
+player-sleep-left = { $minutes } min
+player-sleep-end = At end
+player-sleep-paused = Sleep timer: playback paused
+player-info-title = Playback info
+player-info-playing = Playing
+player-info-direct-play = Direct play
+player-info-direct-stream = Direct stream
+player-info-transcoding = Transcoding
+player-info-because = Because
+player-info-container = Container
+player-info-video = Video
+player-info-resolution = Resolution
+player-info-frame-rate = Frame rate
+player-info-video-bitrate = Video bitrate
+player-info-range = Range
+player-info-audio = Audio
+player-info-channels = Channels
+player-info-audio-bitrate = Audio bitrate
+player-info-decoder = Decoder
+player-info-decoder-software = Software
+player-info-dropped = Dropped frames
+player-info-buffered = Buffered
+player-info-output = Output
+player-info-output-zero-copy = GPU, zero-copy
+player-info-output-gpu = GPU
+player-info-output-software = Software
+player-info-output-surface = Player's own surface
+player-info-fps = { $fps } fps
+player-info-seconds = { $seconds } s
+player-info-reason =
+    { $reason ->
+        [ContainerNotSupported] The container isn't supported by this player
+        [VideoCodecNotSupported] The video codec isn't supported by this player
+        [AudioCodecNotSupported] The audio codec isn't supported by this player
+        [SubtitleCodecNotSupported] The subtitle format isn't supported by this player
+        [AudioIsExternal] The audio is in a separate file
+        [SecondaryAudioNotSupported] A second audio track isn't supported
+        [VideoProfileNotSupported] The video profile isn't supported
+        [VideoLevelNotSupported] The video level isn't supported
+        [VideoResolutionNotSupported] The video resolution is too high for this player
+        [VideoBitDepthNotSupported] The video's bit depth isn't supported
+        [VideoFramerateNotSupported] The video's frame rate isn't supported
+        [VideoRangeTypeNotSupported] The video's HDR format isn't supported
+        [VideoCodecTagNotSupported] The video's codec tag isn't supported
+        [RefFramesNotSupported] The video uses too many reference frames
+        [AnamorphicVideoNotSupported] Anamorphic video isn't supported
+        [InterlacedVideoNotSupported] Interlaced video isn't supported
+        [AudioChannelsNotSupported] The audio has more channels than this player takes
+        [AudioProfileNotSupported] The audio profile isn't supported
+        [AudioSampleRateNotSupported] The audio's sample rate isn't supported
+        [AudioBitDepthNotSupported] The audio's bit depth isn't supported
+        [ContainerBitrateExceedsLimit] The bitrate is over the streaming limit
+        [VideoBitrateNotSupported] The video bitrate is too high
+        [AudioBitrateNotSupported] The audio bitrate is too high
+        [UnknownVideoStreamInfo] The server couldn't read the video's details
+        [UnknownAudioStreamInfo] The server couldn't read the audio's details
+        [DirectPlayError] Direct play failed
+        [StreamCountExceedsLimit] The file has more streams than this player takes
+       *[other] { $reason }
+    }
 player-restarting = The player stopped unexpectedly. Restarting it…
 player-reconnecting = Lost the connection to the server. Reconnecting…
 player-crashing = The player keeps crashing on this item. The log may say why.
@@ -304,9 +372,24 @@ settings-tracks-note = Which audio and subtitle tracks an item starts with is ke
 settings-autoplay = Play the next episode automatically
 settings-autoplay-description = When an episode ends, so the player stays open. From the next item on.
 settings-autoplay-unset = on
-settings-skip-intro = Skip intros and recaps automatically
-settings-skip-intro-description = Each intro or recap once as it starts, never in a SyncPlay group. From the next item on.
-settings-skip-intro-unset = off
+settings-skip-intro = Intros
+settings-skip-intro-description = Ask shows a skip button, Skip jumps by itself and offers Undo, Off does neither. Never skipped by itself in a SyncPlay group. From the next item on.
+settings-skip-intro-unset = ask
+settings-skip-recap = Recaps
+settings-skip-recap-description = Ask shows a skip button, Skip jumps by itself and offers Undo, Off does neither. Never skipped by itself in a SyncPlay group. From the next item on.
+settings-skip-recap-unset = ask
+settings-skip-preview = Previews
+settings-skip-preview-description = Ask shows a skip button, Skip jumps by itself and offers Undo, Off does neither. Never skipped by itself in a SyncPlay group. From the next item on.
+settings-skip-preview-unset = ask
+settings-skip-commercial = Ads
+settings-skip-commercial-description = Ask shows a skip button, Skip jumps by itself and offers Undo, Off does neither. Never skipped by itself in a SyncPlay group. From the next item on.
+settings-skip-commercial-unset = ask
+settings-skip-credits = Credits
+settings-skip-credits-description = Ask shows a skip button when there's no next episode to offer. Skip jumps to the end of the credits, which plays the next episode. Off leaves it to the up-next card. From the next item on.
+settings-skip-credits-unset = off
+settings-skip-ask = Ask
+settings-skip-skip = Skip
+settings-skip-off = Off
 settings-bitrate = Max streaming bitrate
 settings-bitrate-description = Videos above this bitrate are transcoded by the server. Lower it for slow connections. Automatic measures the connection before playing (at most every 10 minutes) and uses 80% of it, keeping the cap for when it's turned off. Read when the next item starts.
 settings-bitrate-unset = no limit

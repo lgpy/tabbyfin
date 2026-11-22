@@ -150,6 +150,29 @@ impl Player {
         }
     }
 
+    /// mpv's properties as text (`hwdec-current`, `video-params/w`…), in the order asked; `None`
+    /// for one with no value now, and for all of them where the player has none to give
+    /// (Media3, or an mpv that's gone). For the playback info, so the app asks only while it's
+    /// shown.
+    pub async fn properties(&self, names: &[&str]) -> Vec<Option<String>> {
+        match &self.0 {
+            Backend::Embedded(player) => {
+                let (player, names): (_, Vec<String>) =
+                    (player.clone(), names.iter().map(|n| (*n).to_owned()).collect());
+                tokio::task::spawn_blocking(move || player.properties(&names))
+                    .await
+                    .unwrap_or_default()
+            }
+            Backend::Remote(player) => player.properties(names).await,
+            #[cfg(target_os = "android")]
+            Backend::Media3(_) => vec![None; names.len()],
+        }
+        .into_iter()
+        .chain(std::iter::repeat(None))
+        .take(names.len())
+        .collect()
+    }
+
     /// Loads a file. Options are set as properties first so this works with every mpv
     /// version (the `loadfile` argument list changed in 0.38).
     pub async fn load(&self, req: LoadRequest) -> Result<()> {

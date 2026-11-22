@@ -242,6 +242,74 @@ player-skip-recap = Saltar resumen
 player-skip-preview = Saltar avance
 player-skip-ad = Saltar anuncio
 player-skip-credits = Saltar créditos
+player-skipped-intro = Intro saltada
+player-skipped-recap = Resumen saltado
+player-skipped-preview = Avance saltado
+player-skipped-ad = Anuncio saltado
+player-skipped-credits = Créditos saltados
+player-undo = Deshacer
+player-sleep = Temporizador de apagado
+player-sleep-off = Desactivado
+player-sleep-left = { $minutes } min
+player-sleep-end = Al final
+player-sleep-paused = Temporizador de apagado: reproducción en pausa
+player-info-title = Información de reproducción
+player-info-playing = Reproduciendo
+player-info-direct-play = Reproducción directa
+player-info-direct-stream = Transmisión directa
+player-info-transcoding = Transcodificación
+player-info-because = Porque
+player-info-container = Contenedor
+player-info-video = Vídeo
+player-info-resolution = Resolución
+player-info-frame-rate = Fotogramas por segundo
+player-info-video-bitrate = Tasa de bits del vídeo
+player-info-range = Rango
+player-info-audio = Audio
+player-info-channels = Canales
+player-info-audio-bitrate = Tasa de bits del audio
+player-info-decoder = Decodificador
+player-info-decoder-software = Software
+player-info-dropped = Fotogramas perdidos
+player-info-buffered = En búfer
+player-info-output = Salida
+player-info-output-zero-copy = GPU, sin copia
+player-info-output-gpu = GPU
+player-info-output-software = Software
+player-info-output-surface = Superficie propia del reproductor
+player-info-fps = { $fps } fps
+player-info-seconds = { $seconds } s
+player-info-reason =
+    { $reason ->
+        [ContainerNotSupported] El contenedor no es compatible con este reproductor
+        [VideoCodecNotSupported] El códec de vídeo no es compatible con este reproductor
+        [AudioCodecNotSupported] El códec de audio no es compatible con este reproductor
+        [SubtitleCodecNotSupported] El formato de subtítulos no es compatible con este reproductor
+        [AudioIsExternal] El audio está en un archivo aparte
+        [SecondaryAudioNotSupported] No se admite una segunda pista de audio
+        [VideoProfileNotSupported] El perfil del vídeo no es compatible
+        [VideoLevelNotSupported] El nivel del vídeo no es compatible
+        [VideoResolutionNotSupported] La resolución del vídeo es demasiado alta para este reproductor
+        [VideoBitDepthNotSupported] La profundidad de color del vídeo no es compatible
+        [VideoFramerateNotSupported] La frecuencia de fotogramas del vídeo no es compatible
+        [VideoRangeTypeNotSupported] El formato HDR del vídeo no es compatible
+        [VideoCodecTagNotSupported] La etiqueta del códec del vídeo no es compatible
+        [RefFramesNotSupported] El vídeo usa demasiados fotogramas de referencia
+        [AnamorphicVideoNotSupported] No se admite el vídeo anamórfico
+        [InterlacedVideoNotSupported] No se admite el vídeo entrelazado
+        [AudioChannelsNotSupported] El audio tiene más canales de los que admite este reproductor
+        [AudioProfileNotSupported] El perfil del audio no es compatible
+        [AudioSampleRateNotSupported] La frecuencia de muestreo del audio no es compatible
+        [AudioBitDepthNotSupported] La profundidad de bits del audio no es compatible
+        [ContainerBitrateExceedsLimit] La tasa de bits supera el límite de transmisión
+        [VideoBitrateNotSupported] La tasa de bits del vídeo es demasiado alta
+        [AudioBitrateNotSupported] La tasa de bits del audio es demasiado alta
+        [UnknownVideoStreamInfo] El servidor no pudo leer los detalles del vídeo
+        [UnknownAudioStreamInfo] El servidor no pudo leer los detalles del audio
+        [DirectPlayError] Falló la reproducción directa
+        [StreamCountExceedsLimit] El archivo tiene más flujos de los que admite este reproductor
+       *[other] { $reason }
+    }
 player-restarting = El reproductor se ha detenido inesperadamente. Reiniciándolo…
 player-reconnecting = Se ha perdido la conexión con el servidor. Reconectando…
 player-crashing = El reproductor sigue fallando con este elemento. El registro puede decir por qué.
@@ -304,9 +372,24 @@ settings-tracks-note = Las pistas de audio y subtítulos con las que empieza un 
 settings-autoplay = Reproducir el siguiente episodio automáticamente
 settings-autoplay-description = Cuando termina un episodio, así el reproductor sigue abierto. A partir del siguiente elemento.
 settings-autoplay-unset = activado
-settings-skip-intro = Saltar intros y resúmenes automáticamente
-settings-skip-intro-description = Cada intro o resumen una vez, al empezar, nunca en un grupo de SyncPlay. A partir del siguiente elemento.
-settings-skip-intro-unset = desactivado
+settings-skip-intro = Intros
+settings-skip-intro-description = Preguntar muestra un botón para saltar, Saltar salta solo y permite deshacer, Desactivado no hace ninguna de las dos cosas. Nunca salta solo en un grupo de SyncPlay. A partir del siguiente elemento.
+settings-skip-intro-unset = preguntar
+settings-skip-recap = Resúmenes
+settings-skip-recap-description = Preguntar muestra un botón para saltar, Saltar salta solo y permite deshacer, Desactivado no hace ninguna de las dos cosas. Nunca salta solo en un grupo de SyncPlay. A partir del siguiente elemento.
+settings-skip-recap-unset = preguntar
+settings-skip-preview = Avances
+settings-skip-preview-description = Preguntar muestra un botón para saltar, Saltar salta solo y permite deshacer, Desactivado no hace ninguna de las dos cosas. Nunca salta solo en un grupo de SyncPlay. A partir del siguiente elemento.
+settings-skip-preview-unset = preguntar
+settings-skip-commercial = Anuncios
+settings-skip-commercial-description = Preguntar muestra un botón para saltar, Saltar salta solo y permite deshacer, Desactivado no hace ninguna de las dos cosas. Nunca salta solo en un grupo de SyncPlay. A partir del siguiente elemento.
+settings-skip-commercial-unset = preguntar
+settings-skip-credits = Créditos
+settings-skip-credits-description = Preguntar muestra un botón para saltar cuando no hay episodio siguiente que ofrecer. Saltar va al final de los créditos, lo que reproduce el episodio siguiente. Desactivado lo deja a la tarjeta del episodio siguiente. A partir del siguiente elemento.
+settings-skip-credits-unset = desactivado
+settings-skip-ask = Preguntar
+settings-skip-skip = Saltar
+settings-skip-off = Desactivado
 settings-bitrate = Tasa de bits máxima de transmisión
 settings-bitrate-description = El servidor transcodifica los vídeos que superan esta tasa de bits. Bájala para conexiones lentas. Automática mide la conexión antes de reproducir (como mucho cada 10 minutos) y usa el 80 % de ella, y guarda el límite para cuando se desactive. Se lee cuando empieza el siguiente elemento.
 settings-bitrate-unset = sin límite

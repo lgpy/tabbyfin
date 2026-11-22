@@ -75,6 +75,8 @@ pub enum Action {
     /// The skip button or the up-next card's Play now.
     Skip,
     ToggleFullscreen,
+    /// The playback info overlay.
+    ToggleInfo,
     /// Fullscreen first, then the up-next card, then stop.
     ExitPlayer,
     SpeedUp,
@@ -143,6 +145,7 @@ pub const BINDINGS: &[Binding] = {
         bind(Player, NONE, Key::Enter, Skip),
         bind(Player, NONE, Key::S, Skip),
         bind(Player, NONE, Key::F, ToggleFullscreen),
+        bind(Player, NONE, Key::I, ToggleInfo),
         bind(Player, NONE, Key::Escape, ExitPlayer),
         bind(Player, NONE, Key::CloseBracket, SpeedUp),
         bind(Player, NONE, Key::OpenBracket, SpeedDown),

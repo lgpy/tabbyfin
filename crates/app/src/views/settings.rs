@@ -45,8 +45,11 @@ use egui_material_icons::icons::{
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 
-use crate::config::{self, AndroidPlayer, Config, SubtitleColor, SubtitleStyle, ThemePreference};
+use crate::config::{
+    self, AndroidPlayer, Config, SkipAction, SkipActions, SubtitleColor, SubtitleStyle, ThemePreference,
+};
 use crate::i18n::{self, tr};
+use crate::markers::SegmentKind;
 use crate::nav::{NavRequest, Route};
 use crate::playback::Adjustments;
 use crate::services::AppEvent;
@@ -343,15 +346,55 @@ fn autoplay_row() -> Row {
         unset: tr!("settings-autoplay-unset"),
     }
 }
-fn skip_intro_row() -> Row {
+/// One row per kind of segment: what to do when it starts.
+fn skip_row(kind: SegmentKind) -> Row {
+    let (label, description, key, unset) = match kind {
+        SegmentKind::Intro => (
+            tr!("settings-skip-intro"),
+            tr!("settings-skip-intro-description"),
+            "skip_actions.intro",
+            tr!("settings-skip-intro-unset"),
+        ),
+        SegmentKind::Recap => (
+            tr!("settings-skip-recap"),
+            tr!("settings-skip-recap-description"),
+            "skip_actions.recap",
+            tr!("settings-skip-recap-unset"),
+        ),
+        SegmentKind::Preview => (
+            tr!("settings-skip-preview"),
+            tr!("settings-skip-preview-description"),
+            "skip_actions.preview",
+            tr!("settings-skip-preview-unset"),
+        ),
+        SegmentKind::Commercial => (
+            tr!("settings-skip-commercial"),
+            tr!("settings-skip-commercial-description"),
+            "skip_actions.commercial",
+            tr!("settings-skip-commercial-unset"),
+        ),
+        SegmentKind::Outro => (
+            tr!("settings-skip-credits"),
+            tr!("settings-skip-credits-description"),
+            "skip_actions.outro",
+            tr!("settings-skip-credits-unset"),
+        ),
+    };
     Row {
         section: Section::Playback,
-        label: tr!("settings-skip-intro"),
-        description: tr!("settings-skip-intro-description"),
-        key: "auto_skip_intro",
-        unset: tr!("settings-skip-intro-unset"),
+        label,
+        description,
+        key,
+        unset,
     }
 }
+const SKIP_KINDS: [SegmentKind; 5] = [
+    SegmentKind::Intro,
+    SegmentKind::Recap,
+    SegmentKind::Preview,
+    SegmentKind::Commercial,
+    SegmentKind::Outro,
+];
 fn bitrate_row() -> Row {
     Row {
         section: Section::Playback,
@@ -582,7 +625,11 @@ fn all_rows() -> Vec<Row> {
         language_row(),
         tracks_note_row(),
         autoplay_row(),
-        skip_intro_row(),
+        skip_row(SegmentKind::Intro),
+        skip_row(SegmentKind::Recap),
+        skip_row(SegmentKind::Preview),
+        skip_row(SegmentKind::Commercial),
+        skip_row(SegmentKind::Outro),
         bitrate_row(),
         cast_bitrate_row(),
         hevc_row(),
@@ -1201,9 +1248,26 @@ impl SettingsPage {
             self.save(|config| config.autoplay_next_episode = edit.or_unset());
         }
 
-        let current = self.config.auto_skip_intro.unwrap_or(false);
-        if let Some(edit) = toggle(ui, &self.search, skip_intro_row(), current, Some(false)) {
-            self.save(|config| config.auto_skip_intro = edit.or_unset());
+        let actions = [
+            (SkipAction::Ask, tr!("settings-skip-ask")),
+            (SkipAction::Skip, tr!("settings-skip-skip")),
+            (SkipAction::Off, tr!("settings-skip-off")),
+        ];
+        for (kind, id) in SKIP_KINDS.into_iter().zip([
+            "settings_skip_intro",
+            "settings_skip_recap",
+            "settings_skip_preview",
+            "settings_skip_commercial",
+            "settings_skip_outro",
+        ]) {
+            let current = self.config.skip_actions.get(kind);
+            let default = Some(SkipActions::default_for(kind));
+            let picked = self
+                .pickers
+                .choose(ui, &self.search, skip_row(kind), id, &actions, current, default);
+            if let Some(edit) = picked {
+                self.save(|config| config.skip_actions.set(kind, edit.or_unset()));
+            }
         }
 
         // `AUTOMATIC` measures the connection before playing instead.
@@ -2331,7 +2395,7 @@ mod tests {
         assert_eq!(config.animations, None); // on
         assert_eq!(config.hide_spoilers, None); // off
         assert_eq!(config.autoplay_next_episode, None); // on
-        assert_eq!(config.auto_skip_intro, None); // off
+        assert!(config.skip_actions.is_default()); // ask, credits off
         assert_eq!(config.prefer_hevc, None); // off
         assert_eq!(config.check_for_updates, None); // on
         assert_eq!(config.subtitle_color, None); // white
@@ -2374,7 +2438,7 @@ mod tests {
         assert_eq!(found("subtitle mode"), [Section::Languages]);
         assert_eq!(found("hevc transcodes"), [Section::Playback]);
         // A config key, and a server field.
-        assert_eq!(found("auto_skip_intro"), [Section::Playback]);
+        assert_eq!(found("skip_actions.intro"), [Section::Playback]);
         assert_eq!(found("hideplayedinlatest"), [Section::Home]);
         assert!(found("nothing like this").is_empty());
     }

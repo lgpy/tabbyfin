@@ -155,6 +155,11 @@ impl EmbeddedPlayer {
         self.core.command(&refs)
     }
 
+    /// Each property as mpv prints it, `None` where it has no value.
+    pub fn properties(&self, names: &[String]) -> Vec<Option<String>> {
+        names.iter().map(|name| self.core.get_string(name)).collect()
+    }
+
     pub fn set_property(&self, name: &str, value: &Value) -> Result<()> {
         match value {
             // String lists (e.g. http-header-fields): replace the whole list without splitting

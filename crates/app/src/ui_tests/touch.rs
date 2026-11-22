@@ -581,6 +581,11 @@ impl PlayerRun {
         self.services.as_ref()?.playback.now_playing()
     }
 
+    /// The services, for a test that moves what the page only reads (the sleep timer's clock).
+    pub fn services_mut(&mut self) -> Option<&mut Services> {
+        self.services.as_mut()
+    }
+
     /// The running session's state, to move it as a test needs (near the end, say).
     pub fn now_playing_mut(&mut self) -> Option<&mut crate::playback::NowPlaying> {
         self.services.as_mut()?.playback.now_playing_mut()
@@ -827,6 +832,54 @@ fn a_phones_player_settings_open_as_a_side_sheet() {
         !sent.iter().any(|command| matches!(command, UiCommand::Stop)),
         "{sent:?}"
     );
+}
+
+/// The sheet's General tab steps the sleep timer from its plus, and puts it back from reset, and
+/// shows the playback info from its switch.
+#[test]
+fn a_phones_settings_sheet_sets_the_sleep_timer_and_the_info() {
+    use crate::playback::SleepTimer;
+
+    let _config = ConfigDir::new("touch-player-sleep");
+    let server = FixtureServer::start();
+    let mut harness = phone_player(&server);
+    harness.get_by_label("Settings").click();
+    for _ in 0..3 {
+        harness.step();
+    }
+    harness.get_by_role_and_label(Role::Tab, "General").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    harness.get_by_label("Increase sleep timer").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    let sleep = harness
+        .state_mut()
+        .services_mut()
+        .expect("the services")
+        .playback
+        .sleep();
+    assert!(matches!(sleep, Some(SleepTimer::In(_))), "{sleep:?}");
+    harness.get_by_label("Reset sleep timer").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    let sleep = harness
+        .state_mut()
+        .services_mut()
+        .expect("the services")
+        .playback
+        .sleep();
+    assert_eq!(sleep, None);
+
+    assert!(harness.query_by_label("Because").is_none());
+    harness.get_by_label("On").click();
+    for _ in 0..4 {
+        harness.step();
+    }
+    harness.get_by_label("Direct play");
 }
 
 /// Chapters opens its sheet, and a chapter picked there seeks to it and closes the sheet.

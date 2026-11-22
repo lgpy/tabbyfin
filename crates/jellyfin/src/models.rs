@@ -489,6 +489,12 @@ pub struct MediaStream {
     pub height: Option<u32>,
     pub channels: Option<u32>,
     pub channel_layout: Option<String>,
+    /// Bits per second.
+    pub bit_rate: Option<i64>,
+    pub real_frame_rate: Option<f32>,
+    pub average_frame_rate: Option<f32>,
+    /// `SDR`, `HDR10`, `HDR10Plus`, `HLG`, `DOVI`…
+    pub video_range_type: Option<String>,
 }
 
 /// Defines an enum that decodes from Jellyfin's string values, maps anything unrecognized to
