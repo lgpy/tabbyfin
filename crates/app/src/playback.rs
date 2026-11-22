@@ -541,6 +541,16 @@ impl NowPlaying {
         self.next = front.cloned().or_else(|| self.following.clone());
     }
 
+    /// What plays this item again as it plays now: the same version, audio and subtitle.
+    fn track_options(&self) -> PlayOptions {
+        PlayOptions {
+            media_source_id: Some(self.source.id.clone()),
+            audio_stream_index: self.audio,
+            subtitle: self.subtitle,
+            ..Default::default()
+        }
+    }
+
     pub fn is_transcoding(&self) -> bool {
         self.stream.method == PlayMethod::Transcode
     }
@@ -1651,10 +1661,7 @@ impl Services {
         };
         let options = PlayOptions {
             start: Some(Ticks::from(state.position)),
-            media_source_id: Some(state.source.id.clone()),
-            audio_stream_index: state.audio,
-            subtitle: state.subtitle,
-            ..Default::default()
+            ..state.track_options()
         };
         self.reload(options);
     }
@@ -1852,6 +1859,13 @@ impl Services {
         // The sleep timer's end of the item: nothing plays after it, whatever the queue and the
         // repeat mode would do. The queue stays as it was.
         let held = matches!(result, Ok(Ended::Finished)) && playback.hold_after_end(&running.item.id);
+        // Repeat one plays it again as it played, from its start.
+        let replay = playback.current().map(NowPlaying::track_options).unwrap_or_else(|| PlayOptions {
+            media_source_id: running.options.media_source_id.clone(),
+            audio_stream_index: running.options.audio_stream_index,
+            subtitle: running.options.subtitle,
+            ..Default::default()
+        });
         let next = playback.take_next(running.generation);
         let group_item = running.options.group_item.clone();
         // What the queue's modes make of an item that played to its end; a group's queue is the
@@ -1870,7 +1884,7 @@ impl Services {
             Ok(Ended::Finished) if !matches!(after, AfterEnd::Stop) => match after {
                 AfterEnd::Replay => {
                     tracing::info!(item = %running.item.name, "repeating the item");
-                    self.play(&running.item, PlayOptions::default());
+                    self.play(&running.item, replay);
                 }
                 AfterEnd::Next(next) => {
                     tracing::info!(next = %next.name, "playing the next episode");

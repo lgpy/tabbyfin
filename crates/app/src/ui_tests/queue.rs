@@ -504,3 +504,33 @@ fn repeat_all_wraps_before_the_following_episode() {
     assert_eq!(services.end_for_test(), Some(episode(2).id));
 }
 
+/// Playing the item again with repeat one keeps its version and tracks.
+#[test]
+fn repeat_one_keeps_the_version_and_tracks() {
+    use jellyfin::RepeatMode;
+
+    use crate::playback::{PlayOptions, SubtitleChoice};
+
+    let _config = ConfigDir::new("queue-repeat-one-tracks");
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.set_repeat(RepeatMode::RepeatOne);
+    let source_id = {
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.audio = Some(3);
+        state.subtitle = SubtitleChoice::Stream(5);
+        state.source.id.clone()
+    };
+    // It was started with the defaults and the user chose since; what plays again is the choice.
+    assert_eq!(
+        services.end_with_for_test(PlayOptions::default()),
+        Some(episode(1).id)
+    );
+    let (_, options) = services.last_started_for_test();
+    let options = options.expect("a new session");
+    assert_eq!(options.media_source_id, Some(source_id));
+    assert_eq!(options.audio_stream_index, Some(3));
+    assert_eq!(options.subtitle, SubtitleChoice::Stream(5));
+    assert!(options.start.is_none(), "from its start");
+}
+
