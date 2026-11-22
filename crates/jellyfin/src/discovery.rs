@@ -20,6 +20,14 @@ use tokio::time::{Instant, timeout_at};
 /// The port servers listen on for discovery.
 const PORT: u16 = 7359;
 const QUERY: &[u8] = b"Who is JellyfinServer?";
+/// Anyone on the network can answer, so what's kept is bounded: the datagrams read from one
+/// socket, the servers returned, and the characters of a name.
+const MAX_DATAGRAMS: usize = 128;
+const MAX_SERVERS: usize = 32;
+const MAX_NAME_CHARS: usize = 80;
+/// Longer than any real address; an address is rejected rather than cut, since a cut one points
+/// somewhere else.
+const MAX_ADDRESS_CHARS: usize = 200;
 
 /// A server that answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,8 +46,8 @@ struct Reply {
     name: String,
 }
 
-/// Broadcasts the query and collects answers for `wait`: one entry per server (by its `Id`),
-/// by name, without the ones that only name this machine (a loopback address is no use to
+/// Broadcasts the query and collects answers for `wait`: one entry per server and address (a
+/// host can answer with another's `Id`, and both rows should show), by name, without the ones that only name this machine (a loopback address is no use to
 /// anyone choosing from a list). Empty when nothing answers or the network can't broadcast.
 pub async fn discover_servers(wait: Duration) -> Vec<DiscoveredServer> {
     let mut locals = vec![Ipv4Addr::UNSPECIFIED];
@@ -75,18 +83,25 @@ async fn discover_with(locals: &[Ipv4Addr], targets: &[SocketAddr], wait: Durati
         .into_iter()
         .flatten()
         .filter_map(|datagram| parse_reply(&datagram))
-        .filter(|server| seen.insert(server.id.clone()))
+        .filter(|server| seen.insert((server.id.clone(), server.address.clone())))
+        .take(MAX_SERVERS)
         .collect();
     found.sort_by_key(|server| server.name.to_lowercase());
     found
 }
 
-/// What `socket` receives until `deadline`.
+/// What `socket` receives until `deadline`, or until `MAX_DATAGRAMS` reads. A read that fails
+/// (on Windows a datagram larger than the buffer, or an ICMP unreachable for the query) says
+/// nothing about the next one, so it's skipped, and counts towards the limit.
 async fn listen(socket: &UdpSocket, deadline: Instant) -> Vec<Vec<u8>> {
     let mut datagrams = Vec::new();
     let mut buffer = vec![0; 2048];
-    while let Ok(Ok((len, _))) = timeout_at(deadline, socket.recv_from(&mut buffer)).await {
-        datagrams.push(buffer[..len].to_vec());
+    for _ in 0..MAX_DATAGRAMS {
+        match timeout_at(deadline, socket.recv_from(&mut buffer)).await {
+            Ok(Ok((len, _))) => datagrams.push(buffer[..len].to_vec()),
+            Ok(Err(_)) => {}
+            Err(_) => break,
+        }
     }
     datagrams
 }
@@ -94,7 +109,13 @@ async fn listen(socket: &UdpSocket, deadline: Instant) -> Vec<Vec<u8>> {
 /// A server's answer, unless it isn't one or only names this machine.
 fn parse_reply(datagram: &[u8]) -> Option<DiscoveredServer> {
     let reply: Reply = serde_json::from_slice(datagram).ok()?;
+    if reply.address.chars().count() > MAX_ADDRESS_CHARS {
+        return None;
+    }
     let url = url::Url::parse(&reply.address).ok()?;
+    if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
     let local = match url.host()? {
         url::Host::Domain(name) => name.eq_ignore_ascii_case("localhost"),
         url::Host::Ipv4(ip) => ip.is_loopback() || ip.is_unspecified(),
@@ -106,7 +127,7 @@ fn parse_reply(datagram: &[u8]) -> Option<DiscoveredServer> {
     Some(DiscoveredServer {
         address: reply.address.trim_end_matches('/').to_owned(),
         id: reply.id,
-        name: reply.name,
+        name: reply.name.chars().take(MAX_NAME_CHARS).collect(),
     })
 }
 
@@ -152,6 +173,56 @@ mod tests {
         }
         assert_eq!(parse_reply(b"Who is JellyfinServer?"), None);
         assert_eq!(parse_reply(&reply("not a url", "abc", "Home")), None);
+    }
+
+    #[test]
+    fn only_plain_http_addresses_are_kept_and_names_are_cut() {
+        for address in [
+            "ftp://192.168.1.5/",
+            "file:///etc/passwd",
+            "http://user:pw@192.168.1.5:8096",
+            "http://u@192.168.1.5",
+        ] {
+            assert_eq!(parse_reply(&reply(address, "abc", "Home")), None, "{address}");
+        }
+        assert!(parse_reply(&reply("https://192.168.1.5", "abc", "Home")).is_some());
+        let long = format!("http://192.168.1.5/{}", "a".repeat(300));
+        assert_eq!(parse_reply(&reply(&long, "abc", "Home")), None);
+        let named = parse_reply(&reply("http://192.168.1.5", "abc", &"n".repeat(500))).expect("a server");
+        assert_eq!(named.name.chars().count(), MAX_NAME_CHARS);
+    }
+
+    #[tokio::test]
+    async fn the_list_of_servers_is_capped() {
+        let mut answers = Vec::new();
+        for n in 0..100 {
+            answers.push(reply("http://192.168.1.7:8096", &format!("id{n}"), "Many"));
+        }
+        let found = discover_with(
+            &[Ipv4Addr::LOCALHOST],
+            &[responder(answers).await],
+            Duration::from_millis(400),
+        )
+        .await;
+        assert_eq!(found.len(), MAX_SERVERS);
+    }
+
+    /// A host answering with the real server's id and name but its own address is another row,
+    /// not a replacement.
+    #[tokio::test]
+    async fn the_same_id_at_two_addresses_shows_both() {
+        let answers = vec![
+            reply("http://192.168.1.5:8096", "real", "Home"),
+            reply("http://192.168.1.66:8096", "real", "Home"),
+        ];
+        let found = discover_with(
+            &[Ipv4Addr::LOCALHOST],
+            &[responder(answers).await],
+            Duration::from_millis(300),
+        )
+        .await;
+        let addresses: Vec<&str> = found.iter().map(|server| server.address.as_str()).collect();
+        assert_eq!(found.len(), 2, "{addresses:?}");
     }
 
     /// A server on a socket of its own: answers the query with each of `answers`.
