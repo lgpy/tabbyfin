@@ -343,6 +343,16 @@ mod tests {
     }
 
     #[test]
+    fn q_opens_the_queue_in_the_player_alone() {
+        assert_eq!(
+            press(Key::Q, Modifiers::NONE).action(Scope::Player),
+            Some(Action::ToggleQueue)
+        );
+        assert_eq!(press(Key::Q, Modifiers::NONE).action(Scope::Browse), None);
+        assert_eq!(press(Key::Q, Modifiers::NONE).action(Scope::Shell), None);
+    }
+
+    #[test]
     fn punctuation_ignores_the_shift_a_layout_needs() {
         assert_eq!(
             press(Key::CloseBracket, Modifiers::SHIFT).action(Scope::Player),

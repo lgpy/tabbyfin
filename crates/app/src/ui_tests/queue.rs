@@ -206,3 +206,167 @@ fn the_panel_keys_move_and_remove_entries() {
         ]
     );
 }
+
+/// Repeat and shuffle go to the session, which reports them to the server with its progress, and
+/// the queue keeps the playing item when it shuffles.
+#[test]
+fn repeat_and_shuffle_are_sent_to_the_session() {
+    use jellyfin::{PlaybackOrder, RepeatMode};
+
+    use crate::playback::UiCommand;
+
+    let _config = ConfigDir::new("queue-modes");
+    let (_server, mut harness) = playing();
+    harness.state_mut().commands();
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(0), episode(2), movie()], false);
+    let sent = |harness: &mut Harness<'static, PlayerRun>| harness.state_mut().commands();
+
+    services.cycle_repeat();
+    let commands = sent(&mut harness);
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [UiCommand::SetQueueModes(RepeatMode::RepeatAll, PlaybackOrder::Default)]
+        ),
+        "{commands:?}"
+    );
+    let services = harness.state_mut().services();
+    services.cycle_repeat();
+    services.toggle_shuffle();
+    let commands = sent(&mut harness);
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [
+                UiCommand::SetQueueModes(RepeatMode::RepeatOne, PlaybackOrder::Default),
+                UiCommand::SetQueueModes(RepeatMode::RepeatOne, PlaybackOrder::Shuffle)
+            ]
+        ),
+        "{commands:?}"
+    );
+
+    // Shuffling mixed what was queued and kept the playing item, and the up-next card follows.
+    let mut shuffled = queued(&mut harness);
+    shuffled.sort();
+    let mut expected = vec![episode(0).id, episode(2).id, movie().id];
+    expected.sort();
+    assert_eq!(shuffled, expected);
+    let front = queued(&mut harness).into_iter().next();
+    let state = harness.state().now_playing().expect("the session");
+    assert_eq!(state.item.id, episode(1).id);
+    assert_eq!(state.next.as_ref().map(|item| item.id.clone()), front);
+
+    // Off again: the order it was in, and off is reported.
+    let services = harness.state_mut().services();
+    services.toggle_shuffle();
+    services.cycle_repeat();
+    let commands = sent(&mut harness);
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [
+                UiCommand::SetQueueModes(RepeatMode::RepeatOne, PlaybackOrder::Default),
+                UiCommand::SetQueueModes(RepeatMode::RepeatNone, PlaybackOrder::Default)
+            ]
+        ),
+        "{commands:?}"
+    );
+    assert_eq!(queued(&mut harness), [episode(0).id, episode(2).id, movie().id]);
+}
+
+/// Another client's repeat and shuffle commands set the same modes.
+#[test]
+fn remote_control_sets_repeat_and_shuffle() {
+    use jellyfin::{GeneralCommand, PlaybackOrder, RepeatMode};
+
+    use crate::playback::UiCommand;
+
+    let _config = ConfigDir::new("queue-remote-modes");
+    let (_server, mut harness) = playing();
+    harness.state_mut().commands();
+    let services = harness.state_mut().services();
+    services.on_remote_command(GeneralCommand::SetRepeatMode(RepeatMode::RepeatAll));
+    services.on_remote_command(GeneralCommand::SetShuffleQueue(true));
+    let commands = harness.state_mut().commands();
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [
+                UiCommand::SetQueueModes(RepeatMode::RepeatAll, PlaybackOrder::Default),
+                UiCommand::SetQueueModes(RepeatMode::RepeatAll, PlaybackOrder::Shuffle)
+            ]
+        ),
+        "{commands:?}"
+    );
+}
+
+/// The panel's repeat and shuffle are on the keyboard's way: with nothing queued Q starts on
+/// repeat, Enter flips it, Down goes to shuffle and Enter flips that.
+#[test]
+fn the_panels_toggles_work_from_the_keyboard() {
+    use jellyfin::{PlaybackOrder, RepeatMode};
+
+    use crate::playback::UiCommand;
+
+    let _config = ConfigDir::new("queue-toggle-keys");
+    let (_server, mut harness) = playing();
+    harness.state_mut().commands();
+
+    plain(&mut harness, egui::Key::Q);
+    plain(&mut harness, egui::Key::Enter);
+    plain(&mut harness, egui::Key::ArrowDown);
+    plain(&mut harness, egui::Key::Enter);
+    let commands = harness.state_mut().commands();
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [
+                UiCommand::SetQueueModes(RepeatMode::RepeatAll, PlaybackOrder::Default),
+                UiCommand::SetQueueModes(RepeatMode::RepeatAll, PlaybackOrder::Shuffle)
+            ]
+        ),
+        "{commands:?}"
+    );
+    // The panel stayed up for it.
+    assert!(!rows(&harness).is_empty());
+}
+
+/// What an item that played to its end is followed by: the next queued one when autoplay is on,
+/// the same one again with repeat one, nothing without either.
+#[test]
+fn the_end_of_an_item_follows_the_queue_and_the_repeat_mode() {
+    use jellyfin::RepeatMode;
+
+    let _config = ConfigDir::new("queue-end");
+    let (_server, mut harness) = playing();
+    let id = |index: usize| episode(index).id;
+    harness.state_mut().services().enqueue(vec![episode(2)], false);
+
+    // No autoplay (the setting, or nothing next) and no repeat: playback just ends.
+    assert_eq!(harness.state_mut().services().end_for_test(), None);
+    assert!(
+        harness
+            .state_mut()
+            .services()
+            .events
+            .iter()
+            .any(|event| matches!(event, crate::services::AppEvent::PlaybackEnded))
+    );
+
+    // Repeat one: the same item again, and the queue is as it was.
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(2)], false);
+    services.set_repeat(RepeatMode::RepeatOne);
+    assert_eq!(services.end_for_test(), Some(id(1)));
+    assert_eq!(queued(&mut harness), [id(2)]);
+
+    // Autoplay: the queued item plays and leaves the queue.
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(2)], false);
+    harness.state_mut().now_playing_mut().expect("the session").autoplay = true;
+    assert_eq!(harness.state_mut().services().end_for_test(), Some(id(2)));
+    assert!(queued(&mut harness).is_empty());
+}

@@ -12,6 +12,19 @@ use jellyfin::{PlaybackOrder, RepeatMode};
 
 use crate::views::item::shuffle;
 
+/// What follows an item that played to its end ([`LocalQueue::after_end`]).
+#[derive(Debug)]
+pub enum AfterEnd {
+    /// The same item, from its start.
+    Replay,
+    /// The next item, from its resume point.
+    Next(BaseItemDto),
+    /// The queue's first item, from its start: the rest is queued again.
+    Restart(BaseItemDto),
+    /// Nothing: playback ends.
+    Stop,
+}
+
 #[derive(Default)]
 pub struct LocalQueue {
     /// What plays after the current item, in order.
@@ -169,6 +182,24 @@ impl LocalQueue {
         self.upcoming = entries.into_iter().map(|(_, item)| item).collect();
     }
 
+    /// What follows an item that played to its end, by the repeat mode: the same item again for
+    /// *repeat one*; otherwise `next` (the queue's front, or the following episode, when the
+    /// setting lets it start by itself); at the end of the queue, *repeat all* starts it over.
+    pub fn after_end(&mut self, current: &BaseItemDto, next: Option<BaseItemDto>) -> AfterEnd {
+        if self.repeat == RepeatMode::RepeatOne {
+            return AfterEnd::Replay;
+        }
+        if let Some(next) = next {
+            return AfterEnd::Next(next);
+        }
+        if self.repeat == RepeatMode::RepeatAll
+            && let Some(first) = self.restart(current)
+        {
+            return AfterEnd::Restart(first);
+        }
+        AfterEnd::Stop
+    }
+
     /// Repeating the whole queue, at its end: everything that played plus `current` again, the
     /// first of them to play now and the rest queued. `None` while entries are still waiting.
     pub fn restart(&mut self, current: &BaseItemDto) -> Option<BaseItemDto> {
@@ -191,7 +222,7 @@ mod tests {
     use jellyfin::models::BaseItemDto;
     use jellyfin::{PlaybackOrder, RepeatMode};
 
-    use super::LocalQueue;
+    use super::{AfterEnd, LocalQueue};
 
     fn item(id: &str) -> BaseItemDto {
         serde_json::from_value(serde_json::json!({ "Id": id, "Name": id })).expect("item")
@@ -304,6 +335,44 @@ mod tests {
         queue.remove(0);
         queue.set_shuffle(false);
         assert_eq!(ids(&queue), ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn repeat_one_plays_the_same_item_again_even_with_things_queued() {
+        let mut queue = queue(&["b", "c"]);
+        queue.repeat = RepeatMode::RepeatOne;
+        assert!(matches!(queue.after_end(&item("a"), Some(item("b"))), AfterEnd::Replay));
+        assert!(matches!(queue.after_end(&item("a"), None), AfterEnd::Replay));
+        // The queue itself is where it was.
+        assert_eq!(ids(&queue), ["b", "c"]);
+    }
+
+    #[test]
+    fn repeat_all_starts_the_queue_over_at_its_end() {
+        let mut queue = queue(&["b", "c"]);
+        queue.repeat = RepeatMode::RepeatAll;
+        // Not the end: the next item plays.
+        assert!(matches!(queue.after_end(&item("a"), Some(item("b"))), AfterEnd::Next(next) if next.id == "b"));
+        queue.advance(&item("b"), Some(&item("a")));
+        queue.advance(&item("c"), Some(&item("b")));
+        // The end: everything again, from the first.
+        let after = queue.after_end(&item("c"), None);
+        assert!(
+            matches!(&after, AfterEnd::Restart(first) if first.id == "a"),
+            "{after:?}"
+        );
+        assert_eq!(ids(&queue), ["b", "c"]);
+    }
+
+    #[test]
+    fn without_repeat_the_end_of_the_queue_stops() {
+        let mut queue = queue(&["b"]);
+        queue.advance(&item("b"), Some(&item("a")));
+        assert!(matches!(queue.after_end(&item("b"), None), AfterEnd::Stop));
+        assert!(matches!(
+            queue.after_end(&item("b"), Some(item("x"))),
+            AfterEnd::Next(_)
+        ));
     }
 
     #[test]

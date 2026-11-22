@@ -239,6 +239,12 @@ impl Services {
             self.toast(Toast::info(message));
             return;
         }
+        // The queue's modes are the player's own, set whatever plays (a cast ignores them).
+        match command {
+            GeneralCommand::SetRepeatMode(mode) => return self.set_repeat(mode),
+            GeneralCommand::SetShuffleQueue(on) => return self.set_shuffle(on),
+            _ => {}
+        }
         // The rest act on what's playing: the TV while casting.
         let volume = match (self.cast.casting(), self.playback.now_playing()) {
             (Some(casting), _) => casting.volume,
@@ -272,7 +278,10 @@ impl Services {
                 self.events.push(AppEvent::ToggleFullscreen);
                 return;
             }
-            GeneralCommand::DisplayMessage { .. } | GeneralCommand::Other(_) => return,
+            GeneralCommand::DisplayMessage { .. }
+            | GeneralCommand::SetRepeatMode(_)
+            | GeneralCommand::SetShuffleQueue(_)
+            | GeneralCommand::Other(_) => return,
         };
         self.control(command);
     }

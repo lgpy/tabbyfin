@@ -17,7 +17,7 @@ use jellyfin::models::{
     BaseItemDto, BaseItemKind, ChapterInfo, ItemField, MediaSegmentDto, MediaSourceInfo, MediaStream, MediaStreamType,
     TrickplayInfo,
 };
-use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
+use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackOrder, PlaybackReport, RepeatMode, Ticks};
 use player::libmpv::{VideoImport, VideoOutput};
 use player::{Cues, EndReason, LoadRequest, Player, PlayerEvent};
 use serde_json::json;
@@ -26,7 +26,7 @@ use url::Url;
 
 use crate::config::{Config, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
 use crate::i18n::tr;
-use crate::local_queue::LocalQueue;
+use crate::local_queue::{AfterEnd, LocalQueue};
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::services::{AppEvent, Services};
@@ -159,6 +159,8 @@ pub enum UiCommand {
     ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
+    /// The queue's repeat and shuffle, which the progress reports carry to the server.
+    SetQueueModes(RepeatMode, PlaybackOrder),
     Stop,
 }
 
@@ -623,6 +625,11 @@ impl PlaybackManager {
         }
     }
 
+    /// Repeat, and whether the queue is shuffled.
+    pub(crate) fn modes(&self) -> (RepeatMode, bool) {
+        (self.queue.repeat, self.queue.is_shuffled())
+    }
+
     /// Shows the playing item's `next` as the queue's front, or the following episode once the
     /// queue is empty.
     fn refresh_next(&mut self) {
@@ -642,6 +649,7 @@ impl PlaybackManager {
         self.generation += 1;
         self.active = true;
         let (volume, muted, import, online) = (self.volume, self.muted, self.video_import, self.online);
+        let modes = self.queue.modes();
         if self.adjusted_item.as_ref() != Some(&item.id) {
             self.adjustments = self.adjustments.for_next_item();
             self.adjusted_item = Some(item.id.clone());
@@ -674,6 +682,7 @@ impl PlaybackManager {
                     adjustments,
                     (account, online),
                     import,
+                    modes,
                     channels,
                 );
                 let result = AssertUnwindSafe(session).catch_unwind().await;
@@ -898,6 +907,59 @@ impl Services {
         playback.refresh_next();
     }
 
+    /// Sets what the queue does at the end of an item (the panel's repeat button, or remote
+    /// control). In a SyncPlay group it's the group's, set on the server; while casting it's the
+    /// TV's, which has no such control.
+    pub fn set_repeat(&mut self, mode: RepeatMode) {
+        if self.is_casting() {
+            return;
+        }
+        if self.in_group() {
+            self.syncplay.set_repeat(mode);
+            return;
+        }
+        self.playback.queue.repeat = mode;
+        self.queue_modes_changed();
+    }
+
+    /// Off, all, one.
+    pub fn cycle_repeat(&mut self) {
+        let next = if self.in_group() {
+            self.syncplay.repeat_mode().next()
+        } else {
+            self.playback.queue.repeat.next()
+        };
+        self.set_repeat(next);
+    }
+
+    /// Shuffles what's queued, or puts it back in order (the panel's shuffle button, or remote
+    /// control). A group's and a cast's, as [`Services::set_repeat`].
+    pub fn set_shuffle(&mut self, on: bool) {
+        if self.is_casting() {
+            return;
+        }
+        if self.in_group() {
+            self.syncplay.set_shuffle(on);
+            return;
+        }
+        self.playback.queue.set_shuffle(on);
+        self.queue_modes_changed();
+    }
+
+    pub fn toggle_shuffle(&mut self) {
+        let on = !self.playback.queue.is_shuffled();
+        self.set_shuffle(on);
+    }
+
+    /// The modes changed: the session reports them, and the up-next card follows the new order.
+    fn queue_modes_changed(&mut self) {
+        let (repeat, order) = self.playback.queue.modes();
+        if let Some(state) = self.playback.current() {
+            state.send(UiCommand::SetQueueModes(repeat, order));
+        }
+        self.playback.refresh_next();
+    }
+
     /// Takes the queue's entry at `index` out, from the player's queue panel.
     pub fn queue_remove(&mut self, index: usize) {
         if self.playback.queue.remove(index).is_some() {
@@ -910,6 +972,33 @@ impl Services {
         let to = self.playback.queue.move_entry(index, by)?;
         self.playback.refresh_next();
         Some(to)
+    }
+
+    /// The running session playing to its end, as the session reports it, for tests of what
+    /// follows. Returns the item a new session was started for, if one was.
+    #[cfg(test)]
+    pub fn end_for_test(&mut self) -> Option<String> {
+        let state = self.playback.now_playing()?;
+        let generation = self.playback.generation;
+        let (commands, _) = mpsc::unbounded_channel();
+        let (_, updates) = task::channel(&self.playback.ctx);
+        let running = Running {
+            generation,
+            item: state.item.clone(),
+            attempt: 0,
+            options: PlayOptions::default(),
+            updates,
+            commands,
+            volume: self.playback.volume,
+            muted: false,
+            adjustments: Adjustments::default(),
+            autoplay: true,
+            resumed_from: None,
+        };
+        self.session_ended(running, Ok(Ended::Finished));
+        (self.playback.generation != generation)
+            .then(|| self.playback.started.as_ref().map(|item| item.id.clone()))
+            .flatten()
     }
 
     /// Plays the queue's entry at `index` now. What's before it counts as played.
@@ -1211,6 +1300,12 @@ impl Services {
             .filter(|state| state.session == running.generation)
             .and_then(|state| state.autoplay_next());
         let group_item = running.options.group_item.clone();
+        // What the queue's modes make of an item that played to its end; a group's queue is the
+        // server's, so its modes are too.
+        let after = match result {
+            Ok(Ended::Finished) if group_item.is_none() => self.playback.queue.after_end(&running.item, next),
+            _ => AfterEnd::Stop,
+        };
         match result {
             // In a group, every member reports the end and the server moves the queue on
             // (once); the next item then comes as a queue update.
@@ -1218,10 +1313,23 @@ impl Services {
                 self.group_item_ended(group_item);
                 self.events.push(AppEvent::PlaybackEnded);
             }
-            Ok(Ended::Finished) if let Some(next) = next => {
-                tracing::info!(next = %next.name, "playing the next episode");
-                self.play_from_resume(&next);
-            }
+            Ok(Ended::Finished) if !matches!(after, AfterEnd::Stop) => match after {
+                AfterEnd::Replay => {
+                    tracing::info!(item = %running.item.name, "repeating the item");
+                    self.play(&running.item, PlayOptions::default());
+                }
+                AfterEnd::Next(next) => {
+                    tracing::info!(next = %next.name, "playing the next episode");
+                    self.play_from_resume(&next);
+                }
+                // The queue is made again from what played, so the first of it plays without
+                // asking the queue to move on.
+                AfterEnd::Restart(first) => {
+                    tracing::info!(first = %first.name, "repeating the queue");
+                    self.play_now(&first, PlayOptions::default());
+                }
+                AfterEnd::Stop => self.events.push(AppEvent::PlaybackEnded),
+            },
             // Keep the player up and try again from where it stopped.
             Ok(Ended::Lost {
                 position,
@@ -1620,6 +1728,7 @@ async fn run_session(
     adjustments: Adjustments,
     (account, online): (String, bool),
     import: VideoImport,
+    (repeat_mode, playback_order): (RepeatMode, PlaybackOrder),
     mut channels: Channels,
 ) -> Result<Ended, String> {
     // Offline, nothing goes to the server: each call would only wait to fail.
@@ -1812,6 +1921,8 @@ async fn run_session(
         play_method: method,
         volume_level: volume_level(volume),
         is_muted: muted,
+        repeat_mode,
+        playback_order,
         ..Default::default()
     };
     let mut reporting = Reporting::default();
@@ -2011,7 +2122,8 @@ impl Reporting {
             | UiCommand::SeekBy(_)
             | UiCommand::SeekTo(_)
             | UiCommand::Audio(_)
-            | UiCommand::Subtitle(_) => self.progress(),
+            | UiCommand::Subtitle(_)
+            | UiCommand::SetQueueModes(..) => self.progress(),
             _ => Outgoing::Nothing,
         }
     }
@@ -2106,6 +2218,11 @@ async fn apply_command(
                 player.set_property("sid", sid).await?;
                 report.subtitle_stream_index = subtitle_index(choice);
             }
+            Ok(())
+        }
+        UiCommand::SetQueueModes(repeat_mode, playback_order) => {
+            report.repeat_mode = repeat_mode;
+            report.playback_order = playback_order;
             Ok(())
         }
         UiCommand::Stop => player.quit().await,
@@ -2211,6 +2328,18 @@ mod tests {
         assert_eq!(reporting.on_command(&UiCommand::Audio(2)), Outgoing::Progress);
         assert_eq!(reporting.on_command(&UiCommand::SetSpeed(1.5)), Outgoing::Nothing);
         assert_eq!(reporting.on_command(&UiCommand::SetVolume(50.)), Outgoing::Nothing);
+    }
+
+    #[test]
+    fn the_queues_modes_are_reported_once_applied() {
+        use jellyfin::{PlaybackOrder, RepeatMode};
+
+        let (mut reporting, mut report) = (Reporting::default(), PlaybackReport::default());
+        let command = UiCommand::SetQueueModes(RepeatMode::RepeatAll, PlaybackOrder::Shuffle);
+        // Before the start report, which carries the modes itself.
+        assert_eq!(reporting.on_command(&command), Outgoing::Nothing);
+        reporting.on_event(&PlayerEvent::FileLoaded, &mut report, tokio::time::Instant::now());
+        assert_eq!(reporting.on_command(&command), Outgoing::Progress);
     }
 
     #[test]

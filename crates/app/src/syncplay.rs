@@ -290,6 +290,20 @@ impl SyncPlay {
         self.call(move |client| async move { client.syncplay_set_shuffle(mode).await });
     }
 
+    /// The group's repeat mode.
+    pub fn repeat_mode(&self) -> RepeatMode {
+        self.queue.as_ref().map_or(RepeatMode::RepeatNone, |q| q.repeat_mode)
+    }
+
+    pub fn set_repeat(&self, mode: RepeatMode) {
+        self.call(move |client| async move { client.syncplay_set_repeat(mode).await });
+    }
+
+    pub fn set_shuffle(&self, on: bool) {
+        let mode = if on { ShuffleMode::Shuffle } else { ShuffleMode::Sorted };
+        self.call(move |client| async move { client.syncplay_set_shuffle(mode).await });
+    }
+
     /// None, all, one.
     pub fn cycle_repeat(&self) {
         let mode = self
