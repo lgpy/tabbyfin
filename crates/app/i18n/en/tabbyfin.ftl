@@ -200,6 +200,7 @@ player-audio = Audio
 player-chapters = Chapters
 player-queue = Queue (Q)
 player-queue-empty = Nothing is queued after this.
+player-queue-save = Save as playlist…
 player-seek = Seek
 player-volume = Volume
 player-cast = Cast to a TV
@@ -504,6 +505,11 @@ dialog-sharing = Everyone on this server can see it
 dialog-delete-note = The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.
 dialog-added = Added to { $name }.
 dialog-created = Made the playlist { $name }.
+dialog-save-queue = Save the queue as a playlist
+dialog-save-queue-count = { $count ->
+    [one] A playlist of { $count } item: what's playing and what's queued.
+   *[other] A playlist of { $count } items: what's playing and what's queued.
+    }
 dialog-already-there = { $item } is already in { $name }.
 dialog-cant-change = You can't change { $name }; it belongs to someone else.
 dialog-add-to-playlist = Add to playlist

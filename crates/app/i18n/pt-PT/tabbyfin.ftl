@@ -200,6 +200,7 @@ player-audio = Áudio
 player-chapters = Capítulos
 player-queue = Fila (Q)
 player-queue-empty = Não há nada na fila a seguir a este.
+player-queue-save = Guardar como lista de reprodução…
 player-seek = Posição
 player-volume = Volume
 player-cast = Transmitir para uma TV
@@ -504,6 +505,11 @@ dialog-sharing = Todos neste servidor podem vê-la
 dialog-delete-note = A lista de reprodução é removida do servidor para todos com quem está partilhada. O que está nela fica nas suas bibliotecas.
 dialog-added = Adicionado a { $name }.
 dialog-created = Lista de reprodução { $name } criada.
+dialog-save-queue = Guardar a fila como lista de reprodução
+dialog-save-queue-count = { $count ->
+    [one] Uma lista com { $count } item: o que está a reproduzir e o que está na fila.
+   *[other] Uma lista com { $count } itens: o que está a reproduzir e o que está na fila.
+    }
 dialog-already-there = { $item } já está em { $name }.
 dialog-cant-change = Não pode alterar { $name }; pertence a outra pessoa.
 dialog-add-to-playlist = Adicionar à lista de reprodução

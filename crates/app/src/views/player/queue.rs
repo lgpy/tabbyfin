@@ -19,8 +19,12 @@ use crate::i18n::tr;
 use crate::keys;
 use crate::playback;
 use crate::theme;
+use crate::theme::over_video;
 use crate::views::PageCx;
+use crate::views::dialogs::SaveQueue;
+use crate::widgets::focus::{self, Place};
 use crate::widgets::list_row::{self, Handle, Handles, Leading, ListRow};
+use crate::widgets::prompt;
 use crate::widgets::{label, popup};
 
 /// The panel's width, and how tall its list grows before it scrolls.
@@ -36,6 +40,8 @@ enum Entry {
     Shuffle,
     /// A queued item, by its place among the queued ones.
     Item(usize),
+    /// *Save as playlist…*, under the entries, when there are any.
+    Save,
 }
 
 /// The entries for a queue of `queued` items.
@@ -43,6 +49,7 @@ fn entries(queued: usize) -> Vec<Entry> {
     [Entry::Repeat, Entry::Shuffle]
         .into_iter()
         .chain((0..queued).map(Entry::Item))
+        .chain((queued > 0).then_some(Entry::Save))
         .collect()
 }
 
@@ -53,6 +60,8 @@ pub(super) struct QueuePanel {
     highlight: Option<Entry>,
     /// The list scrolls to the highlight on the next frame (set when the keyboard moves it).
     scroll: bool,
+    /// The *Save as playlist* dialog, while it's open.
+    saving: Option<SaveQueue>,
 }
 
 /// What a frame of the panel asked for.
@@ -63,6 +72,7 @@ struct Asked {
     shift: Option<(usize, isize)>,
     cycle_repeat: bool,
     toggle_shuffle: bool,
+    save: bool,
 }
 
 impl PlayerPage {
@@ -81,6 +91,32 @@ impl PlayerPage {
         egui::Popup::open_id(cx.ctx, queue_id());
         self.show_controls();
         cx.ctx.request_repaint();
+    }
+
+    /// Draws the *Save as playlist* dialog while it's open, from the page's `show`.
+    pub(super) fn queue_dialog(&mut self, cx: &mut PageCx) {
+        if let Some(dialog) = &mut self.queue.saving
+            && !dialog.show(cx)
+        {
+            self.queue.saving = None;
+        }
+    }
+
+    /// Opens the dialog for what plays and what's queued, named for the show or the item.
+    fn save_queue(&mut self, cx: &mut PageCx) {
+        let Some(state) = cx.services.playback.now_playing() else {
+            return;
+        };
+        let name = state
+            .item
+            .series_name
+            .clone()
+            .unwrap_or_else(|| state.item.name.clone());
+        let ids: Vec<String> = std::iter::once(&state.item)
+            .chain(cx.services.playback.queued())
+            .map(|item| item.id.clone())
+            .collect();
+        self.queue.saving = Some(SaveQueue::new(ids, name));
     }
 
     fn close_queue(&mut self, ctx: &egui::Context) {
@@ -150,6 +186,10 @@ impl PlayerPage {
                     self.close_queue(ctx);
                     cx.services.queue_jump(at);
                 }
+                Some(Entry::Save) => {
+                    self.close_queue(ctx);
+                    self.save_queue(cx);
+                }
                 None => {}
             }
         }
@@ -187,6 +227,10 @@ impl PlayerPage {
                     toggles(ui, repeat, shuffled, highlight, &mut asked);
                 });
                 queue_list(ui, playing.as_deref(), &queued, highlight, scroll, &mut asked);
+                if !queued.is_empty() {
+                    ui.add_space(theme::SPACE.sm);
+                    save_button(ui, highlight == Some(Entry::Save), &mut asked);
+                }
             });
         if asked.cycle_repeat {
             cx.services.cycle_repeat();
@@ -207,6 +251,26 @@ impl PlayerPage {
             self.close_queue(cx.ctx);
             cx.services.queue_jump(at);
         }
+        if asked.save {
+            self.close_queue(cx.ctx);
+            self.save_queue(cx);
+        }
+    }
+}
+
+/// *Save as playlist…* under the list, ringed while the keyboard is on it.
+fn save_button(ui: &mut Ui, ringed: bool, asked: &mut Asked) {
+    let colours = prompt::Quiet {
+        ink: over_video::FOREGROUND,
+        outline: over_video::QUIET_OUTLINE,
+        hover: over_video::ROUND_HOVER,
+    };
+    let button = prompt::quiet(ui, &tr!("player-queue-save"), colours);
+    if ringed {
+        focus::ring(ui, button.rect, button.rect.height() / 2., Place::Outside);
+    }
+    if button.clicked() {
+        asked.save = true;
     }
 }
 

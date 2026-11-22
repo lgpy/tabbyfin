@@ -370,3 +370,68 @@ fn the_end_of_an_item_follows_the_queue_and_the_repeat_mode() {
     assert_eq!(harness.state_mut().services().end_for_test(), Some(id(2)));
     assert!(queued(&mut harness).is_empty());
 }
+
+/// *Save as playlist…* in the panel makes a playlist of what plays and what's queued, in order,
+/// named for the show.
+#[test]
+fn the_queue_is_saved_as_a_playlist() {
+    let _config = ConfigDir::new("queue-save");
+    let (server, mut harness) = playing();
+    server.json_value("POST", "/Playlists", &serde_json::json!({ "Id": "made" }));
+    harness.state_mut().services().enqueue(vec![episode(2), movie()], false);
+
+    plain(&mut harness, egui::Key::Q);
+    harness.get_by_label("Save as playlist…").click();
+    for _ in 0..4 {
+        harness.step();
+    }
+    assert!(rows(&harness).is_empty(), "the panel closes for the dialog");
+    // The name starts as the show's; Enter saves.
+    plain(&mut harness, egui::Key::Enter);
+    for _ in 0..50 {
+        if server.requests("POST", "/Playlists") > 0 {
+            break;
+        }
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let bodies = server.bodies("POST", "/Playlists");
+    assert_eq!(bodies.len(), 1, "{bodies:?}");
+    assert_eq!(bodies[0]["Name"], "Test Show");
+    assert_eq!(
+        bodies[0]["Ids"],
+        serde_json::json!([episode(1).id, episode(2).id, movie().id])
+    );
+}
+
+/// The keyboard reaches *Save as playlist…* at the end of the entries, and only with entries.
+#[test]
+fn save_is_the_last_stop_of_the_panels_keys() {
+    let _config = ConfigDir::new("queue-save-keys");
+    let (server, mut harness) = playing();
+    server.json_value("POST", "/Playlists", &serde_json::json!({ "Id": "made" }));
+
+    // Nothing queued: no button to save.
+    plain(&mut harness, egui::Key::Q);
+    assert!(harness.query_by_label("Save as playlist…").is_none());
+    plain(&mut harness, egui::Key::Q);
+
+    harness.state_mut().services().enqueue(vec![episode(2)], false);
+    plain(&mut harness, egui::Key::Q);
+    assert!(harness.query_by_label("Save as playlist…").is_some());
+    // Up from the first entry goes round to the end: the button.
+    plain(&mut harness, egui::Key::ArrowUp);
+    plain(&mut harness, egui::Key::ArrowUp);
+    plain(&mut harness, egui::Key::ArrowUp);
+    plain(&mut harness, egui::Key::Enter);
+    assert!(rows(&harness).is_empty(), "the dialog took over from the panel");
+    plain(&mut harness, egui::Key::Enter);
+    for _ in 0..50 {
+        if server.requests("POST", "/Playlists") > 0 {
+            break;
+        }
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(server.requests("POST", "/Playlists"), 1);
+}

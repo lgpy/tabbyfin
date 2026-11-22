@@ -200,6 +200,7 @@ player-audio = Audio
 player-chapters = Capítulos
 player-queue = Cola (Q)
 player-queue-empty = No hay nada en la cola después de esto.
+player-queue-save = Guardar como lista…
 player-seek = Posición
 player-volume = Volumen
 player-cast = Enviar a una TV
@@ -504,6 +505,11 @@ dialog-sharing = Todos los de este servidor pueden verla
 dialog-delete-note = La lista se elimina del servidor para todas las personas con las que se comparte. Lo que contiene se queda en tus bibliotecas.
 dialog-added = Añadido a { $name }.
 dialog-created = Se ha creado la lista { $name }.
+dialog-save-queue = Guardar la cola como lista
+dialog-save-queue-count = { $count ->
+    [one] Una lista de { $count } elemento: lo que se reproduce y lo que está en la cola.
+   *[other] Una lista de { $count } elementos: lo que se reproduce y lo que está en la cola.
+    }
 dialog-already-there = { $item } ya está en { $name }.
 dialog-cant-change = No puedes cambiar { $name }; es de otra persona.
 dialog-add-to-playlist = Añadir a una lista

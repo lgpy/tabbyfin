@@ -257,6 +257,7 @@ impl PlayerPage {
         }
         self.sync_video(cx);
         self.queue_keys(cx);
+        self.queue_dialog(cx);
         if let Some(session) = cx.services.playback.now_playing().map(|state| state.session) {
             self.follow_session(ui.ctx(), session);
             self.auto_skip(cx);
