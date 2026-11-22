@@ -1,6 +1,6 @@
 [
   {
-    "GroupId": "b9f0c1a2-0000-4000-8000-000000000001",
+    "GroupId": "b9f0c1a2000040008000000000000001",
     "GroupName": "Movie night",
     "State": "Playing",
     "Participants": [
@@ -10,7 +10,7 @@
     "LastUpdatedAt": "2026-01-01T20:00:00.0000000Z"
   },
   {
-    "GroupId": "b9f0c1a2-0000-4000-8000-000000000002",
+    "GroupId": "b9f0c1a2000040008000000000000002",
     "GroupName": "Empty room",
     "State": "Idle",
     "Participants": [],

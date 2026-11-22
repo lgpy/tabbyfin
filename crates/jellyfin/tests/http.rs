@@ -214,7 +214,7 @@ async fn the_bitrate_test_times_the_download() {
     // The upper bound proves the timing: with no delay measured, 500 kB would read as many
     // times 4 Mbit/s. The lower one only has to survive a slow runner (the download may take
     // several times the 1 s delay), so it is far under the nominal 4 Mbit/s.
-    assert!((500_000..4_100_000).contains(&bits), "{bits} bit/s");
+    assert!((1_000_000..4_100_000).contains(&bits), "{bits} bit/s");
 }
 
 /// The server replaces the whole user configuration, so an update sends back what it read with
