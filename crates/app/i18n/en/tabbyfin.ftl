@@ -152,6 +152,22 @@ person-guest-star = Guest star
 person-composer = Composer
 person-conductor = Conductor
 person-lyricist = Lyricist
+person-arranger = Arranger
+person-engineer = Engineer
+person-mixer = Mixer
+person-remixer = Remixer
+person-creator = Creator
+person-artist = Artist
+person-album-artist = Album artist
+person-author = Author
+person-illustrator = Illustrator
+person-penciller = Penciller
+person-inker = Inker
+person-colorist = Colorist
+person-letterer = Letterer
+person-cover-artist = Cover artist
+person-editor = Editor
+person-translator = Translator
 item-less = Less
 item-show-less = Show less
 item-show-more = Show more
@@ -528,9 +544,6 @@ dialog-item-count = { $count ->
 dialog-playlist-forbidden = This playlist belongs to someone else; it can't be changed.
 
 ## downloads-and-casting
-
-# A select's closing brace is indented: `i18n::tests` reads a line that starts at the left margin
-# as a new message.
 
 # The downloads page, and the platform's notice of the transfers (Android's notification).
 downloads-title = Downloads

@@ -117,8 +117,8 @@ pub fn runtime_text(ticks: Ticks) -> String {
     }
 }
 
-/// A person's role as the server names it (`GuestStar`), in the interface's language; a kind
-/// this has no message for shows the server's own text.
+/// A person's role as the server names it (`GuestStar`), in the interface's language. `Actor`,
+/// `Unknown` and any kind this has no message for show the server's own text.
 pub fn kind_label(kind: &str) -> String {
     match kind {
         "Director" => tr!("person-director"),
@@ -128,6 +128,22 @@ pub fn kind_label(kind: &str) -> String {
         "Composer" => tr!("person-composer"),
         "Conductor" => tr!("person-conductor"),
         "Lyricist" => tr!("person-lyricist"),
+        "Arranger" => tr!("person-arranger"),
+        "Engineer" => tr!("person-engineer"),
+        "Mixer" => tr!("person-mixer"),
+        "Remixer" => tr!("person-remixer"),
+        "Creator" => tr!("person-creator"),
+        "Artist" => tr!("person-artist"),
+        "AlbumArtist" => tr!("person-album-artist"),
+        "Author" => tr!("person-author"),
+        "Illustrator" => tr!("person-illustrator"),
+        "Penciller" => tr!("person-penciller"),
+        "Inker" => tr!("person-inker"),
+        "Colorist" => tr!("person-colorist"),
+        "Letterer" => tr!("person-letterer"),
+        "CoverArtist" => tr!("person-cover-artist"),
+        "Editor" => tr!("person-editor"),
+        "Translator" => tr!("person-translator"),
         other => other.to_owned(),
     }
 }
@@ -141,7 +157,42 @@ pub fn is_placeholder_episode_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_placeholder_episode_name;
+    use super::{is_placeholder_episode_name, kind_label};
+
+    /// Every kind Jellyfin's `PersonKind` has, bar `Actor` and `Unknown`, reads as a message.
+    #[test]
+    fn the_credit_kinds_of_a_cast_row_have_messages() {
+        for kind in [
+            "Director",
+            "Writer",
+            "Producer",
+            "GuestStar",
+            "Composer",
+            "Conductor",
+            "Lyricist",
+            "Arranger",
+            "Engineer",
+            "Mixer",
+            "Remixer",
+            "Creator",
+            "Artist",
+            "AlbumArtist",
+            "Author",
+            "Illustrator",
+            "Penciller",
+            "Inker",
+            "Colorist",
+            "Letterer",
+            "CoverArtist",
+            "Editor",
+            "Translator",
+        ] {
+            let label = kind_label(kind);
+            assert!(!label.starts_with("person-") && !label.is_empty(), "{kind}: {label}");
+        }
+        assert_eq!(kind_label("Actor"), "Actor");
+        assert_eq!(kind_label("CoverArtist"), "Cover artist");
+    }
 
     #[test]
     fn jellyfins_names_for_untitled_episodes() {

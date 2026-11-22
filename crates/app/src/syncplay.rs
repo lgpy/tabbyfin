@@ -292,6 +292,20 @@ impl SyncPlay {
         }
     }
 
+    /// Puts a test's session in a group whose queue is `queue`, with `loaded` as the entry the
+    /// local player has loaded.
+    #[cfg(test)]
+    pub(crate) fn join_for_test(&mut self, queue: PlayQueue, loaded: &str) {
+        self.group = Some(GroupInfo {
+            group_id: "group".into(),
+            group_name: "Movie night".into(),
+            state: Default::default(),
+            participants: Vec::new(),
+        });
+        self.queue = Some(queue);
+        self.loaded = Some(loaded.to_owned());
+    }
+
     /// Whether [`Self::skip`] has an entry to go to.
     pub fn can_skip(&self, forward: bool) -> bool {
         let Some(from) = self.loaded.as_deref() else {

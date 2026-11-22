@@ -60,7 +60,7 @@ use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::motion;
 use crate::playback::{Adjustments, NowPlaying, PlayOptions, SubtitleChoice, UiCommand, Version};
-use crate::services::AppEvent;
+use crate::services::{AppEvent, Services};
 use crate::task;
 use crate::theme::{self, over_video};
 use crate::tracks::{self, Choice, SUBTITLES_OFF};
@@ -263,11 +263,12 @@ impl PlayerPage {
             chapters: egui::Popup::is_id_open(ui.ctx(), chapters_id()) || self.sheet == Some(phone::Sheet::Chapters),
             settings: egui::Popup::is_id_open(ui.ctx(), settings_id()) || self.sheet == Some(phone::Sheet::Settings),
         };
+        let skip = Skip::read(cx.services);
         let view = cx
             .services
             .playback
             .now_playing()
-            .map(|state| View::read(state, menus, self.show_remaining));
+            .map(|state| View::read(state, menus, self.show_remaining, skip));
 
         let now = ui.input(|input| input.time);
         if std::mem::take(&mut self.controls_appeared) || self.controls_since.is_none() {
@@ -1540,6 +1541,27 @@ impl SettingsMenu {
     }
 }
 
+/// Whether Previous and Next have somewhere to go, as `Services::can_skip` answers it (the
+/// group's queue in a SyncPlay group, the neighbouring episodes otherwise), read once for all
+/// three layouts. In a group the buttons name no episode, since the queue's entry may be
+/// anything.
+#[derive(Clone, Copy)]
+struct Skip {
+    previous: bool,
+    next: bool,
+    in_group: bool,
+}
+
+impl Skip {
+    fn read(services: &Services) -> Self {
+        Self {
+            previous: services.can_skip(false),
+            next: services.can_skip(true),
+            in_group: services.in_group(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Menus {
     chapters: bool,
@@ -1547,7 +1569,7 @@ struct Menus {
 }
 
 impl View {
-    fn read(state: &NowPlaying, menus: Menus, show_remaining: bool) -> Self {
+    fn read(state: &NowPlaying, menus: Menus, show_remaining: bool, skip: Skip) -> Self {
         let title = state.item.name.clone();
         let title_aside = (state.item.kind == BaseItemKind::Episode).then(|| {
             let (series, _) = card_text(&state.item);
@@ -1610,8 +1632,14 @@ impl View {
             time,
             chapter_marks,
             chapter_count: state.chapters.len(),
-            previous_tip: state.previous.as_ref().map(previous_tip),
-            next_tip: state.next.as_ref().map(next_tip),
+            previous_tip: skip.previous.then(|| match (skip.in_group, &state.previous) {
+                (false, Some(previous)) => previous_tip(previous),
+                _ => tr!("player-previous"),
+            }),
+            next_tip: skip.next.then(|| match (skip.in_group, &state.next) {
+                (false, Some(next)) => next_tip(next),
+                _ => tr!("player-next"),
+            }),
             versions: state.versions.clone(),
             source_id: state.source.id.clone(),
             version_name,

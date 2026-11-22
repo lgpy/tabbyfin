@@ -949,6 +949,23 @@ impl Services {
         }
     }
 
+    /// Whether [`Self::play_next`] (`forward`) or [`Self::play_previous`] has somewhere to go, which
+    /// is what the player's Next and Previous buttons show on. In a SyncPlay group that is an entry
+    /// of the group's queue, as those two move it; otherwise the series' neighbouring episode (or
+    /// collection movie, or queued item) of the item playing.
+    pub fn can_skip(&self, forward: bool) -> bool {
+        if self.in_group() {
+            return self.group_can_skip(forward);
+        }
+        self.playback.now_playing().is_some_and(|state| {
+            if forward {
+                state.next.is_some()
+            } else {
+                state.previous.is_some()
+            }
+        })
+    }
+
     /// Plays from the beginning instead of the resume point.
     pub fn start_over(&mut self) {
         let Some(state) = self.playback.now_playing.as_mut() else {

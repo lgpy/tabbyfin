@@ -4902,6 +4902,7 @@ dependencies = [
  "egui-wgpu",
  "egui_kittest",
  "egui_material_icons",
+ "fluent-syntax",
  "fs4",
  "futures-util",
  "gethostname",

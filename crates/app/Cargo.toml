@@ -101,6 +101,9 @@ mockup = ["egui_kittest/wgpu", "egui_kittest/snapshot"]
 # does.
 egui_kittest = "0.37"
 wiremock = "0.6.5"
+# Fluent's own parser, which `i18n-embed` already builds, to read the translation files in
+# `i18n.rs`'s tests (the version Cargo.lock has).
+fluent-syntax = "0.12"
 # The scripted Chromecast the casting tests cast to, on loopback.
 cast = { workspace = true, features = ["fake-device"] }
 # A local TLS server with a self-signed certificate, for the sign-in screen's probe
