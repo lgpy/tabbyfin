@@ -525,6 +525,8 @@ pub struct PlayerRun {
     player: Option<crate::views::player::PlayerPage>,
     /// What the page sent the session.
     pub sent: Option<tokio::sync::mpsc::UnboundedReceiver<crate::playback::UiCommand>>,
+    /// The keys the app took, waiting for this frame, as the shell hands the player its own.
+    keys: Vec<crate::keys::Press>,
 }
 
 impl PlayerRun {
@@ -534,7 +536,23 @@ impl PlayerRun {
             services: None,
             player: None,
             sent: None,
+            keys: Vec::new(),
         }
+    }
+
+    /// Queues the presses `keys::take` gave the shell for the next frame.
+    pub fn presses(&mut self, presses: impl IntoIterator<Item = crate::keys::Press>) {
+        self.keys.extend(presses);
+    }
+
+    /// The running session's state, as the page reads it.
+    pub fn now_playing(&self) -> Option<&crate::playback::NowPlaying> {
+        self.services.as_ref()?.playback.now_playing()
+    }
+
+    /// The running session's state, to move it as a test needs (near the end, say).
+    pub fn now_playing_mut(&mut self) -> Option<&mut crate::playback::NowPlaying> {
+        self.services.as_mut()?.playback.now_playing_mut()
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -582,13 +600,19 @@ impl PlayerRun {
             render_state: None,
             under_bar: None,
         };
-        self.player
-            .get_or_insert_with(crate::views::player::PlayerPage::new)
-            .show(ui, &mut cx);
+        let presses = std::mem::take(&mut self.keys);
+        let player = self.player.get_or_insert_with(crate::views::player::PlayerPage::new);
+        // As the shell routes them: the player's keys are the player's, before anything is drawn.
+        for press in presses {
+            if let Some(action) = press.action(crate::keys::Scope::Player) {
+                player.on_key(action, &mut cx);
+            }
+        }
+        player.show(ui, &mut cx);
     }
 
     /// The commands the page has sent since this was last asked.
-    fn commands(&mut self) -> Vec<crate::playback::UiCommand> {
+    pub fn commands(&mut self) -> Vec<crate::playback::UiCommand> {
         let sent = self.sent.as_mut().expect("the session started");
         std::iter::from_fn(|| sent.try_recv().ok()).collect()
     }

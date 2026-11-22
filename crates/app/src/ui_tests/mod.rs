@@ -45,8 +45,10 @@ pub mod login;
 pub mod menus;
 #[cfg(feature = "mockup")]
 pub mod mockups;
+pub mod player;
 pub mod settings;
 pub mod shelf;
+pub mod shell;
 pub mod states;
 pub mod theme;
 pub mod toasts;
