@@ -3,7 +3,8 @@
 //! The shared client's 30 s timeout is meant for API calls, where a slow answer means the
 //! server is in trouble. A download can take hours, so [`Client::download`] overrides it and
 //! fails on a stall instead: no bytes for [`STALL_TIMEOUT`] is a broken connection, whatever
-//! the file's size.
+//! the file's size. The wait for the response's headers counts too: a server that takes the
+//! connection and never answers is as broken as one that goes quiet mid-body.
 
 use std::time::Duration;
 
@@ -29,13 +30,18 @@ pub struct Download {
     /// The file's whole length, from `Content-Range` (206) or `Content-Length` (200), when the
     /// server says. Without it, a download only ends when the connection does.
     pub total: Option<u64>,
+    /// What identifies this version of the file, for a later `If-Range`
+    /// ([`Client::download_resuming`]): its strong `ETag`, else its `Last-Modified`. `None` when
+    /// the server sends neither, or only a weak `ETag`, which a range request may not compare.
+    pub validator: Option<String>,
+    stall: Duration,
 }
 
 impl Download {
     /// The next piece of the body, `None` once all of it has arrived. Fails with
     /// [`Error::Stalled`] when nothing arrives for [`STALL_TIMEOUT`].
     pub async fn chunk(&mut self) -> Result<Option<Vec<u8>>> {
-        match tokio::time::timeout(STALL_TIMEOUT, self.response.chunk()).await {
+        match tokio::time::timeout(self.stall, self.response.chunk()).await {
             Ok(Ok(Some(bytes))) => Ok(Some(bytes.to_vec())),
             Ok(Ok(None)) => Ok(None),
             Ok(Err(err)) => Err(Error::Http(err)),
@@ -56,23 +62,65 @@ impl Client {
     /// the rest of the file, which it may or may not honour (see [`Download::partial`]). Read
     /// the body with [`Download::chunk`].
     pub async fn download(&self, url: Url, offset: u64) -> Result<Download> {
+        self.download_with(url, offset, None, STALL_TIMEOUT).await
+    }
+
+    /// [`Client::download`] for a file that was started before. `if_range` is the
+    /// [`Download::validator`] the first response gave: the server sends the rest of the file
+    /// only while it is still that version, and the whole file again (a 200, so
+    /// [`Download::partial`] is `false`) once it isn't.
+    pub async fn download_resuming(&self, url: Url, offset: u64, if_range: Option<&str>) -> Result<Download> {
+        self.download_with(url, offset, if_range, STALL_TIMEOUT).await
+    }
+
+    /// [`Client::download_resuming`] with the stall limit given, for the tests: waiting for the
+    /// response and each piece of its body may go `stall` without an answer.
+    pub async fn download_with(
+        &self,
+        url: Url,
+        offset: u64,
+        if_range: Option<&str>,
+        stall: Duration,
+    ) -> Result<Download> {
         let mut request = self.http().get(url).timeout(TOTAL_TIMEOUT);
         if offset > 0 {
             request = request.header(header::RANGE, format!("bytes={offset}-"));
+            if let Some(validator) = if_range {
+                request = request.header(header::IF_RANGE, validator);
+            }
         }
-        let response = self.send(request).await?;
+        // `TOTAL_TIMEOUT` replaced the client's 30 s, so a server that takes the connection and
+        // never answers would hold this for hours: the wait for the headers has a stall limit too.
+        let response = tokio::time::timeout(stall, self.send(request))
+            .await
+            .map_err(|_| Error::Stalled)??;
         let partial = response.status() == StatusCode::PARTIAL_CONTENT;
         let total = if partial {
             content_range_total(&response)
         } else {
             response.content_length()
         };
+        let validator = validator(&response);
         Ok(Download {
             response,
             partial,
             total,
+            validator,
+            stall,
         })
     }
+}
+
+/// The response's strong `ETag`, or else its `Last-Modified`: both are valid in `If-Range`, but a
+/// weak `ETag` (`W/"…"`) never matches there, so it would only restart every resume.
+fn validator(response: &Response) -> Option<String> {
+    let text = |name| {
+        let value = response.headers().get(name)?.to_str().ok()?.trim();
+        (!value.is_empty()).then(|| value.to_owned())
+    };
+    text(header::ETAG)
+        .filter(|etag| !etag.starts_with("W/"))
+        .or_else(|| text(header::LAST_MODIFIED))
 }
 
 /// The file's length in a `Content-Range: bytes 100-599/600` header. The server may send `*`

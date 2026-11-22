@@ -37,6 +37,12 @@ pub enum Error {
 }
 
 impl Error {
+    /// Whether the server refused a range request as past the end of its file (416). A resumed
+    /// download gets it when its `.part` already holds everything, or more than the file now has.
+    pub fn is_range_not_satisfiable(&self) -> bool {
+        matches!(self, Error::Status { status: 416, .. })
+    }
+
     /// Whether the request failed because the server's TLS certificate was refused (expired,
     /// self-signed, or for another name). Something answers TLS at that address, so it must not
     /// be tried again over plain HTTP.
