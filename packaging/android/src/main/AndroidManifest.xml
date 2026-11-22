@@ -47,7 +47,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|fontScale|locale|layoutDirection|touchscreen|colorMode|mcc|mnc|grammaticalGender"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|fontScale|locale|layoutDirection|touchscreen|colorMode|mcc|mnc|grammaticalGender|fontWeightAdjustment"
             android:windowSoftInputMode="adjustResize">
             <meta-data android:name="android.app.lib_name" android:value="tabbyfin" />
             <intent-filter>
