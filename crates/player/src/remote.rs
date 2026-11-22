@@ -26,7 +26,55 @@ use crate::{EndReason, Error, PlayerEvent, Result};
 #[cfg(target_os = "linux")]
 pub(crate) const FD_ENV: &str = "TABBYFIN_PLAYER_FD";
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<()>>>>>;
+type Reply = oneshot::Sender<Result<()>>;
+
+/// The replies a caller awaits, by request id. Once the host is gone it's closed: nothing will
+/// ever answer, so a request made after that must fail at once instead of waiting forever, and
+/// the check and the drain share one lock so none can slip in between them.
+#[derive(Default)]
+struct Replies {
+    awaiting: Mutex<Awaiting>,
+}
+
+#[derive(Default)]
+struct Awaiting {
+    replies: HashMap<u64, Reply>,
+    closed: bool,
+}
+
+type Pending = Arc<Replies>;
+
+impl Replies {
+    /// Starts waiting for the reply to `id`, or `Error::Closed` if the host is gone.
+    fn expect(&self, id: u64) -> Result<oneshot::Receiver<Result<()>>> {
+        let mut awaiting = self.awaiting.lock().unwrap();
+        if awaiting.closed {
+            return Err(Error::Closed);
+        }
+        let (tx, rx) = oneshot::channel();
+        awaiting.replies.insert(id, tx);
+        Ok(rx)
+    }
+
+    fn cancel(&self, id: u64) {
+        self.awaiting.lock().unwrap().replies.remove(&id);
+    }
+
+    fn answer(&self, id: u64, result: Result<()>) {
+        if let Some(reply) = self.awaiting.lock().unwrap().replies.remove(&id) {
+            let _ = reply.send(result);
+        }
+    }
+
+    /// The host is gone: fails every waiting caller and every later one.
+    fn close(&self) {
+        let mut awaiting = self.awaiting.lock().unwrap();
+        awaiting.closed = true;
+        for (_, reply) in awaiting.replies.drain() {
+            let _ = reply.send(Err(Error::Closed));
+        }
+    }
+}
 
 pub struct RemotePlayer {
     requests: mpsc::UnboundedSender<Request>,
@@ -76,11 +124,11 @@ impl RemotePlayer {
         }
 
         let (requests, requests_rx) = mpsc::unbounded_channel();
-        tokio::spawn(write_requests(stdin, requests_rx));
+        let pending: Pending = Default::default();
+        tokio::spawn(write_requests(stdin, requests_rx, pending.clone()));
 
         let (events_tx, events) = mpsc::unbounded_channel();
         let (frames_tx, frames) = watch::channel(None);
-        let pending: Pending = Default::default();
         tokio::spawn(read_messages(
             stdout,
             events_tx,
@@ -122,19 +170,25 @@ impl RemotePlayer {
 
     async fn call(&self, request: impl FnOnce(u64) -> Request) -> Result<()> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (reply_tx, reply) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, reply_tx);
+        let reply = self.pending.expect(id)?;
         if self.requests.send(request(id)).is_err() {
-            self.pending.lock().unwrap().remove(&id);
+            self.pending.cancel(id);
             return Err(Error::Closed);
         }
         reply.await.map_err(|_| Error::Closed)?
     }
 }
 
-async fn write_requests(mut stdin: BufWriter<ChildStdin>, mut requests: mpsc::UnboundedReceiver<Request>) {
+async fn write_requests(
+    mut stdin: BufWriter<ChildStdin>,
+    mut requests: mpsc::UnboundedReceiver<Request>,
+    pending: Pending,
+) {
     while let Some(request) = requests.recv().await {
         if wire::write(&mut stdin, &request, &[]).await.is_err() {
+            // The pipe is dead, so no reply will come; don't leave callers waiting for one
+            // before the reader notices.
+            pending.close();
             break;
         }
     }
@@ -164,9 +218,7 @@ async fn read_messages(
                 let _ = events.send(event);
             }
             Message::Reply { id, result } => {
-                if let Some(reply) = pending.lock().unwrap().remove(&id) {
-                    let _ = reply.send(result.map_err(Error::from));
-                }
+                pending.answer(id, result.map_err(Error::from));
             }
             Message::Pixels { width, height } => {
                 let frame = VideoFrame {
@@ -224,9 +276,7 @@ async fn read_messages(
         let _ = events.send(PlayerEvent::EndFile(reason));
         let _ = events.send(PlayerEvent::Exited);
     }
-    for (_, reply) in pending.lock().unwrap().drain() {
-        let _ = reply.send(Err(Error::Closed));
-    }
+    pending.close();
 }
 
 /// Logs what the host writes to stderr (its own log, already formatted) under `player`.
@@ -346,5 +396,32 @@ impl FdTable {
                 return None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closing_fails_the_waiting_and_the_later() {
+        let replies = Replies::default();
+        let mut waiting = replies.expect(1).unwrap();
+        replies.close();
+        assert!(matches!(waiting.try_recv(), Ok(Err(Error::Closed))));
+        // The host is gone: a request made now doesn't wait for a reply that can't come.
+        assert!(matches!(replies.expect(2), Err(Error::Closed)));
+    }
+
+    #[test]
+    fn a_reply_reaches_its_caller_only() {
+        let replies = Replies::default();
+        let mut first = replies.expect(1).unwrap();
+        let mut second = replies.expect(2).unwrap();
+        replies.answer(2, Ok(()));
+        assert!(matches!(second.try_recv(), Ok(Ok(()))));
+        assert!(first.try_recv().is_err());
+        replies.cancel(1);
+        assert!(matches!(first.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
     }
 }
