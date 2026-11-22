@@ -26,7 +26,7 @@ use crate::{EndReason, Error, PlayerEvent, Result};
 #[cfg(target_os = "linux")]
 pub(crate) const FD_ENV: &str = "TABBYFIN_PLAYER_FD";
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<()>>>>>;
+type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Option<String>>>>>>;
 
 pub struct RemotePlayer {
     requests: mpsc::UnboundedSender<Request>,
@@ -112,15 +112,23 @@ impl RemotePlayer {
     }
 
     pub async fn command(&self, args: Vec<Value>) -> Result<()> {
-        self.call(|id| Request::Command { id, args }).await
+        self.call(|id| Request::Command { id, args }).await.map(|_| ())
     }
 
     pub async fn set_property(&self, name: &str, value: Value) -> Result<()> {
         let name = name.to_owned();
-        self.call(|id| Request::SetProperty { id, name, value }).await
+        self.call(|id| Request::SetProperty { id, name, value })
+            .await
+            .map(|_| ())
     }
 
-    async fn call(&self, request: impl FnOnce(u64) -> Request) -> Result<()> {
+    pub async fn get_property(&self, name: &str) -> Result<String> {
+        let name = name.to_owned();
+        let reply = self.call(|id| Request::GetProperty { id, name }).await?;
+        reply.ok_or_else(|| Error::Host("the player process sent no value".into()))
+    }
+
+    async fn call(&self, request: impl FnOnce(u64) -> Request) -> Result<Option<String>> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (reply_tx, reply) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, reply_tx);

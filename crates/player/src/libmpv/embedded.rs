@@ -155,6 +155,14 @@ impl EmbeddedPlayer {
         self.core.command(&refs)
     }
 
+    /// A property as text; lists and maps (like `audio-device-list`) come as JSON.
+    pub fn get_property(&self, name: &str) -> Result<String> {
+        self.core.get_string(name).ok_or_else(|| Error::Command {
+            command: format!("get {name}"),
+            message: "property unavailable".into(),
+        })
+    }
+
     pub fn set_property(&self, name: &str, value: &Value) -> Result<()> {
         match value {
             // String lists (e.g. http-header-fields): replace the whole list without splitting

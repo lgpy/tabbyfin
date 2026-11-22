@@ -70,6 +70,31 @@ pub struct Config {
     /// to the receiver, which measures the connection itself.
     #[serde(default)]
     pub cast_max_bitrate: Option<u64>,
+    /// The audio output's mpv device name (`audio-device`). `None` is automatic. A device
+    /// that's gone plays through the automatic one.
+    #[serde(default)]
+    pub audio_device: Option<String>,
+    /// The channel layout sent to the device. `None` is automatic (mpv's `auto-safe`).
+    #[serde(default)]
+    pub audio_channels: Option<player::Channels>,
+    /// Formats passed through to a receiver undecoded. `None` means no, for each.
+    #[serde(default)]
+    pub passthrough_ac3: Option<bool>,
+    #[serde(default)]
+    pub passthrough_eac3: Option<bool>,
+    #[serde(default)]
+    pub passthrough_dts: Option<bool>,
+    #[serde(default)]
+    pub passthrough_dts_hd: Option<bool>,
+    #[serde(default)]
+    pub passthrough_truehd: Option<bool>,
+    /// Exclusive access to the audio device, where the output has such a mode. `None` means no.
+    #[serde(default)]
+    pub audio_exclusive: Option<bool>,
+    /// Compress loud scenes and lift quiet ones; the player's menu changes it per session.
+    /// `None` means off.
+    #[serde(default)]
+    pub night_mode: Option<bool>,
     /// Play the next episode when one ends. `None` means yes.
     #[serde(default)]
     pub autoplay_next_episode: Option<bool>,
@@ -326,6 +351,24 @@ impl Config {
         cfg!(target_os = "android") && self.download_wifi_only.unwrap_or(true)
     }
 
+    /// The audio output's settings for a player.
+    pub fn audio_settings(&self) -> player::AudioSettings {
+        let on = |setting: Option<bool>| setting.unwrap_or(false);
+        player::AudioSettings {
+            device: self.audio_device.clone(),
+            channels: self.audio_channels.unwrap_or_default(),
+            passthrough: player::Passthrough {
+                ac3: on(self.passthrough_ac3),
+                eac3: on(self.passthrough_eac3),
+                dts: on(self.passthrough_dts),
+                dts_hd: on(self.passthrough_dts_hd),
+                truehd: on(self.passthrough_truehd),
+            },
+            exclusive: on(self.audio_exclusive),
+            night_mode: on(self.night_mode),
+        }
+    }
+
     /// Loads the config, creating it (with a fresh device id) if missing or unreadable.
     pub fn load() -> Self {
         let mut config = match std::fs::read_to_string(path()) {
@@ -438,6 +481,35 @@ mod tests {
         config.list_current_account();
         config.list_current_account();
         assert_eq!(config.accounts, [account("s1", "u1")]);
+    }
+
+    #[test]
+    fn a_config_from_before_the_audio_settings_plays_as_mpv_does() {
+        let config: Config = toml::from_str("device_id = \"d\"
+volume = 80.0
+").expect("parses");
+        assert_eq!(config.audio_settings(), player::AudioSettings::default());
+    }
+
+    #[test]
+    fn the_audio_settings_are_saved_and_read_back() {
+        let config = Config {
+            audio_device: Some("wasapi/{abc}".into()),
+            audio_channels: Some(player::Channels::Surround5_1),
+            passthrough_eac3: Some(true),
+            passthrough_truehd: Some(true),
+            audio_exclusive: Some(true),
+            night_mode: Some(true),
+            ..Default::default()
+        };
+        let saved = toml::to_string(&config).expect("serializes");
+        assert!(saved.contains("audio_channels = \"5.1\""), "{saved}");
+        let read: Config = toml::from_str(&saved).expect("parses");
+        let settings = read.audio_settings();
+        assert_eq!(settings.device.as_deref(), Some("wasapi/{abc}"));
+        assert_eq!(settings.channels, player::Channels::Surround5_1);
+        assert_eq!(settings.passthrough.mpv(), "eac3,truehd");
+        assert!(settings.exclusive && settings.night_mode);
     }
 
     #[test]

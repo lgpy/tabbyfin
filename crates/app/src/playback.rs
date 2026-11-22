@@ -1365,6 +1365,35 @@ fn subtitle_index(choice: SubtitleChoice) -> Option<i32> {
     }
 }
 
+/// Sets the audio output's mpv options from the settings, which only the desktop's mpv has
+/// (Android's mpv is `ao=aaudio` and its own default player is Media3). A device that's no
+/// longer there is left out, so playback goes to the automatic one; a rejected option is logged
+/// and skipped rather than failing the playback. Returns what was applied.
+async fn apply_audio(player: &Player, mut settings: player::AudioSettings) -> player::AudioSettings {
+    if cfg!(target_os = "android") {
+        return settings;
+    }
+    if let Some(device) = settings.device.clone() {
+        let present = match player.audio_devices().await {
+            Ok(devices) => devices.iter().any(|d| d.name == device),
+            Err(err) => {
+                tracing::debug!("couldn't list the audio devices: {err}");
+                false
+            }
+        };
+        if !present {
+            tracing::warn!(%device, "the chosen audio device isn't there; using the automatic one");
+            settings.device = None;
+        }
+    }
+    for (name, value) in settings.properties() {
+        if let Err(err) = player.set_property(name, value.as_str()).await {
+            tracing::warn!("mpv didn't take {name}={value}: {err}");
+        }
+    }
+    settings
+}
+
 async fn start_player(
     import: VideoImport,
 ) -> Result<(Player, mpsc::UnboundedReceiver<PlayerEvent>, VideoOutput), String> {
@@ -1677,6 +1706,9 @@ async fn run_session(
             .await
             .map_err(|err| err.to_string())?;
     }
+    // The audio output before the volume: `volume-max` sets how far the volume goes.
+    let config = Config::load();
+    apply_audio(&player, config.audio_settings()).await;
     player
         .set_property("volume", volume)
         .await
@@ -1687,7 +1719,6 @@ async fn run_session(
         .map_err(|err| err.to_string())?;
     // Cosmetic, so a property this mpv doesn't have is skipped: before 0.38 there's no
     // `sub-border-style`, and a visible `sub-back-color` draws the box on its own.
-    let config = Config::load();
     for (name, value) in subtitle_look(
         config.subtitle_color.unwrap_or_default(),
         config.subtitle_style.unwrap_or_default(),

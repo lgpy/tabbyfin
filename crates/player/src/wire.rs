@@ -25,6 +25,9 @@ pub enum Request {
     Command { id: u64, args: Vec<Value> },
     /// An mpv property; answered with [`Message::Reply`].
     SetProperty { id: u64, name: String, value: Value },
+    /// Reads an mpv property as text (JSON for a list or map); answered with [`Message::Reply`]
+    /// carrying the text.
+    GetProperty { id: u64, name: String },
     /// The video's on-screen size in device pixels.
     SetTarget { width: u32, height: u32 },
 }
@@ -34,9 +37,10 @@ pub enum Request {
 pub enum Message {
     /// Sent once, after [`Request::Start`]: libmpv and the video output are up, or why not.
     Started(Result<(), WireError>),
+    /// The answer to a request: the property's text for [`Request::GetProperty`], else `None`.
     Reply {
         id: u64,
-        result: Result<(), WireError>,
+        result: Result<Option<String>, WireError>,
     },
     Event(PlayerEvent),
     /// A software-rendered frame; the payload is its pixels as a [`crate::libmpv::VideoFrame`]
