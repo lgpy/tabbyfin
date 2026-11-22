@@ -112,6 +112,22 @@ impl LocalQueue {
         true
     }
 
+    /// What played from this queue right before the current item, which Previous goes back to.
+    pub fn last_played(&self) -> Option<&BaseItemDto> {
+        self.played.last()
+    }
+
+    /// Goes back one: the entry that played last is to play now, and `current` is the first of
+    /// what's coming again. `None` with nothing played.
+    pub fn step_back(&mut self, current: &BaseItemDto) -> Option<BaseItemDto> {
+        let previous = self.played.pop()?;
+        if self.shuffled {
+            self.unshuffled.insert(0, current.id.clone());
+        }
+        self.upcoming.push_front(current.clone());
+        Some(previous)
+    }
+
     /// Takes the entry at `index` to play now: `previous`, the item playing, and the entries
     /// before it join what played. `None` past the end.
     pub fn jump(&mut self, index: usize, previous: Option<&BaseItemDto>) -> Option<BaseItemDto> {
@@ -291,6 +307,35 @@ mod tests {
         let first = queue.restart(&item("d")).expect("a restart");
         assert_eq!(first.id, "a");
         assert_eq!(ids(&queue), ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn stepping_back_plays_what_played_and_puts_the_current_item_first_again() {
+        let mut queue = queue(&["b", "c"]);
+        queue.advance(&item("b"), Some(&item("a")));
+        queue.advance(&item("c"), Some(&item("b")));
+        assert_eq!(queue.last_played().map(|item| item.id.as_str()), Some("b"));
+        assert!(queue.is_empty());
+
+        assert_eq!(queue.step_back(&item("c")).map(|item| item.id), Some("b".to_owned()));
+        assert_eq!(ids(&queue), ["c"]);
+        assert_eq!(queue.step_back(&item("b")).map(|item| item.id), Some("a".to_owned()));
+        assert_eq!(ids(&queue), ["b", "c"]);
+        // Nothing before the first: nothing to go back to.
+        assert!(queue.step_back(&item("a")).is_none());
+        assert_eq!(ids(&queue), ["b", "c"]);
+    }
+
+    #[test]
+    fn stepping_back_in_a_shuffled_queue_keeps_the_way_back_to_its_order() {
+        let mut queue = queue(&["b", "c", "d"]);
+        queue.set_shuffle(true);
+        queue.advance(&item(queue.front().expect("an entry").id.clone().as_str()), Some(&item("a")));
+        let playing = item("x");
+        queue.step_back(&playing);
+        assert_eq!(queue.front().map(|item| item.id.as_str()), Some("x"));
+        queue.set_shuffle(false);
+        assert_eq!(queue.front().map(|item| item.id.as_str()), Some("x"));
     }
 
     #[test]

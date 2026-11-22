@@ -427,6 +427,9 @@ pub struct NowPlaying {
     /// The item before this one: the previous episode, or the previous movie of its
     /// collection.
     pub previous: Option<BaseItemDto>,
+    /// The previous episode or movie of its collection, which `previous` falls back to when the
+    /// queue has nothing played before this item.
+    neighbour_previous: Option<BaseItemDto>,
     /// What plays next: the queue's next item, the following episode, or the following movie
     /// of the item's collection.
     pub next: Option<BaseItemDto>,
@@ -536,9 +539,12 @@ impl NowPlaying {
 
     /// What plays next now that the queue's front is `front`: that, or the following episode
     /// when the queue is empty.
-    fn follow_queue(&mut self, front: Option<&BaseItemDto>) {
+    ///
+    /// The item before this one is what the queue played before it, or the previous episode.
+    fn follow_queue(&mut self, front: Option<&BaseItemDto>, played: Option<&BaseItemDto>) {
         self.next_queued = front.is_some();
         self.next = front.cloned().or_else(|| self.following.clone());
+        self.previous = played.cloned().or_else(|| self.neighbour_previous.clone());
     }
 
     /// What plays this item again as it plays now: the same version, audio and subtitle.
@@ -592,11 +598,13 @@ impl NowPlaying {
     }
 
     /// Takes the details fetched after the start. `queued`: the play queue has items, which take
-    /// the place of the next episode.
-    fn apply_details(&mut self, details: Details, queued: bool) {
+    /// the place of the next episode; `played`: what it played right before this item, which is
+    /// the previous one.
+    fn apply_details(&mut self, details: Details, queued: bool, played: Option<&BaseItemDto>) {
         self.versions = details.versions;
         self.trickplay = details.trickplay;
-        self.previous = details.previous;
+        self.neighbour_previous = details.previous;
+        self.previous = played.cloned().or_else(|| self.neighbour_previous.clone());
         self.following = details.next;
         self.following_in_collection = details.next_in_collection;
         if !queued {
@@ -872,6 +880,7 @@ impl PlaybackManager {
             versions: Vec::new(),
             trickplay: TrickplayTiles::new(),
             previous: None,
+            neighbour_previous: None,
             next: None,
             next_queued: false,
             following: None,
@@ -934,9 +943,9 @@ impl PlaybackManager {
     /// Shows the playing item's `next` as the queue's front, or the following episode once the
     /// queue is empty.
     fn refresh_next(&mut self) {
-        let front = self.queue.front().cloned();
+        let (front, played) = (self.queue.front().cloned(), self.queue.last_played().cloned());
         if let Some(state) = &mut self.now_playing {
-            state.follow_queue(front.as_ref());
+            state.follow_queue(front.as_ref(), played.as_ref());
         }
     }
 
@@ -1416,10 +1425,20 @@ impl Services {
         }
     }
 
-    /// Plays the previous episode (or movie of the collection) from its resume point.
+    /// Plays the previous item from its resume point: what the queue played before this one,
+    /// keeping the queue (this item is next again), or else the previous episode (or movie of
+    /// the collection).
     pub fn play_previous(&mut self) {
         if self.is_casting() {
             self.cast_skip(false);
+            return;
+        }
+        if !self.in_group()
+            && let Some(current) = self.playback.started.clone()
+            && let Some(previous) = self.playback.queue.step_back(&current)
+        {
+            self.playback.refresh_next();
+            self.play_now(&previous, resume_options(&previous));
             return;
         }
         if let Some(previous) = self.playback.now_playing().and_then(|state| state.previous.clone()) {
@@ -1783,7 +1802,8 @@ impl Services {
                     night_available: running.night_available,
                     versions: Vec::new(),
                     trickplay: TrickplayTiles::new(),
-                    previous: None,
+                    previous: playback.queue.last_played().cloned(),
+                    neighbour_previous: None,
                     // Read when the session starts, not when it was asked for: a remote play
                     // next or last queued while it was loading counts too.
                     next: playback.queue.front().cloned(),
@@ -1810,8 +1830,9 @@ impl Services {
             SessionUpdate::Details(details) => {
                 // Items queued since the start (remote control) count too.
                 let queued = !playback.queue.is_empty();
+                let played = playback.queue.last_played().cloned();
                 if let Some(state) = playback.state_of(generation) {
-                    state.apply_details(*details, queued);
+                    state.apply_details(*details, queued, played.as_ref());
                 }
             }
             SessionUpdate::Stats(stats) => {
