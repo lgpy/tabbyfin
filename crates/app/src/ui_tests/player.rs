@@ -210,6 +210,55 @@ fn a_segment_set_to_skip_is_skipped_and_undo_goes_back() {
     assert!(harness.state_mut().commands().is_empty(), "not skipped again");
 }
 
+/// After Undo the segment isn't skipped again by a restart of the same item (a reconnect, a
+/// track switch on a transcode), only for another item.
+#[test]
+fn undo_is_remembered_across_a_restart_of_the_item_but_not_for_another_item() {
+    use crate::config::SkipAction;
+    use crate::markers::SegmentKind;
+
+    let _config = ConfigDir::new("player-undo-restart");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let (item, source, next, segments) = {
+        let state = harness.state_mut().now_playing_mut().expect("the session");
+        state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+        (
+            state.item.clone(),
+            state.source.clone(),
+            state.next.clone().expect("a next episode"),
+            state.segments.clone(),
+        )
+    };
+    harness.step();
+    harness.get_by_label("Undo").click();
+    harness.step();
+    harness.step();
+    harness.state_mut().commands();
+
+    // The same item again, in a new session: back inside the intro, and left alone.
+    let restart = |harness: &mut Harness<'static, PlayerRun>, item: &jellyfin::models::BaseItemDto| {
+        let services = harness.state_mut().services_mut().expect("the services");
+        let sent = services.playback.start_for_test(item.clone(), source.clone());
+        let state = services.playback.now_playing_mut().expect("the new session");
+        state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+        state.segments = segments.clone();
+        harness.state_mut().sent = Some(sent);
+        harness.step();
+        harness.step();
+        harness.state_mut().commands()
+    };
+    let sent = restart(&mut harness, &item);
+    assert!(sent.is_empty(), "not skipped again: {sent:?}");
+
+    // Another item's intro is skipped as usual.
+    let sent = restart(&mut harness, &next);
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 13 * 60),
+        "{sent:?}"
+    );
+}
+
 /// A kind set to Off has no button and isn't skipped; Enter leaves it alone.
 #[test]
 fn a_segment_set_to_off_is_left_alone() {

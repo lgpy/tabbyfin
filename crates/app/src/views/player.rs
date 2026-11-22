@@ -189,8 +189,10 @@ pub struct PlayerPage {
     /// click restores.
     paused_before_click: bool,
     /// The start of each segment skipped automatically, so seeking back into one (Undo included)
-    /// doesn't skip it again.
+    /// doesn't skip it again, and the item they belong to: a restart of it (a reconnect, another
+    /// track) keeps them.
     auto_skipped: Vec<Duration>,
+    auto_skipped_item: Option<String>,
     /// The segment just skipped by itself, while its notice shows.
     skipped: Option<(SegmentKind, Duration)>,
     skipped_notice: task::Deadline,
@@ -242,6 +244,7 @@ impl PlayerPage {
             scroll_pending: 0.,
             paused_before_click: false,
             auto_skipped: Vec::new(),
+            auto_skipped_item: None,
             skipped: None,
             skipped_notice: task::Deadline::default(),
             trickplay: None,
@@ -289,8 +292,13 @@ impl PlayerPage {
         self.sync_video(cx);
         self.queue_keys(cx);
         self.queue_dialog(cx);
-        if let Some(session) = cx.services.playback.now_playing().map(|state| state.session) {
-            self.follow_session(ui.ctx(), session);
+        if let Some((session, item)) = cx
+            .services
+            .playback
+            .now_playing()
+            .map(|state| (state.session, state.item.id.clone()))
+        {
+            self.follow_session(ui.ctx(), session, &item);
             self.auto_skip(cx);
             self.poll_info(cx);
             self.ensure_trickplay(cx);
@@ -448,15 +456,19 @@ impl PlayerPage {
         );
     }
 
-    /// The session changed: what belongs to one item starts over, and the menus close.
-    fn follow_session(&mut self, ctx: &egui::Context, session: u64) {
+    /// The session changed: what belongs to one session starts over, and the menus close. What
+    /// belongs to the item (the segments already skipped) does only for another item.
+    fn follow_session(&mut self, ctx: &egui::Context, session: u64, item: &str) {
         if self.session == Some(session) {
             return;
         }
         self.session = Some(session);
         self.scrub = None;
         self.trickplay = None;
-        self.auto_skipped.clear();
+        if self.auto_skipped_item.as_deref() != Some(item) {
+            self.auto_skipped.clear();
+            self.auto_skipped_item = Some(item.to_owned());
+        }
         self.skipped = None;
         self.skipped_notice.cancel();
         self.adjusting_volume = false;
