@@ -675,7 +675,7 @@ fn mockup_rows_media() {
 // drawn in place rather than over a page.
 
 /// The surfaces
-/// `surface::frame` with a centred `heading`, its three notices and a `waiting` line; beside it
+/// `surface::frame` with a centred `heading`, its four notices and a `waiting` line; beside it
 /// `heading_left` on a surface, and a `strip` holding a page's toolbar.
 #[test]
 fn mockup_surfaces_panel() {
@@ -698,6 +698,8 @@ fn mockup_surfaces_panel() {
                                     surface::notice(ui, surface::Kind::Info, "The server is starting up.");
                                     ui.add_space(surface::GAP_FIELD);
                                     surface::notice(ui, surface::Kind::Success, "Signed in.");
+                                    ui.add_space(surface::GAP_FIELD);
+                                    surface::notice(ui, surface::Kind::Warning, "This connection isn't encrypted.");
                                     ui.add_space(surface::GAP_FIELD);
                                     surface::waiting(ui, "Waiting for approval…");
                                 });

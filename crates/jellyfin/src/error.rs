@@ -36,4 +36,37 @@ pub enum Error {
     Decode { path: String, source: serde_json::Error },
 }
 
+impl Error {
+    /// Whether the request failed because the server's TLS certificate was refused (expired,
+    /// self-signed, or for another name). Something answers TLS at that address, so it must not
+    /// be tried again over plain HTTP.
+    pub fn is_certificate(&self) -> bool {
+        let Error::Http(err) = self else { return false };
+        let mut source = Some(err as &(dyn std::error::Error + 'static));
+        while let Some(err) = source {
+            if matches!(tls_error(err), Some(rustls::Error::InvalidCertificate(_))) {
+                return true;
+            }
+            source = err.source();
+        }
+        false
+    }
+}
+
+/// rustls's error out of `err`, which is one itself or an `io::Error` carrying it. The handshake's
+/// failure arrives as an `io::Error` inside another, and `source()` skips over what an `io::Error`
+/// wraps, so each level is opened by hand.
+fn tls_error<'a>(err: &'a (dyn std::error::Error + 'static)) -> Option<&'a rustls::Error> {
+    if let Some(tls) = err.downcast_ref::<rustls::Error>() {
+        return Some(tls);
+    }
+    let mut inner = err.downcast_ref::<std::io::Error>()?.get_ref()?;
+    loop {
+        if let Some(tls) = inner.downcast_ref::<rustls::Error>() {
+            return Some(tls);
+        }
+        inner = inner.downcast_ref::<std::io::Error>()?.get_ref()?;
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;

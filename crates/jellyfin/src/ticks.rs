@@ -29,7 +29,7 @@ impl From<Duration> for Ticks {
 impl From<Ticks> for Duration {
     /// Negative ticks (seen from some servers for unknown positions) clamp to zero.
     fn from(t: Ticks) -> Self {
-        Duration::from_nanos(t.0.max(0) as u64 * 100)
+        Duration::from_nanos((t.0.max(0) as u64).saturating_mul(100))
     }
 }
 
@@ -46,5 +46,7 @@ mod tests {
         assert_eq!(Ticks::from_secs_f64(1.5), Ticks(15_000_000));
         assert_eq!(Ticks(15_000_000).as_secs_f64(), 1.5);
         assert_eq!(Duration::from(Ticks(-5)), Duration::ZERO);
+        // The server's number, however big: no overflow.
+        assert_eq!(Duration::from(Ticks(i64::MAX)), Duration::from_nanos(u64::MAX));
     }
 }

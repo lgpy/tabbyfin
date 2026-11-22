@@ -7,7 +7,7 @@ use egui::{
     CornerRadius, FontId, Frame, Margin, Rect, RichText, Sense, Shadow, Spinner, Stroke, Ui, Vec2, WidgetInfo, pos2,
     vec2,
 };
-use egui_material_icons::icons::{ICON_CHECK_CIRCLE, ICON_ERROR, ICON_INFO};
+use egui_material_icons::icons::{ICON_CHECK_CIRCLE, ICON_ERROR, ICON_INFO, ICON_WARNING};
 
 use crate::i18n::tr;
 use crate::theme::{self, SPACE, text};
@@ -128,6 +128,8 @@ pub enum Kind {
     Info,
     /// Something worked.
     Success,
+    /// Something to weigh before going on (a connection that isn't encrypted).
+    Warning,
 }
 
 impl Kind {
@@ -137,6 +139,7 @@ impl Kind {
             Self::Danger => tr!("widget-error"),
             Self::Info => tr!("widget-information"),
             Self::Success => tr!("widget-success"),
+            Self::Warning => tr!("widget-warning"),
         }
     }
 
@@ -147,6 +150,7 @@ impl Kind {
             Self::Danger => "Error",
             Self::Info => "Information",
             Self::Success => "Success",
+            Self::Warning => "Warning",
         }
     }
 }
@@ -160,6 +164,7 @@ pub fn notice(ui: &mut Ui, kind: Kind, message: &str) {
         Kind::Danger => (tokens.danger, ICON_ERROR),
         Kind::Info => (tokens.info, ICON_INFO),
         Kind::Success => (tokens.success, ICON_CHECK_CIRCLE),
+        Kind::Warning => (tokens.warning, ICON_WARNING),
     };
     let font = text::font(ui, "base");
     Frame::new()

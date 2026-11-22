@@ -5,7 +5,7 @@ use url::Url;
 
 use crate::client::Query;
 use crate::models::{MediaSourceInfo, MediaStream};
-use crate::{Client, Result, Ticks};
+use crate::{Client, Error, Result, Ticks};
 
 #[derive(Debug, Clone, Default)]
 pub struct PlaybackInfoRequest {
@@ -217,8 +217,25 @@ impl Client {
     /// A server-relative URL from a `PlaybackInfo` response (`TranscodingUrl`, `DeliveryUrl`)
     /// made absolute, without the `ApiKey` the server puts in it: authenticate with
     /// [`Client::authorization_header`] instead, so the token stays out of logs.
-    pub fn transcode_url(&self, relative: &str) -> Url {
-        let mut url = self.url(relative);
+    ///
+    /// The server writes this string, and whatever plays the URL sends it the token: one that
+    /// names another host (or a file, or isn't a URL at all), climbs out of the server's own
+    /// path or carries a login is refused, not followed.
+    pub fn transcode_url(&self, relative: &str) -> Result<Url> {
+        let refused = || Error::InvalidUrl("a stream URL that leaves the server".into());
+        let mut url = self
+            .base_url()
+            .join(relative.trim_start_matches('/'))
+            .map_err(|_| refused())?;
+        let base = self.base_url();
+        // An encoded slash is a path separator to the proxies that decode it, so `..%2f` climbs.
+        let path = url.path().to_ascii_lowercase();
+        let climbs = !url.path().starts_with(base.path()) || path.contains("%2f") || path.contains("%5c");
+        // The base's own login (a proxy's basic auth in the address) comes along in the join.
+        let login = (url.username(), url.password()) != (base.username(), base.password());
+        if url.origin() != base.origin() || climbs || login {
+            return Err(refused());
+        }
         let pairs: Vec<(String, String)> = url
             .query_pairs()
             .filter(|(key, _)| !key.eq_ignore_ascii_case("apikey") && !key.eq_ignore_ascii_case("api_key"))
@@ -228,7 +245,7 @@ impl Client {
         if !pairs.is_empty() {
             url.query_pairs_mut().extend_pairs(pairs);
         }
-        url
+        Ok(url)
     }
 
     /// Ends the server's transcode for a play session (it would otherwise run on for a while).

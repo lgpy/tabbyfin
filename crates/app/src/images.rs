@@ -499,16 +499,32 @@ impl<K: Hash + Eq + Clone, V> Lru<K, V> {
     }
 }
 
+/// The longest id or tag kept in a file name; real ones are 32 hex digits.
+const NAME_PART_MAX: usize = 64;
+
+/// A server's id or tag as one safe piece of a file name. The server controls both, so a
+/// `../` or a drive letter in one must not reach outside the cache folder: only ASCII letters,
+/// digits and `-` stay (real ids and tags are hex), no dots either since `..` names the parent.
+fn name_part(value: &str) -> String {
+    value
+        .chars()
+        .take(NAME_PART_MAX)
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .collect()
+}
+
 /// The image tag changes whenever the image does, so it's part of the file name and stale
-/// entries are simply never read again.
+/// entries are simply never read again. The result is always `dir/<shard>/<name>`.
 fn cache_path(dir: &Path, req: &ImageRequest) -> PathBuf {
-    let shard = req.item_id.get(..2).unwrap_or("xx");
+    let id = name_part(&req.item_id);
+    let tag = req.tag.as_deref().map_or_else(|| "none".to_owned(), name_part);
+    let shard = id.get(..2).unwrap_or("xx");
     let name = format!(
         "{}-{}-{}-{}-{}x{}",
-        req.item_id,
+        id,
         req.image_type.as_str().unwrap_or("Other"),
         req.index.unwrap_or(0),
-        req.tag.as_deref().unwrap_or("none"),
+        tag,
         req.fill_width.unwrap_or(0),
         req.fill_height.unwrap_or(0),
     );
@@ -537,7 +553,9 @@ mod tests {
     use jellyfin::Client;
     use jellyfin::models::ImageType;
 
-    use super::{Entry, ImageCache, KEEP_RECENT, Key, Lru, MEMORY_BUDGET, STALE, TEXTURE_OPTIONS, decode, next_load};
+    use super::{
+        Entry, ImageCache, KEEP_RECENT, Key, Lru, MEMORY_BUDGET, STALE, TEXTURE_OPTIONS, cache_path, decode, next_load,
+    };
     use crate::session::client_info;
 
     fn request(item_id: &str) -> jellyfin::ImageRequest {
@@ -559,6 +577,80 @@ mod tests {
 
     fn texture(ctx: &egui::Context, name: &str) -> egui::TextureHandle {
         ctx.load_texture(name, ColorImage::filled([1, 1], Color32::WHITE), TEXTURE_OPTIONS)
+    }
+
+    /// The folders and file under `dir` that `cache_path` names.
+    fn parts_below(dir: &std::path::Path, req: &jellyfin::ImageRequest) -> Vec<String> {
+        let path = cache_path(dir, req);
+        let rest = path.strip_prefix(dir).expect("the path is inside the cache folder");
+        rest.components()
+            .map(|c| {
+                assert!(
+                    matches!(c, std::path::Component::Normal(_)),
+                    "{c:?} is not a plain name"
+                );
+                c.as_os_str().to_string_lossy().into_owned()
+            })
+            .collect()
+    }
+
+    /// Exactly two plain names below `dir`: a shard folder and the file.
+    fn assert_contained(dir: &std::path::Path, req: &jellyfin::ImageRequest) {
+        let parts = parts_below(dir, req);
+        assert_eq!(parts.len(), 2, "{req:?} gave {parts:?}");
+        for part in parts {
+            assert!(part != ".." && part != ".", "{part:?}");
+            assert!(!part.contains(['/', '\\', ':']), "{part:?}");
+        }
+    }
+
+    #[test]
+    fn hostile_ids_and_tags_stay_inside_the_cache_folder() {
+        let dir = std::path::Path::new("cache-root");
+        let long = "a".repeat(10_000);
+        for id in [
+            "../../x",
+            "..",
+            "/etc/x",
+            "C:\\Windows\\x",
+            "\\\\server\\share\\x",
+            "",
+            "a",
+            "\u{e9}\u{4e2d}\u{6587}",
+            long.as_str(),
+        ] {
+            assert_contained(dir, &request(id));
+        }
+        for tag in ["../..", "a:b?c*", "a/b", "a\\b", ""] {
+            let req = jellyfin::ImageRequest::new("0123456789abcdef", ImageType::Primary, Some(tag.into()));
+            assert_contained(dir, &req);
+        }
+        let name = parts_below(dir, &request(&long)).pop().expect("a name");
+        assert!(name.len() < 200, "a huge id gave a {} character name", name.len());
+    }
+
+    #[test]
+    fn a_well_formed_request_keeps_its_old_path() {
+        let id = "0123456789abcdef0123456789abcdef";
+        let tag = "fedcba9876543210fedcba9876543210";
+        let req = jellyfin::ImageRequest::new(id, ImageType::Primary, Some(tag.into())).fill_width(320);
+        let parts = parts_below(std::path::Path::new("cache-root"), &req);
+        assert_eq!(parts[0], "01");
+        assert_eq!(
+            parts[1],
+            "0123456789abcdef0123456789abcdef-Primary-0-fedcba9876543210fedcba9876543210-320x0"
+        );
+    }
+
+    #[test]
+    fn requests_that_differ_get_different_paths() {
+        let dir = std::path::Path::new("cache-root");
+        let base = jellyfin::ImageRequest::new("0123", ImageType::Primary, Some("aaaa".into())).fill_width(100);
+        let mut other_tag = base.clone();
+        other_tag.tag = Some("bbbb".into());
+        let other_width = base.clone().fill_width(200);
+        assert_ne!(cache_path(dir, &base), cache_path(dir, &other_tag));
+        assert_ne!(cache_path(dir, &base), cache_path(dir, &other_width));
     }
 
     #[test]

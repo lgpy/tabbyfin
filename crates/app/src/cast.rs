@@ -209,7 +209,7 @@ impl Casting {
     pub fn position(&self) -> Duration {
         match self.position_at {
             Some(at) if self.playing && !self.paused => {
-                let position = self.position + at.elapsed();
+                let position = self.position.saturating_add(at.elapsed());
                 self.duration.map_or(position, |duration| position.min(duration))
             }
             _ => self.position,
@@ -278,11 +278,12 @@ impl Casting {
             changed = true;
         }
         if let Some(seconds) = entry.position_seconds() {
-            self.position = Duration::from_secs_f64(seconds.max(0.));
+            // The device's number: `from_secs_f64` panics on one too big for a `Duration`.
+            self.position = Duration::try_from_secs_f64(seconds.max(0.)).unwrap_or_default();
             self.position_at = Some(Instant::now());
         }
         if let Some(duration) = entry.media.as_ref().and_then(|media| media.duration) {
-            self.duration = Some(Duration::from_secs_f64(duration.max(0.)));
+            self.duration = Duration::try_from_secs_f64(duration.max(0.)).ok();
         }
         match entry.player_state.as_deref() {
             Some("PAUSED") => self.paused = true,
@@ -694,9 +695,10 @@ fn outgoing_for(command: &UiCommand, casting: &Casting) -> Option<Outgoing> {
         UiCommand::SetPause(true) => Outgoing::Command(Command::Pause),
         UiCommand::SetPause(false) => Outgoing::Command(Command::Unpause),
         UiCommand::SeekTo(position) => seek(position),
-        UiCommand::SeekBy(seconds) => seek(Duration::from_secs_f64(
-            (casting.position().as_secs_f64() + seconds).max(0.),
-        )),
+        // Past the end of a `Duration` (a device's absurd position) is its end, not a panic.
+        UiCommand::SeekBy(seconds) => seek(
+            Duration::try_from_secs_f64((casting.position().as_secs_f64() + seconds).max(0.)).unwrap_or(Duration::MAX),
+        ),
         UiCommand::SetVolume(percent) => Outgoing::Volume((percent.clamp(0., 100.) / 100.) as f32),
         UiCommand::SetMute(muted) => Outgoing::Muted(muted),
         UiCommand::ToggleMute => Outgoing::Muted(!casting.muted),
@@ -877,7 +879,7 @@ impl Services {
             match command {
                 UiCommand::SeekTo(_) | UiCommand::SeekBy(_) => {
                     if let Outgoing::Command(Command::Seek { position_seconds }) = &outgoing {
-                        casting.position = Duration::from_secs_f64(*position_seconds);
+                        casting.position = Duration::try_from_secs_f64(*position_seconds).unwrap_or(Duration::MAX);
                         casting.position_at = Some(Instant::now());
                     }
                 }
@@ -1652,6 +1654,21 @@ mod tests {
             server_address(&url("https://jf.example.com/jellyfin/"), local),
             "https://jf.example.com/jellyfin"
         );
+    }
+
+    /// The position is the device's number: one at the end of what a `Duration` holds neither
+    /// overflows as time passes nor panics a seek from it.
+    #[test]
+    fn an_absurd_position_from_the_device_doesnt_panic() {
+        let casting = Casting {
+            position: Duration::MAX,
+            position_at: Some(Instant::now()),
+            playing: true,
+            ..Casting::default()
+        };
+        assert_eq!(casting.position(), Duration::MAX);
+        assert!(outgoing_for(&UiCommand::SeekBy(10.), &casting).is_some());
+        assert!(outgoing_for(&UiCommand::SeekBy(-10.), &casting).is_some());
     }
 
     #[test]

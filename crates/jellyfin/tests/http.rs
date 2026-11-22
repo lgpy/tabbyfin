@@ -345,3 +345,73 @@ async fn a_failed_download_maps_to_the_error() {
     let err = client.download(client.download_url("item"), 0).await.err();
     assert!(matches!(err, Some(Error::Unauthorized)), "{err:?}");
 }
+
+/// The server's text is cut to 500 bytes for the error, and the cut can fall inside a
+/// character: `String::truncate` panics there.
+#[tokio::test]
+async fn an_error_body_is_cut_on_a_character_boundary() {
+    let server = MockServer::start().await;
+    // 600 two-byte characters: byte 500 is a boundary, so shift it with a one-byte prefix.
+    for (route, text) in [("a", "é".repeat(600)), ("b", format!("x{}", "é".repeat(600)))] {
+        Mock::given(path(format!("/Items/{route}")))
+            .respond_with(ResponseTemplate::new(500).set_body_string(text))
+            .mount(&server)
+            .await;
+    }
+    let client = client(&server).await;
+    for (id, kept) in [("a", 500), ("b", 499)] {
+        match client.delete_item(id).await {
+            Err(Error::Status { status, message }) => {
+                assert_eq!(status, 500);
+                assert_eq!(message.len(), kept, "{id}");
+                assert!(message.chars().all(|c| c == 'é' || c == 'x'));
+            }
+            other => panic!("expected a status error, got {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_short_error_body_comes_back_whole() {
+    let server = MockServer::start().await;
+    let text = "é".repeat(249); // 498 bytes
+    Mock::given(path("/Items/a"))
+        .respond_with(ResponseTemplate::new(500).set_body_string(text.clone()))
+        .mount(&server)
+        .await;
+    match client(&server).await.delete_item("a").await {
+        Err(Error::Status { message, .. }) => assert_eq!(message, text),
+        other => panic!("expected a status error, got {other:?}"),
+    }
+}
+
+/// A redirect is followed within the server only: another host (or port) would get the request's
+/// body, at sign-in the password.
+#[tokio::test]
+async fn a_redirect_that_leaves_the_server_is_refused() {
+    let server = MockServer::start().await;
+    let elsewhere = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/System/Info/Public"))
+        .respond_with(ResponseTemplate::new(307).insert_header("Location", format!("{}/x", elsewhere.uri())))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Users/Me"))
+        .respond_with(ResponseTemplate::new(307).insert_header("Location", "/moved"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/moved"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+
+    let err = client.public_info().await.expect_err("the redirect is refused");
+    assert!(matches!(&err, Error::Http(e) if e.is_redirect()), "{err:?}");
+    assert!(elsewhere.received_requests().await.expect("recorded").is_empty());
+
+    // Within the server it is followed, to whatever answers there.
+    assert!(matches!(client.current_user().await, Err(Error::NotFound)));
+}

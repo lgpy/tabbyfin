@@ -1320,7 +1320,10 @@ fn stream_url(
         .transcoding_url
         .as_deref()
         .ok_or_else(|| tr!("player-not-streamable"))?;
-    let url = client.transcode_url(relative);
+    let url = client.transcode_url(relative).map_err(|err| {
+        tracing::warn!("the server's transcode can't be played: {err}");
+        tr!("player-not-streamable")
+    })?;
     let reasons = query_param(&url, "TranscodeReasons").unwrap_or_default();
     tracing::info!(%reasons, "the server is transcoding");
     Ok((url, PlayMethod::Transcode))
@@ -1348,7 +1351,13 @@ fn subtitle_files(
             let url = match method {
                 PlayMethod::DirectPlay if stream.is_external => client.subtitle_url(item_id, &source.id, stream),
                 PlayMethod::Transcode if stream.delivery_method.as_deref() == Some("External") => {
-                    client.transcode_url(stream.delivery_url.as_deref()?)
+                    match client.transcode_url(stream.delivery_url.as_deref()?) {
+                        Ok(url) => url,
+                        Err(err) => {
+                            tracing::warn!(index = stream.index, "leaving out a subtitle: {err}");
+                            return None;
+                        }
+                    }
                 }
                 _ => return None,
             };
