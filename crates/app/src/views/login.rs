@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use egui_material_icons::icons::{ICON_ARROW_BACK, ICON_VISIBILITY, ICON_VISIBILITY_OFF};
 use jellyfin::models::PublicSystemInfo;
-use jellyfin::{Client, ClientInfo, Error, MIN_SUPPORTED_VERSION};
+use jellyfin::{Client, ClientInfo, DiscoveredServer, Error, MIN_SUPPORTED_VERSION};
 
 use crate::config::SavedServer;
 use crate::i18n::tr;
@@ -103,6 +103,9 @@ impl Field {
     }
 }
 
+/// How long the network has to answer the search for servers.
+const DISCOVERY_WAIT: Duration = Duration::from_millis(1500);
+
 /// What the form is waiting on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Busy {
@@ -138,6 +141,11 @@ pub struct Login {
     busy: Option<Busy>,
     status: Option<String>,
     error: Option<String>,
+
+    /// The search for servers on the network, while it runs, and what it found: listed under
+    /// the address box, and choosing one fills the box.
+    discovery: Option<Task<Vec<DiscoveredServer>>>,
+    discovered: Vec<DiscoveredServer>,
 
     /// The in-flight operation. Replacing or clearing it cancels the previous one.
     task: Option<Task<Outcome>>,
@@ -191,11 +199,16 @@ impl Login {
             busy: None,
             status: None,
             error,
+            discovery: None,
+            discovered: Vec::new(),
             task: None,
             progress: None,
             retry: Deadline::default(),
             event: None,
         };
+        if !has_url {
+            login.discover(ctx);
+        }
         // Focus is asked for by id, which focuses the field the first time it draws, so a key
         // typed at launch can't land in a form that hasn't taken the keyboard yet.
         if let Some(field) = login.focus {
@@ -207,10 +220,25 @@ impl Login {
         login
     }
 
+    /// Looks for servers on the network, for a second or two. The tests don't: they would
+    /// broadcast on the developer's real network.
+    fn discover(&mut self, ctx: &egui::Context) {
+        if cfg!(test) {
+            return;
+        }
+        self.discovery = Some(Task::spawn(ctx, jellyfin::discover_servers(DISCOVERY_WAIT)));
+    }
+
     /// What the mascot did on the last frame.
     #[cfg(test)]
     pub fn watch(&self) -> Watch {
         self.watch
+    }
+
+    /// Servers the network answered with, as if the search had found them.
+    #[cfg(test)]
+    pub fn set_discovered(&mut self, found: Vec<DiscoveredServer>) {
+        self.discovered = found;
     }
 
     /// What the form asked the app to do, once.
@@ -250,6 +278,10 @@ impl Login {
                     Progress::QuickConnectCode(code) => self.quick_connect_code = Some(code),
                 }
             }
+        }
+        if let Some(found) = self.discovery.as_mut().and_then(Task::poll) {
+            self.discovery = None;
+            self.discovered = found;
         }
         if let Some(outcome) = self.task.as_mut().and_then(Task::poll) {
             self.task = None;
@@ -339,7 +371,7 @@ impl Login {
                 }
             } else if self.server.is_some() {
                 if button::subtle(ui, &tr!("login-use-another-server")).clicked() {
-                    self.change_server();
+                    self.change_server(ctx);
                 }
             } else {
                 ui.label(label::muted(
@@ -571,13 +603,14 @@ impl Login {
         self.quick_connect_code = None;
     }
 
-    fn change_server(&mut self) {
+    fn change_server(&mut self, ctx: &egui::Context) {
         self.cancel();
         self.retry.cancel();
         self.resume_saved_session = false;
         self.server = None;
         self.error = None;
         self.focus = Some(Field::Server);
+        self.discover(ctx);
     }
 
     fn server_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -619,6 +652,7 @@ impl Login {
             self.focus = None;
         }
         let entered = address.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        self.found_servers(ui);
         ui.add_space(surface::GAP_GROUP);
         let connect = button::brand(
             ui,
@@ -629,6 +663,30 @@ impl Login {
         );
         if connect.clicked() || entered {
             self.on_connect(ctx);
+        }
+    }
+
+    /// The servers the network answered with, under the address box: nothing when none did.
+    /// Choosing one puts its address in the box, for *Connect* to take as typed.
+    fn found_servers(&mut self, ui: &mut egui::Ui) {
+        if self.discovered.is_empty() {
+            return;
+        }
+        ui.add_space(surface::GAP_GROUP);
+        field::label(ui, &tr!("login-found-servers"));
+        for server in self.discovered.clone() {
+            let names = [server.name.as_str()];
+            let label = tr!(
+                "login-found-server",
+                name = server.name.as_str(),
+                address = server.address.as_str()
+            );
+            let row = AvatarRow::new(&names, &server.name, &server.address, &label).show(ui, self.busy.is_none());
+            if row.row.clicked() {
+                self.url = server.address.clone();
+                self.focus = Some(Field::Server);
+            }
+            ui.add_space(surface::GAP_ITEM);
         }
     }
 
@@ -949,7 +1007,7 @@ mod tests {
         let sender = login.begin_request(&ctx);
         // *Change* clicked between the code being sent and the next tick draining it.
         assert!(sender.send(Progress::QuickConnectCode("LATE".into())).is_ok());
-        login.change_server();
+        login.change_server(&ctx);
         login.tick(&ctx);
         assert_eq!(login.quick_connect_code, None);
         assert!(sender.send(Progress::QuickConnectCode("LATER".into())).is_err());
