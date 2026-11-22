@@ -44,6 +44,9 @@ pub struct ImageCache {
     placeholders: Lru<String, Option<TextureHandle>>,
     /// A trim waiting for recently used images to age, while over the budget.
     trim: Deadline,
+    /// Loads that failed in a row, by image, for the backoff. Kept apart from `entries`, since
+    /// the retry replaces the entry. A success clears it.
+    failures: HashMap<Key, u32>,
     /// Images waiting to load, with when each was last asked for.
     queue: HashMap<Key, Instant>,
     /// When any image was last asked for: queued ones asked for well before it are stale.
@@ -86,7 +89,15 @@ const TEXTURE_OPTIONS: TextureOptions = TextureOptions::LINEAR.with_mipmap_mode(
 enum Entry {
     Loading,
     Ready(TextureHandle),
-    Failed,
+    /// When the last load failed. The image is asked for again once [`retry_after`] has passed.
+    Failed(Instant),
+}
+
+/// The wait before a failed image is asked for again: 30 s, doubling per repeated failure up to
+/// 4 minutes, so a passing outage heals but an image the server doesn't have isn't requested on
+/// every scroll.
+fn retry_after(failures: u32) -> Duration {
+    Duration::from_secs(30 << failures.saturating_sub(1).min(3))
 }
 
 /// What a texture is held for: a server image (with its disk cache), or a file on disk, such as
@@ -135,6 +146,7 @@ impl ImageCache {
             entries: Lru::new(MEMORY_BUDGET),
             placeholders: Lru::with_limit(PLACEHOLDER_BUDGET, PLACEHOLDER_LIMIT),
             trim: Deadline::default(),
+            failures: HashMap::new(),
             queue: HashMap::new(),
             newest_want: Instant::now(),
             running: 0,
@@ -181,7 +193,11 @@ impl ImageCache {
     }
 
     fn get_key(&mut self, key: Key) -> Option<TextureHandle> {
-        let now = Instant::now();
+        self.get_key_at(key, Instant::now())
+    }
+
+    /// [`Self::get_key`] at a given time, so the tests don't have to wait out the backoff.
+    fn get_key_at(&mut self, key: Key, now: Instant) -> Option<TextureHandle> {
         self.newest_want = now;
         match self.entries.get(&key) {
             Some(Entry::Ready(texture)) => return Some(texture.clone()),
@@ -191,7 +207,14 @@ impl ImageCache {
                 }
                 return None;
             }
-            Some(Entry::Failed) => return None,
+            // Nothing polls for the retry: it happens when a page next asks, which it does on
+            // every frame it draws the image.
+            Some(Entry::Failed(at)) => {
+                let failures = self.failures.get(&key).copied().unwrap_or(1);
+                if now.saturating_duration_since(*at) < retry_after(failures) {
+                    return None;
+                }
+            }
             None => {}
         }
         // What this evicts drops here, and its textures go with it.
@@ -218,11 +241,13 @@ impl ImageCache {
             let (entry, size) = match result {
                 Ok(image) => {
                     let size = image.pixels.len() * 4;
+                    self.failures.remove(&key);
                     (Entry::Ready(self.ctx.load_texture(name, image, TEXTURE_OPTIONS)), size)
                 }
                 Err(err) => {
                     tracing::warn!(image = %key.label(), "image load failed: {err:#}");
-                    (Entry::Failed, 0)
+                    *self.failures.entry(key.clone()).or_default() += 1;
+                    (Entry::Failed(Instant::now()), 0)
                 }
             };
             // What this evicts drops here, and its textures go with it.
@@ -555,6 +580,7 @@ mod tests {
 
     use super::{
         Entry, ImageCache, KEEP_RECENT, Key, Lru, MEMORY_BUDGET, STALE, TEXTURE_OPTIONS, cache_path, decode, next_load,
+        retry_after,
     };
     use crate::session::client_info;
 
@@ -695,6 +721,73 @@ mod tests {
         assert!(matches!(cache.entries.get(&key), Some(Entry::Ready(_))));
     }
 
+    /// Sends `result` for `key` as a finished load and ticks.
+    fn finish(cache: &mut ImageCache, key: &Key, result: anyhow::Result<ColorImage>) {
+        cache.running += 1;
+        cache
+            .loading_from
+            .send((key.clone(), "test".into(), result))
+            .expect("the cache is listening");
+        cache.tick();
+    }
+
+    #[test]
+    fn a_failed_image_is_asked_for_again_after_the_backoff() {
+        let ctx = egui::Context::default();
+        let mut cache = cache(&ctx, MEMORY_BUDGET);
+        let key = key("a");
+        let t0 = Instant::now();
+        finish(&mut cache, &key, Err(anyhow::anyhow!("the server restarted")));
+        assert!(matches!(cache.entries.get(&key), Some(Entry::Failed(_))));
+        assert_eq!(cache.failures.get(&key), Some(&1));
+
+        // Well inside the backoff: still failed, nothing queued.
+        assert!(cache.get_key_at(key.clone(), t0 + Duration::from_secs(5)).is_none());
+        assert!(matches!(cache.entries.get(&key), Some(Entry::Failed(_))));
+        assert!(cache.queue.is_empty());
+
+        // Past it: queued again.
+        cache.get_key_at(key.clone(), t0 + Duration::from_secs(31));
+        assert!(matches!(cache.entries.get(&key), Some(Entry::Loading)));
+        assert!(cache.queue.contains_key(&key));
+    }
+
+    #[test]
+    fn repeated_failures_wait_longer_up_to_a_cap() {
+        assert_eq!(retry_after(1), Duration::from_secs(30));
+        assert_eq!(retry_after(2), Duration::from_secs(60));
+        assert_eq!(retry_after(3), Duration::from_secs(120));
+        assert_eq!(retry_after(4), Duration::from_secs(240));
+        assert_eq!(retry_after(40), Duration::from_secs(240));
+
+        let ctx = egui::Context::default();
+        let mut cache = cache(&ctx, MEMORY_BUDGET);
+        let key = key("a");
+        finish(&mut cache, &key, Err(anyhow::anyhow!("no")));
+        let t0 = Instant::now();
+        cache.get_key_at(key.clone(), t0 + Duration::from_secs(31));
+        finish(&mut cache, &key, Err(anyhow::anyhow!("still no")));
+        assert_eq!(cache.failures.get(&key), Some(&2));
+        // The second failure needs a minute, not half of one.
+        let t1 = Instant::now();
+        assert!(cache.get_key_at(key.clone(), t1 + Duration::from_secs(31)).is_none());
+        assert!(cache.queue.is_empty());
+        cache.get_key_at(key.clone(), t1 + Duration::from_secs(61));
+        assert!(cache.queue.contains_key(&key));
+    }
+
+    #[test]
+    fn a_success_after_a_failure_clears_the_count() {
+        let ctx = egui::Context::default();
+        let mut cache = cache(&ctx, MEMORY_BUDGET);
+        let key = key("a");
+        finish(&mut cache, &key, Err(anyhow::anyhow!("no")));
+        assert_eq!(cache.failures.get(&key), Some(&1));
+        finish(&mut cache, &key, Ok(ColorImage::filled([2, 2], Color32::WHITE)));
+        assert!(cache.failures.is_empty());
+        assert!(matches!(cache.entries.get(&key), Some(Entry::Ready(_))));
+    }
+
     #[test]
     fn a_poster_file_loads_from_disk() {
         let _config = crate::ui_tests::ConfigDir::new("images-file");
@@ -720,7 +813,7 @@ mod tests {
         let missing = dir.join("gone.png");
         assert!(cache.get_file(&missing).is_none());
         let start = Instant::now();
-        while !matches!(cache.entries.get(&Key::File(missing.clone())), Some(Entry::Failed)) {
+        while !matches!(cache.entries.get(&Key::File(missing.clone())), Some(Entry::Failed(_))) {
             cache.tick();
             assert!(start.elapsed() < std::time::Duration::from_secs(10), "it never failed");
             std::thread::sleep(std::time::Duration::from_millis(10));

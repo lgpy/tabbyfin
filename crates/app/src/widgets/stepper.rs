@@ -68,8 +68,11 @@ pub fn row(ui: &mut Ui, label: &str, keys: Option<&str>, value: &str, moved: boo
     painter.rect_filled(pill, (PILL_H / 2.) as u8, colours.fill);
     painter.text(pill.center(), Align2::CENTER_CENTER, value, font, colours.ink);
     let word = label.to_lowercase();
+    // Salted with the label, so two rows in one `ui` don't share their buttons' ids (a click on
+    // one row's + would also be reported by the other's).
+    let salt = ui.scope_id().with(label);
     let button = |center: Pos2, icon, name: String, key: &'static str, ink, step| {
-        pressed(ui, center, icon, &name, key, ink, colours).then_some(step)
+        pressed(ui, salt.with(key), center, icon, &name, ink, colours).then_some(step)
     };
     let down = button(
         pos2(pill.left() + BUTTON / 2., y),
@@ -104,15 +107,15 @@ pub fn row(ui: &mut Ui, label: &str, keys: Option<&str>, value: &str, moved: boo
 
 fn pressed(
     ui: &Ui,
+    id: egui::Id,
     center: Pos2,
     icon: MaterialIcon,
     name: &str,
-    key: &'static str,
     ink: Color32,
     colours: Colours,
 ) -> bool {
     let rect = egui::Rect::from_center_size(center, vec2(BUTTON, BUTTON));
-    let response = ui.interact(rect, ui.scope_id().with(key), Sense::CLICK);
+    let response = ui.interact(rect, id, Sense::CLICK);
     let response = crate::layout::grow(ui, response, Sense::CLICK);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), name));
     if response.hovered() {
