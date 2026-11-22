@@ -393,6 +393,16 @@ fn audio_device_row() -> Row {
     }
 }
 
+fn audio_channels_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-audio-channels"),
+        description: tr!("settings-audio-channels-description"),
+        key: "audio_channels",
+        unset: tr!("settings-audio-channels-unset"),
+    }
+}
+
 fn subtitles_note_row() -> Row {
     note_row(Section::Subtitles, tr!("settings-subtitles-note"))
 }
@@ -581,6 +591,7 @@ fn all_rows() -> Vec<Row> {
         hevc_row(),
         player_row(),
         audio_device_row(),
+        audio_channels_row(),
         subtitles_note_row(),
         subtitle_tracks_note_row(),
         subtitle_color_row(),
@@ -1330,6 +1341,26 @@ impl SettingsPage {
         if let Some(edit) = picked {
             let device = edit.or_unset().flatten().map(str::to_owned);
             self.save(|config| config.audio_device = device);
+        }
+
+        let channels = [
+            (player::Channels::Auto, tr!("settings-audio-channels-auto")),
+            (player::Channels::Stereo, tr!("settings-audio-channels-stereo")),
+            (player::Channels::Surround5_1, "5.1".to_owned()),
+            (player::Channels::Surround7_1, "7.1".to_owned()),
+        ];
+        let current = self.config.audio_channels.unwrap_or_default();
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            audio_channels_row(),
+            "settings_audio_channels",
+            &channels,
+            current,
+            Some(player::Channels::Auto),
+        );
+        if let Some(edit) = picked {
+            self.save(|config| config.audio_channels = edit.or_unset());
         }
     }
 
