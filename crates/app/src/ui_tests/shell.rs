@@ -479,3 +479,45 @@ fn a_wrong_code_is_said_in_words_and_keeps_the_dialog() {
     });
     assert!(bar.harness.query_by_label("Code").is_some(), "the dialog is still open");
 }
+
+/// A `401` while Quick Connect is still on is a dead token: the session ends, rather than the
+/// dialog blaming Quick Connect.
+#[test]
+fn a_rejected_token_while_authorising_is_an_expired_session() {
+    use crate::services::AppEvent;
+
+    let (_config, server, mut bar) = account_menu("shell-authorise-expired", true);
+    server.status("POST", "/QuickConnect/Authorize", 401);
+    bar.harness
+        .get_by_role_and_label(Role::MenuItemRadio, "Authorise a device…")
+        .click();
+    bar.step_until("the dialog", |harness| harness.query_by_label("Code").is_some());
+    bar.type_text("123456");
+    bar.harness.key_press(Key::Enter);
+    bar.step_until("the session ending", |harness| {
+        harness.state().services.as_ref().is_none_or(|services| {
+            services
+                .events
+                .iter()
+                .any(|event| matches!(event, AppEvent::SessionExpired))
+        })
+    });
+    assert!(bar.harness.query_by_label_contains("turned off").is_none());
+}
+
+/// ...and a `401` because Quick Connect was turned off since the menu was drawn says so.
+#[test]
+fn authorising_with_quick_connect_turned_off_since_says_so() {
+    let (_config, server, mut bar) = account_menu("shell-authorise-turned-off", true);
+    server.json_value_now("GET", "/QuickConnect/Enabled", &serde_json::json!(false));
+    server.status("POST", "/QuickConnect/Authorize", 401);
+    bar.harness
+        .get_by_role_and_label(Role::MenuItemRadio, "Authorise a device…")
+        .click();
+    bar.step_until("the dialog", |harness| harness.query_by_label("Code").is_some());
+    bar.type_text("123456");
+    bar.harness.key_press(Key::Enter);
+    bar.step_until("the explanation", |harness| {
+        harness.query_by_label_contains("turned off").is_some()
+    });
+}

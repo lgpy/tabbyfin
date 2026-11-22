@@ -239,6 +239,24 @@ impl FixtureServer {
         )
     }
 
+    /// Answers `route` with `body` from now on, over whatever answered it before.
+    pub fn json_value_now(&self, http_method: &'static str, route: &'static str, body: &serde_json::Value) {
+        let mock = self.mock.clone();
+        let body = body.to_string();
+        block_on(async move {
+            Mock::given(method(http_method))
+                .and(path(route))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(body)
+                        .insert_header("content-type", "application/json"),
+                )
+                .with_priority(1)
+                .mount(&mock)
+                .await;
+        });
+    }
+
     /// Answers `route` with a bare status, e.g. a 401 for a wrong password.
     pub fn status(&self, http_method: &'static str, route: &'static str, status: u16) {
         self.respond(http_method, route, ResponseTemplate::new(status))
