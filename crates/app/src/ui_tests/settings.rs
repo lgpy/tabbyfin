@@ -15,6 +15,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable};
 
 use crate::config::{Config, ThemePreference};
 use crate::nav::Route;
+use crate::services::AppEvent;
 use crate::ui_tests::{ConfigDir, FixtureServer, PageHarness, PageRun, fixture_json, session};
 use crate::views::settings::Section;
 use crate::views::{Page, PageCx};
@@ -362,7 +363,8 @@ fn a_failed_server_save_after_leaving_is_a_toast() {
 }
 
 /// A device setting that can't be written to the config folder is a toast, and the control stays
-/// on the value that's still in effect.
+/// on the value that's still in effect. Failing again says nothing more, and what the running
+/// app would apply for the change (the appearance) isn't applied.
 #[test]
 fn a_config_that_cant_be_written_says_so() {
     let _config = ConfigDir::new("settings-unwritable");
@@ -374,22 +376,45 @@ fn a_config_that_cant_be_written_says_so() {
     let aside = crate::config::dir().join("config.toml.tmp");
     std::fs::create_dir_all(&aside).expect("a folder in the file's place");
 
+    let failures = |ui: &PageHarness| {
+        ui.toasts()
+            .iter()
+            .filter(|toast| toast.contains("Couldn't save this setting"))
+            .count()
+    };
+    let appearance_changes = |ui: &PageHarness| {
+        let services = ui.state().services.as_ref().expect("the services are made");
+        services
+            .events
+            .iter()
+            .filter(|event| matches!(event, AppEvent::AppearanceChanged))
+            .count()
+    };
+
     let switch = ui.harness().get_by_role_and_label(Role::Switch, "Animations");
     assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::True));
     switch.click();
     ui.step();
     ui.step();
-    assert!(
-        ui.toasts()
-            .iter()
-            .any(|toast| toast.contains("Couldn't save this setting")),
-        "no toast: {:?}",
-        ui.toasts()
-    );
+    assert_eq!(failures(&ui), 1, "no toast: {:?}", ui.toasts());
     let switch = ui.harness().get_by_role_and_label(Role::Switch, "Animations");
     assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::True), "still on");
 
+    // Failing again, as a second change in a row: no second toast.
+    ui.harness().get_by_role_and_label(Role::Switch, "Animations").click();
+    ui.step();
+    ui.step();
+    assert_eq!(failures(&ui), 1, "one toast for the failed saves: {:?}", ui.toasts());
+    assert_eq!(appearance_changes(&ui), 0, "a change that wasn't saved isn't applied");
+
+    // Once the folder is gone a save works again, and the same change takes effect.
     std::fs::remove_dir_all(&aside).expect("the folder goes");
+    ui.harness().get_by_role_and_label(Role::Switch, "Animations").click();
+    ui.step();
+    ui.step();
+    assert_eq!(appearance_changes(&ui), 1, "applied once it saved");
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Animations");
+    assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::False), "off now");
 }
 
 /// Enter on a picker egui's focus is on opens its list from the keyboard, on its first row; Down

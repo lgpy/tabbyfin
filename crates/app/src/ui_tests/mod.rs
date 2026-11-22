@@ -116,6 +116,12 @@ pub struct ConfigDir {
 
 static CONFIG_DIR: Mutex<()> = Mutex::new(());
 
+thread_local! {
+    /// Whether this thread holds the [`ConfigDir`]. The environment variable is the process's,
+    /// so it can't tell a test that holds one from one running beside the holder.
+    static HOLDS_CONFIG_DIR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 impl ConfigDir {
     pub fn new(name: &str) -> Self {
         let serial = CONFIG_DIR.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -125,22 +131,25 @@ impl ConfigDir {
         // SAFETY: every test that reads the config holds this guard for as long as the variable
         // is set, and no background thread reads it in between.
         unsafe { std::env::set_var("TABBYFIN_CONFIG_DIR", &dir) };
+        HOLDS_CONFIG_DIR.with(|holds| holds.set(true));
         Self { _serial: serial, dir }
     }
 }
 
 /// Fails a test that is about to build services without a [`ConfigDir`]: they load and save the
-/// config, which would otherwise be the developer's own.
+/// config, which would otherwise be the developer's own. It asks the calling thread, which is the
+/// test's own: the variable would be set whenever any other test holds a directory.
 #[track_caller]
 pub fn assert_config_dir() {
     assert!(
-        std::env::var_os("TABBYFIN_CONFIG_DIR").is_some(),
+        HOLDS_CONFIG_DIR.with(std::cell::Cell::get),
         "this test builds Services without a ConfigDir: declare `let _config = ConfigDir::new(..)` first"
     );
 }
 
 impl Drop for ConfigDir {
     fn drop(&mut self) {
+        HOLDS_CONFIG_DIR.with(|holds| holds.set(false));
         // SAFETY: see `new`; the guard is still held here.
         unsafe { std::env::remove_var("TABBYFIN_CONFIG_DIR") };
         let _ = std::fs::remove_dir_all(&self.dir);

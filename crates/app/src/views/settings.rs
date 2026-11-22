@@ -694,6 +694,9 @@ pub struct SettingsPage {
     /// The device's config couldn't be written: a toast on the next frame, which `save` has no
     /// page context to raise itself.
     unsaved: bool,
+    /// A save failed and no save has worked since: the toast was raised, so the next failure
+    /// doesn't raise another.
+    save_failed: bool,
 }
 
 /// What a button on the page asked for, with how it went.
@@ -719,6 +722,7 @@ impl SettingsPage {
             compact: false,
             push: None,
             unsaved: false,
+            save_failed: false,
         }
     }
 
@@ -737,17 +741,28 @@ impl SettingsPage {
     }
 
     /// Writes a change through the config file: loaded fresh, changed, saved, and kept for the
-    /// controls. A write that fails (a read-only folder, a full disk) leaves the controls on the
-    /// value they showed, the one still in effect, and says so. Passwords and tokens
-    /// never go through here; they're in `credentials`.
-    fn save(&mut self, change: impl FnOnce(&mut Config)) {
+    /// controls. Returns whether the write succeeded; a caller that acts on the new value (the
+    /// running app, a connected TV) does so only then.
+    ///
+    /// A write that fails (a read-only folder, a full disk) leaves the control, the running app
+    /// and the file all on the old value, the one still in effect, and says so once: further
+    /// failures stay quiet until a save succeeds or the page is opened again, so a run of
+    /// changes doesn't pile up identical toasts. Passwords and tokens never go through here;
+    /// they're in `credentials`.
+    fn save(&mut self, change: impl FnOnce(&mut Config)) -> bool {
         let mut config = Config::load();
         change(&mut config);
         match config.save() {
-            Ok(()) => self.config = config,
+            Ok(()) => {
+                self.config = config;
+                self.save_failed = false;
+                true
+            }
             Err(err) => {
                 tracing::warn!("failed to save config: {err:#}");
-                self.unsaved = true;
+                self.unsaved |= !self.save_failed;
+                self.save_failed = true;
+                false
             }
         }
     }
@@ -755,8 +770,9 @@ impl SettingsPage {
     /// Saves an appearance setting and asks the app to apply it: the theme, the text size and
     /// the animations are the app's, not the session's, so they apply on every screen.
     fn save_appearance(&mut self, cx: &mut PageCx, change: impl FnOnce(&mut Config)) {
-        self.save(change);
-        cx.services.events.push(AppEvent::AppearanceChanged);
+        if self.save(change) {
+            cx.services.events.push(AppEvent::AppearanceChanged);
+        }
     }
 
     /// Scrolls to `section`, from the menu or a note's link, leaving the search; or opens its
@@ -1203,11 +1219,15 @@ impl SettingsPage {
             default,
         );
         match picked {
-            Some(Edit::Set(mbps)) => self.save(|config| apply_bitrate(config, mbps)),
-            Some(Edit::Default) => self.save(|config| {
-                config.automatic_bitrate = None;
-                config.max_streaming_bitrate = None;
-            }),
+            Some(Edit::Set(mbps)) => {
+                self.save(|config| apply_bitrate(config, mbps));
+            }
+            Some(Edit::Default) => {
+                self.save(|config| {
+                    config.automatic_bitrate = None;
+                    config.max_streaming_bitrate = None;
+                });
+            }
             None => {}
         }
 
@@ -1234,8 +1254,9 @@ impl SettingsPage {
                 Edit::Set(mbps) if mbps > 0 => Some(mbps as u64 * 1_000_000),
                 Edit::Set(_) | Edit::Default => None,
             };
-            self.save(|config| config.cast_max_bitrate = bitrate);
-            cx.services.cast.set_max_bitrate(bitrate);
+            if self.save(|config| config.cast_max_bitrate = bitrate) {
+                cx.services.cast.set_max_bitrate(bitrate);
+            }
         }
 
         let current = self.config.prefer_hevc.unwrap_or(false);
@@ -1313,8 +1334,9 @@ impl SettingsPage {
         );
         if let Some(edit) = picked {
             let scale = edit.or_unset().unwrap_or(1.);
-            self.save(|config| config.subtitle_scale = Some(scale).filter(|&scale| scale != 1.));
-            cx.services.playback.set_subtitle_scale(scale);
+            if self.save(|config| config.subtitle_scale = Some(scale).filter(|&scale| scale != 1.)) {
+                cx.services.playback.set_subtitle_scale(scale);
+            }
         }
     }
 
@@ -1322,8 +1344,9 @@ impl SettingsPage {
         let current = self.config.download_wifi_only.unwrap_or(true);
         if let Some(edit) = toggle(ui, &self.search, wifi_only_row(), current, Some(true)) {
             let wifi_only = edit.or_unset();
-            self.save(|config| config.download_wifi_only = wifi_only);
-            cx.services.downloads.set_wifi_only(wifi_only.unwrap_or(true));
+            if self.save(|config| config.download_wifi_only = wifi_only) {
+                cx.services.downloads.set_wifi_only(wifi_only.unwrap_or(true));
+            }
         }
         if self.search.shows(&downloads_folder_row()) {
             let folder = config::downloads_dir().display().to_string();
