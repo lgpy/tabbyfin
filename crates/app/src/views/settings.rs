@@ -458,6 +458,16 @@ fn audio_exclusive_row() -> Row {
     }
 }
 
+fn night_mode_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-night-mode"),
+        description: tr!("settings-night-mode-description"),
+        key: "night_mode",
+        unset: tr!("settings-night-mode-unset"),
+    }
+}
+
 fn subtitles_note_row() -> Row {
     note_row(Section::Subtitles, tr!("settings-subtitles-note"))
 }
@@ -653,6 +663,7 @@ fn all_rows() -> Vec<Row> {
         passthrough_dts_hd_row(),
         passthrough_truehd_row(),
         audio_exclusive_row(),
+        night_mode_row(),
         subtitles_note_row(),
         subtitle_tracks_note_row(),
         subtitle_color_row(),
@@ -1354,7 +1365,7 @@ impl SettingsPage {
         }
     }
 
-    fn audio(&mut self, ui: &mut Ui, _cx: &mut PageCx) {
+    fn audio(&mut self, ui: &mut Ui, cx: &mut PageCx) {
         // Asked once per visit: the list is mpv's, which runs in a process of its own.
         if matches!(self.devices, Devices::Unasked) && !cfg!(test) {
             let task = Task::spawn(ui.ctx(), player::list_audio_devices());
@@ -1452,6 +1463,13 @@ impl SettingsPage {
         let current = self.config.audio_exclusive.unwrap_or(false);
         if let Some(edit) = toggle(ui, &self.search, audio_exclusive_row(), current, Some(false)) {
             self.save(|config| config.audio_exclusive = edit.or_unset());
+        }
+
+        let current = self.config.night_mode.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, night_mode_row(), current, Some(false)) {
+            let night = edit.or_unset();
+            self.save(|config| config.night_mode = night);
+            cx.services.playback.set_night_mode(night.unwrap_or(false));
         }
     }
 
@@ -2495,6 +2513,8 @@ mod tests {
             [Section::Playback, Section::Subtitles, Section::Languages]
         );
         assert_eq!(found("bitrate"), [Section::Playback]);
+        assert_eq!(found("night mode"), [Section::Audio]);
+        assert_eq!(found("passthrough"), [Section::Audio]);
         assert_eq!(found("subtitle mode"), [Section::Languages]);
         assert_eq!(found("hevc transcodes"), [Section::Playback]);
         // A config key, and a server field.

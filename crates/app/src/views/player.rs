@@ -1507,6 +1507,8 @@ struct SettingsMenu {
     subtitle_choices: Vec<Choice>,
     default_audio: Option<i32>,
     default_subtitle: Option<i32>,
+    /// Whether night mode can act (no passthrough); the desktop's mpv only.
+    night_available: bool,
 }
 
 impl SettingsMenu {
@@ -1643,6 +1645,7 @@ impl View {
                     subtitle_choices,
                     default_audio: state.source.default_audio_stream_index,
                     default_subtitle: state.source.default_subtitle_stream_index,
+                    night_available: state.night_available,
                 }
             }),
             audio_button: tracks::count(&state.source, MediaStreamType::Audio) > 1,
@@ -1778,6 +1781,7 @@ impl View {
                 subtitle_choices,
                 default_audio,
                 default_subtitle,
+                night_available: false,
             }),
             audio_button: count(MediaStreamType::Audio) > 1,
             subtitles_button: count(MediaStreamType::Subtitle) > 0,
@@ -2072,6 +2076,12 @@ fn settings_body(
                     adjustments.audio_delay = stepped_delay(delay, step);
                     adjusted = true;
                 }
+                if !cfg!(target_os = "android") {
+                    if let Some(on) = night_mode_row(ui, adjustments.night_mode, menu.night_available) {
+                        adjustments.night_mode = on;
+                        adjusted = true;
+                    }
+                }
             }
         }
         SettingsTab::Subtitles => {
@@ -2171,6 +2181,39 @@ fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab)
         ink_muted: over_video::MUTED_FOREGROUND,
     };
     tabs::bar(ui, &shown, current, colours)
+}
+
+/// Night mode's row in the audio tab: Off and On, or the reason it can't act while a format is
+/// passed through. Returns the choice clicked.
+fn night_mode_row(ui: &mut egui::Ui, on: bool, available: bool) -> Option<bool> {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
+    ui.painter().text(
+        pos2(rect.left() + 8., rect.center().y),
+        Align2::LEFT_CENTER,
+        tr!("player-night-mode"),
+        theme::text::font(ui, "sm"),
+        over_video::MENU_INK,
+    );
+    if !available {
+        ui.horizontal(|ui| {
+            ui.add_space(8.);
+            ui.label(
+                RichText::new(tr!("player-night-mode-passthrough"))
+                    .font(theme::text::font(ui, "sm"))
+                    .color(over_video::MUTED_FOREGROUND),
+            );
+        });
+        return None;
+    }
+    let labels = [tr!("settings-off"), tr!("settings-on")];
+    let colours = segmented::Colours {
+        track: over_video::MENU_INSET,
+        hover: over_video::MENU_INSET_HOVER,
+        ink: over_video::MENU_INK,
+        chosen: over_video::BRAND,
+        chosen_ink: over_video::BRAND_FOREGROUND,
+    };
+    segmented::show(ui, &labels, Some(usize::from(on)), colours).map(|index| index == 1)
 }
 
 /// The speed choices, the chosen one in the player's lilac. Returns the speed clicked.

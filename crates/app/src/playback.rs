@@ -80,6 +80,8 @@ pub struct Adjustments {
     pub audio_delay: f64,
     /// 1.0 is the subtitles' own size.
     pub subtitle_scale: f64,
+    /// Night mode: compressed dynamic range. Carries to the next item; Settings has its default.
+    pub night_mode: bool,
 }
 
 impl Default for Adjustments {
@@ -89,6 +91,7 @@ impl Default for Adjustments {
             subtitle_delay: 0.,
             audio_delay: 0.,
             subtitle_scale: 1.,
+            night_mode: false,
         }
     }
 }
@@ -125,14 +128,16 @@ impl Adjustments {
             subtitle_delay: tenths(self.subtitle_delay.clamp(-Self::MAX_DELAY, Self::MAX_DELAY)),
             audio_delay: tenths(self.audio_delay.clamp(-Self::MAX_DELAY, Self::MAX_DELAY)),
             subtitle_scale: tenths(self.subtitle_scale.clamp(Self::SCALE_RANGE.0, Self::SCALE_RANGE.1)),
+            night_mode: self.night_mode,
         }
     }
 
-    /// For the next item: the same speed and subtitle size, no delays.
+    /// For the next item: the same speed, subtitle size and night mode, no delays.
     fn for_next_item(self) -> Self {
         Self {
             speed: self.speed,
             subtitle_scale: self.subtitle_scale,
+            night_mode: self.night_mode,
             ..Self::default()
         }
     }
@@ -155,6 +160,8 @@ pub enum UiCommand {
     /// Seconds.
     SetAudioDelay(f64),
     SetSubtitleScale(f64),
+    /// Night mode on or off, applied as an audio filter (not with passthrough on).
+    SetNightMode(bool),
     ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
@@ -237,6 +244,8 @@ pub struct NowPlaying {
     pub volume: f64,
     pub muted: bool,
     pub adjustments: Adjustments,
+    /// Whether night mode can act on this session: not with a format passed through.
+    pub night_available: bool,
     /// All versions of the item, once known; empty or one entry means there's nothing to
     /// switch to.
     pub versions: Vec<Version>,
@@ -429,6 +438,7 @@ struct Running {
     volume: f64,
     muted: bool,
     adjustments: Adjustments,
+    night_available: bool,
     autoplay: bool,
     resumed_from: Option<Duration>,
 }
@@ -448,6 +458,7 @@ impl PlaybackManager {
         let volume = config.volume.unwrap_or(DEFAULT_VOLUME);
         let adjustments = Adjustments {
             subtitle_scale: config.subtitle_scale.unwrap_or(1.),
+            night_mode: config.night_mode.unwrap_or(false),
             ..Adjustments::default()
         }
         .clamped();
@@ -484,6 +495,12 @@ impl PlaybackManager {
 
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    /// Sets night mode for the next items (the settings page; the player's menu goes through
+    /// [`Services::adjust`]).
+    pub fn set_night_mode(&mut self, on: bool) {
+        self.adjustments.night_mode = on;
     }
 
     /// Sets the subtitle size for the next items (the settings page; the player's menu goes
@@ -544,6 +561,7 @@ impl PlaybackManager {
             volume: self.volume,
             muted: false,
             adjustments: self.adjustments,
+            night_available: true,
             versions: Vec::new(),
             trickplay: TrickplayTiles::new(),
             previous: None,
@@ -651,6 +669,7 @@ impl PlaybackManager {
             volume,
             muted,
             adjustments,
+            night_available: !Config::load().audio_settings().passthrough.any(),
             autoplay,
             resumed_from,
         });
@@ -986,6 +1005,7 @@ impl Services {
             (new.subtitle_delay != old.subtitle_delay).then_some(UiCommand::SetSubtitleDelay(new.subtitle_delay)),
             (new.audio_delay != old.audio_delay).then_some(UiCommand::SetAudioDelay(new.audio_delay)),
             (new.subtitle_scale != old.subtitle_scale).then_some(UiCommand::SetSubtitleScale(new.subtitle_scale)),
+            (new.night_mode != old.night_mode).then_some(UiCommand::SetNightMode(new.night_mode)),
         ];
         for command in changes.into_iter().flatten() {
             state.send(command);
@@ -1087,6 +1107,7 @@ impl Services {
                     volume: running.volume,
                     muted: running.muted,
                     adjustments: running.adjustments,
+                    night_available: running.night_available,
                     versions: Vec::new(),
                     trickplay: TrickplayTiles::new(),
                     previous: None,
@@ -1709,7 +1730,14 @@ async fn run_session(
     }
     // The audio output before the volume: `volume-max` sets how far the volume goes.
     let config = Config::load();
-    apply_audio(&player, config.audio_settings()).await;
+    let audio_output = apply_audio(
+        &player,
+        player::AudioSettings {
+            night_mode: adjustments.night_mode,
+            ..config.audio_settings()
+        },
+    )
+    .await;
     player
         .set_property("volume", volume)
         .await
@@ -1827,7 +1855,7 @@ async fn run_session(
             Some(command) = channels.commands.recv() => {
                 tracing::debug!(?command, "player command");
                 let send_now = reporting.on_command(&command);
-                if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
+                if let Err(err) = apply_command(&player, &source, &stream, &mut report, audio_output.passthrough, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
                 if online && send_now == Outgoing::Progress {
@@ -2029,6 +2057,7 @@ async fn apply_command(
     source: &MediaSourceInfo,
     stream: &StreamInfo,
     report: &mut PlaybackReport,
+    passthrough: player::Passthrough,
     command: UiCommand,
 ) -> player::Result<()> {
     match command {
@@ -2046,6 +2075,11 @@ async fn apply_command(
         UiCommand::SetSubtitleDelay(seconds) => player.set_property("sub-delay", seconds).await,
         UiCommand::SetAudioDelay(seconds) => player.set_property("audio-delay", seconds).await,
         UiCommand::SetSubtitleScale(scale) => player.set_property("sub-scale", scale).await,
+        UiCommand::SetNightMode(on) => {
+            player
+                .set_property("af", player::night_filter(on, passthrough))
+                .await
+        }
         UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
         // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
         UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),
@@ -2267,12 +2301,14 @@ mod tests {
             subtitle_delay: 0.1 + 0.2,
             audio_delay: -100.,
             subtitle_scale: 0.1,
+            night_mode: true,
         }
         .clamped();
         assert_eq!(wild.speed, 2.);
         assert_eq!(wild.subtitle_delay, 0.3);
         assert_eq!(wild.audio_delay, -30.);
         assert_eq!(wild.subtitle_scale, 0.5);
+        assert!(wild.night_mode);
     }
 
     #[test]
@@ -2282,9 +2318,10 @@ mod tests {
             subtitle_delay: 1.2,
             audio_delay: -0.3,
             subtitle_scale: 1.4,
+            night_mode: true,
         }
         .for_next_item();
-        assert_eq!((next.speed, next.subtitle_scale), (1.5, 1.4));
+        assert_eq!((next.speed, next.subtitle_scale, next.night_mode), (1.5, 1.4, true));
         assert_eq!((next.subtitle_delay, next.audio_delay), (0., 0.));
     }
 
