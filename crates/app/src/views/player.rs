@@ -48,8 +48,9 @@ use egui::{
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_FAST_FORWARD,
-    ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT,
-    ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_FAST_REWIND, ICON_FORWARD_5, ICON_FORWARD_10, ICON_FORWARD_30, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT,
+    ICON_PAUSE, ICON_PLAY_ARROW, ICON_REPLAY_5, ICON_REPLAY_10, ICON_REPLAY_30, ICON_RESTART_ALT, ICON_SETTINGS,
+    ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
@@ -83,8 +84,6 @@ use crate::widgets::tabs;
 use crate::widgets::text::{card_text, episode_label, timestamp};
 use crate::widgets::video::Video;
 
-/// Seconds per seek key press (and remote rewind or fast-forward).
-pub const SEEK_STEP: f64 = 10.;
 /// Volume percent per key press, wheel notch or remote volume step.
 pub const VOLUME_STEP: f64 = 5.;
 /// Trackpad points per wheel notch, for platforms that send pixel deltas (macOS): three lines of
@@ -263,11 +262,12 @@ impl PlayerPage {
             chapters: egui::Popup::is_id_open(ui.ctx(), chapters_id()) || self.sheet == Some(phone::Sheet::Chapters),
             settings: egui::Popup::is_id_open(ui.ctx(), settings_id()) || self.sheet == Some(phone::Sheet::Settings),
         };
+        let seek_step = cx.services.playback.seek_step();
         let view = cx
             .services
             .playback
             .now_playing()
-            .map(|state| View::read(state, menus, self.show_remaining));
+            .map(|state| View::read(state, menus, self.show_remaining, seek_step));
 
         let now = ui.input(|input| input.time);
         if std::mem::take(&mut self.controls_appeared) || self.controls_since.is_none() {
@@ -659,11 +659,12 @@ impl PlayerPage {
                 self.show_controls();
             }
             Action::SeekForward => {
-                cx.services.control(UiCommand::SeekBy(SEEK_STEP));
+                cx.services.control(UiCommand::SeekBy(cx.services.playback.seek_step()));
                 self.show_controls();
             }
             Action::SeekBackward => {
-                cx.services.control(UiCommand::SeekBy(-SEEK_STEP));
+                cx.services
+                    .control(UiCommand::SeekBy(-cx.services.playback.seek_step()));
                 self.show_controls();
             }
             Action::VolumeUp => self.change_volume(VOLUME_STEP, cx),
@@ -719,8 +720,10 @@ impl PlayerPage {
     fn casting_key(&mut self, action: Action, keys: Keys, cx: &mut PageCx) -> bool {
         match action {
             Action::TogglePause => cx.services.control(UiCommand::TogglePause),
-            Action::SeekForward => cx.services.control(UiCommand::SeekBy(SEEK_STEP)),
-            Action::SeekBackward => cx.services.control(UiCommand::SeekBy(-SEEK_STEP)),
+            Action::SeekForward => cx.services.control(UiCommand::SeekBy(cx.services.playback.seek_step())),
+            Action::SeekBackward => cx
+                .services
+                .control(UiCommand::SeekBy(-cx.services.playback.seek_step())),
             Action::VolumeUp => self.change_volume(VOLUME_STEP, cx),
             Action::VolumeDown => self.change_volume(-VOLUME_STEP, cx),
             Action::ToggleMute => cx.services.control(UiCommand::ToggleMute),
@@ -836,14 +839,16 @@ impl PlayerPage {
                     cx.services.control(UiCommand::TogglePause);
                     self.show_controls();
                 }
-                let back = tr!("player-back-10s");
+                let seconds = view.seek_step;
+                let back = tr!("player-back-seconds", seconds = seconds);
                 if control(ICON_FAST_REWIND, CONTROL, &back).show(ui).clicked() {
-                    cx.services.control(UiCommand::SeekBy(-SEEK_STEP));
+                    cx.services
+                        .control(UiCommand::SeekBy(-cx.services.playback.seek_step()));
                     self.show_controls();
                 }
-                let forward = tr!("player-forward-10s");
+                let forward = tr!("player-forward-seconds", seconds = seconds);
                 if control(ICON_FAST_FORWARD, CONTROL, &forward).show(ui).clicked() {
-                    cx.services.control(UiCommand::SeekBy(SEEK_STEP));
+                    cx.services.control(UiCommand::SeekBy(cx.services.playback.seek_step()));
                     self.show_controls();
                 }
                 let muted = view.muted || view.volume == 0.;
@@ -1438,6 +1443,8 @@ struct View {
     duration: Option<Duration>,
     volume: f64,
     speed: f64,
+    /// Seconds the skip buttons and keys jump (a setting).
+    seek_step: f64,
     /// A SyncPlay group controls playback for this session.
     group: bool,
     transcoding: bool,
@@ -1554,7 +1561,7 @@ struct Menus {
 }
 
 impl View {
-    fn read(state: &NowPlaying, menus: Menus, show_remaining: bool) -> Self {
+    fn read(state: &NowPlaying, menus: Menus, show_remaining: bool, seek_step: f64) -> Self {
         let title = state.item.name.clone();
         let title_aside = (state.item.kind == BaseItemKind::Episode).then(|| {
             let (series, _) = card_text(&state.item);
@@ -1612,6 +1619,7 @@ impl View {
             duration: state.duration,
             volume: state.volume,
             speed: state.adjustments.speed,
+            seek_step,
             group: state.group_item.is_some(),
             transcoding: state.is_transcoding(),
             time,
@@ -1689,7 +1697,7 @@ impl View {
 
     /// The view of a cast: what the TV reported, with the item's versions, tracks and chapters
     /// once it's fetched from the server.
-    fn read_cast(casting: &Casting, device: &cast::Device, reconnecting: bool, menus: Menus) -> Self {
+    fn read_cast(casting: &Casting, device: &cast::Device, reconnecting: bool, menus: Menus, seek_step: f64) -> Self {
         let item = casting.item.as_ref();
         let position = casting.position();
         let title = item.map_or_else(|| casting.name.clone(), |item| item.name.clone());
@@ -1763,6 +1771,7 @@ impl View {
             duration: casting.duration,
             volume: casting.volume,
             speed: 1.,
+            seek_step,
             group: false,
             transcoding: false,
             // The controller draws its own seek bar's times, so the clock's text and the bar's
@@ -1887,11 +1896,22 @@ fn next_tip(item: &jellyfin::models::BaseItemDto) -> String {
     }
 }
 
+/// The skip buttons' icons for a step in seconds: Material has them for 5, 10 and 30; a step
+/// without one (15) gets the plain arrows.
+fn seek_icons(step: f64) -> (MaterialIcon, MaterialIcon) {
+    match step.round() as u32 {
+        5 => (ICON_REPLAY_5, ICON_FORWARD_5),
+        10 => (ICON_REPLAY_10, ICON_FORWARD_10),
+        30 => (ICON_REPLAY_30, ICON_FORWARD_30),
+        _ => (ICON_FAST_REWIND, ICON_FAST_FORWARD),
+    }
+}
+
 /// Under this many seconds a delay reads as zero.
 const DELAY_ZERO: f64 = 0.05;
 
 /// A playback speed as the player writes it: "1.5×", "0.75×", with the language's decimal mark.
-fn speed_text(speed: f64) -> String {
+pub(crate) fn speed_text(speed: f64) -> String {
     format!("{}×", i18n::decimal(speed.to_string()))
 }
 
@@ -2343,7 +2363,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, SETTINGS_W, SettingsTab,
+        CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SETTINGS_W, SettingsTab,
         VOLUME_STEP, control, delay_stepper, delay_text, lit_button, menu_button, press_settings, scroll_steps,
         settings_id, settings_tabs, speed_group, stepped_delay, time_at, toggle_menu, wheel_notches,
     };
@@ -2706,7 +2726,7 @@ mod tests {
 
     #[test]
     fn the_seek_and_volume_steps_are_the_ones_remote_control_uses() {
-        assert_eq!(SEEK_STEP, 10.);
+        assert_eq!(crate::playback::DEFAULT_SEEK_STEP, 10);
         assert_eq!(VOLUME_STEP, 5.);
     }
 }

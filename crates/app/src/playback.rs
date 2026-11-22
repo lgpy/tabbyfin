@@ -39,6 +39,9 @@ const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 /// key changes the volume many times a second; one report covers them all.
 const VOLUME_REPORT_AFTER: Duration = Duration::from_secs(1);
 const DEFAULT_VOLUME: f64 = 100.;
+/// The seconds a seek key or skip button jumps, as Settings offers them.
+pub const SEEK_STEPS: [u32; 4] = [5, 10, 15, 30];
+pub const DEFAULT_SEEK_STEP: u32 = 10;
 /// How long quitting the app waits for a running session to report its stop. The next launch
 /// reports it instead if this runs out (`report_unfinished`).
 const EXIT_WAIT: Duration = Duration::from_secs(3);
@@ -416,6 +419,8 @@ pub struct PlaybackManager {
     volume: f64,
     muted: bool,
     adjustments: Adjustments,
+    /// Seconds per seek key press, skip button and remote fast-forward (a setting).
+    seek_step: f64,
     /// The item `adjustments` were made for; another one starts without the delays.
     adjusted_item: Option<String>,
     /// What the window's renderer can draw, which picks the player's video output. Pixels until
@@ -458,6 +463,7 @@ impl PlaybackManager {
         let volume = config.volume.unwrap_or(DEFAULT_VOLUME);
         let adjustments = Adjustments {
             subtitle_scale: config.subtitle_scale.unwrap_or(1.),
+            speed: config.default_speed.unwrap_or(1.),
             ..Adjustments::default()
         }
         .clamped();
@@ -476,6 +482,7 @@ impl PlaybackManager {
             volume,
             muted: false,
             adjustments,
+            seek_step: Self::seek_step_of(config.seek_step),
             adjusted_item: None,
             video_import: VideoImport::Pixels,
         }
@@ -504,6 +511,25 @@ impl PlaybackManager {
             ..self.adjustments
         }
         .clamped();
+    }
+
+    /// Sets the speed the next items start at (the settings page).
+    pub fn set_default_speed(&mut self, speed: f64) {
+        self.adjustments = Adjustments {
+            speed,
+            ..self.adjustments
+        }
+        .clamped();
+    }
+
+    /// Seconds per seek key press, skip button and remote fast-forward.
+    pub fn seek_step(&self) -> f64 {
+        self.seek_step
+    }
+
+    /// Sets the seek step, in seconds (the settings page).
+    pub fn set_seek_step(&mut self, seconds: Option<u32>) {
+        self.seek_step = Self::seek_step_of(seconds);
     }
 
     /// What plays after the current item, in order.
@@ -689,6 +715,15 @@ impl PlaybackManager {
         } else {
             None
         }
+    }
+
+    /// The configured seek step in seconds: one of [`SEEK_STEPS`], else the default.
+    fn seek_step_of(configured: Option<u32>) -> f64 {
+        f64::from(
+            configured
+                .filter(|seconds| SEEK_STEPS.contains(seconds))
+                .unwrap_or(DEFAULT_SEEK_STEP),
+        )
     }
 
     /// Remembers the volume and subtitle size for the next launch.

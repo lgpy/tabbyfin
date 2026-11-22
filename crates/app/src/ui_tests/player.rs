@@ -325,3 +325,33 @@ fn a_second_subtitle_is_picked_and_cleared() {
     );
     assert_eq!(harness.state().now_playing().unwrap().secondary_subtitle, None);
 }
+
+/// The seek step setting is how far the arrow keys jump, in both directions.
+#[test]
+fn the_seek_step_setting_sets_how_far_the_arrows_jump() {
+    let _config = ConfigDir::new("player-seek-step");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    harness
+        .state_mut()
+        .services_mut()
+        .expect("the services")
+        .playback
+        .set_seek_step(Some(30));
+
+    plain(&mut harness, egui::Key::ArrowRight);
+    plain(&mut harness, egui::Key::ArrowLeft);
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekBy(a), UiCommand::SeekBy(b)] if *a == 30. && *b == -30.),
+        "{sent:?}"
+    );
+
+    // A value Settings doesn't offer falls back to ten seconds.
+    let playback = &mut harness.state_mut().services_mut().unwrap().playback;
+    playback.set_seek_step(Some(7));
+    assert_eq!(playback.seek_step(), 10.);
+    playback.set_seek_step(None);
+    assert_eq!(playback.seek_step(), 10.);
+}

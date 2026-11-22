@@ -48,12 +48,14 @@ use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurati
 use crate::config::{self, AndroidPlayer, Config, SubtitleColor, SubtitleStyle, ThemePreference};
 use crate::i18n::{self, tr};
 use crate::nav::{NavRequest, Route};
+use crate::playback::{Adjustments, DEFAULT_SEEK_STEP, SEEK_STEPS};
 use crate::services::AppEvent;
 use crate::task::Task;
 use crate::theme;
 use crate::theme::SPACE;
 use crate::theme::text;
 use crate::toasts::Toast;
+use crate::views::player::speed_text;
 use crate::views::{Page, PageCx};
 use crate::widgets::avatar_row::AvatarRow;
 use crate::widgets::button::{self, Focus, State};
@@ -337,6 +339,24 @@ fn skip_intro_row() -> Row {
         unset: tr!("settings-skip-intro-unset"),
     }
 }
+fn seek_step_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-seek-step"),
+        description: tr!("settings-seek-step-description"),
+        key: "seek_step",
+        unset: tr!("settings-seek-step-unset"),
+    }
+}
+fn default_speed_row() -> Row {
+    Row {
+        section: Section::Playback,
+        label: tr!("settings-default-speed"),
+        description: tr!("settings-default-speed-description"),
+        key: "default_speed",
+        unset: tr!("settings-default-speed-unset"),
+    }
+}
 fn bitrate_row() -> Row {
     Row {
         section: Section::Playback,
@@ -557,6 +577,8 @@ fn all_rows() -> Vec<Row> {
         tracks_note_row(),
         autoplay_row(),
         skip_intro_row(),
+        seek_step_row(),
+        default_speed_row(),
         bitrate_row(),
         cast_bitrate_row(),
         hevc_row(),
@@ -1170,6 +1192,50 @@ impl SettingsPage {
         let current = self.config.auto_skip_intro.unwrap_or(false);
         if let Some(edit) = toggle(ui, &self.search, skip_intro_row(), current, Some(false)) {
             self.save(|config| config.auto_skip_intro = edit.or_unset());
+        }
+
+        let steps: Vec<(u32, String)> = SEEK_STEPS
+            .iter()
+            .map(|&seconds| (seconds, format!("{seconds} s")))
+            .collect();
+        let current = self
+            .config
+            .seek_step
+            .filter(|s| SEEK_STEPS.contains(s))
+            .unwrap_or(DEFAULT_SEEK_STEP);
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            seek_step_row(),
+            "settings_seek_step",
+            &steps,
+            current,
+            Some(DEFAULT_SEEK_STEP),
+        );
+        if let Some(edit) = picked {
+            let seconds = edit.or_unset().filter(|&seconds| seconds != DEFAULT_SEEK_STEP);
+            self.save(|config| config.seek_step = seconds);
+            cx.services.playback.set_seek_step(seconds);
+        }
+
+        let speeds: Vec<(f64, String)> = Adjustments::SPEEDS
+            .iter()
+            .map(|&speed| (speed, speed_text(speed)))
+            .collect();
+        let current = self.config.default_speed.unwrap_or(1.);
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            default_speed_row(),
+            "settings_default_speed",
+            &speeds,
+            current,
+            Some(1.),
+        );
+        if let Some(edit) = picked {
+            let speed = edit.or_unset().filter(|&speed| speed != 1.);
+            self.save(|config| config.default_speed = speed);
+            cx.services.playback.set_default_speed(speed.unwrap_or(1.));
         }
 
         // `AUTOMATIC` measures the connection before playing instead.
@@ -2252,12 +2318,31 @@ mod tests {
         assert_eq!(config.animations, None); // on
         assert_eq!(config.autoplay_next_episode, None); // on
         assert_eq!(config.auto_skip_intro, None); // off
+        assert_eq!(config.seek_step, None); // 10 s
+        assert_eq!(config.default_speed, None); // 1×
         assert_eq!(config.prefer_hevc, None); // off
         assert_eq!(config.check_for_updates, None); // on
         assert_eq!(config.subtitle_color, None); // white
         assert_eq!(config.subtitle_style, None); // outline
         assert_eq!(config.subtitle_scale, None); // 100 %
         assert_eq!(bitrate_choice(&config), 0); // no limit
+    }
+
+    /// The player preferences go to the config file and come back as they were saved.
+    #[test]
+    fn the_seek_step_and_default_speed_are_saved() {
+        use crate::playback::{Adjustments, DEFAULT_SEEK_STEP, SEEK_STEPS};
+
+        assert!(SEEK_STEPS.contains(&DEFAULT_SEEK_STEP));
+        assert!(Adjustments::SPEEDS.contains(&1.));
+        let config = Config {
+            seek_step: Some(30),
+            default_speed: Some(1.5),
+            ..Default::default()
+        };
+        let text = toml::to_string(&config).unwrap();
+        let read: Config = toml::from_str(&text).unwrap();
+        assert_eq!((read.seek_step, read.default_speed), (Some(30), Some(1.5)));
     }
 
     fn search(text: &str) -> Search {
