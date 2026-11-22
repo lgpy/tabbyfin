@@ -152,6 +152,7 @@ All of these exist in the 12.2 OpenAPI spec and none are marked obsolete (checke
 | Library contents | `GET /Items?ParentId=&IncludeItemTypes=&Recursive=&SortBy=&StartIndex=&Limit=&Fields=` |
 | Continue watching | `GET /UserItems/Resume` |
 | Remove from Continue Watching | `POST /UserItems/{itemId}/UserData` with `{"PlaybackPositionTicks":0}` (only the fields sent change; the same body with the old ticks is the undo) |
+| Authorise another device | `POST /QuickConnect/Authorize?code=` (any signed-in user; `404` unknown or expired code, `401` Quick Connect off, so it isn't taken for a dead token). Offered only when `GET /QuickConnect/Enabled` is true |
 | Next up | `GET /Shows/NextUp` |
 | Latest | `GET /Items/Latest?ParentId=` |
 | Item detail | `GET /Items/{itemId}` |

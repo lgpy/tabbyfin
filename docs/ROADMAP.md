@@ -48,7 +48,7 @@ Done: keyboard navigation everywhere, library sort and filters, favorites, cast 
 
 ## 4. Accounts and settings
 
-Done: player preferences, subtitle appearance, theme, window size and position, several servers and users, Settings for this device and the server (languages, Home), 10.11 support (the API smoke test, and the app clicked through on 10.11.11).
+Done: authorising another device's Quick Connect code from the account menu, player preferences, subtitle appearance, theme, window size and position, several servers and users, Settings for this device and the server (languages, Home), 10.11 support (the API smoke test, and the app clicked through on 10.11.11).
 
 ## 5. Platform and packaging
 

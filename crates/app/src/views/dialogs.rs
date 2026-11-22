@@ -589,6 +589,97 @@ impl DeletePlaylist {
     }
 }
 
+/// *Authorise a device…*: the Quick Connect code another device shows, typed here and approved
+/// for the signed-in user, which signs that device in as them. Enter authorises. A refusal is
+/// worded under the field and keeps the dialog open, so a mistyped code can be fixed.
+pub struct AuthoriseDevice {
+    typed: String,
+    /// What went wrong with the last try, in words.
+    error: Option<String>,
+    focus: bool,
+    /// The authorise request while it runs.
+    authorising: Option<Task<jellyfin::Result<()>>>,
+}
+
+impl AuthoriseDevice {
+    pub fn new() -> Self {
+        Self {
+            typed: String::new(),
+            error: None,
+            focus: true,
+            authorising: None,
+        }
+    }
+
+    /// Draws the dialog: `false` once it should be dropped (authorised, or closed).
+    pub fn show(&mut self, cx: &mut PageCx) -> bool {
+        if let Some(result) = self.authorising.as_mut().and_then(Task::poll) {
+            self.authorising = None;
+            match result {
+                Ok(()) => {
+                    cx.services.toast(Toast::success(tr!("dialog-authorise-done")));
+                    return false;
+                }
+                // Not `handle_error`: this server's `401` says Quick Connect is off, not that
+                // the session's token is gone.
+                Err(jellyfin::Error::Unauthorized) => self.error = Some(tr!("dialog-authorise-off")),
+                Err(jellyfin::Error::NotFound) => self.error = Some(tr!("dialog-authorise-wrong")),
+                Err(jellyfin::Error::Status { .. }) => self.error = Some(tr!("dialog-authorise-failed")),
+                Err(err) => self.error = Some(cx.services.handle_error(&err)),
+            }
+            self.focus = true;
+        }
+
+        let ctx = cx.ctx;
+        let busy = self.authorising.is_some();
+        let mut authorise = false;
+        let id = egui::Id::unique("authorise_device");
+        let note = tr!("dialog-authorise-note", name = cx.services.session.user.name.as_str());
+        let modal = dialog::show(ctx, id, WIDTH, &tr!("dialog-authorise-title"), Some(&note), |ui| {
+            // Enter authorises; the field never sees it.
+            let enter = ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+            field::label(ui, &tr!("dialog-authorise-code"));
+            let field = ui.add(field::single_line(ui, id.with("code"), &mut self.typed, "").interactive(!busy));
+            field::shown(&field, Kind::Text);
+            if std::mem::take(&mut self.focus) {
+                field.request_focus();
+            }
+            if let Some(error) = &self.error {
+                ui.add_space(surface::GAP_FIELD);
+                ui.label(label::muted(ui, error.clone()));
+            }
+            let ready = !self.typed.trim().is_empty();
+            dialog::buttons(ui, |ui| {
+                let state = if busy {
+                    State::Loading
+                } else if ready {
+                    State::Ready
+                } else {
+                    State::Disabled
+                };
+                if dialog::main(ui, &tr!("dialog-authorise"), state).clicked() {
+                    authorise = true;
+                }
+                dialog::cancel(ui);
+            });
+            if enter && ready && !busy {
+                authorise = true;
+            }
+        });
+
+        if authorise {
+            self.error = None;
+            let client = cx.services.session.client.clone();
+            // The code's spaces (it's often read out in groups) aren't part of it.
+            let code: String = self.typed.split_whitespace().collect();
+            self.authorising = Some(Task::spawn(cx.ctx, async move {
+                client.quick_connect_authorize(&code).await
+            }));
+        }
+        !modal.should_close()
+    }
+}
+
 /// The list's lines for what's typed: every playlist whose name contains it, then a new
 /// playlist named by it unless one already has that name.
 fn rows(playlists: &[BaseItemDto], typed: &str) -> Vec<Row> {
