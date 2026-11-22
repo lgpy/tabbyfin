@@ -9,6 +9,7 @@ use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ImageType};
 
 use crate::cast::{Cast, Casting};
+use crate::i18n::tr;
 use crate::playback::UiCommand;
 use crate::services::Services;
 use crate::theme::{self, text};
@@ -80,23 +81,20 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
         .session
         .as_ref()
         .is_some_and(|session| session.reconnecting.is_some());
+    // The panel's status and each row's are the same two words: looked up once for the frame.
+    let (casting_note, reconnecting_note) = (tr!("cast-status-casting"), tr!("cast-status-reconnecting"));
     let status = match casting_on {
-        Some(_) if reconnecting => Some(("Reconnecting", tokens.warning)),
-        Some(_) => Some(("Casting", tokens.success)),
+        Some(_) if reconnecting => Some((reconnecting_note.as_str(), tokens.warning)),
+        Some(_) => Some((casting_note.as_str(), tokens.success)),
         None => None,
     };
-    popup::panel_heading(
-        ui,
-        "Cast to a TV",
-        status,
-        "Play on a Chromecast or Google TV on this network. Your TV plays it; this app is the remote.",
-    );
+    popup::panel_heading(ui, &tr!("cast-panel-title"), status, &tr!("cast-panel-note"));
     ui.add_space(surface::GAP_GROUP);
     let mut chosen = None;
     if cast.devices.is_empty() {
-        state::icon_message(ui, ICON_TV, "Looking for TVs on this network…");
+        state::icon_message(ui, ICON_TV, &tr!("cast-looking"));
     } else {
-        popup::panel_section(ui, "On this network", SECTION_H, |_| {});
+        popup::panel_section(ui, &tr!("cast-section-network"), SECTION_H, |_| {});
         list_row::block(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
             for device in &cast.devices {
@@ -111,28 +109,28 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
                 };
                 // mDNS doesn't say how many TVs a group has.
                 let detail = if in_use && reconnecting {
-                    "Reconnecting"
+                    reconnecting_note.clone()
                 } else if in_use {
-                    "Casting"
+                    casting_note.clone()
                 } else if device.runs_receiver() {
                     // Its own ad says the receiver is up: what it plays can be picked up again.
-                    "Jellyfin is running"
+                    tr!("cast-device-running")
                 } else if device.is_group() {
-                    "Group"
+                    tr!("cast-device-group")
                 } else {
-                    device.model.as_str()
+                    device.model.clone()
                 };
                 let label = if in_use {
-                    format!("{}, casting", device.name)
+                    tr!("cast-device-casting", device = device.name.as_str())
                 } else if device.runs_receiver() {
-                    format!("Reconnect to {}", device.name)
+                    tr!("cast-device-reconnect", device = device.name.as_str())
                 } else {
-                    format!("Cast to {}", device.name)
+                    tr!("cast-device-cast", device = device.name.as_str())
                 };
                 let ringed = highlight == Some(&entry);
                 let row = ListRow::new(&device.name)
                     .leading(leading)
-                    .detail(Some(detail))
+                    .detail(Some(&detail))
                     .highlighted(in_use || ringed)
                     .ringed(ringed)
                     .role(Role::MenuItem)
@@ -146,7 +144,7 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
     }
     if cast.is_casting() {
         ui.add_space(surface::GAP_GROUP);
-        let disconnect = button::quiet(ui, "Disconnect", width, State::Ready, Focus::Skip);
+        let disconnect = button::quiet(ui, &tr!("cast-disconnect"), width, State::Ready, Focus::Skip);
         if highlight == Some(&CastEntry::Disconnect) {
             focus::ring(ui, disconnect.rect, radius, Place::Outside);
         }
@@ -154,7 +152,7 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
             chosen = Some(CastEntry::Disconnect);
         }
         ui.add_space(surface::GAP_ITEM);
-        let stop = button::quiet_danger(ui, "Stop casting", width, State::Ready, Focus::Skip);
+        let stop = button::quiet_danger(ui, &tr!("cast-stop"), width, State::Ready, Focus::Skip);
         if highlight == Some(&CastEntry::Stop) {
             focus::ring(ui, stop.rect, radius, Place::Outside);
         }
@@ -201,17 +199,14 @@ impl StopCastFirst {
             .as_ref()
             .map_or_else(String::new, |session| session.device.name.clone());
         let title = match &self.action {
-            GroupAction::Join(_) => "Stop casting to join?",
-            GroupAction::Create(_) => "Stop casting to start a group?",
+            GroupAction::Join(_) => tr!("cast-stop-join-title"),
+            GroupAction::Create(_) => tr!("cast-stop-create-title"),
         };
-        let note = format!(
-            "A SyncPlay group plays here, in step with the others, so casting to {device} stops. \
-             What it plays stops too."
-        );
-        let modal = dialog::show(ctx, Id::unique("stop_cast_first"), 460., title, None, |ui| {
+        let note = tr!("cast-stop-note", device = device.as_str());
+        let modal = dialog::show(ctx, Id::unique("stop_cast_first"), 460., &title, None, |ui| {
             ui.label(note);
             dialog::buttons(ui, |ui| {
-                if dialog::danger(ui, "Stop casting", State::Ready).clicked() {
+                if dialog::danger(ui, &tr!("cast-stop"), State::Ready).clicked() {
                     confirmed = true;
                 }
                 dialog::cancel(ui);
@@ -291,9 +286,9 @@ fn draw_bar(
     let response = ui.interact(rect, Id::unique("now_casting_bar_open"), Sense::CLICK);
     let name = bar_title(casting);
     let label = if reconnecting {
-        format!("{name}, reconnecting to {device}")
+        tr!("cast-bar-label-reconnecting", name = name.as_str(), device = device)
     } else {
-        format!("{name}, on {device}")
+        tr!("cast-bar-label-on", name = name.as_str(), device = device)
     };
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label.clone()));
     if response.hovered() {
@@ -318,11 +313,11 @@ fn draw_bar(
     let button_size = 40.;
     let button_center = pos2(rect.right() - pad - button_size / 2., rect.center().y);
     let (icon, tip) = if casting.paused {
-        (ICON_PLAY_ARROW, "Play")
+        (ICON_PLAY_ARROW, tr!("cast-bar-play"))
     } else {
-        (ICON_PAUSE, "Pause")
+        (ICON_PAUSE, tr!("cast-bar-pause"))
     };
-    let pause = RoundButton::icon(icon, tip)
+    let pause = RoundButton::icon(icon, &tip)
         .size(button_size, 24.)
         .focus(Focus::Skip)
         .show_at(ui, button_center, Id::unique("now_casting_pause"));
@@ -352,11 +347,11 @@ fn draw_bar(
         tokens.brand,
     );
     let place = if reconnecting {
-        format!("Reconnecting to {device}…")
+        tr!("cast-bar-reconnecting", device = device)
     } else {
         match (&casting.series_name, compact) {
-            (Some(series), false) => format!("{series} · on {device}"),
-            _ => format!("on {device}"),
+            (Some(series), false) => tr!("cast-bar-series", series = series.as_str(), device = device),
+            _ => tr!("cast-bar-on", device = device),
         }
     };
     let place_galley = painter.layout_no_wrap(place, text::font(ui, "xs"), tokens.ink_muted);
@@ -417,12 +412,12 @@ fn thumbnail(item: &BaseItemDto) -> Option<ImageRequest> {
 
 /// What the cast button says, as its tooltip and to a screen reader: in a SyncPlay group, why
 /// it's off.
-pub fn button_label(services: &Services) -> &'static str {
+pub fn button_label(services: &Services) -> String {
     if services.is_casting() {
-        "Casting (cast to a TV)"
+        tr!("cast-button-casting")
     } else if services.in_group() {
-        "Cast to a TV (off in a SyncPlay group)"
+        tr!("cast-button-off-in-group")
     } else {
-        "Cast to a TV"
+        tr!("cast-button")
     }
 }

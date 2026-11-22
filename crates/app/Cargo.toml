@@ -32,6 +32,13 @@ directories.workspace = true
 fs4.workspace = true
 gethostname.workspace = true
 keyring.workspace = true
+# The interface's translations (`i18n.rs`): Fluent files under `i18n/`, embedded at build time;
+# `fl!` checks message ids and arguments against the English file when it compiles.
+i18n-embed = { version = "0.16", features = ["fluent-system"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8"
+# The system's languages, which the interface follows unless Settings picks one.
+sys-locale = "0.3"
 # The update check (`update.rs`).
 reqwest.workspace = true
 serde.workspace = true

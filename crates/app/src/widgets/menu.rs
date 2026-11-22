@@ -28,6 +28,7 @@ use jellyfin::models::{BaseItemDto, BaseItemKind};
 
 use crate::downloads::{Downloads, Offer};
 
+use crate::i18n::tr;
 use crate::item_menu::{self, Mark, can_add_to_playlist, can_mark, is_favorite, is_playable, is_played, resume_point};
 use crate::playback::PlayOptions;
 use crate::services::{Marked, Services, Shuffled, UpNext};
@@ -75,50 +76,57 @@ pub fn item_menu(response: &Response, item: &BaseItemDto, downloads: &Downloads)
         match resume_point(item) {
             Some(position) => {
                 actions.push(MenuAction::Play { start: Some(position) });
-                entries.push(Entry::new(format!("Resume from {}", timestamp(position.into()))).icon(ICON_PLAY_ARROW));
+                entries
+                    .push(Entry::new(tr!("item-resume-from", time = timestamp(position.into()))).icon(ICON_PLAY_ARROW));
                 actions.push(MenuAction::Play { start: None });
-                entries.push(Entry::new("Play from beginning").icon(ICON_REPLAY));
+                entries.push(Entry::new(tr!("item-play-from-beginning")).icon(ICON_REPLAY));
             }
             None => {
                 actions.push(MenuAction::Play { start: None });
-                entries.push(Entry::new("Play").icon(ICON_PLAY_ARROW));
+                entries.push(Entry::new(tr!("item-play")).icon(ICON_PLAY_ARROW));
             }
         }
     } else if matches!(item.kind, BaseItemKind::Series | BaseItemKind::Season) {
         // Which episode, and whether it resumes, takes a request; the item page's button shows
         // it, and this asks the page to play it.
         actions.push(MenuAction::UpNext);
-        entries.push(Entry::new("Play").icon(ICON_PLAY_ARROW));
+        entries.push(Entry::new(tr!("item-play")).icon(ICON_PLAY_ARROW));
     }
     // Named and drawn like the item page's toggles: the icon shows whether it's on.
     let played = is_played(item);
     actions.push(MenuAction::Mark(Mark::Played(!played)));
     let watched = if played {
-        Entry::new("Watched").icon(ICON_CHECK_CIRCLE).tint(tokens.success)
+        Entry::new(tr!("item-watched"))
+            .icon(ICON_CHECK_CIRCLE)
+            .tint(tokens.success)
     } else {
-        Entry::new("Watched").icon(ICON_CHECK.outlined())
+        Entry::new(tr!("item-watched")).icon(ICON_CHECK.outlined())
     };
     entries.push(watched.toggled(played).separated());
     let favorite = is_favorite(item);
     actions.push(MenuAction::Mark(Mark::Favorite(!favorite)));
     let heart = if favorite {
-        Entry::new("Favorite").icon(ICON_FAVORITE).tint(tokens.red)
+        Entry::new(tr!("item-favorite")).icon(ICON_FAVORITE).tint(tokens.red)
     } else {
-        Entry::new("Favorite").icon(ICON_FAVORITE.outlined())
+        Entry::new(tr!("item-favorite")).icon(ICON_FAVORITE.outlined())
     };
     entries.push(heart.toggled(favorite));
     if can_add_to_playlist(item) {
         actions.push(MenuAction::AddToPlaylist);
-        entries.push(Entry::new("Add to playlist…").icon(ICON_PLAYLIST_ADD).separated());
+        entries.push(
+            Entry::new(tr!("item-add-to-playlist"))
+                .icon(ICON_PLAYLIST_ADD)
+                .separated(),
+        );
     }
     if let Some(offer) = downloads.offer(item) {
         let folder = matches!(item.kind, BaseItemKind::Series | BaseItemKind::Season);
         let entry = match offer {
-            Offer::Download if folder => Entry::new("Download all episodes").icon(ICON_DOWNLOAD),
-            Offer::Download => Entry::new("Download").icon(ICON_DOWNLOAD),
-            Offer::Cancel => Entry::new("Cancel download").icon(ICON_CLOSE),
-            Offer::Remove => Entry::new("Remove download").icon(ICON_DELETE.outlined()),
-            Offer::Retry => Entry::new("Retry download").icon(ICON_REFRESH),
+            Offer::Download if folder => Entry::new(tr!("item-download-all-episodes")).icon(ICON_DOWNLOAD),
+            Offer::Download => Entry::new(tr!("item-download")).icon(ICON_DOWNLOAD),
+            Offer::Cancel => Entry::new(tr!("item-cancel-download")).icon(ICON_CLOSE),
+            Offer::Remove => Entry::new(tr!("item-remove-download")).icon(ICON_DELETE.outlined()),
+            Offer::Retry => Entry::new(tr!("item-retry-download")).icon(ICON_REFRESH),
         };
         actions.push(MenuAction::Download(offer));
         // Its own group after Add to playlist, or after Favorite where there's none.
@@ -293,7 +301,7 @@ impl Services {
                         ..Default::default()
                     },
                 ),
-                Ok(None) => self.toast(Toast::info("Nothing here to play.")),
+                Ok(None) => self.toast(Toast::info(tr!("item-nothing-to-play"))),
                 Err(err) => {
                     let message = self.handle_error(&err);
                     self.toast(Toast::error(message));

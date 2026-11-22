@@ -16,6 +16,7 @@ use egui_material_icons::icons::{ICON_CLOSE, ICON_DELETE, ICON_DOWNLOAD, ICON_PL
 use jellyfin::models::{BaseItemDto, BaseItemKind};
 
 use crate::downloads::{self, DownloadState, Offer};
+use crate::i18n::tr;
 use crate::item_menu::resume_point;
 use crate::layout;
 use crate::nav::{NavRequest, Route};
@@ -52,8 +53,8 @@ enum Asked {
 }
 
 impl Page for DownloadsPage {
-    fn title(&self) -> &str {
-        "Downloads"
+    fn title(&self) -> String {
+        tr!("downloads-title")
     }
 
     fn show(&mut self, ui: &mut Ui, cx: &mut PageCx) {
@@ -64,11 +65,7 @@ impl Page for DownloadsPage {
             .map(|(item, state)| (item.clone(), state.clone()))
             .collect();
         if entries.is_empty() {
-            return state::icon_message(
-                ui,
-                ICON_DOWNLOAD,
-                "Nothing downloaded yet. Download a movie or an episode from its page or its menu.",
-            );
+            return state::icon_message(ui, ICON_DOWNLOAD, &tr!("downloads-empty"));
         }
         let side = layout::side(ui.ctx());
         let wifi = cx.services.downloads.waiting_for_wifi();
@@ -133,13 +130,17 @@ fn summary(entries: &[(BaseItemDto, DownloadState)]) -> String {
     }
     let mut parts = Vec::new();
     if done > 0 {
-        parts.push(format!("{done} downloaded, {}", downloads::bytes(size)));
+        parts.push(tr!(
+            "downloads-summary-done",
+            count = done,
+            size = downloads::bytes(size)
+        ));
     }
     if coming > 0 {
-        parts.push(format!("{coming} to come"));
+        parts.push(tr!("downloads-summary-coming", count = coming));
     }
     if failed > 0 {
-        parts.push(format!("{failed} failed"));
+        parts.push(tr!("downloads-summary-failed", count = failed));
     }
     parts.join(" · ")
 }
@@ -148,42 +149,46 @@ fn summary(entries: &[(BaseItemDto, DownloadState)]) -> String {
 /// `wifi`: the queue waits for an unmetered network (*Download over Wi-Fi only*).
 fn status(state: &DownloadState, wifi: bool) -> (String, Option<f32>) {
     match state {
-        DownloadState::Queued if wifi => ("Waiting for Wi-Fi".to_owned(), Some(0.)),
-        DownloadState::Queued => ("Waiting to download".to_owned(), Some(0.)),
-        DownloadState::Paused => ("Paused".to_owned(), None),
+        DownloadState::Queued if wifi => (tr!("downloads-status-waiting-wifi"), Some(0.)),
+        DownloadState::Queued => (tr!("downloads-status-waiting"), Some(0.)),
+        DownloadState::Paused => (tr!("downloads-status-paused"), None),
         DownloadState::Downloading { done, total } => match total.filter(|&total| total > 0) {
             Some(total) => {
                 let share = *done as f32 / total as f32;
                 (
-                    format!(
-                        "{} of {} · {:.0}%",
-                        downloads::bytes(*done),
-                        downloads::bytes(total),
-                        share * 100.
+                    tr!(
+                        "downloads-status-progress",
+                        done = downloads::bytes(*done),
+                        total = downloads::bytes(total),
+                        percent = format!("{:.0}", share * 100.)
                     ),
                     Some(share),
                 )
             }
-            None => (format!("{} so far", downloads::bytes(*done)), Some(0.)),
+            None => (tr!("downloads-status-so-far", done = downloads::bytes(*done)), Some(0.)),
         },
         DownloadState::Done { size } => (downloads::bytes(*size), None),
-        DownloadState::Failed(message) => (format!("Failed: {message}"), None),
+        DownloadState::Failed(message) => (tr!("downloads-status-failed", message = message), None),
     }
 }
 
 /// The round buttons a download has, rightmost last: playing it once it's here, and stopping,
 /// retrying or deleting it.
-fn buttons(state: &DownloadState) -> Vec<(MaterialIcon, &'static str, Option<Offer>)> {
+fn buttons(state: &DownloadState) -> Vec<(MaterialIcon, String, Option<Offer>)> {
     match state {
         DownloadState::Done { .. } => vec![
-            (ICON_PLAY_ARROW, "Play", None),
-            (ICON_DELETE.outlined(), "Remove download", Some(Offer::Remove)),
+            (ICON_PLAY_ARROW, tr!("downloads-action-play"), None),
+            (
+                ICON_DELETE.outlined(),
+                tr!("downloads-action-remove"),
+                Some(Offer::Remove),
+            ),
         ],
         DownloadState::Failed(_) => vec![
-            (ICON_REFRESH, "Retry download", Some(Offer::Retry)),
-            (ICON_CLOSE, "Remove from downloads", Some(Offer::Cancel)),
+            (ICON_REFRESH, tr!("downloads-action-retry"), Some(Offer::Retry)),
+            (ICON_CLOSE, tr!("downloads-action-remove-queued"), Some(Offer::Cancel)),
         ],
-        _ => vec![(ICON_CLOSE, "Cancel download", Some(Offer::Cancel))],
+        _ => vec![(ICON_CLOSE, tr!("downloads-action-cancel"), Some(Offer::Cancel))],
     }
 }
 
@@ -269,10 +274,10 @@ fn row(
     let mut asked = None;
     let mut center = pos2(rect.right() - PAD - BUTTON / 2., rect.center().y);
     for (icon, label, offer) in buttons.into_iter().rev() {
-        let clicked = RoundButton::icon(icon, label)
+        let clicked = RoundButton::icon(icon, &label)
             .size(BUTTON, BUTTON_ICON)
-            .tooltip(label)
-            .show_at(ui, center, response.id.with(label))
+            .tooltip(&label)
+            .show_at(ui, center, response.id.with(&label))
             .clicked();
         if clicked {
             asked = Some(match offer {

@@ -12,6 +12,7 @@ mod credentials;
 #[cfg(debug_assertions)]
 mod debug;
 mod downloads;
+mod i18n;
 mod images;
 mod item_menu;
 mod keyboard;

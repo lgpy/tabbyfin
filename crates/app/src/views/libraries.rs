@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use jellyfin::ItemsQuery;
 use jellyfin::models::{BaseItemDto, BaseItemKind, CollectionType};
 
+use crate::i18n::{self, tr};
 use crate::layout;
 use crate::nav::Route;
 use crate::task::Task;
@@ -61,8 +62,8 @@ impl LibrariesPage {
 }
 
 impl Page for LibrariesPage {
-    fn title(&self) -> &str {
-        "Libraries"
+    fn title(&self) -> String {
+        tr!("library-title")
     }
 
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
@@ -85,7 +86,7 @@ impl Page for LibrariesPage {
                 }
                 return;
             }
-            Some(Ok(views)) if views.is_empty() => return state::empty(ui, "Your server has no libraries yet."),
+            Some(Ok(views)) if views.is_empty() => return state::empty(ui, tr!("library-empty")),
             Some(Ok(views)) => views,
         };
         let side = layout::side(ui.ctx());
@@ -143,28 +144,15 @@ fn count_query(view: &BaseItemDto) -> ItemsQuery {
 
 /// "1,284 movies", by what the library holds.
 fn count_line(kind: Option<CollectionType>, count: u32) -> String {
-    let (one, many) = match kind {
-        Some(CollectionType::Movies) => ("movie", "movies"),
-        Some(CollectionType::TvShows) => ("show", "shows"),
-        Some(CollectionType::BoxSets) => ("collection", "collections"),
-        Some(CollectionType::Playlists) => ("playlist", "playlists"),
-        _ => ("item", "items"),
-    };
-    let noun = if count == 1 { one } else { many };
-    format!("{} {noun}", thousands(count))
-}
-
-/// `count` with a comma between each three digits.
-fn thousands(count: u32) -> String {
-    let digits = count.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
+    let shown = i18n::grouped(count.into());
+    let count = count as usize;
+    match kind {
+        Some(CollectionType::Movies) => tr!("library-count-movies", count = count, shown = shown.as_str()),
+        Some(CollectionType::TvShows) => tr!("library-count-shows", count = count, shown = shown.as_str()),
+        Some(CollectionType::BoxSets) => tr!("library-count-collections", count = count, shown = shown.as_str()),
+        Some(CollectionType::Playlists) => tr!("library-count-playlists", count = count, shown = shown.as_str()),
+        _ => tr!("library-count-items", count = count, shown = shown.as_str()),
     }
-    out
 }
 
 #[cfg(test)]

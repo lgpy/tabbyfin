@@ -38,8 +38,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
-  # The Android APK (docs/android.md): the app's library in release for arm64 and x86_64, in a
-  # debug-signed APK that installs on any phone or emulator until there's a release key.
+  # The Android APK (docs/android.md): the app's library in release for arm64 and x86_64. On a
+  # `v*` tag, a release-signed APK per ABI for the GitHub release, with the key from the
+  # repository's secrets; otherwise one debug-signed APK, which installs over a debug build.
   android:
     name: Android APK
     runs-on: ubuntu-24.04
@@ -64,11 +65,31 @@ jobs:
       - name: Install the NDK
         # The runner has the SDK (ANDROID_HOME) but not necessarily this NDK.
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" > /dev/null
-      - run: bash packaging/android/build.sh --release
-      - uses: actions/upload-artifact@v4
+      - if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: bash packaging/android/build.sh --release
+      - if: "!startsWith(github.ref, 'refs/tags/v')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabbyfin-android-debug
+          path: packaging/android/build/outputs/apk/debug/tabbyfin-debug.apk
+          if-no-files-found: error
+      - name: Build the release-signed APKs
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          TABBYFIN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TABBYFIN_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TABBYFIN_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export TABBYFIN_KEYSTORE="$RUNNER_TEMP/tabbyfin-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE" | base64 -d > "$TABBYFIN_KEYSTORE"
+          bash packaging/android/build.sh --sign
+          rm -f "$TABBYFIN_KEYSTORE"
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
         with:
           name: tabbyfin-android
-          path: packaging/android/build/outputs/apk/debug/tabbyfin-debug.apk
+          path: packaging/android/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
   # The API client against real servers: the newest we develop against and the oldest we
@@ -206,7 +227,7 @@ jobs:
 
   release:
     name: Release
-    needs: [package, appimage, flatpak]
+    needs: [package, appimage, flatpak, android]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

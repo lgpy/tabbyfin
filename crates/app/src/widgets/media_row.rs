@@ -24,6 +24,7 @@ use egui_material_icons::icons::{ICON_CHECK, ICON_CHECK_CIRCLE, ICON_EXPAND_LESS
 use jellyfin::ImageRequest;
 use jellyfin::models::BaseItemDto;
 
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::theme::{self, text};
 use crate::widgets::button::Focus;
@@ -261,7 +262,7 @@ impl<'a> MediaRow<'a> {
         } else {
             ICON_CHECK.outlined()
         };
-        let watched = RoundButton::icon(icon, "Watched (W)")
+        let watched = RoundButton::icon(icon, &tr!("widget-watched-key"))
             .size(size.watched, size.watched_icon)
             .on(self.played)
             .focus(Focus::Skip)
@@ -270,8 +271,8 @@ impl<'a> MediaRow<'a> {
         // Up, Down and Remove, against the toggle.
         let handle = self.handles.filter(|_| active).and_then(|moves| {
             let right = inner.right() - size.watched;
-            let remove = "Remove from playlist (Delete)";
-            list_row::handles(&mut content, right, watched_center.y, id, moves, remove)
+            let remove = tr!("widget-remove-from-playlist");
+            list_row::handles(&mut content, right, watched_center.y, id, moves, &remove)
         });
         MediaRowResponse { row, watched, handle }
     }
@@ -332,7 +333,7 @@ impl<'a> MediaRow<'a> {
         } else {
             ICON_CHECK.outlined()
         };
-        let watched = RoundButton::icon(icon, "Watched (W)")
+        let watched = RoundButton::icon(icon, &tr!("widget-watched-key"))
             .size(PHONE_WATCHED, PHONE_WATCHED_ICON)
             .on(self.played)
             .focus(Focus::Skip)

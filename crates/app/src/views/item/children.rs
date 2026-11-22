@@ -19,6 +19,7 @@ use super::{
 };
 use crate::browse::Cursor;
 use crate::downloads::Downloads;
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::item_menu::is_played;
 use crate::nav::Route;
@@ -38,15 +39,15 @@ pub(super) const HEADING_GAP: f32 = 12.;
 
 /// The heading over the item's children: a series' seasons, a collection's items, a season's
 /// episodes or a playlist's entries. Nothing when there are none.
-pub(super) fn children_heading(data: &ItemData) -> Option<&'static str> {
+pub(super) fn children_heading(data: &ItemData) -> Option<String> {
     if data.children.is_empty() {
         return None;
     }
     Some(match data.item.kind {
-        BaseItemKind::Series => "Seasons",
-        BaseItemKind::BoxSet => "In this collection",
-        BaseItemKind::Playlist => "Playlist",
-        _ => "Episodes",
+        BaseItemKind::Series => tr!("item-seasons"),
+        BaseItemKind::BoxSet => tr!("item-in-this-collection"),
+        BaseItemKind::Playlist => tr!("item-playlist"),
+        _ => tr!("item-episodes"),
     })
 }
 
@@ -138,11 +139,11 @@ pub(super) fn seasons(
 fn season_line(season: &BaseItemDto) -> String {
     let mut parts = Vec::new();
     if let Some(count) = season.child_count.filter(|&count| count > 0) {
-        parts.push(format!("{count} episode{}", if count == 1 { "" } else { "s" }));
+        parts.push(tr!("item-episode-count", count = (count as usize)));
     }
     match season.user_data.as_ref().and_then(|data| data.unplayed_item_count) {
-        Some(0) => parts.push("Watched".to_owned()),
-        Some(left) => parts.push(format!("{left} to watch")),
+        Some(0) => parts.push(tr!("item-watched")),
+        Some(left) => parts.push(tr!("item-to-watch", count = (left as usize))),
         None => {}
     }
     parts.join(" · ")
@@ -364,21 +365,29 @@ pub(super) fn season_shelf(
     asked: &mut Asked,
 ) -> Rect {
     let size = vec2(POSTER_W, POSTER_H) * COMPACT_SEASON_SCALE;
-    shelf::shelf_with_gaps(ui, "seasons", "Seasons", COMPACT_CARD_GAP, HEADING_GAP, 0., |ui| {
-        for (index, season) in data.children.iter().enumerate() {
-            let selected = cursor.is_selected(CHILDREN, index);
-            let response = season_card(ui, images, season, size, open == Some(season.id.as_str()), selected);
-            if selected && moved {
-                response.scroll_to_me(None);
+    shelf::shelf_with_gaps(
+        ui,
+        "seasons",
+        &tr!("item-seasons"),
+        COMPACT_CARD_GAP,
+        HEADING_GAP,
+        0.,
+        |ui| {
+            for (index, season) in data.children.iter().enumerate() {
+                let selected = cursor.is_selected(CHILDREN, index);
+                let response = season_card(ui, images, season, size, open == Some(season.id.as_str()), selected);
+                if selected && moved {
+                    response.scroll_to_me(None);
+                }
+                if response.clicked() {
+                    asked.season = Some(season.clone());
+                }
+                if let Some(action) = menu::item_menu(&response, season, downloads) {
+                    asked.menu = Some((action, season.clone()));
+                }
             }
-            if response.clicked() {
-                asked.season = Some(season.clone());
-            }
-            if let Some(action) = menu::item_menu(&response, season, downloads) {
-                asked.menu = Some((action, season.clone()));
-            }
-        }
-    })
+        },
+    )
 }
 
 /// Room round a season's poster for its ring, which the shelf would otherwise clip.
@@ -398,12 +407,12 @@ fn season_card(
     let room = SEASON_RING_ROOM;
     // One short line under a narrow card: what's left, or how many there are.
     let line = match season.user_data.as_ref().and_then(|data| data.unplayed_item_count) {
-        Some(0) => "Watched".to_owned(),
-        Some(left) => format!("{left} to watch"),
+        Some(0) => tr!("item-watched"),
+        Some(left) => tr!("item-to-watch", count = (left as usize)),
         None => season
             .child_count
             .filter(|&count| count > 0)
-            .map(|count| format!("{count} episode{}", if count == 1 { "" } else { "s" }))
+            .map(|count| tr!("item-episode-count", count = (count as usize)))
             .unwrap_or_default(),
     };
     let cell = vec2(size.x + 2. * room, size.y + 2. * room + 44.);
@@ -493,7 +502,7 @@ pub(super) fn episodes_band(
             );
             (drawn.first, drawn.selected)
         }
-        Load::Loaded(_) => (Some(band_note(ui, "No episodes in this season.", false)), None),
+        Load::Loaded(_) => (Some(band_note(ui, &tr!("item-no-episodes"), false)), None),
         Load::Loading => (Some(band_note(ui, "", true)), None),
         Load::Failed(message) => (Some(band_note(ui, message, false)), None),
     };

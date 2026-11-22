@@ -15,6 +15,7 @@ use egui::{
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_PLAY_ARROW};
 
+use crate::i18n::tr;
 use crate::theme::{self, text};
 use crate::widgets::button::Focus;
 use crate::widgets::focus::{self, Place};
@@ -53,7 +54,7 @@ pub fn regular_height(ui: &Ui) -> f32 {
 }
 
 /// A handle a row's owner acts on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Handle {
     Up,
     Down,
@@ -72,17 +73,18 @@ pub struct Handles {
 pub fn handles(ui: &mut Ui, right: f32, y: f32, id: Id, moves: Handles, remove: &str) -> Option<Handle> {
     let mut pressed = None;
     let buttons = [
-        (Handle::Up, ICON_ARROW_UPWARD, "Move up (Alt+Up)", moves.up),
-        (Handle::Down, ICON_ARROW_DOWNWARD, "Move down (Alt+Down)", moves.down),
-        (Handle::Remove, ICON_CLOSE, remove, true),
+        (Handle::Up, ICON_ARROW_UPWARD, tr!("widget-move-up"), moves.up),
+        (Handle::Down, ICON_ARROW_DOWNWARD, tr!("widget-move-down"), moves.down),
+        (Handle::Remove, ICON_CLOSE, remove.to_owned(), true),
     ];
     let mut x = right - HANDLES_W + HANDLE_SIZE / 2.;
     for (which, icon, label, enabled) in buttons {
-        let button = RoundButton::icon(icon.outlined(), label)
+        // Each button's id goes by which handle it is, since its name follows the language.
+        let button = RoundButton::icon(icon.outlined(), &label)
             .size(HANDLE_SIZE, HANDLE_ICON)
             .enabled(enabled)
             .focus(Focus::Skip)
-            .show_at(ui, pos2(x, y), id.with(label));
+            .show_at(ui, pos2(x, y), id.with(which));
         if button.clicked() {
             pressed = Some(which);
         }

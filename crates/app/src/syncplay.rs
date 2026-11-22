@@ -34,6 +34,7 @@ use jellyfin::{
 };
 use tokio::sync::mpsc;
 
+use crate::i18n::tr;
 use crate::playback::{NowPlaying, PlayOptions, UiCommand};
 use crate::runtime;
 use crate::services::Services;
@@ -575,28 +576,28 @@ impl Services {
         tracing::debug!(?update, "SyncPlay update");
         match update {
             GroupUpdate::GroupJoined(group) => {
-                self.toast(Toast::info(format!("Joined the SyncPlay group {}", group.group_name)));
+                self.toast(Toast::info(tr!("syncplay-joined", group = group.group_name.clone())));
                 self.syncplay.group = Some(group);
                 self.syncplay.start_clock();
             }
             GroupUpdate::GroupLeft | GroupUpdate::NotInGroup => {
                 if let Some(group) = self.syncplay.group.take() {
-                    self.toast(Toast::info(format!("Left {}", group.group_name)));
+                    self.toast(Toast::info(tr!("syncplay-left", group = group.group_name)));
                 }
                 self.leave_group_playback();
             }
             GroupUpdate::GroupDoesNotExist => {
-                self.toast(Toast::info("That SyncPlay group no longer exists."));
+                self.toast(Toast::info(tr!("syncplay-gone")));
                 self.syncplay.refresh_groups();
             }
             GroupUpdate::LibraryAccessDenied => {
-                self.toast(Toast::info("Someone in the group can't access this item."));
+                self.toast(Toast::info(tr!("syncplay-no-access")));
             }
             GroupUpdate::UserJoined(user) => {
                 if let Some(group) = &mut self.syncplay.group {
                     group.participants.push(user.clone());
                 }
-                self.toast(Toast::info(format!("{user} joined")));
+                self.toast(Toast::info(tr!("syncplay-user-joined", user = user)));
             }
             GroupUpdate::UserLeft(user) => {
                 if let Some(group) = &mut self.syncplay.group
@@ -604,7 +605,7 @@ impl Services {
                 {
                     group.participants.remove(i);
                 }
-                self.toast(Toast::info(format!("{user} left")));
+                self.toast(Toast::info(tr!("syncplay-user-left", user = user)));
             }
             GroupUpdate::StateUpdate { state, .. } => {
                 if let Some(group) = &mut self.syncplay.group {
@@ -697,7 +698,7 @@ impl Services {
             match message {
                 Inbound::Failed(err) => {
                     let message = self.handle_error(&err);
-                    self.toast(Toast::error(format!("SyncPlay: {message}")));
+                    self.toast(Toast::error(tr!("syncplay-error", message = message)));
                 }
                 Inbound::Clock(sample) => self.syncplay.clock.add(sample),
             }
@@ -776,7 +777,7 @@ impl Services {
             Err(err) => {
                 tracing::warn!("couldn't load the group's item: {err}");
                 let message = self.handle_error(&err);
-                self.toast(Toast::error(format!("Couldn't load the group's item: {message}")));
+                self.toast(Toast::error(tr!("syncplay-load-failed", message = message)));
             }
         }
     }

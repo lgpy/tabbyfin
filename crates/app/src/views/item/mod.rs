@@ -35,6 +35,7 @@ use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ItemField, ItemSo
 use jellyfin::{Client, ItemsQuery, Ticks};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
+use crate::i18n::{self, tr};
 use crate::item_menu::{
     Mark, PlaylistEdit, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played,
     resume_point,
@@ -101,7 +102,7 @@ pub fn meta_line(item: &BaseItemDto) -> String {
         parts.push(rating.clone());
     }
     if let Some(score) = item.community_rating {
-        parts.push(format!("★ {score:.1}"));
+        parts.push(format!("★ {}", i18n::decimal(format!("{score:.1}"))));
     }
     parts.join(" · ")
 }
@@ -751,7 +752,7 @@ impl ItemPage {
                     shuffle(&mut items);
                 }
                 if items.is_empty() {
-                    cx.services.toast(Toast::info("Nothing here to play."));
+                    cx.services.toast(Toast::info(tr!("item-nothing-to-play")));
                 } else {
                     cx.services.play_all(items);
                 }
@@ -817,7 +818,7 @@ impl ItemPage {
             .map(|(index, source)| Entry::new(version_label(source, index)).checked(index == current))
             .collect();
         let shown = PopupMenu::new(id)
-            .title("Version")
+            .title(&tr!("item-version"))
             .width(PICKER_W)
             .show(response, &entries);
         if shown.search {
@@ -922,7 +923,7 @@ impl ItemPage {
                         ));
                     } else if let Some(title) = children::children_heading(data) {
                         ui.add_space(SECTION_GAP);
-                        children_title = Some(children::heading(ui, title));
+                        children_title = Some(children::heading(ui, &title));
                         ui.add_space(children::HEADING_GAP);
                         children_row = match data.item.kind {
                             BaseItemKind::Series => children::seasons(
@@ -1184,9 +1185,12 @@ struct Asked {
 /// A More menu row. Deleting a playlist can't be taken back, so it's set apart and in red.
 fn more_entry(action: ItemAction) -> Entry<'static> {
     match action {
-        ItemAction::AddToPlaylist => Entry::new("Add to playlist…").icon(ICON_PLAYLIST_ADD),
-        ItemAction::EditPlaylist => Entry::new("Edit…").icon(ICON_EDIT),
-        _ => Entry::new("Delete playlist…").icon(ICON_DELETE).danger().separated(),
+        ItemAction::AddToPlaylist => Entry::new(tr!("item-add-to-playlist")).icon(ICON_PLAYLIST_ADD),
+        ItemAction::EditPlaylist => Entry::new(tr!("item-edit")).icon(ICON_EDIT),
+        _ => Entry::new(tr!("item-delete-playlist"))
+            .icon(ICON_DELETE)
+            .danger()
+            .separated(),
     }
 }
 
@@ -1201,8 +1205,8 @@ fn versions_menu_id(ui: &Ui) -> Id {
 }
 
 impl Page for ItemPage {
-    fn title(&self) -> &str {
-        &self.name
+    fn title(&self) -> String {
+        self.name.clone()
     }
 
     fn scope(&self) -> Option<Scope> {

@@ -7,6 +7,7 @@ use egui::{Align2, Color32, CornerRadius, Rect, Response, Sense, Stroke, StrokeK
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{ICON_CHECK, ICON_REMOVE};
 
+use crate::i18n::tr;
 use crate::theme::{self, text};
 use crate::widgets::focus::{self, Place};
 use crate::widgets::round_button;
@@ -113,12 +114,12 @@ pub fn filter(ui: &mut Ui, label: &str, mark: Mark, highlighted: bool) -> Respon
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::CLICK);
     let response = crate::layout::grow(ui, response, Sense::CLICK);
     response.widget_info(|| {
-        let state = match mark {
-            Mark::Off => "",
-            Mark::Included => ", included",
-            Mark::Excluded => ", excluded",
+        let name = match mark {
+            Mark::Off => label.to_owned(),
+            Mark::Included => tr!("widget-included", label = label),
+            Mark::Excluded => tr!("widget-excluded", label = label),
         };
-        WidgetInfo::labeled(Role::Button, true, format!("{label}{state}"))
+        WidgetInfo::labeled(Role::Button, true, name)
     });
 
     // Under the pointer, the inset ones take `inset_hover` and the included one `brand_hover`.

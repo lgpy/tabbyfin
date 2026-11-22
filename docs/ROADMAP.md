@@ -60,18 +60,17 @@ Done: an Inno Setup installer for Windows, an AppImage and a Flatpak bundle besi
 | 5.2 | **Windows code signing** | P2 | M | Avoids SmartScreen warnings on the installer and the exe. |
 | 5.3 | **Flathub** | P2 | M | The Flatpak builds and plays from a local bundle; it isn't published. |
 | 5.4 | **ARM builds** | P3 | M | Windows on ARM and Linux aarch64 aren't built. The libmpv and ANGLE pins are x86_64 only. |
-| 5.5 | **Android (phones and tablets)** | P3 | L | Signs in, browses and plays by touch, in a phone layout (a bottom bar, compact pages, 48-point targets, long-press menus); Media3 (default) and libmpv (a setting) play on a phone, with a touch player page. Left: refining the touch UI, then the release (`build.sh --sign` makes the signed APKs; CI signing on tags and the key are left), predictive Back's animation, picture-in-picture and a `MediaSession`. Plan in [`android.md`](android.md). |
+| 5.5 | **Android (phones and tablets)** | P3 | L | Signs in, browses and plays by touch, in a phone layout (a bottom bar, compact pages, 48-point targets, long-press menus); Media3 (default) and libmpv (a setting) play on a phone, with a touch player page. Left: refining the touch UI, the release key in CI's secrets (CI signs the APKs on tags), predictive Back's animation, picture-in-picture and a `MediaSession`. Plan in [`android.md`](android.md). |
 | 5.6 | **Tarball and AppImage dependencies** | P3 | S | Without `libxkbcommon-x11` (a bare container) both panic at start-up in `xkbcommon-dl` instead of saying what's missing, and the tarball doesn't list what it needs. Real desktops have it. |
 
 ## 6. Quality and engineering
 
-Done: an integration job in CI against 12.2 and 10.11, error messages for the common failures, bounded image memory and a loading queue.
+Done: an integration job in CI against 12.2 and 10.11, error messages for the common failures, bounded image memory and a loading queue, the interface in English and European Portuguese (Fluent, following the system language or the one Settings picks).
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
 | 6.1 | **UI tests** | P2 | M | API fixtures, a mocked server and `egui_kittest` UI tests (`crates/app/src/ui_tests/`) cover the client, reporting, the browse cursor, sign-in, dialogs, Settings, Home, the library, the item page and the widgets. The top bar and the player have little UI coverage. |
 | 6.2 | **Screen readers** | P3 | L | Keyboard reach, contrast (WCAG AA) and text size are done, and every widget names itself to AccessKit, but no screen reader has been tried. |
-| 6.3 | **Localisation** | P3 | M | All strings are English and inline. Extract them before the UI grows much more. |
 | 6.4 | **Performance on real hardware** | P3 | M | Profiled only in WSL debug builds (10,000-item fake library: about 640 MB, posters in view 0.5 s after a fast scroll). Check a release build on real hardware. |
 | 6.5 | **Expired token while browsing** | P3 | S | The error wording exists but hasn't been rechecked. |
 

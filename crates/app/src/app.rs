@@ -19,6 +19,7 @@ use jellyfin::Client;
 
 use crate::config::{Config, SavedServer};
 use crate::downloads;
+use crate::i18n::tr;
 use crate::keys::{self, Press};
 use crate::services::{AppEvent, Services};
 use crate::session::{Session, client_info, describe_error};
@@ -209,11 +210,12 @@ impl App {
         app
     }
 
-    /// Applies the config's appearance, at launch and after Settings saved a change
-    /// (`AppEvent::AppearanceChanged`): starts or stops following the desktop's colour scheme
+    /// Applies the config's appearance and language, at launch and after Settings saved a
+    /// change (`AppEvent::AppearanceChanged`): starts or stops following the desktop's colour scheme
     /// (Linux, while the theme preference is the system's), and reads the system's text size
     /// the first time a setting follows it.
     fn apply_appearance(&mut self, ctx: &egui::Context, config: &Config) {
+        crate::i18n::apply(crate::i18n::resolve(config.language));
         theme::apply(ctx, config);
         self.zoom = theme::zoom(config);
         if theme::follows_the_desktop(config) {
@@ -321,7 +323,7 @@ impl App {
                 }
                 self.remember(&session);
                 self.show_signed_in(ctx, frame, *session);
-                self.toasts.push(Toast::success("You're back online."));
+                self.toasts.push(Toast::success(tr!("shell-back-online")));
             }
             Some(Reconnected::Expired) => self.session_expired(ctx),
         }

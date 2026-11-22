@@ -24,8 +24,9 @@ use jellyfin::models::ImageType;
 
 use super::{
     PlayerPage, SEEK_STEP, SettingsChoice, SettingsTab, View, chapter_colours, control, gradient, label_badge,
-    settings_body,
+    settings_body, speed_text,
 };
+use crate::i18n::tr;
 use crate::playback::{PlayOptions, SubtitleChoice, UiCommand};
 use crate::theme::{self, over_video};
 use crate::views::PageCx;
@@ -123,7 +124,8 @@ impl PlayerPage {
             |ui| {
                 ui.spacing_mut().item_spacing.x = 8.;
                 let settings_open = self.sheet == Some(Sheet::Settings);
-                if control(ICON_TUNE, BUTTON, "Settings")
+                let settings = tr!("player-sheet-settings");
+                if control(ICON_TUNE, BUTTON, &settings)
                     .on(settings_open)
                     .show(ui)
                     .clicked()
@@ -132,7 +134,8 @@ impl PlayerPage {
                 }
                 if view.subtitles_button {
                     let on = view.subtitle_shown.is_some();
-                    let subtitles = control(ICON_CLOSED_CAPTION, BUTTON, "Subtitles").on(on).show(ui);
+                    let tip = tr!("player-subtitles");
+                    let subtitles = control(ICON_CLOSED_CAPTION, BUTTON, &tip).on(on).show(ui);
                     if subtitles.clicked() {
                         self.toggle_subtitles(view, cx);
                     }
@@ -144,7 +147,8 @@ impl PlayerPage {
                 }
                 if view.chapter_count >= 2 {
                     let open = self.sheet == Some(Sheet::Chapters);
-                    if control(ICON_VIEW_LIST, BUTTON, "Chapters").on(open).show(ui).clicked() {
+                    let chapters = tr!("player-chapters");
+                    if control(ICON_VIEW_LIST, BUTTON, &chapters).on(open).show(ui).clicked() {
                         self.toggle_sheet(Sheet::Chapters);
                     }
                 }
@@ -153,7 +157,8 @@ impl PlayerPage {
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 12.;
-                    if control(ICON_ARROW_BACK, BUTTON, "Back (Esc)").show(ui).clicked() {
+                    let back = tr!("player-back");
+                    if control(ICON_ARROW_BACK, BUTTON, &back).show(ui).clicked() {
                         self.exit(cx);
                     }
                     ui.vertical(|ui| {
@@ -181,11 +186,11 @@ impl PlayerPage {
         ui.painter()
             .circle_filled(center, PLAY / 2., over_video::SURFACE_SUBTLE);
         let (icon, tip) = if view.paused {
-            (ICON_PLAY_ARROW, "Play (Space)")
+            (ICON_PLAY_ARROW, tr!("player-play"))
         } else {
-            (ICON_PAUSE, "Pause (Space)")
+            (ICON_PAUSE, tr!("player-pause"))
         };
-        if control(icon, PLAY, tip)
+        if control(icon, PLAY, &tip)
             .show_at(ui, center, Id::unique("player_play"))
             .clicked()
         {
@@ -193,12 +198,24 @@ impl PlayerPage {
             self.show_controls();
         }
         let skips = [
-            (-1., ICON_REPLAY_10, "Back 10 s (Left)", -SEEK_STEP),
-            (1., ICON_FORWARD_10, "Forward 10 s (Right)", SEEK_STEP),
+            (
+                -1.,
+                ICON_REPLAY_10,
+                tr!("player-back-10s"),
+                "player_back_10",
+                -SEEK_STEP,
+            ),
+            (
+                1.,
+                ICON_FORWARD_10,
+                tr!("player-forward-10s"),
+                "player_forward_10",
+                SEEK_STEP,
+            ),
         ];
-        for (side, icon, tip, by) in skips {
+        for (side, icon, tip, id, by) in skips {
             let at = center + vec2(side * SKIP_DX * scale, 0.);
-            if control(icon, SKIP, tip).show_at(ui, at, Id::unique(tip)).clicked() {
+            if control(icon, SKIP, &tip).show_at(ui, at, Id::unique(id)).clicked() {
                 cx.services.control(UiCommand::SeekBy(by));
                 self.show_controls();
             }
@@ -246,7 +263,7 @@ impl PlayerPage {
                     self.toggle_remaining();
                 }
                 if (view.speed - 1.).abs() > 1e-6 {
-                    label_badge(ui, &format!("{}×", view.speed));
+                    label_badge(ui, &speed_text(view.speed));
                 }
             },
         );
@@ -318,8 +335,8 @@ impl PlayerPage {
                         tab = menu.tab(tab);
                         tab.label()
                     }
-                    (Sheet::Settings, None) => "Settings",
-                    (Sheet::Chapters, _) => "Chapters",
+                    (Sheet::Settings, None) => tr!("player-sheet-settings"),
+                    (Sheet::Chapters, _) => tr!("player-chapters"),
                 };
                 ui.horizontal(|ui| {
                     let title = RichText::new(title)
@@ -327,7 +344,8 @@ impl PlayerPage {
                         .color(over_video::FOREGROUND);
                     ui.add(egui::Label::new(title).selectable(false));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if control(ICON_CLOSE, 36., "Close").show(ui).clicked() {
+                        let tip = tr!("player-close");
+                        if control(ICON_CLOSE, 36., &tip).show(ui).clicked() {
                             close = true;
                         }
                     });
@@ -373,7 +391,7 @@ fn versions(ui: &mut egui::Ui, view: &View) -> Option<String> {
     ui.add_space(8.);
     popup::separator_in(ui, over_video::MENU_BORDER);
     ui.add_space(8.);
-    ui.label(label::overline(ui, "Version").color(over_video::MUTED_FOREGROUND));
+    ui.label(label::overline(ui, &tr!("player-version")).color(over_video::MUTED_FOREGROUND));
     let mut picked = None;
     for version in &view.versions {
         let entry = Entry::new(version.name.as_str())
@@ -398,10 +416,11 @@ fn chapters(ui: &mut egui::Ui, view: &View, cx: &mut PageCx) -> Option<std::time
             ..ImageRequest::new(&menu.item_id, ImageType::Chapter, Some(tag.clone()))
                 .fill_width((media_row::CHAPTER_THUMB_W * 2.) as u32)
         });
+        let number = chapter.index + 1;
         let name = chapter
             .name
             .clone()
-            .unwrap_or_else(|| format!("Chapter {}", chapter.index + 1));
+            .unwrap_or_else(|| tr!("player-chapter-number", number = number));
         let current = menu.current == Some(chapter.index);
         let row = media_row::chapter(
             ui,

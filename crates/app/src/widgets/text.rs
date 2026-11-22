@@ -7,6 +7,8 @@ use std::time::Duration;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ImageType};
 use jellyfin::{ImageRequest, Ticks};
 
+use crate::i18n::tr;
+
 /// Poster and landscape card sizes at their default scale, and the space between cards.
 pub const POSTER_W: f32 = 150.;
 pub const POSTER_H: f32 = 225.;
@@ -75,7 +77,7 @@ pub fn card_text(item: &BaseItemDto) -> (String, String) {
                 .as_ref()
                 .and_then(|d| d.unplayed_item_count)
                 .filter(|n| *n > 0)
-                .map(|n| format!("{n} unwatched"))
+                .map(|n| tr!("widget-unwatched", count = (n as usize)))
                 .unwrap_or_default(),
         ),
         _ => (

@@ -79,6 +79,9 @@ pub struct Config {
     /// Animations, smooth scrolling included. `None` means on.
     #[serde(default)]
     pub animations: Option<bool>,
+    /// The interface's language. `None` follows the system's (`i18n.rs`).
+    #[serde(default)]
+    pub language: Option<crate::i18n::Language>,
     /// UI zoom from Ctrl+= and Ctrl+-, 1.0 being 100%. `None` means 1.0.
     #[serde(default)]
     pub ui_zoom: Option<f32>,

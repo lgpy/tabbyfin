@@ -17,6 +17,7 @@ use jellyfin::ItemsQuery;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ItemField, ItemSortBy};
 
 use crate::browse::{self, Browse, Cursor, Move, Position, Section};
+use crate::i18n::tr;
 use crate::keys::{Action, Scope};
 use crate::nav::{NavRequest, Route};
 use crate::task::{Deadline, Task};
@@ -105,8 +106,8 @@ impl SearchPage {
 }
 
 impl Page for SearchPage {
-    fn title(&self) -> &str {
-        "Search"
+    fn title(&self) -> String {
+        tr!("search-title")
     }
 
     fn scope(&self) -> Option<Scope> {
@@ -162,7 +163,7 @@ impl Page for SearchPage {
 
         // Only reachable if the page were opened without the box saying anything.
         if self.term.is_empty() {
-            state::message(ui, "Type in the search box to search.");
+            state::message(ui, tr!("search-type-to-search"));
         } else {
             match &self.results {
                 Load::Loading => state::spinner(ui),
@@ -172,7 +173,7 @@ impl Page for SearchPage {
                         self.search_now(cx);
                     }
                 }
-                Load::Loaded(items) if items.is_empty() => state::empty(ui, "No results."),
+                Load::Loaded(items) if items.is_empty() => state::empty(ui, tr!("search-no-results")),
                 Load::Loaded(items) => {
                     show_results(ui, items, self.width, &mut self.cursor, &mut self.add_to_playlist, cx)
                 }
@@ -230,7 +231,7 @@ struct Asked {
 
 /// One kind of result: its title, its items and how they're laid out.
 struct Group<'a> {
-    title: &'static str,
+    title: String,
     items: Vec<&'a BaseItemDto>,
     /// Episodes are wide stills; movies and shows are posters.
     landscape: bool,
@@ -242,9 +243,9 @@ struct Group<'a> {
 fn groups(items: &[BaseItemDto], available: f32) -> Vec<Group<'_>> {
     let available = (available - 2. * PADDING).max(0.);
     [
-        ("Movies", BaseItemKind::Movie, false),
-        ("Shows", BaseItemKind::Series, false),
-        ("Episodes", BaseItemKind::Episode, true),
+        (tr!("search-movies"), BaseItemKind::Movie, false),
+        (tr!("search-shows"), BaseItemKind::Series, false),
+        (tr!("search-episodes"), BaseItemKind::Episode, true),
     ]
     .into_iter()
     .map(|(title, kind, landscape)| {
@@ -291,7 +292,7 @@ fn show_results(
             }
             ui.horizontal(|ui| {
                 ui.add_space(PADDING);
-                ui.label(label::heading(ui, group.title));
+                ui.label(label::heading(ui, &group.title));
             });
             ui.add_space(TITLE_GAP);
             for (row, cards) in group.items.chunks(group.columns).enumerate() {

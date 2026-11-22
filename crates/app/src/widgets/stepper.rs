@@ -8,6 +8,7 @@ use egui::{Align2, Color32, CursorIcon, Pos2, Sense, Ui, WidgetInfo, pos2, vec2}
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{ICON_ADD, ICON_REMOVE, ICON_RESTART_ALT};
 
+use crate::i18n::tr;
 use crate::theme::text;
 use crate::widgets::round_button;
 
@@ -67,19 +68,22 @@ pub fn row(ui: &mut Ui, label: &str, keys: Option<&str>, value: &str, moved: boo
     painter.rect_filled(pill, (PILL_H / 2.) as u8, colours.fill);
     painter.text(pill.center(), Align2::CENTER_CENTER, value, font, colours.ink);
     let word = label.to_lowercase();
-    let button =
-        |center: Pos2, icon, name: String, ink, step| pressed(ui, center, icon, &name, ink, colours).then_some(step);
+    let button = |center: Pos2, icon, name: String, key: &'static str, ink, step| {
+        pressed(ui, center, icon, &name, key, ink, colours).then_some(step)
+    };
     let down = button(
         pos2(pill.left() + BUTTON / 2., y),
         ICON_REMOVE,
-        format!("Decrease {word}"),
+        tr!("widget-decrease", label = word.as_str()),
+        "decrease",
         colours.ink,
         Step::Down,
     );
     let up = button(
         pos2(pill.right() - BUTTON / 2., y),
         ICON_ADD,
-        format!("Increase {word}"),
+        tr!("widget-increase", label = word.as_str()),
+        "increase",
         colours.ink,
         Step::Up,
     );
@@ -88,7 +92,8 @@ pub fn row(ui: &mut Ui, label: &str, keys: Option<&str>, value: &str, moved: boo
             button(
                 pos2(pill.left() - BUTTON / 2. - 2., y),
                 ICON_RESTART_ALT,
-                format!("Reset {word}"),
+                tr!("widget-reset", label = word.as_str()),
+                "reset",
                 colours.ink_muted,
                 Step::Reset,
             )
@@ -97,9 +102,17 @@ pub fn row(ui: &mut Ui, label: &str, keys: Option<&str>, value: &str, moved: boo
     down.or(up).or(reset)
 }
 
-fn pressed(ui: &Ui, center: Pos2, icon: MaterialIcon, name: &str, ink: Color32, colours: Colours) -> bool {
+fn pressed(
+    ui: &Ui,
+    center: Pos2,
+    icon: MaterialIcon,
+    name: &str,
+    key: &'static str,
+    ink: Color32,
+    colours: Colours,
+) -> bool {
     let rect = egui::Rect::from_center_size(center, vec2(BUTTON, BUTTON));
-    let response = ui.interact(rect, ui.scope_id().with(name), Sense::CLICK);
+    let response = ui.interact(rect, ui.scope_id().with(key), Sense::CLICK);
     let response = crate::layout::grow(ui, response, Sense::CLICK);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), name));
     if response.hovered() {

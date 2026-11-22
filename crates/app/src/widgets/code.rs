@@ -9,6 +9,7 @@ use egui::accesskit::Role;
 use egui::{Align2, Button, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
 use egui_material_icons::icons::{ICON_CHECK, ICON_CONTENT_COPY};
 
+use crate::i18n::tr;
 use crate::theme;
 use crate::widgets::button;
 
@@ -71,9 +72,9 @@ fn copy_button(ui: &mut Ui, inset: Rect, code: &str) {
         .filter(|left| *left > 0.);
     let copied = left.is_some();
     let (icon, label) = if copied {
-        (ICON_CHECK, "Copied")
+        (ICON_CHECK, tr!("widget-copied"))
     } else {
-        (ICON_CONTENT_COPY, "Copy code")
+        (ICON_CONTENT_COPY, tr!("widget-copy-code"))
     };
     let icon = icon.outlined();
     let font = FontId::new(ICON, icon.font_family());
@@ -81,7 +82,7 @@ fn copy_button(ui: &mut Ui, inset: Rect, code: &str) {
     let button = Button::new(label_text).frame(false).min_size(vec2(BUTTON, BUTTON));
     let center = egui::pos2(inset.right() - BUTTON_INSET - BUTTON / 2., inset.center().y);
     let response = ui.place(Rect::from_center_size(center, vec2(BUTTON, BUTTON)), button);
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label.as_str()));
     if response.clicked() {
         ctx.copy_text(code.to_owned());
         ctx.data_mut(|data| data.insert_temp(id, now));

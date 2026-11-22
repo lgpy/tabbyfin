@@ -1,6 +1,8 @@
 use jellyfin::models::{PublicSystemInfo, UserDto};
 use jellyfin::{Client, ClientInfo};
 
+use crate::i18n::tr;
+
 /// A signed-in user on a server.
 #[derive(Clone)]
 pub struct Session {
@@ -43,17 +45,17 @@ pub fn client_info(device_id: &str) -> ClientInfo {
 pub fn describe_error(err: &jellyfin::Error) -> String {
     use jellyfin::Error;
     match err {
-        Error::InvalidUrl(_) => "That doesn't look like a valid server address.".into(),
-        Error::Http(e) if e.is_timeout() => "The server took too long to respond.".into(),
-        Error::Http(e) if e.is_connect() => "Couldn't reach the server. Check the address and your connection.".into(),
-        Error::Http(_) => "The connection to the server broke off. It may be restarting.".into(),
-        Error::ServerStarting => "The server is still starting up.".into(),
-        Error::Unauthorized => "Your session has expired. Please sign in again.".into(),
-        Error::Forbidden => "This account isn't allowed to do that.".into(),
-        Error::NotFound => "The server couldn't find what was requested.".into(),
-        Error::Decode { .. } => "The server sent a response this app doesn't understand.".into(),
-        Error::Stalled => "The server sent nothing for 30 seconds.".into(),
-        Error::Socket(_) => "The live connection to the server failed.".into(),
-        Error::Status { status, .. } => format!("The server returned an error ({status})."),
+        Error::InvalidUrl(_) => tr!("shell-error-invalid-url"),
+        Error::Http(e) if e.is_timeout() => tr!("shell-error-timeout"),
+        Error::Http(e) if e.is_connect() => tr!("shell-error-connect"),
+        Error::Http(_) => tr!("shell-error-broken"),
+        Error::ServerStarting => tr!("shell-error-starting"),
+        Error::Unauthorized => tr!("shell-error-expired"),
+        Error::Forbidden => tr!("shell-error-forbidden"),
+        Error::NotFound => tr!("shell-error-not-found"),
+        Error::Decode { .. } => tr!("shell-error-decode"),
+        Error::Stalled => tr!("shell-error-stalled"),
+        Error::Socket(_) => tr!("shell-error-socket"),
+        Error::Status { status, .. } => tr!("shell-error-status", status = status.to_string()),
     }
 }
