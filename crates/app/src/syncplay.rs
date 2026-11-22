@@ -593,12 +593,15 @@ impl Services {
                 self.toast(Toast::info(tr!("syncplay-joined", group = group.group_name.clone())));
                 self.syncplay.group = Some(group);
                 self.syncplay.start_clock();
+                // The group's queue is what plays now, not the local one's history.
+                self.refresh_next();
             }
             GroupUpdate::GroupLeft | GroupUpdate::NotInGroup => {
                 if let Some(group) = self.syncplay.group.take() {
                     self.toast(Toast::info(tr!("syncplay-left", group = group.group_name)));
                 }
                 self.leave_group_playback();
+                self.refresh_next();
             }
             GroupUpdate::GroupDoesNotExist => {
                 self.toast(Toast::info(tr!("syncplay-gone")));

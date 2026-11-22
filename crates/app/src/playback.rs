@@ -1068,10 +1068,13 @@ impl PlaybackManager {
     }
 
     /// Shows the playing item's `next` as the queue's front, or the following episode once the
-    /// queue is empty.
-    fn refresh_next(&mut self) {
-        let (front, played) = (self.queue.front().cloned(), self.queue.last_played().cloned());
+    /// queue is empty. `solo`: the local queue's history is Previous (see
+    /// [`Services::solo_playback`]), which a group's session never takes from it.
+    fn refresh_next(&mut self, solo: bool) {
+        let front = self.queue.front().cloned();
+        let played = self.queue.last_played().cloned();
         if let Some(state) = &mut self.now_playing {
+            let played = played.filter(|_| solo && state.group_item.is_none());
             state.follow_queue(front.as_ref(), played.as_ref());
         }
     }
@@ -1380,10 +1383,22 @@ impl Services {
         }
         // The queue takes the place of the next episode for the up-next card and autoplay, and
         // asking for something to play next undoes dismissing the card.
-        playback.refresh_next();
+        playback.refresh_next(true);
         if let Some(state) = &mut playback.now_playing {
             state.next_cancelled = false;
         }
+    }
+
+    /// Whether the local queue is what plays: not a SyncPlay group's queue and not a TV's. Only
+    /// then is what it played before the playing item the one Previous goes back to.
+    fn solo_playback(&self) -> bool {
+        !self.in_group() && !self.is_casting()
+    }
+
+    /// [`PlaybackManager::refresh_next`] for the state of the group and the cast now.
+    pub(crate) fn refresh_next(&mut self) {
+        let solo = self.solo_playback();
+        self.playback.refresh_next(solo);
     }
 
     /// Sets what the queue does at the end of an item (the panel's repeat button, or remote
@@ -1436,20 +1451,20 @@ impl Services {
         if let Some(state) = self.playback.current() {
             state.send(UiCommand::SetQueueModes(repeat, order));
         }
-        self.playback.refresh_next();
+        self.refresh_next();
     }
 
     /// Takes the queue's entry at `index` out, from the player's queue panel.
     pub fn queue_remove(&mut self, index: usize) {
         if self.playback.queue.remove(index).is_some() {
-            self.playback.refresh_next();
+            self.refresh_next();
         }
     }
 
     /// Moves the queue's entry at `index` up (`-1`) or down (`1`). Returns where it went.
     pub fn queue_move(&mut self, index: usize, by: isize) -> Option<usize> {
         let to = self.playback.queue.move_entry(index, by)?;
-        self.playback.refresh_next();
+        self.refresh_next();
         Some(to)
     }
 
@@ -1586,7 +1601,7 @@ impl Services {
             && let Some(current) = self.playback.started.clone()
             && let Some(previous) = self.playback.queue.step_back(&current)
         {
-            self.playback.refresh_next();
+            self.refresh_next();
             self.play_now(&previous, resume_options(&previous));
             return;
         }
@@ -1921,6 +1936,7 @@ impl Services {
     }
 
     fn on_session_update(&mut self, generation: u64, update: SessionUpdate) {
+        let solo = self.solo_playback();
         let playback = &mut self.playback;
         match update {
             SessionUpdate::Started {
@@ -1964,7 +1980,12 @@ impl Services {
                     night_available: running.night_available,
                     versions: Vec::new(),
                     trickplay: TrickplayTiles::new(),
-                    previous: playback.queue.last_played().cloned(),
+                    // What the local queue played, for a solo session only.
+                    previous: playback
+                        .queue
+                        .last_played()
+                        .filter(|_| solo && running.options.group_item.is_none())
+                        .cloned(),
                     neighbour_previous: None,
                     // Read when the session starts, not when it was asked for: a remote play
                     // next or last queued while it was loading counts too.
@@ -1994,6 +2015,7 @@ impl Services {
                 let queued = !playback.queue.is_empty();
                 let played = playback.queue.last_played().cloned();
                 if let Some(state) = playback.state_of(generation) {
+                    let played = played.filter(|_| solo && state.group_item.is_none());
                     state.apply_details(*details, queued, played.as_ref());
                 }
             }
