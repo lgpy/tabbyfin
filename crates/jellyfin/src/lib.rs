@@ -16,6 +16,7 @@ pub mod models;
 mod playback;
 mod remote;
 mod socket;
+mod subtitles;
 mod syncplay;
 mod system;
 mod ticks;

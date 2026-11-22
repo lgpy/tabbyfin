@@ -655,3 +655,27 @@ syncplay-user-joined = { $user } juntou-se ao grupo
 syncplay-user-left = { $user } saiu do grupo
 syncplay-error = SyncPlay: { $message }
 syncplay-load-failed = Não foi possível carregar o item do grupo: { $message }
+
+item-search-subtitles = Procurar legendas…
+player-search-subtitles = Procurar legendas…
+subtitle-search-title = Procurar legendas
+subtitle-search-language = Idioma
+subtitle-search-searching = A procurar…
+subtitle-search-none = Não foram encontradas legendas em { $language }. Se uma pesquisa nunca encontrar nenhuma, o servidor pode não ter um fornecedor de legendas configurado; um administrador pode adicionar um, como o Open Subtitles, nos plugins do painel de controlo.
+subtitle-search-forbidden = A sua conta não tem permissão para procurar legendas.
+subtitle-search-downloading = A transferir…
+subtitle-search-added = Legenda adicionada
+subtitle-search-not-downloaded = O servidor não conseguiu transferir essa legenda. Experimente outra.
+subtitle-search-exact = Correspondência exata
+subtitle-search-downloads = { $count ->
+    [one] { $digits } transferência
+   *[other] { $digits } transferências
+  }
+subtitle-search-rating = Classificação { $rating }
+subtitle-search-row-label = { $name }, { $detail }
+player-position = Posição
+settings-subtitle-position = Posição
+settings-subtitle-position-description = A que altura do ecrã ficam as legendas. Partilhada com o menu de definições do leitor. Chega de imediato ao gestor de reprodução, por isso uma sessão em curso muda com ela.
+settings-subtitle-position-unset = Em baixo
+settings-subtitle-position-bottom = Em baixo
+settings-subtitle-position-raised = { $percent } % mais acima

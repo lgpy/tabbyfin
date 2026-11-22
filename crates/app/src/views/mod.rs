@@ -17,6 +17,7 @@ pub mod player;
 pub mod search;
 pub mod settings;
 pub mod shell;
+pub mod subtitle_search;
 pub mod value_filters;
 
 use crate::keys::{Action, Scope};

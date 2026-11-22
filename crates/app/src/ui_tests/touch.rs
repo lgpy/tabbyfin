@@ -540,6 +540,32 @@ impl PlayerRun {
         }
     }
 
+    /// The signed-in user may manage subtitles, which is what offers the subtitle search.
+    pub fn with_subtitle_management(mut self) -> Self {
+        if let Some(session) = &mut self.session {
+            session.user.policy = Some(jellyfin::models::UserPolicy {
+                enable_subtitle_management: true,
+            });
+        }
+        self
+    }
+
+    /// Applies the settings menu's adjustments, as the page does when one is changed.
+    pub fn adjust(&mut self, adjustments: crate::playback::Adjustments) {
+        self.services
+            .as_mut()
+            .expect("the services are made")
+            .adjust(adjustments);
+    }
+
+    /// Hands the services a subtitle the server downloaded, as the search dialog does.
+    pub fn add_downloaded_subtitle(&mut self, item_id: &str, sources: &[jellyfin::models::MediaSourceInfo]) -> bool {
+        self.services
+            .as_mut()
+            .expect("the services are made")
+            .add_downloaded_subtitle(item_id, sources)
+    }
+
     /// Queues the presses `keys::take` gave the shell for the next frame.
     pub fn presses(&mut self, presses: impl IntoIterator<Item = crate::keys::Press>) {
         self.keys.extend(presses);

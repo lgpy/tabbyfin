@@ -161,7 +161,9 @@ impl Media3Player {
                 None => Err(rejected(name, value)),
             },
             // The UI draws the subtitles, in its own style and size, and shows the title.
-            "force-media-title" | "sub-scale" | "sub-color" | "sub-border-style" | "sub-back-color" => Ok(()),
+            "force-media-title" | "sub-scale" | "sub-pos" | "sub-color" | "sub-border-style" | "sub-back-color" => {
+                Ok(())
+            }
             _ => {
                 tracing::warn!(name, ?value, "Media3 doesn't take this property");
                 Ok(())

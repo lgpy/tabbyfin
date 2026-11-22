@@ -36,6 +36,58 @@ pub struct UserDto {
     pub primary_image_tag: Option<String>,
     #[serde(default)]
     pub configuration: Option<UserConfiguration>,
+    /// What the user may do. Missing in sessions saved before it was read.
+    #[serde(default)]
+    pub policy: Option<UserPolicy>,
+}
+
+impl UserDto {
+    /// Whether the user may search for subtitles and download them to the library.
+    pub fn can_manage_subtitles(&self) -> bool {
+        self.policy
+            .as_ref()
+            .is_some_and(|policy| policy.enable_subtitle_management)
+    }
+}
+
+/// The parts of a user's policy the app reads (`/Users/Me`'s `Policy`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UserPolicy {
+    /// The permission `RemoteSearch/Subtitles` requires: administrators don't have it
+    /// unless it's switched on for them.
+    #[serde(default, deserialize_with = "nullable")]
+    pub enable_subtitle_management: bool,
+}
+
+/// A subtitle a provider offers for an item (`RemoteSearch/Subtitles`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct RemoteSubtitleInfo {
+    /// What [`crate::Client::download_subtitle`] takes.
+    #[serde(default)]
+    pub id: String,
+    /// The release or file name the provider lists it under.
+    #[serde(default)]
+    pub name: String,
+    pub provider_name: Option<String>,
+    /// The file format, `srt` or `ass`.
+    pub format: Option<String>,
+    #[serde(rename = "ThreeLetterISOLanguageName")]
+    pub three_letter_iso_language_name: Option<String>,
+    pub download_count: Option<u32>,
+    pub community_rating: Option<f32>,
+    /// Matched by the file's hash: made for exactly this file, so its timing fits.
+    #[serde(default, deserialize_with = "nullable")]
+    pub is_hash_match: bool,
+    #[serde(default, deserialize_with = "nullable")]
+    pub hearing_impaired: bool,
+    #[serde(default, deserialize_with = "nullable")]
+    pub forced: bool,
+    #[serde(default, deserialize_with = "nullable")]
+    pub machine_translated: bool,
+    #[serde(default, deserialize_with = "nullable")]
+    pub ai_translated: bool,
 }
 
 /// The user's preferences kept by the server (the web client's Settings → Home, Display and
@@ -430,6 +482,9 @@ pub struct MediaStream {
     pub delivery_method: Option<String>,
     /// Server-relative URL for subtitles delivered as files.
     pub delivery_url: Option<String>,
+    /// Where the file is on the server, which identifies an external subtitle across refreshes
+    /// (its `index` can move when another is added beside it).
+    pub path: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub channels: Option<u32>,

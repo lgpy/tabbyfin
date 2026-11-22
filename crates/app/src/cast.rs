@@ -707,6 +707,8 @@ fn outgoing_for(command: &UiCommand, casting: &Casting) -> Option<Outgoing> {
         | UiCommand::SetSpeed(_)
         | UiCommand::SetSubtitleDelay(_)
         | UiCommand::SetAudioDelay(_)
+        | UiCommand::AddSubtitle(_)
+        | UiCommand::SetSubtitlePosition(_)
         | UiCommand::SetSubtitleScale(_)
         | UiCommand::SetQueueModes(..) => return None,
     })
@@ -1702,6 +1704,7 @@ mod tests {
             UiCommand::SetSubtitleDelay(1.),
             UiCommand::SetAudioDelay(1.),
             UiCommand::SetSubtitleScale(1.2),
+            UiCommand::SetSubtitlePosition(90),
         ] {
             assert!(outgoing_for(&ignored, &casting).is_none());
         }

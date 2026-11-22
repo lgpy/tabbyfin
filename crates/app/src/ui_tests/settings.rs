@@ -324,3 +324,27 @@ fn the_spoiler_protection_switch_saves_and_applies() {
     assert_eq!(Config::load().hide_spoilers, Some(true));
     assert!(crate::spoilers::hides(&ctx, &episode));
 }
+
+/// The subtitle position is a picker beside the size; stepping it saves mpv's `sub-pos` to the
+/// config, where the bottom (its default) is the key's absence, and the undo button puts it back.
+#[test]
+fn the_subtitle_position_saves_to_the_config() {
+    let _config = ConfigDir::new("settings-sub-pos");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    // The word is in this row's description only among the device's settings.
+    ui.search("how high");
+    ui.step_until("the position row", |harness| {
+        harness.query_all_by_label("Position").next().is_some() && harness.query_all_by_label("Theme").next().is_none()
+    });
+    tab_past_the_menu(&mut ui);
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().subtitle_position, Some(95));
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().subtitle_position, Some(90));
+    ui.press(Key::ArrowLeft);
+    ui.press(Key::ArrowLeft);
+    assert_eq!(Config::load().subtitle_position, None, "the bottom is the default");
+}

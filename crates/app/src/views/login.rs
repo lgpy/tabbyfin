@@ -898,6 +898,7 @@ mod tests {
                 server_id: Some("server".into()),
                 primary_image_tag: None,
                 configuration: None,
+                policy: None,
             },
             server: server(),
         }

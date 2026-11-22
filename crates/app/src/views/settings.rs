@@ -48,6 +48,7 @@ use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurati
 use crate::config::{self, AndroidPlayer, Config, SubtitleColor, SubtitleStyle, ThemePreference};
 use crate::i18n::{self, tr};
 use crate::nav::{NavRequest, Route};
+use crate::playback::Adjustments;
 use crate::services::AppEvent;
 use crate::task::Task;
 use crate::theme;
@@ -102,6 +103,10 @@ fn subtitle_modes() -> [(SubtitleMode, String); 5] {
 
 /// Subtitle sizes offered here; the player's menu sets any size in 10 % steps.
 const SUBTITLE_SCALES: [f64; 6] = [0.75, 1., 1.25, 1.5, 1.75, 2.];
+
+/// Subtitle positions offered here, as mpv's `sub-pos`: the bottom, then higher up the picture.
+/// The player's menu sets any position in 5 % steps.
+const SUBTITLE_POSITIONS: [u8; 10] = [100, 95, 90, 85, 80, 70, 60, 50, 40, 30];
 
 /// Max streaming bitrate choices in Mbit/s; 0 is no limit.
 const BITRATES_MBPS: [i32; 10] = [0, 120, 60, 40, 20, 10, 8, 4, 2, 1];
@@ -418,6 +423,16 @@ fn subtitle_size_row() -> Row {
     }
 }
 
+fn subtitle_position_row() -> Row {
+    Row {
+        section: Section::Subtitles,
+        label: tr!("settings-subtitle-position"),
+        description: tr!("settings-subtitle-position-description"),
+        key: "subtitle_position",
+        unset: tr!("settings-subtitle-position-unset"),
+    }
+}
+
 fn wifi_only_row() -> Row {
     Row {
         section: Section::Downloads,
@@ -577,6 +592,7 @@ fn all_rows() -> Vec<Row> {
         subtitle_color_row(),
         subtitle_style_row(),
         subtitle_size_row(),
+        subtitle_position_row(),
         wifi_only_row(),
         downloads_folder_row(),
         image_cache_row(),
@@ -1322,6 +1338,27 @@ impl SettingsPage {
             self.save(|config| config.subtitle_scale = Some(scale).filter(|&scale| scale != 1.));
             cx.services.playback.set_subtitle_scale(scale);
         }
+
+        // A position set in the player that isn't one of the steps here is listed too.
+        let current = self.config.subtitle_position.unwrap_or(Adjustments::BOTTOM);
+        let positions: Vec<(u8, String)> = subtitle_positions(current)
+            .into_iter()
+            .map(|position| (position, subtitle_position_label(position)))
+            .collect();
+        let picked = self.pickers.choose(
+            ui,
+            &self.search,
+            subtitle_position_row(),
+            "settings_subtitle_position",
+            &positions,
+            current,
+            Some(Adjustments::BOTTOM),
+        );
+        if let Some(edit) = picked {
+            let position = edit.or_unset().unwrap_or(Adjustments::BOTTOM);
+            self.save(|config| config.subtitle_position = Some(position).filter(|&p| p != Adjustments::BOTTOM));
+            cx.services.playback.set_subtitle_position(position);
+        }
     }
 
     fn downloads(&mut self, ui: &mut Ui, cx: &mut PageCx) {
@@ -1678,7 +1715,7 @@ impl ServerSettings {
 }
 
 /// The server's cultures as (code, name), sorted by name, one per code.
-fn language_list(cultures: Vec<Culture>) -> Vec<(String, String)> {
+pub(crate) fn language_list(cultures: Vec<Culture>) -> Vec<(String, String)> {
     let mut languages: Vec<(String, String)> = cultures
         .into_iter()
         .filter_map(|culture| {
@@ -2179,6 +2216,24 @@ fn subtitle_scales(current: f64) -> Vec<f64> {
     scales
 }
 
+/// The positions the picker offers: the steps, plus the one set in the player when it isn't one.
+fn subtitle_positions(current: u8) -> Vec<u8> {
+    let mut positions = SUBTITLE_POSITIONS.to_vec();
+    if !positions.contains(&current) {
+        positions.push(current);
+        positions.sort_by(|a, b| b.cmp(a));
+    }
+    positions
+}
+
+/// A position as the picker names it: the bottom, or how far up from it.
+fn subtitle_position_label(position: u8) -> String {
+    match Adjustments::BOTTOM.saturating_sub(position) {
+        0 => tr!("settings-subtitle-position-bottom"),
+        percent => tr!("settings-subtitle-position-raised", percent = percent),
+    }
+}
+
 /// Opens a folder in the desktop's file manager. Not the `opener` crate: it's one program per
 /// OS, and this is the only place the app opens anything on the desktop. Waits for the launcher,
 /// which exits once the file manager has the folder, so a missing one is reported.
@@ -2200,8 +2255,8 @@ mod tests {
     use crate::config::{Config, ThemePreference};
 
     use super::{
-        AUTOMATIC, BITRATES_MBPS, SUBTITLE_SCALES, Search, Section, Store, all_rows, apply_bitrate, bitrate_choice,
-        language_list, stepped, subtitle_scales, themes,
+        AUTOMATIC, BITRATES_MBPS, SUBTITLE_POSITIONS, SUBTITLE_SCALES, Search, Section, Store, all_rows, apply_bitrate,
+        bitrate_choice, language_list, stepped, subtitle_positions, subtitle_scales, themes,
     };
 
     #[test]
@@ -2255,6 +2310,12 @@ mod tests {
     }
 
     #[test]
+    fn the_players_subtitle_position_joins_the_steps() {
+        assert_eq!(subtitle_positions(100), SUBTITLE_POSITIONS.to_vec());
+        assert_eq!(subtitle_positions(75), [100, 95, 90, 85, 80, 75, 70, 60, 50, 40, 30]);
+    }
+
+    #[test]
     fn the_players_subtitle_size_joins_the_steps() {
         assert_eq!(subtitle_scales(1.), SUBTITLE_SCALES.to_vec());
         assert_eq!(subtitle_scales(1.15), [0.75, 1., 1.15, 1.25, 1.5, 1.75, 2.]);
@@ -2276,6 +2337,7 @@ mod tests {
         assert_eq!(config.subtitle_color, None); // white
         assert_eq!(config.subtitle_style, None); // outline
         assert_eq!(config.subtitle_scale, None); // 100 %
+        assert_eq!(config.subtitle_position, None); // the bottom
         assert_eq!(bitrate_choice(&config), 0); // no limit
     }
 
