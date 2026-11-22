@@ -63,8 +63,8 @@ library-item-count = { $count ->
     [one] { $count } elemento
    *[other] { $count } elementos
     }
-library-values-chosen-items = { $chosen } elegidos · { $items }
-library-values-chosen = { $chosen } elegidos
+library-values-chosen-items = Elegidos: { $chosen } · { $items }
+library-values-chosen = Elegidos: { $chosen }
 library-values-none-match = Ningún género ni etiqueta coincide con «{ $search }».
 library-values-genres = Géneros
 library-values-tags = Etiquetas
@@ -184,7 +184,7 @@ player-settings = Ajustes de reproducción
 player-subtitles = Subtítulos
 player-audio = Audio
 player-chapters = Capítulos
-player-seek = Buscar
+player-seek = Posición
 player-volume = Volumen
 player-cast = Enviar a una TV
 player-cast-to-device = Enviando a { $device }
@@ -331,7 +331,7 @@ settings-user = Usuario
 settings-server = Servidor
 settings-address = Dirección
 settings-server-version = Versión de Jellyfin
-settings-languages-note = El servidor elige entre estas las pistas con las que empieza un elemento. Los menús del reproductor las cambian mientras ves algo. A partir del siguiente elemento.
+settings-languages-note = El servidor elige las pistas con las que empieza un elemento a partir de estos ajustes. Los menús del reproductor las cambian mientras ves algo. A partir del siguiente elemento.
 settings-audio-language = Idioma del audio
 settings-audio-language-description = La pista de audio en este idioma, cuando el archivo la tiene.
 settings-play-default-audio = Reproducir la pista de audio predeterminada
@@ -469,7 +469,7 @@ login-reconnect = Volverás a iniciar sesión automáticamente en cuanto el serv
 login-remove-account = Quitar esta cuenta
 login-server-address = Dirección del servidor
 login-other-server = O conéctate a otro servidor
-login-address-hint = jellyfin.ejemplo.com o 192.168.1.10:8096
+login-address-hint = jellyfin.example.com o 192.168.1.10:8096
 login-connect = Conectar
 login-username = Nombre de usuario
 login-password = Contraseña
@@ -520,7 +520,7 @@ downloads-summary-done = { $count ->
     [one] { $count } descargado, { $size }
    *[other] { $count } descargados, { $size }
   }
-downloads-summary-coming = { $count } pendientes
+downloads-summary-coming = { $count } por descargar
 downloads-summary-failed = { $count ->
     [one] { $count } con error
    *[other] { $count } con error
@@ -544,7 +544,7 @@ downloads-activity-to-come = { $count ->
   }
 downloads-activity-progress = { $done } de { $total }
 downloads-activity-so-far = { $done } hasta ahora
-downloads-activity-more = { $count } más pendientes
+downloads-activity-more = { $count } más por descargar
 downloads-toast-downloaded = Se ha descargado { $title }
 downloads-toast-failed = No se ha podido descargar { $title }: { $message }
 downloads-error-not-downloadable = Este elemento no se puede descargar de este servidor.
