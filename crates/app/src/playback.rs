@@ -26,6 +26,7 @@ use url::Url;
 
 use crate::config::{Config, SkipAction, SkipActions, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
 use crate::i18n::tr;
+use crate::info::{self, Stats};
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::services::{AppEvent, Services};
@@ -156,6 +157,9 @@ pub enum UiCommand {
     SetAudioDelay(f64),
     SetSubtitleScale(f64),
     ToggleMute,
+    /// Asks the player for the numbers behind the info overlay; the answer comes back as
+    /// [`NowPlaying::player_stats`]. Only the local player has them, so it never goes to a group.
+    PollInfo,
     Audio(i32),
     Subtitle(SubtitleChoice),
     Stop,
@@ -172,6 +176,8 @@ enum SessionUpdate {
     },
     /// Fetched after playback starts.
     Details(Box<Details>),
+    /// The player's answer to [`UiCommand::PollInfo`].
+    Stats(Box<Stats>),
     Player(PlayerEvent),
     /// `run_session` returned: the last message of a session. A panic in it is raised again on
     /// the UI thread, as a [`crate::task::Task`]'s is.
@@ -187,6 +193,11 @@ pub struct StreamInfo {
     pub subtitle_files: Vec<i32>,
     /// A subtitle the transcoder burns into the video.
     pub burned_subtitle: Option<i32>,
+    /// Why the server transcodes (`TranscodeReasons` of its URL, e.g. `VideoCodecNotSupported`).
+    pub transcode_reasons: Vec<String>,
+    /// The codecs the transcode produces (`VideoCodec` and `AudioCodec` of its URL).
+    pub transcode_video_codec: Option<String>,
+    pub transcode_audio_codec: Option<String>,
 }
 
 /// Another version (media source) of the playing item.
@@ -216,6 +227,18 @@ const RESUME_PROMPT_FOR: Duration = Duration::from_secs(10);
 
 /// When the up-next card shows without an Outro segment: this long before the end.
 const UP_NEXT_BEFORE_END: Duration = Duration::from_secs(20);
+
+/// Pauses playback after a while, or holds autoplay when the item ends. Not saved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SleepTimer {
+    /// Pauses at this time.
+    In(Instant),
+    /// Nothing plays after the end of the session with this number.
+    EndOfItem(u64),
+}
+
+/// The sleep timer's minutes choices.
+pub const SLEEP_MINUTES: [u64; 4] = [15, 30, 45, 60];
 
 /// State of the embedded player, for the player page.
 pub struct NowPlaying {
@@ -258,6 +281,8 @@ pub struct NowPlaying {
     /// What to do at each kind of segment (the setting, at session start).
     pub skip_actions: SkipActions,
     pub stream: StreamInfo,
+    /// What the player reported at the last poll, while the info overlay asks.
+    pub player_stats: Option<Stats>,
     /// The SyncPlay queue entry, while a group controls playback.
     pub group_item: Option<String>,
     /// Where playback resumed without asking, while the player may still offer to start over.
@@ -422,6 +447,7 @@ pub struct PlaybackManager {
     /// What the window's renderer can draw, which picks the player's video output. Pixels until
     /// the app sets it ([`PlaybackManager::set_video_import`]).
     video_import: VideoImport,
+    sleep: Option<SleepTimer>,
 }
 
 /// A session from its start until its end is handled.
@@ -478,6 +504,7 @@ impl PlaybackManager {
             adjustments,
             adjusted_item: None,
             video_import: VideoImport::Pixels,
+            sleep: None,
         }
     }
 
@@ -532,6 +559,38 @@ impl PlaybackManager {
         self.now_playing.as_mut()
     }
 
+    /// What plays by itself after the session numbered `generation` ends, taking its state. The
+    /// sleep timer's end of the item holds it back, and is spent.
+    pub(crate) fn take_next(&mut self, generation: u64) -> Option<BaseItemDto> {
+        let held = matches!(self.sleep, Some(SleepTimer::EndOfItem(session)) if session == generation);
+        if held {
+            self.sleep = None;
+        }
+        self.now_playing
+            .take()
+            .filter(|state| state.session == generation)
+            .and_then(|state| state.autoplay_next())
+            .filter(|_| !held)
+    }
+
+    pub fn sleep(&self) -> Option<SleepTimer> {
+        self.sleep
+    }
+
+    /// Sets the sleep timer, or clears it with `None`.
+    pub fn set_sleep(&mut self, sleep: Option<SleepTimer>) {
+        self.sleep = sleep;
+        self.ctx.request_repaint();
+    }
+
+    /// Time left on a timed sleep timer.
+    pub fn sleep_left(&self) -> Option<Duration> {
+        match self.sleep {
+            Some(SleepTimer::In(due)) => Some(due.saturating_duration_since(Instant::now())),
+            _ => None,
+        }
+    }
+
     /// A session as if `item` had started playing `source`, with no player behind it, for the
     /// player page's tests: 12 minutes into 48, playing. Returns what the page sends it.
     #[cfg(test)]
@@ -564,6 +623,7 @@ impl PlaybackManager {
             segments: Vec::new(),
             skip_actions: SkipActions::default(),
             stream: StreamInfo::default(),
+            player_stats: None,
             group_item: None,
             resumed_from: None,
             restarts: 0,
@@ -1061,12 +1121,40 @@ impl Services {
         for (generation, update) in self.playback.drain() {
             self.on_session_update(generation, update);
         }
+        self.tick_sleep();
         if let Some(reconnect) = self.playback.reconnect_due() {
             let Reconnect {
                 item, options, attempt, ..
             } = reconnect;
             self.playback.start_session(&item, options, attempt);
         }
+    }
+
+    /// Fires the sleep timer when it's due: pauses (so the position is reported and kept) and holds
+    /// autoplay of what comes after this item. A timer with nothing playing or on its way is
+    /// dropped.
+    fn tick_sleep(&mut self) {
+        if self.playback.sleep.is_none() {
+            return;
+        }
+        if !self.playback.active && self.playback.reconnect.is_none() && self.playback.now_playing.is_none() {
+            self.playback.sleep = None;
+            return;
+        }
+        let Some(SleepTimer::In(due)) = self.playback.sleep else {
+            return;
+        };
+        let now = Instant::now();
+        if now < due {
+            self.playback.ctx.request_repaint_after(due - now);
+            return;
+        }
+        self.playback.sleep = None;
+        if let Some(state) = self.playback.now_playing_mut() {
+            state.autoplay = false;
+        }
+        self.control(UiCommand::SetPause(true));
+        self.toast(Toast::info(tr!("player-sleep-paused")));
     }
 
     fn on_session_update(&mut self, generation: u64, update: SessionUpdate) {
@@ -1086,6 +1174,10 @@ impl Services {
                 let Some(running) = playback.sessions.iter().find(|s| s.generation == generation) else {
                     return;
                 };
+                // An end-of-item timer belongs to the item it was set on.
+                if matches!(playback.sleep, Some(SleepTimer::EndOfItem(session)) if session != generation) {
+                    playback.sleep = None;
+                }
                 playback.now_playing = Some(NowPlaying {
                     session: generation,
                     item: running.item.clone(),
@@ -1113,6 +1205,7 @@ impl Services {
                     segments: Vec::new(),
                     skip_actions: running.skip_actions,
                     stream,
+                    player_stats: None,
                     group_item: running.options.group_item.clone(),
                     resumed_from: running.resumed_from,
                     restarts: 0,
@@ -1128,6 +1221,11 @@ impl Services {
                 let queued = !playback.queue.is_empty();
                 if let Some(state) = playback.state_of(generation) {
                     state.apply_details(*details, queued);
+                }
+            }
+            SessionUpdate::Stats(stats) => {
+                if let Some(state) = playback.state_of(generation) {
+                    state.player_stats = Some(*stats);
                 }
             }
             SessionUpdate::Player(event) => {
@@ -1167,11 +1265,7 @@ impl Services {
         }
         let playback = &mut self.playback;
         playback.active = false;
-        let next = playback
-            .now_playing
-            .take()
-            .filter(|state| state.session == running.generation)
-            .and_then(|state| state.autoplay_next());
+        let next = playback.take_next(running.generation);
         let group_item = running.options.group_item.clone();
         match result {
             // In a group, every member reports the end and the server moves the queue on
@@ -1339,6 +1433,15 @@ fn stream_url(
     let reasons = query_param(&url, "TranscodeReasons").unwrap_or_default();
     tracing::info!(%reasons, "the server is transcoding");
     Ok((url, PlayMethod::Transcode))
+}
+
+/// The first of a transcoding URL's comma-separated codecs (`VideoCodec=h264`).
+fn first_codec(url: &Url, name: &str) -> Option<String> {
+    query_param(url, name)?
+        .split(',')
+        .next()
+        .filter(|codec| !codec.is_empty())
+        .map(str::to_owned)
 }
 
 fn query_param(url: &Url, name: &str) -> Option<String> {
@@ -1650,6 +1753,23 @@ async fn run_session(
             })
             .flatten()
             .map(|s| s.index),
+        transcode_reasons: (method == PlayMethod::Transcode)
+            .then(|| query_param(&url, "TranscodeReasons"))
+            .flatten()
+            .map(|reasons| {
+                reasons
+                    .split(',')
+                    .filter(|r| !r.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        transcode_video_codec: (method == PlayMethod::Transcode)
+            .then(|| first_codec(&url, "VideoCodec"))
+            .flatten(),
+        transcode_audio_codec: (method == PlayMethod::Transcode)
+            .then(|| first_codec(&url, "AudioCodec"))
+            .flatten(),
     };
 
     let (player, mut events, video) = start_player(import).await?;
@@ -1808,6 +1928,11 @@ async fn run_session(
                 }
             }
             Some(command) = channels.commands.recv() => {
+                if matches!(command, UiCommand::PollInfo) {
+                    let values = player.properties(&info::PROPERTIES).await;
+                    let _ = channels.updates.send(SessionUpdate::Stats(Box::new(Stats::parse(&values))));
+                    continue;
+                }
                 tracing::debug!(?command, "player command");
                 let send_now = reporting.on_command(&command);
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
@@ -2057,6 +2182,7 @@ async fn apply_command(
             Ok(())
         }
         UiCommand::Stop => player.quit().await,
+        UiCommand::PollInfo => Ok(()),
     }
 }
 

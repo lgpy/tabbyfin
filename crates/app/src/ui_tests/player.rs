@@ -198,6 +198,7 @@ fn a_segment_set_to_skip_is_skipped_and_undo_goes_back() {
 
     harness.get_by_label("Undo").click();
     harness.step();
+    harness.step();
     let sent = harness.state_mut().commands();
     assert!(
         matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 11 * 60),
@@ -258,6 +259,118 @@ fn the_credits_button_gives_way_to_the_up_next_card() {
     // Skip jumps by itself, whether or not there's a next episode.
     state.skip_actions.set(SegmentKind::Outro, Some(SkipAction::Skip));
     assert_eq!(state.auto_skippable().map(|s| s.end), Some(at(48)));
+}
+
+/// I shows the playback info: how the item plays, the server's reasons in words, and what the
+/// player reported; while it shows the page asks the player for its numbers, and it stops asking
+/// when it's hidden.
+#[test]
+fn i_shows_the_playback_info_and_asks_the_player() {
+    use crate::info::Stats;
+
+    let _config = ConfigDir::new("player-info");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    {
+        let state = harness.state_mut().now_playing_mut().expect("the session");
+        state.stream.method = jellyfin::PlayMethod::Transcode;
+        state.stream.transcode_reasons = vec!["VideoCodecNotSupported".into(), "ContainerBitrateExceedsLimit".into()];
+        state.stream.transcode_video_codec = Some("h264".into());
+        state.player_stats = Some(Stats {
+            hwdec: Some("d3d11va".into()),
+            size: Some((1280, 720)),
+            dropped: Some(4),
+            buffered: Some(9.5),
+            ..Stats::default()
+        });
+    }
+    harness.state_mut().commands();
+    assert!(
+        harness.query_by_label("Transcoding").is_none(),
+        "hidden until asked for"
+    );
+
+    plain(&mut harness, egui::Key::I);
+    harness.step();
+    for text in [
+        "Because",
+        "The video codec isn't supported by this player",
+        "The bitrate is over the streaming limit",
+        "H.264",
+        "1280×720",
+        "d3d11va",
+        "9.5 s",
+    ] {
+        harness.get_by_label(text);
+    }
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::PollInfo, ..]),
+        "the player is asked: {sent:?}"
+    );
+
+    plain(&mut harness, egui::Key::I);
+    harness.step();
+    assert!(harness.query_by_label("Because").is_none());
+    harness.state_mut().commands();
+    harness.step();
+    assert!(harness.state_mut().commands().is_empty(), "no polling while hidden");
+}
+
+/// The sleep timer pauses (not stops) when it's due and holds autoplay; before that it leaves
+/// playback alone.
+#[test]
+fn the_sleep_timer_pauses_and_holds_autoplay() {
+    use std::time::{Duration, Instant};
+
+    use crate::playback::SleepTimer;
+
+    let _config = ConfigDir::new("player-sleep");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().now_playing_mut().expect("the session").autoplay = true;
+    harness.state_mut().commands();
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::In(Instant::now() + Duration::from_secs(3600))));
+    services.tick_playback();
+    assert!(
+        services
+            .playback
+            .sleep_left()
+            .is_some_and(|left| left > Duration::from_secs(3500))
+    );
+    assert!(services.playback.now_playing().expect("the session").autoplay);
+    assert!(harness.state_mut().commands().is_empty());
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.playback.set_sleep(Some(SleepTimer::In(Instant::now())));
+    services.tick_playback();
+    assert_eq!(services.playback.sleep(), None);
+    assert!(!services.playback.now_playing().expect("the session").autoplay);
+    let sent = harness.state_mut().commands();
+    assert!(matches!(sent.as_slice(), [UiCommand::SetPause(true)]), "{sent:?}");
+}
+
+/// "At end" holds back the next episode when this one ends, and is spent by it.
+#[test]
+fn the_sleep_timers_end_of_item_holds_the_next_episode() {
+    use crate::playback::SleepTimer;
+
+    let _config = ConfigDir::new("player-sleep-end");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let services = harness.state_mut().services_mut().expect("the services");
+    let state = services.playback.now_playing_mut().expect("the session");
+    state.autoplay = true;
+    let session = state.session;
+    assert!(state.next.is_some());
+
+    services.playback.set_sleep(Some(SleepTimer::EndOfItem(session)));
+    assert!(services.playback.take_next(session).is_none(), "held back");
+    assert_eq!(services.playback.sleep(), None, "and spent");
 }
 
 /// The bracket keys step the speed up and down through the menu's speeds.

@@ -133,6 +133,19 @@ impl Video {
         self.output.draws_itself()
     }
 
+    /// How the picture reaches the window, from the kind of frame that last arrived.
+    pub fn output_path(&self) -> Option<crate::info::OutputPath> {
+        use crate::info::OutputPath;
+        if self.output.draws_itself() {
+            return Some(OutputPath::Surface);
+        }
+        match &*self.frames.borrow() {
+            Some(Frame::Pixels(_)) => Some(OutputPath::Software),
+            Some(Frame::Shared(_)) => Some(OutputPath::Gpu),
+            None => None,
+        }
+    }
+
     /// Whether a GPU frame failed to import, so nothing new will show: the session has to be
     /// played again with software frames (`Services::fall_back_to_pixels`). Driver quirks with
     /// shared memory can do that where the setup itself worked.

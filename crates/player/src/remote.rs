@@ -27,11 +27,13 @@ use crate::{EndReason, Error, PlayerEvent, Result};
 pub(crate) const FD_ENV: &str = "TABBYFIN_PLAYER_FD";
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<()>>>>>;
+type PendingProperties = Arc<Mutex<HashMap<u64, oneshot::Sender<Vec<Option<String>>>>>>;
 
 pub struct RemotePlayer {
     requests: mpsc::UnboundedSender<Request>,
     next_id: AtomicU64,
     pending: Pending,
+    properties: PendingProperties,
     /// Killed when dropped, in case closing its stdin didn't end it.
     _child: Child,
 }
@@ -81,11 +83,12 @@ impl RemotePlayer {
         let (events_tx, events) = mpsc::unbounded_channel();
         let (frames_tx, frames) = watch::channel(None);
         let pending: Pending = Default::default();
+        let properties: PendingProperties = Default::default();
         tokio::spawn(read_messages(
             stdout,
             events_tx,
             frames_tx,
-            pending.clone(),
+            (pending.clone(), properties.clone()),
             #[cfg(target_os = "linux")]
             fds,
         ));
@@ -106,6 +109,7 @@ impl RemotePlayer {
             requests,
             next_id: AtomicU64::new(1),
             pending,
+            properties,
             _child: child,
         };
         Ok((player, events, video))
@@ -118,6 +122,21 @@ impl RemotePlayer {
     pub async fn set_property(&self, name: &str, value: Value) -> Result<()> {
         let name = name.to_owned();
         self.call(|id| Request::SetProperty { id, name, value }).await
+    }
+
+    /// mpv properties as text, in the order asked; `None` for one mpv has no value for, and for
+    /// all of them if the host is gone.
+    pub async fn properties(&self, names: &[&str]) -> Vec<Option<String>> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (reply_tx, reply) = oneshot::channel();
+        self.properties.lock().unwrap().insert(id, reply_tx);
+        let names_owned = names.iter().map(|name| (*name).to_owned()).collect();
+        let request = Request::GetProperties { id, names: names_owned };
+        if self.requests.send(request).is_err() {
+            self.properties.lock().unwrap().remove(&id);
+            return vec![None; names.len()];
+        }
+        reply.await.unwrap_or_else(|_| vec![None; names.len()])
     }
 
     async fn call(&self, request: impl FnOnce(u64) -> Request) -> Result<()> {
@@ -145,7 +164,7 @@ async fn read_messages(
     mut stdout: BufReader<tokio::process::ChildStdout>,
     events: mpsc::UnboundedSender<PlayerEvent>,
     frames: watch::Sender<Option<Frame>>,
-    pending: Pending,
+    (pending, properties): (Pending, PendingProperties),
     #[cfg(target_os = "linux")] fds: Arc<FdTable>,
 ) {
     let mut exited = false;
@@ -166,6 +185,11 @@ async fn read_messages(
             Message::Reply { id, result } => {
                 if let Some(reply) = pending.lock().unwrap().remove(&id) {
                     let _ = reply.send(result.map_err(Error::from));
+                }
+            }
+            Message::Properties { id, values } => {
+                if let Some(reply) = properties.lock().unwrap().remove(&id) {
+                    let _ = reply.send(values);
                 }
             }
             Message::Pixels { width, height } => {
@@ -227,6 +251,8 @@ async fn read_messages(
     for (_, reply) in pending.lock().unwrap().drain() {
         let _ = reply.send(Err(Error::Closed));
     }
+    // Dropping the senders answers the property queries with nothing.
+    properties.lock().unwrap().clear();
 }
 
 /// Logs what the host writes to stderr (its own log, already formatted) under `player`.

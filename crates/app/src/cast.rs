@@ -707,7 +707,8 @@ fn outgoing_for(command: &UiCommand, casting: &Casting) -> Option<Outgoing> {
         | UiCommand::SetSpeed(_)
         | UiCommand::SetSubtitleDelay(_)
         | UiCommand::SetAudioDelay(_)
-        | UiCommand::SetSubtitleScale(_) => return None,
+        | UiCommand::SetSubtitleScale(_)
+        | UiCommand::PollInfo => return None,
     })
 }
 

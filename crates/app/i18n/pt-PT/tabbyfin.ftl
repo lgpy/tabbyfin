@@ -228,6 +228,68 @@ player-skipped-preview = Antevisão saltada
 player-skipped-ad = Anúncio saltado
 player-skipped-credits = Créditos saltados
 player-undo = Anular
+player-sleep = Temporizador de sono
+player-sleep-off = Desativado
+player-sleep-left = { $minutes } min
+player-sleep-end = No fim
+player-sleep-paused = Temporizador de sono: reprodução em pausa
+player-info-title = Informação de reprodução
+player-info-playing = A reproduzir
+player-info-direct-play = Reprodução direta
+player-info-direct-stream = Transmissão direta
+player-info-transcoding = Transcodificação
+player-info-because = Porque
+player-info-container = Contentor
+player-info-video = Vídeo
+player-info-resolution = Resolução
+player-info-frame-rate = Taxa de fotogramas
+player-info-video-bitrate = Taxa de bits do vídeo
+player-info-range = Gama
+player-info-audio = Áudio
+player-info-channels = Canais
+player-info-audio-bitrate = Taxa de bits do áudio
+player-info-decoder = Descodificador
+player-info-decoder-software = Software
+player-info-dropped = Fotogramas perdidos
+player-info-buffered = Em memória
+player-info-output = Saída
+player-info-output-zero-copy = GPU, sem cópia
+player-info-output-gpu = GPU
+player-info-output-software = Software
+player-info-output-surface = Superfície própria do leitor
+player-info-fps = { $fps } fps
+player-info-seconds = { $seconds } s
+player-info-reason =
+    { $reason ->
+        [ContainerNotSupported] O contentor não é suportado por este leitor
+        [VideoCodecNotSupported] O codec de vídeo não é suportado por este leitor
+        [AudioCodecNotSupported] O codec de áudio não é suportado por este leitor
+        [SubtitleCodecNotSupported] O formato das legendas não é suportado por este leitor
+        [AudioIsExternal] O áudio está num ficheiro à parte
+        [SecondaryAudioNotSupported] Uma segunda faixa de áudio não é suportada
+        [VideoProfileNotSupported] O perfil do vídeo não é suportado
+        [VideoLevelNotSupported] O nível do vídeo não é suportado
+        [VideoResolutionNotSupported] A resolução do vídeo é demasiado alta para este leitor
+        [VideoBitDepthNotSupported] A profundidade de cor do vídeo não é suportada
+        [VideoFramerateNotSupported] A taxa de fotogramas do vídeo não é suportada
+        [VideoRangeTypeNotSupported] O formato HDR do vídeo não é suportado
+        [VideoCodecTagNotSupported] A etiqueta do codec do vídeo não é suportada
+        [RefFramesNotSupported] O vídeo usa demasiados fotogramas de referência
+        [AnamorphicVideoNotSupported] Vídeo anamórfico não é suportado
+        [InterlacedVideoNotSupported] Vídeo entrelaçado não é suportado
+        [AudioChannelsNotSupported] O áudio tem mais canais do que este leitor aceita
+        [AudioProfileNotSupported] O perfil do áudio não é suportado
+        [AudioSampleRateNotSupported] A taxa de amostragem do áudio não é suportada
+        [AudioBitDepthNotSupported] A profundidade de bits do áudio não é suportada
+        [ContainerBitrateExceedsLimit] A taxa de bits excede o limite de transmissão
+        [VideoBitrateNotSupported] A taxa de bits do vídeo é demasiado alta
+        [AudioBitrateNotSupported] A taxa de bits do áudio é demasiado alta
+        [UnknownVideoStreamInfo] O servidor não conseguiu ler os detalhes do vídeo
+        [UnknownAudioStreamInfo] O servidor não conseguiu ler os detalhes do áudio
+        [DirectPlayError] A reprodução direta falhou
+        [StreamCountExceedsLimit] O ficheiro tem mais fluxos do que este leitor aceita
+       *[other] { $reason }
+    }
 player-restarting = O leitor parou inesperadamente. A reiniciá-lo…
 player-reconnecting = Perdeu-se a ligação ao servidor. A restabelecer a ligação…
 player-crashing = O leitor está sempre a falhar neste item. O registo pode explicar porquê.

@@ -228,6 +228,68 @@ player-skipped-preview = Avance saltado
 player-skipped-ad = Anuncio saltado
 player-skipped-credits = Créditos saltados
 player-undo = Deshacer
+player-sleep = Temporizador de apagado
+player-sleep-off = Desactivado
+player-sleep-left = { $minutes } min
+player-sleep-end = Al final
+player-sleep-paused = Temporizador de apagado: reproducción en pausa
+player-info-title = Información de reproducción
+player-info-playing = Reproduciendo
+player-info-direct-play = Reproducción directa
+player-info-direct-stream = Transmisión directa
+player-info-transcoding = Transcodificación
+player-info-because = Porque
+player-info-container = Contenedor
+player-info-video = Vídeo
+player-info-resolution = Resolución
+player-info-frame-rate = Fotogramas por segundo
+player-info-video-bitrate = Tasa de bits del vídeo
+player-info-range = Rango
+player-info-audio = Audio
+player-info-channels = Canales
+player-info-audio-bitrate = Tasa de bits del audio
+player-info-decoder = Decodificador
+player-info-decoder-software = Software
+player-info-dropped = Fotogramas perdidos
+player-info-buffered = En búfer
+player-info-output = Salida
+player-info-output-zero-copy = GPU, sin copia
+player-info-output-gpu = GPU
+player-info-output-software = Software
+player-info-output-surface = Superficie propia del reproductor
+player-info-fps = { $fps } fps
+player-info-seconds = { $seconds } s
+player-info-reason =
+    { $reason ->
+        [ContainerNotSupported] El contenedor no es compatible con este reproductor
+        [VideoCodecNotSupported] El códec de vídeo no es compatible con este reproductor
+        [AudioCodecNotSupported] El códec de audio no es compatible con este reproductor
+        [SubtitleCodecNotSupported] El formato de subtítulos no es compatible con este reproductor
+        [AudioIsExternal] El audio está en un archivo aparte
+        [SecondaryAudioNotSupported] No se admite una segunda pista de audio
+        [VideoProfileNotSupported] El perfil del vídeo no es compatible
+        [VideoLevelNotSupported] El nivel del vídeo no es compatible
+        [VideoResolutionNotSupported] La resolución del vídeo es demasiado alta para este reproductor
+        [VideoBitDepthNotSupported] La profundidad de color del vídeo no es compatible
+        [VideoFramerateNotSupported] La frecuencia de fotogramas del vídeo no es compatible
+        [VideoRangeTypeNotSupported] El formato HDR del vídeo no es compatible
+        [VideoCodecTagNotSupported] La etiqueta del códec del vídeo no es compatible
+        [RefFramesNotSupported] El vídeo usa demasiados fotogramas de referencia
+        [AnamorphicVideoNotSupported] No se admite el vídeo anamórfico
+        [InterlacedVideoNotSupported] No se admite el vídeo entrelazado
+        [AudioChannelsNotSupported] El audio tiene más canales de los que admite este reproductor
+        [AudioProfileNotSupported] El perfil del audio no es compatible
+        [AudioSampleRateNotSupported] La frecuencia de muestreo del audio no es compatible
+        [AudioBitDepthNotSupported] La profundidad de bits del audio no es compatible
+        [ContainerBitrateExceedsLimit] La tasa de bits supera el límite de transmisión
+        [VideoBitrateNotSupported] La tasa de bits del vídeo es demasiado alta
+        [AudioBitrateNotSupported] La tasa de bits del audio es demasiado alta
+        [UnknownVideoStreamInfo] El servidor no pudo leer los detalles del vídeo
+        [UnknownAudioStreamInfo] El servidor no pudo leer los detalles del audio
+        [DirectPlayError] Falló la reproducción directa
+        [StreamCountExceedsLimit] El archivo tiene más flujos de los que admite este reproductor
+       *[other] { $reason }
+    }
 player-restarting = El reproductor se ha detenido inesperadamente. Reiniciándolo…
 player-reconnecting = Se ha perdido la conexión con el servidor. Reconectando…
 player-crashing = El reproductor sigue fallando con este elemento. El registro puede decir por qué.
