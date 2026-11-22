@@ -501,6 +501,56 @@ fn a_sleep_timer_is_cancelled_in_a_syncplay_group() {
     assert!(harness.state_mut().commands().is_empty(), "no pause for the group");
 }
 
+/// The picture choices belong to the item: a restart of it (a lost stream, another track on a
+/// transcode, a version) takes them to the new player, and another item starts without.
+#[test]
+fn a_restart_of_the_item_keeps_the_picture_choices() {
+    use std::time::Duration;
+
+    use crate::playback::{AbLoop, Aspect, Picture, PlayOptions};
+
+    let _config = ConfigDir::new("player-picture-restart");
+    let kept = Picture {
+        aspect: Aspect::Fill,
+        deinterlace: true,
+        secondary_subtitle: Some(6),
+        ab_loop: AbLoop::Loop(Duration::from_secs(30), Duration::from_secs(60)),
+    };
+    let choose = |harness: &mut Harness<'static, PlayerRun>| {
+        let state = harness.state_mut().now_playing_mut().expect("the session");
+        state.aspect = Aspect::Fill;
+        state.deinterlace = true;
+        state.secondary_subtitle = Some(6);
+        state.ab_loop = AbLoop::Loop(Duration::from_secs(30), Duration::from_secs(60));
+    };
+
+    // A restart, as a version switch or a track switch on a transcode makes it.
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    choose(&mut harness);
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.reload(PlayOptions::default());
+    assert_eq!(
+        services.last_started_for_test().1.and_then(|o| o.picture),
+        Some(kept.clone())
+    );
+
+    // A lost stream waits to reconnect, with the choices too.
+    let mut harness = desktop_player(&server);
+    choose(&mut harness);
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.lose_for_test();
+    assert_eq!(services.reconnect_options_for_test().and_then(|o| o.picture), Some(kept));
+
+    // Another item starts as a new one does.
+    let mut harness = desktop_player(&server);
+    choose(&mut harness);
+    let services = harness.state_mut().services_mut().expect("the services");
+    let next = services.playback.now_playing().and_then(|s| s.next.clone()).expect("a next episode");
+    services.play(&next, PlayOptions::default());
+    assert_eq!(services.last_started_for_test().1.and_then(|o| o.picture), None);
+}
+
 /// The bracket keys step the speed up and down through the menu's speeds.
 #[test]
 fn the_brackets_step_the_speed() {

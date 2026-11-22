@@ -259,7 +259,7 @@ Tested: software video on Linux and ANGLE/D3D11 with d3d11va on Windows (AMD) th
 
 1. The session runs on tokio. It forwards `PlayerEvent`s into `NowPlaying` — the state the player page draws and controls (`services.playback`) — and it receives `UiCommand`s from that page: pause, seek, volume, tracks and stop.
    - After playback starts, it also looks up the item's versions and, for episodes, the next episode.
-   - **Switching version** starts a new session of the same item at the current position.
+   - **Switching version** starts a new session of the same item at the current position. Any restart of the same item (a version, a track switch on a transcode, a dropped stream, the GPU fallback) carries the picture choices: the aspect, the deinterlace choice, the second subtitle while its track is still there and the A–B loop's points (`PlayOptions::picture`; `run_session` sets them on the new mpv, the tracks' ones once the file has loaded). Another item starts fresh.
    - **Next episode** (button, Shift+N, or automatically when an episode plays to the end) starts a session for the next episode from its resume point.
    - **Chapters and segments** (`markers.rs`) are fetched with the details: chapters from the item (`Fields=Chapters`), segments from `GET /MediaSegments/{id}`.
      - The server only returns segments from provider plugins (e.g. Intro Skipper) that are enabled for the library. Without any, segments are guessed from chapter names: Intro/Opening/OP, Recap/Previously, Preview/Next Episode, Credits/Ending/ED/Outro/End Credits.

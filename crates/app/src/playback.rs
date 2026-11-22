@@ -35,6 +35,7 @@ use crate::session::describe_error;
 use crate::syncplay::GroupRequest;
 use crate::task::{self, Deadline};
 use crate::toasts::Toast;
+use crate::tracks;
 
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 /// How long after a volume or mute change its progress report goes out. A wheel spin or held
@@ -77,6 +78,54 @@ pub struct PlayOptions {
     /// `start` is the item's resume point, taken without asking (next episode, autoplay), so
     /// the player offers to start over.
     pub resumed: bool,
+    /// The picture choices of the playback this restarts (the same item again, in another
+    /// version or with other tracks, or after a lost stream); `None` starts as a new item does.
+    pub picture: Option<Picture>,
+}
+
+/// What a restart of the same item keeps of the picture choices, which belong to the item and
+/// are applied to the new player again.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Picture {
+    pub aspect: Aspect,
+    pub deinterlace: bool,
+    /// A stream index of the second subtitle.
+    pub secondary_subtitle: Option<i32>,
+    pub ab_loop: AbLoop,
+}
+
+impl Picture {
+    /// The choices a new session of `source` starts with: those `carried` over, with the second
+    /// subtitle only if that track is still there and still a text track other than the first
+    /// (the tracks of a transcode are the ones sent as files), else the defaults of a new item.
+    fn starting(
+        carried: Option<&Picture>,
+        source: &MediaSourceInfo,
+        stream: &StreamInfo,
+        subtitle: SubtitleChoice,
+    ) -> Self {
+        let Some(carried) = carried else {
+            return Self {
+                deinterlace: deinterlaces_by_default(source, stream.method),
+                ..Self::default()
+            };
+        };
+        let primary = match subtitle {
+            SubtitleChoice::Stream(index) => Some(index),
+            SubtitleChoice::Off => None,
+            SubtitleChoice::Auto => source.default_subtitle_stream_index.filter(|&index| index >= 0),
+        };
+        let files = (stream.method == PlayMethod::Transcode).then_some(stream.subtitle_files.as_slice());
+        let secondary_subtitle = carried.secondary_subtitle.filter(|&wanted| {
+            tracks::secondary_choices(source, files, primary)
+                .iter()
+                .any(|choice| choice.value == wanted)
+        });
+        Self {
+            secondary_subtitle,
+            ..carried.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -317,6 +366,7 @@ enum SessionUpdate {
         audio: Option<i32>,
         subtitle: SubtitleChoice,
         stream: StreamInfo,
+        picture: Picture,
     },
     /// Fetched after playback starts.
     Details(Box<Details>),
@@ -545,6 +595,16 @@ impl NowPlaying {
         self.next_queued = front.is_some();
         self.next = front.cloned().or_else(|| self.following.clone());
         self.previous = played.cloned().or_else(|| self.neighbour_previous.clone());
+    }
+
+    /// The picture choices a restart of this item keeps.
+    fn picture(&self) -> Picture {
+        Picture {
+            aspect: self.aspect,
+            deinterlace: self.deinterlace,
+            secondary_subtitle: self.secondary_subtitle,
+            ab_loop: self.ab_loop,
+        }
     }
 
     /// What plays this item again as it plays now: the same version, audio and subtitle.
@@ -1378,6 +1438,12 @@ impl Services {
         self.playback.reconnect.is_some()
     }
 
+    /// What the waiting reconnect starts with.
+    #[cfg(test)]
+    pub fn reconnect_options_for_test(&self) -> Option<PlayOptions> {
+        self.playback.reconnect.as_ref().map(|reconnect| reconnect.options.clone())
+    }
+
     /// The item the last session was started for, and what it was started with.
     #[cfg(test)]
     pub fn last_started_for_test(&self) -> (Option<String>, Option<PlayOptions>) {
@@ -1680,6 +1746,7 @@ impl Services {
         };
         let options = PlayOptions {
             start: Some(Ticks::from(state.position)),
+            picture: Some(state.picture()),
             ..state.track_options()
         };
         self.reload(options);
@@ -1698,6 +1765,9 @@ impl Services {
             return;
         };
         options.start = options.start.or(Some(Ticks::from(state.position)));
+        if options.picture.is_none() {
+            options.picture = Some(state.picture());
+        }
         let item = state.item.clone();
         if state.group_item.is_some() {
             self.group_reload(&item, options);
@@ -1770,6 +1840,7 @@ impl Services {
                 audio,
                 subtitle,
                 stream,
+                picture,
             } => {
                 // A replaced session that got this far is stopping; its player never shows.
                 if generation != playback.generation {
@@ -1778,7 +1849,6 @@ impl Services {
                 let Some(running) = playback.sessions.iter().find(|s| s.generation == generation) else {
                     return;
                 };
-                let deinterlace = deinterlaces_by_default(&source, stream.method);
                 playback.now_playing = Some(NowPlaying {
                     session: generation,
                     item: running.item.clone(),
@@ -1791,11 +1861,11 @@ impl Services {
                     loading: true,
                     audio,
                     subtitle,
-                    secondary_subtitle: None,
+                    secondary_subtitle: picture.secondary_subtitle,
                     mpv: running.mpv,
-                    aspect: Aspect::Fit,
-                    deinterlace,
-                    ab_loop: AbLoop::Off,
+                    aspect: picture.aspect,
+                    deinterlace: picture.deinterlace,
+                    ab_loop: picture.ab_loop,
                     volume: running.volume,
                     muted: running.muted,
                     adjustments: running.adjustments,
@@ -1880,6 +1950,8 @@ impl Services {
         // The sleep timer's end of the item: nothing plays after it, whatever the queue and the
         // repeat mode would do. The queue stays as it was.
         let held = matches!(result, Ok(Ended::Finished)) && playback.hold_after_end(&running.item.id);
+        // What a reconnect keeps of the picture choices.
+        let picture = playback.current().map(NowPlaying::picture);
         // Repeat one plays it again as it played, from its start.
         let replay = playback.current().map(NowPlaying::track_options).unwrap_or_else(|| PlayOptions {
             media_source_id: running.options.media_source_id.clone(),
@@ -1941,6 +2013,7 @@ impl Services {
                     options: PlayOptions {
                         start: Some(position),
                         resumed: false,
+                        picture: picture.or(running.options.picture.clone()),
                         ..running.options
                     },
                     attempt: running.attempt + 1,
@@ -2519,6 +2592,7 @@ async fn run_session(
             .flatten(),
     };
 
+    let picture = Picture::starting(options.picture.as_ref(), &source, &stream, subtitle);
     let (player, mut events, video) = start_player(import).await?;
 
     // Track choices are options, so they're set before loading the file. A transcode has
@@ -2596,9 +2670,17 @@ async fn run_session(
     }
     // Before the file loads, like the rest, so the first frame is already deinterlaced.
     player
-        .set_property("deinterlace", deinterlaces_by_default(&source, method))
+        .set_property("deinterlace", picture.deinterlace)
         .await
         .map_err(|err| err.to_string())?;
+    // A restart of the item keeps how its picture fills the window; a new item has mpv's own.
+    if picture.aspect != Aspect::Fit {
+        for (name, value) in picture.aspect.mpv_properties() {
+            if let Err(err) = player.set_property(name, value).await {
+                tracing::debug!("mpv didn't take {name}: {err}");
+            }
+        }
+    }
     for (name, value) in [
         ("speed", adjustments.speed),
         ("sub-delay", adjustments.subtitle_delay),
@@ -2629,6 +2711,7 @@ async fn run_session(
         audio,
         subtitle,
         stream: stream.clone(),
+        picture: picture.clone(),
     });
     let details_task = {
         let (client, item, updates) = (client.clone(), item.clone(), channels.updates.clone());
@@ -2677,6 +2760,26 @@ async fn run_session(
                             let select = file_selected == Some(stream.index);
                             if let Err(err) = player.add_subtitle(url.as_str(), title, stream.language.as_deref(), select).await {
                                 tracing::warn!("couldn't add subtitle: {err}");
+                            }
+                        }
+                        // What a restart of the item keeps, once there are tracks to pick from.
+                        if let Some(sid) = picture
+                            .secondary_subtitle
+                            .and_then(|index| subtitle_track(&source, &stream, index))
+                            && let Err(err) = player.set_property("secondary-sid", sid).await
+                        {
+                            tracing::warn!("couldn't show the second subtitle again: {err}");
+                        }
+                        let (a, b) = match picture.ab_loop {
+                            AbLoop::Off => (None, None),
+                            AbLoop::A(a) => (Some(a), None),
+                            AbLoop::Loop(a, b) => (Some(a), Some(b)),
+                        };
+                        for (name, point) in [("ab-loop-a", a), ("ab-loop-b", b)] {
+                            if let Some(point) = point
+                                && let Err(err) = player.set_property(name, point.as_secs_f64()).await
+                            {
+                                tracing::warn!("couldn't set the loop again: {err}");
                             }
                         }
                     }
@@ -3152,6 +3255,74 @@ mod tests {
             ],
             ..source
         }
+    }
+
+    #[test]
+    fn a_restart_keeps_the_picture_choices_and_a_new_item_starts_fresh() {
+        use super::{AbLoop, Aspect, Picture, StreamInfo, SubtitleChoice};
+        use jellyfin::PlayMethod;
+
+        let text = |index: i32| -> MediaStream {
+            serde_json::from_value(serde_json::json!({
+                "Index": index,
+                "Type": "Subtitle",
+                "IsTextSubtitleStream": true,
+            }))
+            .unwrap()
+        };
+        let source = MediaSourceInfo {
+            media_streams: vec![text(7), text(8)],
+            ..source()
+        };
+        let direct = StreamInfo::default();
+        let at = Duration::from_secs;
+        let carried = Picture {
+            aspect: Aspect::Fill,
+            deinterlace: false,
+            secondary_subtitle: Some(8),
+            ab_loop: AbLoop::Loop(at(30), at(60)),
+        };
+
+        // Everything comes back, the second subtitle too while its track is there.
+        let again = Picture::starting(Some(&carried), &source, &direct, SubtitleChoice::Stream(7));
+        assert_eq!(again, carried);
+        // Not when it's the first subtitle now, or the track is gone.
+        let first = Picture::starting(Some(&carried), &source, &direct, SubtitleChoice::Stream(8));
+        assert_eq!(first.secondary_subtitle, None);
+        assert_eq!(first.aspect, Aspect::Fill);
+        let gone = MediaSourceInfo {
+            media_streams: vec![text(7)],
+            ..source.clone()
+        };
+        assert_eq!(
+            Picture::starting(Some(&carried), &gone, &direct, SubtitleChoice::Off).secondary_subtitle,
+            None
+        );
+        // A transcode only has the tracks it sends as files.
+        let transcode = StreamInfo {
+            method: PlayMethod::Transcode,
+            subtitle_files: vec![7],
+            ..StreamInfo::default()
+        };
+        let sent = Picture::starting(Some(&carried), &source, &transcode, SubtitleChoice::Off);
+        assert_eq!(sent.secondary_subtitle, None);
+        // The deinterlace choice is the user's, even when the video is interlaced.
+        let interlaced: MediaSourceInfo = serde_json::from_value(serde_json::json!({
+            "Id": "s",
+            "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": true }],
+        }))
+        .unwrap();
+        assert!(!Picture::starting(Some(&carried), &interlaced, &direct, SubtitleChoice::Off).deinterlace);
+
+        // Without anything carried (another item), the defaults, and the stream's own deinterlacing.
+        let fresh = Picture::starting(None, &interlaced, &direct, SubtitleChoice::Off);
+        assert_eq!(
+            fresh,
+            Picture {
+                deinterlace: true,
+                ..Picture::default()
+            }
+        );
     }
 
     #[test]
