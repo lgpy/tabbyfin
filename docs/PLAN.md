@@ -107,6 +107,7 @@ crates/app/src/
 ├── i18n.rs          the interface's language: `tr!`, the Fluent loader, the system language
 ├── theme.rs         appearance: theme, text size, zoom, animations, over_video; `theme::apply` is called at launch
 ├── window.rs        the window as it opens (title, icon, app id, sizes) and its saved placement
+├── desktop/         desktop only: the display kept awake, the OS's media controls, the window's title and the taskbar's progress while a video plays (§6)
 ├── ui_tests/        the headless UI tests (egui_kittest)
 ├── widgets/         text (Load<T>), card, image, shelf, menu, popup, select, dialog, button, state, mascot, video, subtitles (cues a player leaves to the UI)
 └── views/           mod (Page, PageCx, open), shell, casting (the cast panel and the now-casting bar), home, login, search, libraries, library, value_filters, item, downloads, settings, player (with its touch gestures and phone controls), dialogs; item has its phone header in item/compact.rs
@@ -433,6 +434,15 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 - Counts use Fluent's plural selectors, and a sentence is one message with arguments, never pieces put together, since word order differs between languages.
 - Numbers the interface writes go through `i18n::decimal` for the fraction's mark and `i18n::grouped` for thousands: English's `4.3` and `1,284`, Portugal's and Spain's `4,3` and `12 840`. Both group from five digits, with a no-break space between them, since the fonts have no U+202F.
 - A page's title is made each frame with `tr!` (`Page::title` returns a `String`), so a change of language reaches the top bar on the next frame; a page named after the server's data hands back a clone.
+
+### Desktop integration
+
+While a video plays, `desktop::Desktop` (owned by `App`, updated every frame from `App::logic` with the signed-in services) does four things, all from `NowPlaying`; none of it exists on Android, which keeps its own screen on. Casting leaves `NowPlaying` empty, so nothing is registered then.
+
+- **The display stays awake** while the video isn't paused (`Awake`, which acts only on transitions): `SetThreadExecutionState` on Windows (on the UI thread, which owns the request), the XDG portal's `Inhibit` with `org.freedesktop.ScreenSaver` as the fallback on Linux (over `zbus` on the runtime, ending with its connection), an IOKit `PreventUserIdleDisplaySleep` assertion on macOS. Pausing, stopping and quitting release it.
+- **The system's media controls**, registered when playback starts and dropped when it ends: Windows' media overlay and macOS' Now Playing through `souvlaki` (`desktop/media_controls.rs`; the overlay is attached to the window's HWND), MPRIS served by our own `zbus` code on Linux (`desktop/linux/mpris.rs`: `souvlaki`'s MPRIS backend runs its own non-tokio thread, which the app's `zbus` can't serve from). `Reporter` turns `NowPlaying` (a `Snapshot`: title, series and season of an episode, duration, artwork, state, position) into the few reports the OS needs; commands come back as `Command`s on a channel (the OS's threads wake the UI) and run through `Services::control`, `play_next` and `play_previous`, so a SyncPlay group gets them. The artwork is the item's image URL, which has no credential (the token is a header), and `artwork_url` strips one if it ever has.
+- **The window's title** names what plays (an episode as *Series · S1:E2 · Name – Tabbyfin*) and goes back to *Tabbyfin* after.
+- **The taskbar button** (Windows, `ITaskbarList3`) shows the position, in the paused colour while paused, cleared when playback ends.
 
 ### Window placement
 
