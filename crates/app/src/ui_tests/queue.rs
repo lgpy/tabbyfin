@@ -435,3 +435,26 @@ fn save_is_the_last_stop_of_the_panels_keys() {
     }
     assert_eq!(server.requests("POST", "/Playlists"), 1);
 }
+
+/// Adding to the queue while the player waits to reconnect puts the items in the queue that's
+/// there, and the interrupted item plays on when the reconnect starts.
+#[test]
+fn adding_while_a_reconnect_waits_keeps_the_queue_and_the_reconnect() {
+    let _config = ConfigDir::new("queue-reconnect");
+    let (_server, mut harness) = playing();
+    let id = |index: usize| episode(index).id;
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(2)], false);
+    services.lose_for_test();
+    assert!(services.reconnect_pending_for_test());
+
+    services.enqueue(vec![movie()], false);
+    assert!(services.reconnect_pending_for_test(), "the reconnect goes ahead");
+    assert_eq!(queued(&mut harness), [id(2), movie().id]);
+    // Play next goes the same way.
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(0)], true);
+    assert!(services.reconnect_pending_for_test());
+    assert_eq!(queued(&mut harness), [id(0), id(2), movie().id]);
+}
+

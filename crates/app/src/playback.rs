@@ -1216,7 +1216,8 @@ impl Services {
             return;
         }
         let playback = &mut self.playback;
-        if !playback.active {
+        // A reconnect that waits is the playback going on: its queue is the one to add to.
+        if !playback.active && playback.reconnect.is_none() {
             self.play_all(items);
             return;
         }
@@ -1300,6 +1301,17 @@ impl Services {
     /// follows. Returns the item a new session was started for, if one was.
     #[cfg(test)]
     pub fn end_for_test(&mut self) -> Option<String> {
+        self.end_with_for_test(PlayOptions::default())
+    }
+
+    /// As [`Services::end_for_test`], for a session that was started with `options`.
+    #[cfg(test)]
+    pub fn end_with_for_test(&mut self, options: PlayOptions) -> Option<String> {
+        self.end_session_for_test(Ok(Ended::Finished), options)
+    }
+
+    #[cfg(test)]
+    fn end_session_for_test(&mut self, result: Result<Ended, String>, options: PlayOptions) -> Option<String> {
         let state = self.playback.now_playing()?;
         let generation = self.playback.generation;
         let (commands, _) = mpsc::unbounded_channel();
@@ -1308,7 +1320,7 @@ impl Services {
             generation,
             item: state.item.clone(),
             attempt: 0,
-            options: PlayOptions::default(),
+            options,
             updates,
             commands,
             volume: self.playback.volume,
@@ -1320,10 +1332,36 @@ impl Services {
             skip_actions: SkipActions::default(),
             resumed_from: None,
         };
-        self.session_ended(running, Ok(Ended::Finished));
+        self.session_ended(running, result);
         (self.playback.generation != generation)
             .then(|| self.playback.started.as_ref().map(|item| item.id.clone()))
             .flatten()
+    }
+
+    /// The running session's stream dropping, which waits to reconnect.
+    #[cfg(test)]
+    pub fn lose_for_test(&mut self) {
+        let lost = Ended::Lost {
+            position: Ticks::from(Duration::from_secs(60)),
+            message: "the test dropped it".into(),
+            crashed: false,
+        };
+        self.end_session_for_test(Ok(lost), PlayOptions::default());
+    }
+
+    /// A reconnect is waiting to start.
+    #[cfg(test)]
+    pub fn reconnect_pending_for_test(&self) -> bool {
+        self.playback.reconnect.is_some()
+    }
+
+    /// The item the last session was started for, and what it was started with.
+    #[cfg(test)]
+    pub fn last_started_for_test(&self) -> (Option<String>, Option<PlayOptions>) {
+        (
+            self.playback.started.as_ref().map(|item| item.id.clone()),
+            self.playback.sessions.last().map(|session| session.options.clone()),
+        )
     }
 
     /// Plays the queue's entry at `index` now. What's before it counts as played.
