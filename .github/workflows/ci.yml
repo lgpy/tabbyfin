@@ -7,8 +7,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Nothing here needs more than reading the repository; the release job adds what it publishes with.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
+  # The Rust every job builds with. Must match `rust` in mise.toml (the check job fails if not).
+  RUST_VERSION: 1.99.0
 
 jobs:
   check:
@@ -19,11 +25,14 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2025, macos-15]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         # eframe/winit build with the runner's C toolchain and pkg-config: the X11, Wayland and
@@ -32,11 +41,37 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config
+      - name: Check the workflow's Rust version against mise.toml
+        if: runner.os == 'Linux'
+        run: |
+          python3 - <<'PY'
+          import tomllib
+          rust = tomllib.load(open("mise.toml", "rb"))["tools"]["rust"]["version"]
+          wanted = "${{ env.RUST_VERSION }}"
+          if rust != wanted:
+              raise SystemExit(f"ci.yml builds with Rust {wanted} but mise.toml pins {rust}: update RUST_VERSION")
+          PY
+      - name: Check the Flatpak crate list against Cargo.lock
+        if: runner.os == 'Linux'
+        # Not a regeneration (`mise run flatpak:sources` does that): this fails when the two
+        # disagree on which crates (name-version) the build fetches.
+        run: |
+          python3 - <<'PY'
+          import json, tomllib
+          lock = tomllib.load(open("Cargo.lock", "rb"))
+          locked = {f"{p['name']}-{p['version']}" for p in lock["package"] if p.get("source", "").startswith("registry+")}
+          listed = {e["dest"].rsplit("/", 1)[-1] for e in json.load(open("packaging/flatpak/cargo-sources.json")) if e.get("type") == "archive"}
+          if locked != listed:
+              print("only in Cargo.lock:", sorted(locked - listed))
+              print("only in cargo-sources.json:", sorted(listed - locked))
+              raise SystemExit("packaging/flatpak/cargo-sources.json is stale: run `mise run flatpak:sources`")
+          print(f"{len(locked)} crates match")
+          PY
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
 
   # The Android APK (docs/android.md): the app's library in release for arm64 and x86_64. On a
   # `v*` tag, a release-signed APK per ABI for the GitHub release, with the key from the
@@ -45,21 +80,24 @@ jobs:
     name: Android APK
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
           targets: aarch64-linux-android, x86_64-linux-android
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: android
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-ndk@4.1.2
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: 21
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
         with:
           gradle-version: 9.8.2
       - name: Install the NDK
@@ -68,12 +106,17 @@ jobs:
       - if: "!startsWith(github.ref, 'refs/tags/v')"
         run: bash packaging/android/build.sh --release
       - if: "!startsWith(github.ref, 'refs/tags/v')"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tabbyfin-android-debug
           path: packaging/android/build/outputs/apk/debug/tabbyfin-debug.apk
           if-no-files-found: error
-      - name: Build the release-signed APKs
+      - name: Build the release APKs, unsigned
+        # No secrets here: cargo ndk and Gradle run every dependency's build.rs and plugin.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: bash packaging/android/build.sh --unsigned
+      - name: Sign the release APKs
+        # The only step with the key: apksigner and zipalign, nothing that builds code.
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
@@ -82,11 +125,12 @@ jobs:
           TABBYFIN_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           export TABBYFIN_KEYSTORE="$RUNNER_TEMP/tabbyfin-release.jks"
+          trap 'rm -f "$TABBYFIN_KEYSTORE"' EXIT
           printf '%s' "$ANDROID_KEYSTORE" | base64 -d > "$TABBYFIN_KEYSTORE"
-          bash packaging/android/build.sh --sign
-          rm -f "$TABBYFIN_KEYSTORE"
+          unset ANDROID_KEYSTORE
+          bash packaging/android/build.sh --sign-only
       - if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tabbyfin-android
           path: packaging/android/build/outputs/apk/release/*.apk
@@ -102,14 +146,18 @@ jobs:
       matrix:
         jellyfin: ["12.2", "10.11.11"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: integration
       - name: Cache the test media
         id: media
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: dev/.data/media
           key: dev-media-${{ hashFiles('dev/make-media.sh') }}
@@ -156,11 +204,14 @@ jobs:
           - os: macos-15
             target: x86_64-apple-darwin
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ matrix.target }}
       - name: Install Linux build dependencies
@@ -172,7 +223,7 @@ jobs:
           sudo apt-get install -y pkg-config
       - name: Install cargo-deb
         if: runner.os == 'Linux'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-deb
       - name: Install Inno Setup (Windows installer)
@@ -185,7 +236,7 @@ jobs:
           # packaging/download.sh fetches pinned files from this repo's `deps` release.
           GH_TOKEN: ${{ github.token }}
         run: packaging/package.sh ${{ matrix.target }} dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tabbyfin-${{ matrix.target }}
           path: dist/*
@@ -197,12 +248,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Build in Ubuntu 22.04
         env:
           GH_TOKEN: ${{ github.token }}
         run: packaging/appimage-docker.sh dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tabbyfin-appimage
           path: dist/*.AppImage
@@ -214,12 +267,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install flatpak-builder
         run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
       - name: Build
         run: packaging/flatpak/build.sh dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tabbyfin-flatpak
           path: dist/*.flatpak
@@ -233,11 +288,21 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Check the tag against the workspace version
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml's version $version (expected v$version)" >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           draft: false
           files: dist/*
