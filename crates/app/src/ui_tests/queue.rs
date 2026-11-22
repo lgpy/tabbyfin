@@ -475,6 +475,33 @@ fn queueing_after_dismissing_the_up_next_card_plays_the_queued_item() {
     assert_eq!(services.end_for_test(), Some(episode(2).id));
 }
 
+/// Queueing brings the dismissed card back only when what plays next changed: adding last to a
+/// queue that has something, or adding nothing, leaves the next item as it was.
+#[test]
+fn queueing_that_leaves_the_next_item_keeps_the_up_next_card_dismissed() {
+    let _config = ConfigDir::new("queue-dismissed-kept");
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(2)], false);
+    {
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.autoplay = true;
+        state.next_cancelled = true;
+    }
+    let cancelled = |services: &mut crate::services::Services| {
+        services.playback.now_playing().expect("the session").next_cancelled
+    };
+    // Last in a queue that already has a front, and nothing at all.
+    services.enqueue(vec![movie()], false);
+    assert!(cancelled(services), "the front is the same");
+    services.enqueue(Vec::new(), true);
+    services.enqueue(Vec::new(), false);
+    assert!(cancelled(services), "nothing was added");
+    // Play next changes what plays next.
+    services.enqueue(vec![episode(0)], true);
+    assert!(!cancelled(services), "a new front undoes the dismissal");
+}
+
 /// Repeat all starts over at the end of what the queue holds, a lone item included, rather than
 /// moving on to the series' following episode.
 #[test]

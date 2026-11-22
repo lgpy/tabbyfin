@@ -1067,6 +1067,13 @@ impl PlaybackManager {
         (self.queue.repeat, self.queue.is_shuffled())
     }
 
+    /// What plays next, as the up-next card shows it: the item, and whether it's the queue's (the
+    /// queue holding the item the series would play next anyway is still a new choice).
+    fn next_id(&self) -> Option<(String, bool)> {
+        let state = self.now_playing.as_ref()?;
+        state.next.as_ref().map(|next| (next.id.clone(), state.next_queued))
+    }
+
     /// Shows the playing item's `next` as the queue's front, or the following episode once the
     /// queue is empty. `solo`: the local queue's history is Previous (see
     /// [`Services::solo_playback`]), which a group's session never takes from it.
@@ -1376,15 +1383,18 @@ impl Services {
             self.play_all(items);
             return;
         }
+        let was_next = playback.next_id();
         if next {
             playback.queue.push_next(items);
         } else {
             playback.queue.push_last(items);
         }
         // The queue takes the place of the next episode for the up-next card and autoplay, and
-        // asking for something to play next undoes dismissing the card.
+        // a new next item undoes dismissing the card: the dismissal was for the one before.
         playback.refresh_next(true);
-        if let Some(state) = &mut playback.now_playing {
+        if playback.next_id() != was_next
+            && let Some(state) = &mut playback.now_playing
+        {
             state.next_cancelled = false;
         }
     }
