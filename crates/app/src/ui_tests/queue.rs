@@ -475,6 +475,32 @@ fn queueing_after_dismissing_the_up_next_card_plays_the_queued_item() {
     assert_eq!(services.end_for_test(), Some(episode(2).id));
 }
 
+/// Queueing brings the dismissed card back only when what plays next changed: adding last to a
+/// queue that has something, or adding nothing, leaves the next item as it was.
+#[test]
+fn queueing_that_leaves_the_next_item_keeps_the_up_next_card_dismissed() {
+    let _config = ConfigDir::new("queue-dismissed-kept");
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.enqueue(vec![episode(2)], false);
+    {
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.autoplay = true;
+        state.next_cancelled = true;
+    }
+    let cancelled =
+        |services: &mut crate::services::Services| services.playback.now_playing().expect("the session").next_cancelled;
+    // Last in a queue that already has a front, and nothing at all.
+    services.enqueue(vec![movie()], false);
+    assert!(cancelled(services), "the front is the same");
+    services.enqueue(Vec::new(), true);
+    services.enqueue(Vec::new(), false);
+    assert!(cancelled(services), "nothing was added");
+    // Play next changes what plays next.
+    services.enqueue(vec![episode(0)], true);
+    assert!(!cancelled(services), "a new front undoes the dismissal");
+}
+
 /// Repeat all starts over at the end of what the queue holds, a lone item included, rather than
 /// moving on to the series' following episode.
 #[test]
@@ -581,4 +607,39 @@ fn the_previous_button_offers_what_the_queue_played() {
     services.enqueue(vec![episode(2)], false);
     let previous = harness.state().now_playing().and_then(|state| state.previous.clone());
     assert_eq!(previous.map(|item| item.id), Some(episode(1).id));
+}
+
+/// What a solo queue played is Previous for a solo session only: joining a SyncPlay group takes
+/// it away, since Previous there would replace the group's queue with a solo episode.
+#[test]
+fn a_solo_queues_history_is_not_previous_in_a_syncplay_group() {
+    use jellyfin::GroupUpdate;
+
+    let _config = ConfigDir::new("queue-previous-group");
+    let (_server, mut harness) = playing();
+    let source = movie().media_sources[0].clone();
+    let services = harness.state_mut().services();
+    services.enqueue(vec![movie()], false);
+    services.playback.now_playing_mut().expect("the session").autoplay = true;
+    assert_eq!(services.end_for_test(), Some(movie().id));
+    services.playback.start_for_test(movie(), source);
+    services.enqueue(vec![episode(2)], false);
+    let previous = |services: &mut crate::services::Services| {
+        services
+            .playback
+            .now_playing()
+            .and_then(|state| state.previous.clone())
+            .map(|item| item.id)
+    };
+    assert_eq!(previous(services), Some(episode(1).id), "solo: what the queue played");
+
+    let group =
+        serde_json::from_value(serde_json::json!({"GroupId": "g", "GroupName": "Movie night"})).expect("a group");
+    services.on_syncplay_update(GroupUpdate::GroupJoined(group));
+    assert_eq!(previous(services), None, "in a group: not the solo history");
+    // Changing the queue's order doesn't bring it back.
+    services.queue_remove(0);
+    assert_eq!(previous(services), None);
+    services.play_previous();
+    assert_eq!(services.last_started_for_test().0, Some(movie().id), "nothing started");
 }

@@ -25,6 +25,9 @@ const QUERY: &[u8] = b"Who is JellyfinServer?";
 const MAX_DATAGRAMS: usize = 128;
 const MAX_SERVERS: usize = 32;
 const MAX_NAME_CHARS: usize = 80;
+/// Jellyfin's ids are 32 characters; an id is rejected rather than cut, since a cut one is
+/// another server's.
+const MAX_ID_CHARS: usize = 64;
 /// Longer than any real address; an address is rejected rather than cut, since a cut one points
 /// somewhere else.
 const MAX_ADDRESS_CHARS: usize = 200;
@@ -78,11 +81,29 @@ async fn discover_with(locals: &[Ipv4Addr], targets: &[SocketAddr], wait: Durati
         sockets.push(socket);
     }
     let heard = join_all(sockets.iter().map(|socket| listen(socket, deadline))).await;
-    let mut seen = HashSet::new();
-    let mut found: Vec<DiscoveredServer> = heard
+    collect(heard.into_iter().flatten())
+}
+
+/// The servers the `replies` (each datagram with the address it came from) describe, one row
+/// per id and address, at most [`MAX_SERVERS`], by name.
+fn collect(replies: impl IntoIterator<Item = (Vec<u8>, SocketAddr)>) -> Vec<DiscoveredServer> {
+    let mut parsed: Vec<(DiscoveredServer, bool)> = replies
         .into_iter()
-        .flatten()
-        .filter_map(|datagram| parse_reply(&datagram))
+        .filter_map(|(datagram, from)| {
+            let server = parse_reply(&datagram)?;
+            let own = advertises_sender(&server.address, from);
+            Some((server, own))
+        })
+        .collect();
+    // Anyone can answer with any addresses, and the list is cut at a cap: the replies from the
+    // address they advertise (what a server on this network does) come first, so a host that
+    // floods the list with others' addresses can't push the real ones out. A server advertising a
+    // reverse proxy's hostname still shows, after them. The sort keeps arrival order otherwise.
+    parsed.sort_by_key(|(_, own)| !own);
+    let mut seen = HashSet::new();
+    let mut found: Vec<DiscoveredServer> = parsed
+        .into_iter()
+        .map(|(server, _)| server)
         .filter(|server| seen.insert((server.id.clone(), server.address.clone())))
         .take(MAX_SERVERS)
         .collect();
@@ -90,15 +111,27 @@ async fn discover_with(locals: &[Ipv4Addr], targets: &[SocketAddr], wait: Durati
     found
 }
 
+/// Whether `address` is the IP address `from` sent its reply from.
+fn advertises_sender(address: &str, from: SocketAddr) -> bool {
+    let Ok(url) = url::Url::parse(address) else {
+        return false;
+    };
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => IpAddr::V4(ip) == from.ip(),
+        Some(url::Host::Ipv6(ip)) => IpAddr::V6(ip) == from.ip(),
+        _ => false,
+    }
+}
+
 /// What `socket` receives until `deadline`, or until `MAX_DATAGRAMS` reads. A read that fails
 /// (on Windows a datagram larger than the buffer, or an ICMP unreachable for the query) says
 /// nothing about the next one, so it's skipped, and counts towards the limit.
-async fn listen(socket: &UdpSocket, deadline: Instant) -> Vec<Vec<u8>> {
+async fn listen(socket: &UdpSocket, deadline: Instant) -> Vec<(Vec<u8>, SocketAddr)> {
     let mut datagrams = Vec::new();
     let mut buffer = vec![0; 2048];
     for _ in 0..MAX_DATAGRAMS {
         match timeout_at(deadline, socket.recv_from(&mut buffer)).await {
-            Ok(Ok((len, _))) => datagrams.push(buffer[..len].to_vec()),
+            Ok(Ok((len, from))) => datagrams.push((buffer[..len].to_vec(), from)),
             Ok(Err(_)) => {}
             Err(_) => break,
         }
@@ -109,11 +142,17 @@ async fn listen(socket: &UdpSocket, deadline: Instant) -> Vec<Vec<u8>> {
 /// A server's answer, unless it isn't one or only names this machine.
 fn parse_reply(datagram: &[u8]) -> Option<DiscoveredServer> {
     let reply: Reply = serde_json::from_slice(datagram).ok()?;
-    if reply.address.chars().count() > MAX_ADDRESS_CHARS {
+    if reply.address.chars().count() > MAX_ADDRESS_CHARS || reply.id.chars().count() > MAX_ID_CHARS {
         return None;
     }
     let url = url::Url::parse(&reply.address).ok()?;
-    if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() || url.password().is_some() {
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port() == Some(0)
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return None;
     }
     let local = match url.host()? {
@@ -125,10 +164,22 @@ fn parse_reply(datagram: &[u8]) -> Option<DiscoveredServer> {
         return None;
     }
     Some(DiscoveredServer {
-        address: reply.address.trim_end_matches('/').to_owned(),
+        // As the parser normalised it, which is what the app will connect to.
+        address: url.as_str().trim_end_matches('/').to_owned(),
         id: reply.id,
-        name: reply.name.chars().take(MAX_NAME_CHARS).collect(),
+        name: reply
+            .name
+            .chars()
+            .filter(|c| !c.is_control() && !is_direction_mark(*c))
+            .take(MAX_NAME_CHARS)
+            .collect(),
     })
+}
+
+/// The characters that change the direction text runs in: they can make a name read as another,
+/// or reorder what's drawn around it.
+fn is_direction_mark(c: char) -> bool {
+    matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 /// The address this machine reaches the network from, by asking the system which one it would
@@ -190,6 +241,76 @@ mod tests {
         assert_eq!(parse_reply(&reply(&long, "abc", "Home")), None);
         let named = parse_reply(&reply("http://192.168.1.5", "abc", &"n".repeat(500))).expect("a server");
         assert_eq!(named.name.chars().count(), MAX_NAME_CHARS);
+    }
+
+    /// What a reply says is shown to the user and later used to connect: names lose control and
+    /// direction characters, ids and ports are sane, an address is the one the URL parser makes of
+    /// it and has no query or fragment, and real-world shapes still pass.
+    #[test]
+    fn a_reply_is_cleaned_and_bounded() {
+        let one = |address: &str| parse_reply(&reply(address, "abc", "Home"));
+        let named =
+            parse_reply(&reply("http://192.168.1.5", "abc", "Ho\nme\u{202E}x\u{0}\u{2067}y")).expect("a server");
+        assert_eq!(named.name, "Homexy");
+        assert!(parse_reply(&reply("http://192.168.1.5", &"a".repeat(MAX_ID_CHARS), "Home")).is_some());
+        assert_eq!(
+            parse_reply(&reply("http://192.168.1.5", &"a".repeat(MAX_ID_CHARS + 1), "Home")),
+            None
+        );
+        for address in [
+            "http://192.168.1.5:0",
+            "http://192.168.1.5:8096/?next=evil",
+            "http://192.168.1.5:8096?x",
+            "http://192.168.1.5/#frag",
+        ] {
+            assert_eq!(one(address), None, "{address}");
+        }
+        // As the URL parser normalises it: the host in lower case, no default port, dots resolved.
+        assert_eq!(
+            one("HTTP://Jelly.Example.COM:80/a/../jellyfin/")
+                .expect("a server")
+                .address,
+            "http://jelly.example.com/jellyfin"
+        );
+        // A subpath, an https hostname and an IPv6 literal pass as they are.
+        for address in [
+            "http://192.168.1.5:8096/jellyfin",
+            "https://jelly.example.com",
+            "https://jelly.example.com:8920",
+            "http://[2001:db8::5]:8096",
+        ] {
+            assert_eq!(one(address).expect(address).address, address);
+        }
+    }
+
+    /// One host answering with 32 or more addresses (another's, say) fills the list in the order
+    /// the answers came; a server that answers from the address it advertises, which a real one
+    /// on the network does, is put first and so is never pushed out.
+    #[test]
+    fn a_flood_does_not_push_the_real_server_out() {
+        let from = |last: u8| SocketAddr::from((Ipv4Addr::new(192, 168, 1, last), PORT));
+        let mut replies: Vec<(Vec<u8>, SocketAddr)> = (0..100)
+            .map(|n| {
+                (
+                    reply(&format!("http://10.0.0.{n}:8096"), &format!("id{n}"), "Flood"),
+                    from(66),
+                )
+            })
+            .collect();
+        let real = (reply("http://192.168.1.5:8096", "real", "Home"), from(5));
+        // A server behind a reverse proxy advertises a hostname, so it can't match its sender.
+        let proxied = (reply("https://jelly.example.com", "proxied", "Proxy"), from(9));
+        replies.push(real.clone());
+        let found = collect(replies);
+        assert_eq!(found.len(), MAX_SERVERS);
+        assert!(
+            found.iter().any(|server| server.id == "real"),
+            "the real server is listed"
+        );
+        // Without a flood both are listed.
+        let found = collect([proxied, real]);
+        let ids: Vec<&str> = found.iter().map(|server| server.id.as_str()).collect();
+        assert_eq!(ids, ["real", "proxied"], "by name: Home, Proxy");
     }
 
     #[tokio::test]

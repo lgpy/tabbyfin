@@ -533,6 +533,35 @@ fn authorising_with_quick_connect_turned_off_since_says_so() {
     });
 }
 
+/// A `401`, then the Quick Connect check failing for another reason (the network dropped), says
+/// nothing about the token: the dialog words that failure and the session goes on.
+#[test]
+fn a_failing_quick_connect_check_after_a_401_does_not_end_the_session() {
+    use crate::services::AppEvent;
+
+    let (_config, server, mut bar) = account_menu("shell-authorise-check-fails", true);
+    server.status("POST", "/QuickConnect/Authorize", 401);
+    server.status_now("GET", "/QuickConnect/Enabled", 500);
+    bar.harness
+        .get_by_role_and_label(Role::MenuItemRadio, "Authorise a device…")
+        .click();
+    bar.step_until("the dialog", |harness| harness.query_by_label("Code").is_some());
+    bar.type_text("123456");
+    bar.harness.key_press(Key::Enter);
+    bar.step_until("the explanation", |harness| {
+        harness.query_by_label_contains("couldn't be authorised").is_some()
+    });
+    let services = bar.harness.state().services.as_ref().expect("still signed in");
+    assert!(
+        !services
+            .events
+            .iter()
+            .any(|event| matches!(event, AppEvent::SessionExpired)),
+        "no session ended"
+    );
+    assert!(bar.harness.query_by_label("Code").is_some(), "the dialog is still open");
+}
+
 /// Offline the account menu keeps what works without the server (Downloads) and leaves out
 /// *Watch history*, which would open to an error.
 #[test]

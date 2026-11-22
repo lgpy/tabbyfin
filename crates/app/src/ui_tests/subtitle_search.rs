@@ -136,6 +136,93 @@ fn the_language_picker_is_reachable_and_operable_by_keyboard() {
     );
 }
 
+/// The picker is the dialog's only focusable widget, so Tab must not trap the keyboard in it:
+/// with its list closed Tab, Shift+Tab and Escape hand focus back to the results without closing
+/// the dialog; with its list open Escape closes only the list; and Escape with focus on the
+/// results closes the dialog as before.
+#[test]
+fn the_language_picker_gives_the_keyboard_back() {
+    use egui::{Key, Modifiers};
+
+    let _config = ConfigDir::new("subtitle-search-picker-leave");
+    let focus_picker = |ui: &mut PageHarness| {
+        ui.harness_mut().key_press(Key::Tab);
+        ui.step();
+        ui.step();
+        assert!(
+            ui.harness().get_by_role(Role::ComboBox).is_focused(),
+            "Tab reached the picker"
+        );
+    };
+    let open = |ui: &PageHarness| ui.harness().query_by_label_contains("Big.Buck.Bunny.1080p").is_some();
+    let leaves = |name: &str, leave: &dyn Fn(&mut PageHarness)| {
+        let server = server();
+        server.json_value("GET", SEARCH, &results());
+        let (mut ui, finished) = search_dialog(&server);
+        ui.step_until("the results", |ui| {
+            ui.query_by_label_contains("Big.Buck.Bunny.1080p").is_some()
+        });
+        focus_picker(&mut ui);
+        leave(&mut ui);
+        ui.step();
+        ui.step();
+        assert!(
+            !ui.harness().get_by_role(Role::ComboBox).is_focused(),
+            "{name}: focus left the picker"
+        );
+        assert!(finished.borrow().is_empty() && open(&ui), "{name}: the dialog stays");
+        // The results have the keys again: Enter starts downloading the highlighted one, which
+        // reads the item first.
+        ui.harness_mut().key_press(Key::Enter);
+        ui.step_until(&format!("{name}: Enter to reach the results"), |_| {
+            server.requests("GET", "/Items/m1") > 0
+        });
+    };
+    leaves("Tab", &|ui| ui.harness_mut().key_press(Key::Tab));
+    leaves("Shift+Tab", &|ui| {
+        ui.harness_mut().key_press_modifiers(Modifiers::SHIFT, Key::Tab)
+    });
+    leaves("Escape", &|ui| ui.harness_mut().key_press(Key::Escape));
+
+    // With its list open, Escape closes the list and nothing more.
+    let server = server();
+    server.json_value("GET", SEARCH, &results());
+    let (mut ui, finished) = search_dialog(&server);
+    ui.step_until("the results", |ui| {
+        ui.query_by_label_contains("Big.Buck.Bunny.1080p").is_some()
+    });
+    focus_picker(&mut ui);
+    ui.harness_mut().key_press(Key::Enter);
+    ui.step();
+    ui.step();
+    assert!(
+        ui.harness().query_all_by_role(Role::MenuItemRadio).count() > 1,
+        "the list is open"
+    );
+    ui.harness_mut().key_press(Key::Escape);
+    ui.step();
+    ui.step();
+    assert_eq!(
+        ui.harness().query_all_by_role(Role::MenuItemRadio).count(),
+        0,
+        "the list closed"
+    );
+    assert!(finished.borrow().is_empty() && open(&ui), "the dialog stays");
+
+    // With focus on the results, Escape closes the dialog.
+    let (mut ui, finished) = search_dialog(&server);
+    ui.step_until("the results", |ui| {
+        ui.query_by_label_contains("Big.Buck.Bunny.1080p").is_some()
+    });
+    ui.harness_mut().key_press(Key::Escape);
+    ui.step();
+    ui.step();
+    assert!(
+        matches!(finished.borrow().as_slice(), [Finished::Closed]),
+        "Escape closed it"
+    );
+}
+
 /// A result without details is named by its name alone, not with a trailing comma.
 #[test]
 fn a_result_without_details_has_a_plain_name() {

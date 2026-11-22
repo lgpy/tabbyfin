@@ -13,6 +13,7 @@ use zbus::connection;
 use zbus::zvariant::{ObjectPath, Value};
 
 use super::super::{APP_NAME, Command, Controls, JUMP, Link, MediaInfo, PlaybackState, Transport};
+use crate::playback::Adjustments;
 
 const NAME: &str = "org.mpris.MediaPlayer2.tabbyfin";
 const PATH: &str = "/org/mpris/MediaPlayer2";
@@ -35,9 +36,20 @@ impl Shared {
         }
     }
 
+    /// The playback speed, 1 while nothing is told. Never zero or less: MPRIS has no such rate.
+    fn rate(&self) -> f64 {
+        match self.state {
+            Some((state, _)) if state.rate > 0. => state.rate,
+            _ => 1.,
+        }
+    }
+
+    /// Where the position is now: told, and moved on at the playback speed while it plays.
     fn position(&self) -> Duration {
         match self.state {
-            Some((state, at)) if state.transport == Transport::Playing => state.position + at.elapsed(),
+            Some((state, at)) if state.transport == Transport::Playing => {
+                state.position + at.elapsed().mul_f64(self.rate())
+            }
             Some((state, _)) => state.position,
             None => Duration::ZERO,
         }
@@ -172,17 +184,18 @@ impl Player {
 
     #[zbus(property)]
     fn rate(&self) -> f64 {
-        1.0
+        self.shared().rate()
     }
 
+    // The speeds the player's menu offers.
     #[zbus(property)]
     fn minimum_rate(&self) -> f64 {
-        1.0
+        Adjustments::SPEEDS[0]
     }
 
     #[zbus(property)]
     fn maximum_rate(&self) -> f64 {
-        1.0
+        Adjustments::SPEEDS[Adjustments::SPEEDS.len() - 1]
     }
 
     #[zbus(property)]
@@ -292,7 +305,7 @@ async fn serve(link: Link, mut updates: mpsc::UnboundedReceiver<Update>) {
                     changed.insert("Metadata", Value::new(shared.metadata()));
                 }
                 Update::Playback(state) => {
-                    let before = shared.status();
+                    let (before, rate_before) = (shared.status(), shared.rate());
                     // A position away from where playing would have put it is a seek.
                     if shared.state.is_some() && shared.position().abs_diff(state.position) > JUMP {
                         seeked = Some(micros(state.position));
@@ -300,6 +313,9 @@ async fn serve(link: Link, mut updates: mpsc::UnboundedReceiver<Update>) {
                     shared.state = Some((state, Instant::now()));
                     if shared.status() != before {
                         changed.insert("PlaybackStatus", Value::from(shared.status()));
+                    }
+                    if shared.rate() != rate_before {
+                        changed.insert("Rate", Value::from(shared.rate()));
                     }
                 }
             }
@@ -340,6 +356,29 @@ mod tests {
             seek_command(-2_500_000),
             Command::SeekBy(false, Duration::from_micros(2_500_000))
         );
+    }
+
+    #[test]
+    fn the_rate_and_the_position_follow_the_playback_speed() {
+        let mut shared = Shared::default();
+        assert_eq!(shared.rate(), 1.);
+        let state = PlaybackState {
+            transport: Transport::Playing,
+            position: Duration::from_secs(10),
+            duration: None,
+            rate: 2.,
+        };
+        shared.state = Some((state, Instant::now() - Duration::from_secs(3)));
+        assert_eq!(shared.rate(), 2.);
+        // Three seconds at twice the speed.
+        let position = shared.position();
+        assert!(
+            position >= Duration::from_secs(16) && position < Duration::from_secs(17),
+            "{position:?}"
+        );
+        // No rate of zero or less goes out: MPRIS has none.
+        shared.state = Some((PlaybackState { rate: 0., ..state }, Instant::now()));
+        assert_eq!(shared.rate(), 1.);
     }
 
     #[test]
