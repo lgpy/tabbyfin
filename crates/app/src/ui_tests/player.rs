@@ -591,6 +591,53 @@ fn the_sleep_timers_end_of_item_survives_a_restart_of_its_item() {
     assert_eq!(services.playback.sleep(), None, "not for another item");
 }
 
+/// A stop ends the playthrough the end-of-item timer was set on: playing the item again, by the
+/// player or by remote control, starts without it.
+#[test]
+fn a_stop_clears_the_sleep_timers_end_of_item() {
+    use crate::playback::{PlayOptions, SleepTimer};
+
+    let _config = ConfigDir::new("player-sleep-stop");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let services = harness.state_mut().services_mut().expect("the services");
+    let item = services.playback.now_playing().expect("the session").item.clone();
+
+    // The player's stop, then the item again.
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    services.control(UiCommand::Stop);
+    services.play(&item, PlayOptions::default());
+    assert_eq!(services.playback.sleep(), None, "not inherited after a stop");
+
+    // A remote Stop, then PlayNow of the same item.
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    services.on_remote_playstate(jellyfin::PlaystateRequest {
+        command: jellyfin::PlaystateCommand::Stop,
+        seek_position_ticks: None,
+    });
+    services.play(&item, PlayOptions::default());
+    assert_eq!(services.playback.sleep(), None, "nor after a remote stop");
+
+    // A dropped stream is the same playthrough going on: its timer waits with the reconnect.
+    let mut harness = desktop_player(&server);
+    let services = harness.state_mut().services_mut().expect("the services");
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    services.lose_for_test();
+    assert!(services.reconnect_pending_for_test());
+    assert!(services.playback.sleep().is_some(), "kept while it reconnects");
+    // And it ends with a session that stops for good.
+    services.end_with_for_test(PlayOptions::default());
+    services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id)));
+    services.stop_playback();
+    assert_eq!(services.playback.sleep(), None);
+}
+
 /// A timed timer that comes due while no session is live (a reconnect waits, the next item
 /// loads) stays due, and pauses once a session is up; the notice shows when it paused.
 #[test]

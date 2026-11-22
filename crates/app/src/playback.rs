@@ -935,6 +935,13 @@ impl PlaybackManager {
         held
     }
 
+    /// Drops the end-of-item sleep timer, which a playthrough's end or a stop takes with it.
+    fn drop_end_timer(&mut self) {
+        if matches!(self.sleep, Some(SleepTimer::EndOfItem(_))) {
+            self.sleep = None;
+        }
+    }
+
     pub fn sleep(&self) -> Option<&SleepTimer> {
         self.sleep.as_ref()
     }
@@ -1038,6 +1045,7 @@ impl PlaybackManager {
     /// which closes the player (a running session closes it when it ends).
     fn stop(&mut self) -> bool {
         self.stop = None;
+        self.drop_end_timer();
         self.reconnect.take().is_some()
     }
 
@@ -1071,10 +1079,10 @@ impl PlaybackManager {
     /// Starts a session; `attempt` counts reconnects after a lost stream.
     fn start_session(&mut self, item: &BaseItemDto, options: PlayOptions, attempt: usize) {
         self.reconnect = None;
-        // An end-of-item timer belongs to the item it was set on: a restart of that item keeps
-        // it, another item takes it away.
-        if matches!(&self.sleep, Some(SleepTimer::EndOfItem(id)) if *id != item.id) {
-            self.sleep = None;
+        // An end-of-item timer belongs to the playthrough it was set in: a restart that continues
+        // it keeps it, the item played again or another item takes it away.
+        if !options.continues {
+            self.drop_end_timer();
         }
         if !options.continues {
             self.playthrough += 1;
@@ -1272,6 +1280,9 @@ impl Services {
     /// to the TV. Stop with no session to send it to (waiting to reconnect, or the next one
     /// still loading) stops that instead.
     pub fn control(&mut self, command: UiCommand) {
+        if matches!(command, UiCommand::Stop) {
+            self.playback.drop_end_timer();
+        }
         if self.is_casting() {
             self.cast_control(command);
             return;
@@ -2031,6 +2042,13 @@ impl Services {
         // The sleep timer's end of the item: nothing plays after it, whatever the queue and the
         // repeat mode would do. The queue stays as it was.
         let held = matches!(result, Ok(Ended::Finished)) && playback.hold_after_end(&running.item.id);
+        // Whatever ends the playthrough ends the timer with it; a reconnect goes on with it.
+        let reconnecting = matches!(result, Ok(Ended::Lost { .. }))
+            && running.options.group_item.is_none()
+            && running.attempt < RECONNECT_DELAYS.len();
+        if !reconnecting {
+            playback.drop_end_timer();
+        }
         // What a reconnect keeps of the picture choices.
         let picture = playback.current().map(NowPlaying::picture);
         // Repeat one plays it again as it played, from its start.
