@@ -207,6 +207,7 @@ fn bar_step(items: &[BarItem], current: Option<BarItem>, step: i32) -> Option<Ba
 #[derive(Clone, Copy)]
 enum AccountAction {
     Downloads,
+    History,
     AuthoriseDevice,
     AddAccount,
     Settings,
@@ -1456,6 +1457,8 @@ impl Shell {
         // What follows the accounts, in order; the menu returns an index into the whole list.
         let mut actions = vec![AccountAction::Downloads];
         entries.push(Entry::new(tr!("shell-downloads")).checked(false).separated());
+        actions.push(AccountAction::History);
+        entries.push(Entry::new(tr!("shell-history")).checked(false));
         if self.quick_connect == Some(true) {
             actions.push(AccountAction::AuthoriseDevice);
             entries.push(Entry::new(tr!("shell-authorise-device")).checked(false));
@@ -1505,6 +1508,7 @@ impl Shell {
         }
         match actions[index - accounts] {
             AccountAction::Downloads => open(Route::Downloads, self),
+            AccountAction::History => open(Route::History, self),
             AccountAction::Settings => open(Route::Settings, self),
             AccountAction::AuthoriseDevice => {
                 self.bar_key = None;

@@ -154,6 +154,7 @@ All of these exist in the 12.2 OpenAPI spec and none are marked obsolete (checke
 | Remove from Continue Watching | `POST /UserItems/{itemId}/UserData` with `{"PlaybackPositionTicks":0}` (only the fields sent change; the same body with the old ticks is the undo) |
 | Authorise another device | `POST /QuickConnect/Authorize?code=` (any signed-in user; `404` unknown or expired code, `401` Quick Connect off, so it isn't taken for a dead token). Offered only when `GET /QuickConnect/Enabled` is true |
 | Servers on the LAN | UDP broadcast of `Who is JellyfinServer?` to port 7359 (`AutoDiscoveryHost` in the server); answers are JSON `{Address, Id, Name, EndpointAddress}`, sent to the asker. `crates/jellyfin/src/discovery.rs`, listed on the sign-in screen. Broadcasts leave by the default route only (no interface listing without a new dependency) |
+| Watch history | `GET /Items?Recursive=true&IncludeItemTypes=Movie,Episode&Filters=IsPlayed&SortBy=DatePlayed&SortOrder=Descending&Limit=120`; grouped by the day of `UserData.LastPlayedDate` (UTC) |
 | Next up | `GET /Shows/NextUp` |
 | Latest | `GET /Items/Latest?ParentId=` |
 | Item detail | `GET /Items/{itemId}` |

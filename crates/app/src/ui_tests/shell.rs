@@ -416,6 +416,17 @@ fn authorise_a_device_is_left_out_with_quick_connect_off() {
     );
 }
 
+/// *Watch history* is in the account menu whatever Quick Connect does.
+#[test]
+fn watch_history_is_in_the_account_menu() {
+    let (_config, _server, bar) = account_menu("shell-history-entry", false);
+    assert!(
+        bar.harness
+            .query_by_role_and_label(Role::MenuItemRadio, "Watch history")
+            .is_some()
+    );
+}
+
 /// The dialog takes the code, Enter sends it (without the spaces it was read out with), and the
 /// device being signed in is a toast.
 #[test]

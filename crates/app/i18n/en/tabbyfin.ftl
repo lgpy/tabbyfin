@@ -395,6 +395,10 @@ menu-no-matches = Nothing matches “{ $search }”.
 shell-account-on = { $name } on { $server }
 shell-downloads = Downloads
 shell-add-account = Add account…
+shell-history = Watch history
+history-title = Watch history
+history-empty = Nothing watched yet.
+history-undated = Date unknown
 shell-authorise-device = Authorise a device…
 shell-sign-out = Sign out
 

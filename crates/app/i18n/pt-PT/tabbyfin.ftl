@@ -395,6 +395,10 @@ menu-no-matches = Nada corresponde a “{ $search }”.
 shell-account-on = { $name } em { $server }
 shell-downloads = Transferências
 shell-add-account = Adicionar conta…
+shell-history = Histórico de visualização
+history-title = Histórico de visualização
+history-empty = Ainda não viu nada.
+history-undated = Data desconhecida
 shell-authorise-device = Autorizar um dispositivo…
 shell-sign-out = Terminar sessão
 
