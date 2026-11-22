@@ -189,10 +189,10 @@ pub struct PlayerPage {
     /// click restores.
     paused_before_click: bool,
     /// The start of each segment skipped automatically, so seeking back into one (Undo included)
-    /// doesn't skip it again, and the item they belong to: a restart of it (a reconnect, another
-    /// track) keeps them.
+    /// doesn't skip it again, and the playthrough they belong to: a restart that continues it (a
+    /// reconnect, another track) keeps them, the item starting over (repeat, played again) doesn't.
     auto_skipped: Vec<Duration>,
-    auto_skipped_item: Option<String>,
+    auto_skipped_playthrough: Option<u64>,
     /// The segment just skipped by itself, while its notice shows.
     skipped: Option<(SegmentKind, Duration)>,
     skipped_notice: task::Deadline,
@@ -244,7 +244,7 @@ impl PlayerPage {
             scroll_pending: 0.,
             paused_before_click: false,
             auto_skipped: Vec::new(),
-            auto_skipped_item: None,
+            auto_skipped_playthrough: None,
             skipped: None,
             skipped_notice: task::Deadline::default(),
             trickplay: None,
@@ -292,13 +292,13 @@ impl PlayerPage {
         self.sync_video(cx);
         self.queue_keys(cx);
         self.queue_dialog(cx);
-        if let Some((session, item)) = cx
+        if let Some((session, playthrough)) = cx
             .services
             .playback
             .now_playing()
-            .map(|state| (state.session, state.item.id.clone()))
+            .map(|state| (state.session, state.playthrough))
         {
-            self.follow_session(ui.ctx(), session, &item);
+            self.follow_session(ui.ctx(), session, playthrough);
             self.auto_skip(cx);
             self.poll_info(cx);
             self.ensure_trickplay(cx);
@@ -457,17 +457,17 @@ impl PlayerPage {
     }
 
     /// The session changed: what belongs to one session starts over, and the menus close. What
-    /// belongs to the item (the segments already skipped) does only for another item.
-    fn follow_session(&mut self, ctx: &egui::Context, session: u64, item: &str) {
+    /// belongs to the playthrough (the segments already skipped) does only for another one.
+    fn follow_session(&mut self, ctx: &egui::Context, session: u64, playthrough: u64) {
         if self.session == Some(session) {
             return;
         }
         self.session = Some(session);
         self.scrub = None;
         self.trickplay = None;
-        if self.auto_skipped_item.as_deref() != Some(item) {
+        if self.auto_skipped_playthrough != Some(playthrough) {
             self.auto_skipped.clear();
-            self.auto_skipped_item = Some(item.to_owned());
+            self.auto_skipped_playthrough = Some(playthrough);
         }
         self.skipped = None;
         self.skipped_notice.cancel();

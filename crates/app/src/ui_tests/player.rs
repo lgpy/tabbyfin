@@ -210,8 +210,8 @@ fn a_segment_set_to_skip_is_skipped_and_undo_goes_back() {
     assert!(harness.state_mut().commands().is_empty(), "not skipped again");
 }
 
-/// After Undo the segment isn't skipped again by a restart of the same item (a reconnect, a
-/// track switch on a transcode), only for another item.
+/// After Undo the segment isn't skipped again by a restart that continues the playthrough (a
+/// reconnect, a track switch on a transcode), only for another item.
 #[test]
 fn undo_is_remembered_across_a_restart_of_the_item_but_not_for_another_item() {
     use crate::config::SkipAction;
@@ -237,9 +237,13 @@ fn undo_is_remembered_across_a_restart_of_the_item_but_not_for_another_item() {
     harness.state_mut().commands();
 
     // The same item again, in a new session: back inside the intro, and left alone.
-    let restart = |harness: &mut Harness<'static, PlayerRun>, item: &jellyfin::models::BaseItemDto| {
+    let restart = |harness: &mut Harness<'static, PlayerRun>, item: &jellyfin::models::BaseItemDto, continues: bool| {
         let services = harness.state_mut().services_mut().expect("the services");
-        let sent = services.playback.start_for_test(item.clone(), source.clone());
+        let sent = if continues {
+            services.playback.start_continuing_for_test(item.clone(), source.clone())
+        } else {
+            services.playback.start_for_test(item.clone(), source.clone())
+        };
         let state = services.playback.now_playing_mut().expect("the new session");
         state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
         state.segments = segments.clone();
@@ -248,14 +252,51 @@ fn undo_is_remembered_across_a_restart_of_the_item_but_not_for_another_item() {
         harness.step();
         harness.state_mut().commands()
     };
-    let sent = restart(&mut harness, &item);
+    let sent = restart(&mut harness, &item, true);
     assert!(sent.is_empty(), "not skipped again: {sent:?}");
 
     // Another item's intro is skipped as usual.
-    let sent = restart(&mut harness, &next);
+    let sent = restart(&mut harness, &next, false);
     assert!(
         matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 13 * 60),
         "{sent:?}"
+    );
+}
+
+/// When the item starts over (repeat one, a lone item on repeat all, or played again) the
+/// intro is skipped again: Undo's choice was for the playthrough it was made in.
+#[test]
+fn an_item_that_starts_over_skips_its_intro_again() {
+    use crate::config::SkipAction;
+    use crate::markers::SegmentKind;
+
+    let _config = ConfigDir::new("player-skip-again");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    let (item, source, segments) = {
+        let state = harness.state_mut().now_playing_mut().expect("the session");
+        state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+        (state.item.clone(), state.source.clone(), state.segments.clone())
+    };
+    harness.step();
+    harness.get_by_label("Undo").click();
+    harness.step();
+    harness.step();
+    harness.state_mut().commands();
+
+    // The same item, as a replay starts it: a new session, and a new playthrough.
+    let services = harness.state_mut().services_mut().expect("the services");
+    let sent = services.playback.start_for_test(item, source);
+    let state = services.playback.now_playing_mut().expect("the new session");
+    state.skip_actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+    state.segments = segments;
+    harness.state_mut().sent = Some(sent);
+    harness.step();
+    harness.step();
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekTo(at)] if at.as_secs() == 13 * 60),
+        "skipped on the second pass: {sent:?}"
     );
 }
 
@@ -652,6 +693,7 @@ fn a_restart_of_the_item_keeps_the_picture_choices() {
         services.last_started_for_test().1.and_then(|o| o.picture),
         Some(kept.clone())
     );
+    assert!(services.last_started_for_test().1.is_some_and(|o| o.continues));
 
     // A lost stream waits to reconnect, with the choices too.
     let mut harness = desktop_player(&server);
@@ -662,6 +704,7 @@ fn a_restart_of_the_item_keeps_the_picture_choices() {
         services.reconnect_options_for_test().and_then(|o| o.picture),
         Some(kept)
     );
+    assert!(services.reconnect_options_for_test().is_some_and(|o| o.continues));
 
     // Another item starts as a new one does.
     let mut harness = desktop_player(&server);
@@ -674,6 +717,7 @@ fn a_restart_of_the_item_keeps_the_picture_choices() {
         .expect("a next episode");
     services.play(&next, PlayOptions::default());
     assert_eq!(services.last_started_for_test().1.and_then(|o| o.picture), None);
+    assert!(services.last_started_for_test().1.is_some_and(|o| !o.continues));
 }
 
 /// The bracket keys step the speed up and down through the menu's speeds.

@@ -81,6 +81,10 @@ pub struct PlayOptions {
     /// The picture choices of the playback this restarts (the same item again, in another
     /// version or with other tracks, or after a lost stream); `None` starts as a new item does.
     pub picture: Option<Picture>,
+    /// This continues the playthrough that's running (a lost stream, another version or track,
+    /// the GPU fallback) rather than starting the item over (played again, repeat), so what
+    /// belongs to the playthrough (the segments skipped, an end-of-item sleep timer) stays.
+    pub continues: bool,
 }
 
 /// What a restart of the same item keeps of the picture choices, which belong to the item and
@@ -461,6 +465,9 @@ pub struct NowPlaying {
     /// The session this is the state of (the manager's generation when it started), so SyncPlay
     /// can tell a new session from the one it watches.
     pub session: u64,
+    /// The playthrough of the item this session belongs to: a restart that continues it keeps the
+    /// number, playing the item over again takes the next.
+    pub playthrough: u64,
     pub item: BaseItemDto,
     pub source: MediaSourceInfo,
     pub video: VideoOutput,
@@ -737,6 +744,9 @@ pub struct PlaybackManager {
     queue: LocalQueue,
     /// The item the last session was started for, which is the one before what starts next.
     started: Option<BaseItemDto>,
+    /// Counts playthroughs: a session that doesn't continue the running one (`PlayOptions::
+    /// continues`) starts the next.
+    playthrough: u64,
     /// The running session's state, once it has started. A replaced session's stays until its
     /// successor starts, so the player has something to show meanwhile.
     now_playing: Option<NowPlaying>,
@@ -808,6 +818,7 @@ impl PlaybackManager {
             reconnect: None,
             queue: LocalQueue::default(),
             started: None,
+            playthrough: 0,
             now_playing: None,
             volume,
             muted: false,
@@ -946,12 +957,24 @@ impl PlaybackManager {
     /// player page's tests: 12 minutes into 48, playing. Returns what the page sends it.
     #[cfg(test)]
     pub fn start_for_test(&mut self, item: BaseItemDto, source: MediaSourceInfo) -> mpsc::UnboundedReceiver<UiCommand> {
+        self.playthrough += 1;
+        self.start_continuing_for_test(item, source)
+    }
+
+    /// As [`PlaybackManager::start_for_test`], for a restart that continues the playthrough.
+    #[cfg(test)]
+    pub fn start_continuing_for_test(
+        &mut self,
+        item: BaseItemDto,
+        source: MediaSourceInfo,
+    ) -> mpsc::UnboundedReceiver<UiCommand> {
         let (commands, received) = mpsc::unbounded_channel();
         self.generation += 1;
         self.active = true;
         self.started = Some(item.clone());
         self.now_playing = Some(NowPlaying {
             session: self.generation,
+            playthrough: self.playthrough,
             item,
             source,
             video: VideoOutput::external(),
@@ -1052,6 +1075,9 @@ impl PlaybackManager {
         // it, another item takes it away.
         if matches!(&self.sleep, Some(SleepTimer::EndOfItem(id)) if *id != item.id) {
             self.sleep = None;
+        }
+        if !options.continues {
+            self.playthrough += 1;
         }
         self.started = Some(item.clone());
         // Dropping the previous sender stops that session; it still reports its final position.
@@ -1812,6 +1838,7 @@ impl Services {
             return;
         };
         options.start = options.start.or(Some(Ticks::from(state.position)));
+        options.continues = true;
         if options.picture.is_none() {
             options.picture = Some(state.picture());
         }
@@ -1902,6 +1929,7 @@ impl Services {
                 };
                 playback.now_playing = Some(NowPlaying {
                     session: generation,
+                    playthrough: playback.playthrough,
                     item: running.item.clone(),
                     source: *source,
                     video,
@@ -2069,6 +2097,7 @@ impl Services {
                     options: PlayOptions {
                         start: Some(position),
                         resumed: false,
+                        continues: true,
                         picture: picture.or(running.options.picture.clone()),
                         ..running.options
                     },
