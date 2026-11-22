@@ -7,9 +7,12 @@
 //! block (playback's controls are in `playback.rs`, SyncPlay's in `syncplay.rs`, remote
 //! control's in `remote.rs`).
 
+use jellyfin::models::UserConfigurationChanges;
+
 use crate::cast::Cast;
 use crate::config::SavedServer;
 use crate::downloads::{self, Downloads};
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::item_menu::{Mark, PlaylistEdits};
 use crate::live::Live;
@@ -21,6 +24,50 @@ use crate::task;
 use crate::toasts::Toast;
 use crate::views::item::prefetch::Prefetch;
 use crate::widgets::menu::RefusedMarks;
+
+/// One server-side settings save's outcome: what it carried, and how it went.
+type SaveDone = (UserConfigurationChanges, jellyfin::Result<()>);
+
+/// The user's configuration changes on their way to the server: queued in `Services`, which
+/// outlives the Settings page, so a change made just before leaving it still goes, and a failure
+/// still reaches the user.
+pub struct ConfigSaves {
+    /// Changes waiting for the save that's out, merged into one.
+    pending: UserConfigurationChanges,
+    /// Whether a save is out.
+    sending: bool,
+    /// What finished saves reported, for [`Services::tick`] to drain.
+    done: task::Receiver<SaveDone>,
+    done_from: task::Sender<SaveDone>,
+    /// How many saves worked and how many failed since the sign-in: a Settings page remembers
+    /// the counts it opened at and notices the difference.
+    saved: u32,
+    failed: u32,
+}
+
+impl ConfigSaves {
+    fn new(ctx: &egui::Context) -> Self {
+        let (done_from, done) = task::channel(ctx);
+        Self {
+            pending: UserConfigurationChanges::default(),
+            sending: false,
+            done,
+            done_from,
+            saved: 0,
+            failed: 0,
+        }
+    }
+
+    /// Whether a save is out or waiting; the server's configuration isn't final until not.
+    pub fn busy(&self) -> bool {
+        self.sending || !self.pending.is_empty()
+    }
+
+    /// How many saves have worked and how many failed, in that order.
+    pub fn outcomes(&self) -> (u32, u32) {
+        (self.saved, self.failed)
+    }
+}
 
 pub struct Services {
     pub session: Session,
@@ -68,6 +115,9 @@ pub struct Services {
     /// they were made (`item_menu.rs`). Queued behind the services so they carry on whatever
     /// page is on top.
     pub playlist_edits: PlaylistEdits,
+    /// Changes to the user's configuration on the server (Settings' server-side sections), on
+    /// their way one request at a time, so leaving Settings doesn't cancel them.
+    pub config_saves: ConfigSaves,
     /// Remote control from other clients: the fetched items of a `Play` request, until
     /// `tick_remote` places them (playing and the controls are methods on `Services`,
     /// `remote.rs`).
@@ -174,6 +224,7 @@ impl Services {
             remote: Remote::new(session.client.clone(), ctx),
             cast: Cast::new(&session, ctx, online),
             playlist_edits: PlaylistEdits::new(ctx),
+            config_saves: ConfigSaves::new(ctx),
             downloads,
             session,
             user_data: 0,
@@ -198,6 +249,7 @@ impl Services {
         self.prefetch.tick(ctx, &self.session.client, self.user_data);
         self.apply_menu_requests();
         self.tick_playlist_edits();
+        self.tick_config_saves();
         self.tick_downloads();
         self.tick_playback();
         self.tick_live();
@@ -234,6 +286,55 @@ impl Services {
             stopping.extend(services.cast.disconnect_for_exit());
         }
         playback::wait_for_exit(stopping);
+    }
+
+    /// Queues `changes` to the user's configuration on the server, which Settings has shown
+    /// already. They go as soon as the save before them is back, whatever page is on top by
+    /// then.
+    pub fn save_user_configuration(&mut self, changes: UserConfigurationChanges) {
+        self.config_saves.pending.merge(changes);
+        self.send_next_config_save();
+    }
+
+    /// Sends what's queued, unless a save is out. Each save reads the whole configuration and
+    /// writes it back (`Client::update_user_configuration`), so two at once could undo each
+    /// other; what was queued meanwhile goes as one.
+    fn send_next_config_save(&mut self) {
+        if self.config_saves.sending || self.config_saves.pending.is_empty() {
+            return;
+        }
+        self.config_saves.sending = true;
+        let changes = std::mem::take(&mut self.config_saves.pending);
+        let client = self.session.client.clone();
+        let sender = self.config_saves.done_from.clone();
+        crate::runtime::detach(async move {
+            let result = client.update_user_configuration(&changes).await;
+            let _ = sender.send((changes, result));
+        });
+    }
+
+    /// A finished save: a failure is a toast, whether or not Settings is still open to show it,
+    /// and what was queued meanwhile goes next.
+    fn tick_config_saves(&mut self) {
+        let done: Vec<SaveDone> = self.config_saves.done.drain().collect();
+        for (changes, result) in done {
+            self.config_saves.sending = false;
+            match result {
+                Ok(()) => {
+                    self.config_saves.saved += 1;
+                    // Home's Latest rows change with it.
+                    if changes.hide_played_in_latest.is_some() {
+                        self.user_data += 1;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!("couldn't save the user's settings: {err}");
+                    self.config_saves.failed += 1;
+                    self.toast(Toast::error(tr!("settings-save-failed")));
+                }
+            }
+            self.send_next_config_save();
+        }
     }
 
     pub fn toast(&mut self, toast: Toast) {

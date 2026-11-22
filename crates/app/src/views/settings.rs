@@ -691,6 +691,9 @@ pub struct SettingsPage {
     /// A section a note's link asked for, opened as its own page after the frame when the
     /// sections are pages of their own.
     push: Option<Section>,
+    /// The device's config couldn't be written: a toast on the next frame, which `save` has no
+    /// page context to raise itself.
+    unsaved: bool,
 }
 
 /// What a button on the page asked for, with how it went.
@@ -715,6 +718,7 @@ impl SettingsPage {
             only: None,
             compact: false,
             push: None,
+            unsaved: false,
         }
     }
 
@@ -733,14 +737,19 @@ impl SettingsPage {
     }
 
     /// Writes a change through the config file: loaded fresh, changed, saved, and kept for the
-    /// controls. Passwords and tokens never go through here; they're in `credentials`.
+    /// controls. A write that fails (a read-only folder, a full disk) leaves the controls on the
+    /// value they showed, the one still in effect, and says so. Passwords and tokens
+    /// never go through here; they're in `credentials`.
     fn save(&mut self, change: impl FnOnce(&mut Config)) {
         let mut config = Config::load();
         change(&mut config);
-        if let Err(err) = config.save() {
-            tracing::warn!("failed to save config: {err:#}");
+        match config.save() {
+            Ok(()) => self.config = config,
+            Err(err) => {
+                tracing::warn!("failed to save config: {err:#}");
+                self.unsaved = true;
+            }
         }
-        self.config = config;
     }
 
     /// Saves an appearance setting and asks the app to apply it: the theme, the text size and
@@ -855,6 +864,9 @@ impl Page for SettingsPage {
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         self.pickers.begin_frame(cx.ctx);
         self.report_job(cx);
+        if std::mem::take(&mut self.unsaved) {
+            cx.services.toast(Toast::error(tr!("settings-config-save-failed")));
+        }
         self.server.tick(cx);
 
         // The menu and the sections side by side on the backdrop, with no line between them:
@@ -1071,7 +1083,7 @@ impl SettingsPage {
         ui.add_space(SPACE.xs);
         ui.label(label::muted(ui, description));
         if store == Store::Server
-            && let Some(status) = self.server.status()
+            && let Some(status) = self.server.status(cx.services.config_saves.busy())
         {
             ui.label(label::muted(ui, status));
         }
@@ -1507,9 +1519,9 @@ impl SettingsPage {
 /// The user's configuration on the server, for the server's sections: read when the page
 /// opens, shown with the page's changes on top, and saved in the background.
 ///
-/// One save is out at a time. A change made meanwhile waits in `pending`, merged with any
-/// others, and goes when the save is back: each save reads the whole configuration and writes
-/// it back (`Client::update_user_configuration`), so two at once could undo each other.
+/// The saves aren't the page's: they're queued in `Services::config_saves`, one at a time, so a
+/// change made just before leaving the page still goes, and a failure is a toast either way.
+/// The page keeps what it shows of them (the banner, and a reload after a failure).
 #[derive(Default)]
 struct ServerSettings {
     /// As the server last gave it, with the changes not yet saved applied.
@@ -1523,8 +1535,9 @@ struct ServerSettings {
     cultures: Option<Task<jellyfin::Result<Vec<Culture>>>>,
     /// Whether the cultures were asked for, so a failure isn't asked again every frame.
     cultures_asked: bool,
-    pending: UserConfigurationChanges,
-    save: Option<Task<(UserConfigurationChanges, jellyfin::Result<()>)>>,
+    /// The saves' outcomes (`ConfigSaves::outcomes`) as of the last frame, to notice a new one;
+    /// `None` until the first frame.
+    seen: Option<(u32, u32)>,
     /// Something was saved since the page opened, for the banner.
     saved: bool,
 }
@@ -1532,7 +1545,9 @@ struct ServerSettings {
 impl ServerSettings {
     /// Starts the loads the page needs and takes in what came back.
     fn tick(&mut self, cx: &mut PageCx) {
-        if self.config.is_none() && self.load.is_none() && !self.failed {
+        // Not while a save is out or waiting: the server's answer would be from before it, and
+        // would show the old values over the new ones.
+        if self.config.is_none() && self.load.is_none() && !self.failed && !cx.services.config_saves.busy() {
             let client = cx.services.session.client.clone();
             self.load = Some(Task::spawn(cx.ctx, async move {
                 Ok(client.current_user().await?.configuration.unwrap_or_default())
@@ -1547,11 +1562,7 @@ impl ServerSettings {
         if let Some(loaded) = self.load.as_mut().and_then(Task::poll) {
             self.load = None;
             match loaded {
-                Ok(mut config) => {
-                    // Changes made before a reload still show, and still go to the server.
-                    self.pending.apply(&mut config);
-                    self.config = Some(config);
-                }
+                Ok(config) => self.config = Some(config),
                 Err(err) => {
                     tracing::warn!("couldn't read the user's settings: {err}");
                     self.failed = true;
@@ -1565,45 +1576,23 @@ impl ServerSettings {
                 Err(err) => tracing::warn!("couldn't read the server's languages: {err}"),
             }
         }
-        if let Some((changes, saved)) = self.save.as_mut().and_then(Task::poll) {
-            self.save = None;
-            match saved {
-                Ok(()) => {
-                    self.saved = true;
-                    // Home's Latest rows change with it.
-                    if changes.hide_played_in_latest.is_some() {
-                        cx.services.user_data += 1;
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!("couldn't save the user's settings: {err}");
-                    cx.services.toast(Toast::error(tr!("settings-save-failed")));
-                    self.config = None;
-                }
-            }
+        let (saved, failed) = cx.services.config_saves.outcomes();
+        let (seen_saved, seen_failed) = self.seen.replace((saved, failed)).unwrap_or((saved, failed));
+        if saved != seen_saved {
+            self.saved = true;
         }
-        self.flush(cx);
+        if failed != seen_failed {
+            // The server's copy is the one in effect: read it again (the toast is the services').
+            self.config = None;
+        }
     }
 
-    /// Shows `changes` at once and saves them when no other save is out.
+    /// Shows `changes` at once and hands them to the services to save.
     fn change(&mut self, cx: &mut PageCx, changes: UserConfigurationChanges) {
         if let Some(config) = &mut self.config {
             changes.apply(config);
         }
-        self.pending.merge(changes);
-        self.flush(cx);
-    }
-
-    fn flush(&mut self, cx: &mut PageCx) {
-        if self.save.is_some() || self.pending.is_empty() || self.config.is_none() {
-            return;
-        }
-        let changes = std::mem::take(&mut self.pending);
-        let client = cx.services.session.client.clone();
-        self.save = Some(Task::spawn(cx.ctx, async move {
-            let saved = client.update_user_configuration(&changes).await;
-            (changes, saved)
-        }));
+        cx.services.save_user_configuration(changes);
     }
 
     /// The configuration to draw the rows with, or, while it isn't there, a line saying why
@@ -1644,8 +1633,8 @@ impl ServerSettings {
     }
 
     /// How saving is going, under the server's banner.
-    fn status(&self) -> Option<String> {
-        if self.save.is_some() || !self.pending.is_empty() {
+    fn status(&self, saving: bool) -> Option<String> {
+        if saving {
             Some(tr!("settings-saving"))
         } else if self.saved {
             Some(format!(

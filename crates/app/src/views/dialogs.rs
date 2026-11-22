@@ -204,7 +204,7 @@ impl AddToPlaylist {
         if let Some(index) = chosen {
             self.choose(index, cx);
         }
-        !modal.should_close()
+        dialog::keep_open(&modal, self.busy)
     }
 
     /// The list under the field: a status line, or the rows, scrolling once it's long. Its
@@ -431,7 +431,7 @@ impl EditPlaylist {
                 if dialog::main(ui, &tr!("dialog-save"), state).clicked() {
                     save = true;
                 }
-                dialog::cancel(ui);
+                dialog::cancel_unless(ui, self.busy);
             });
             if enter && !self.busy && !self.typed.trim().is_empty() {
                 save = true;
@@ -441,7 +441,7 @@ impl EditPlaylist {
         if save {
             self.save(cx);
         }
-        !modal.should_close()
+        dialog::keep_open(&modal, self.busy)
     }
 
     /// The dialog's own keys: Down to the switch, Up back to the name, Space, Left and Right to
@@ -561,7 +561,7 @@ impl DeletePlaylist {
                 if dialog::danger(ui, &tr!("dialog-delete"), state).clicked() {
                     delete = true;
                 }
-                dialog::cancel(ui);
+                dialog::cancel_unless(ui, self.busy);
             });
             // Enter is the confirmation's Delete.
             if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) && !self.busy {
@@ -572,7 +572,7 @@ impl DeletePlaylist {
         if delete {
             self.delete(cx);
         }
-        !modal.should_close()
+        dialog::keep_open(&modal, self.busy)
     }
 
     fn delete(&mut self, cx: &mut PageCx) {
