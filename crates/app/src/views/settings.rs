@@ -41,8 +41,7 @@ use egui::{Align, Align2, Rect, RichText, Role, Sense, Ui, UiBuilder, WidgetInfo
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ACCOUNT_CIRCLE, ICON_CHEVRON_RIGHT, ICON_CLOUD_DONE, ICON_COMPUTER, ICON_DNS, ICON_DOWNLOAD, ICON_HOME,
-    ICON_INFO, ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO,
-    ICON_VOLUME_UP,
+    ICON_INFO, ICON_PALETTE, ICON_PLAY_CIRCLE, ICON_STORAGE, ICON_SUBTITLES, ICON_TRANSLATE, ICON_UNDO, ICON_VOLUME_UP,
 };
 use jellyfin::models::{Culture, SubtitleMode, UserConfiguration, UserConfigurationChanges};
 

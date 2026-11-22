@@ -39,6 +39,17 @@ const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 /// key changes the volume many times a second; one report covers them all.
 const VOLUME_REPORT_AFTER: Duration = Duration::from_secs(1);
 const DEFAULT_VOLUME: f64 = 100.;
+
+/// The most the volume reaches, in percent: mpv's boost on the desktop (`volume-max`), 100 on
+/// Android, whose players have no boost. What's reported to the server and what remote control
+/// sets stay within 0 to 100 either way.
+pub const fn volume_max() -> f64 {
+    if cfg!(target_os = "android") {
+        100.
+    } else {
+        player::MAX_VOLUME
+    }
+}
 /// How long quitting the app waits for a running session to report its stop. The next launch
 /// reports it instead if this runs out (`report_unfinished`).
 const EXIT_WAIT: Duration = Duration::from_secs(3);
@@ -1739,7 +1750,7 @@ async fn run_session(
     )
     .await;
     player
-        .set_property("volume", volume)
+        .set_property("volume", volume.clamp(0., volume_max()))
         .await
         .map_err(|err| err.to_string())?;
     player
@@ -2070,16 +2081,12 @@ async fn apply_command(
                 .command(json!(["seek", position.as_secs_f64(), "absolute"]))
                 .await
         }
-        UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., 100.)).await,
+        UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., volume_max())).await,
         UiCommand::SetMute(muted) => player.set_property("mute", muted).await,
         UiCommand::SetSubtitleDelay(seconds) => player.set_property("sub-delay", seconds).await,
         UiCommand::SetAudioDelay(seconds) => player.set_property("audio-delay", seconds).await,
         UiCommand::SetSubtitleScale(scale) => player.set_property("sub-scale", scale).await,
-        UiCommand::SetNightMode(on) => {
-            player
-                .set_property("af", player::night_filter(on, passthrough))
-                .await
-        }
+        UiCommand::SetNightMode(on) => player.set_property("af", player::night_filter(on, passthrough)).await,
         UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
         // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
         UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),
@@ -2170,7 +2177,7 @@ mod tests {
 
     use super::{
         Adjustments, Outgoing, Reporting, UiCommand, VOLUME_REPORT_AFTER, adjacent, mpv_subtitle_id, mpv_track_id,
-        volume_level,
+        volume_level, volume_max,
     };
 
     #[test]
@@ -2269,6 +2276,12 @@ mod tests {
         assert_eq!(mpv_subtitle_id(&source, 0), Some(2));
         assert_eq!(mpv_subtitle_id(&source, 5), Some(3));
         assert_eq!(mpv_subtitle_id(&source, 9), None);
+    }
+
+    #[test]
+    fn a_boosted_volume_reports_as_full() {
+        assert_eq!(volume_level(volume_max()), 100);
+        assert_eq!(volume_level(125.), 100);
     }
 
     #[test]

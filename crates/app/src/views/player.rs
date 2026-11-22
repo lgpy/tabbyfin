@@ -59,7 +59,7 @@ use crate::i18n::{self, tr};
 use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::motion;
-use crate::playback::{Adjustments, NowPlaying, PlayOptions, SubtitleChoice, UiCommand, Version};
+use crate::playback::{Adjustments, NowPlaying, PlayOptions, SubtitleChoice, UiCommand, Version, volume_max};
 use crate::services::AppEvent;
 use crate::task;
 use crate::theme::{self, over_video};
@@ -572,15 +572,18 @@ impl PlayerPage {
     }
 
     fn change_volume(&mut self, delta: f64, cx: &mut PageCx) {
-        let volume = match cx.services.cast.casting() {
-            Some(casting) => Some(casting.volume),
-            None => cx.services.playback.now_playing().map(|state| state.volume),
+        let (volume, max) = match cx.services.cast.casting() {
+            Some(casting) => (Some(casting.volume), 100.),
+            None => (
+                cx.services.playback.now_playing().map(|state| state.volume),
+                volume_max(),
+            ),
         };
         let Some(volume) = volume else {
             return;
         };
         cx.services
-            .control(UiCommand::SetVolume((volume + delta).clamp(0., 100.)));
+            .control(UiCommand::SetVolume((volume + delta).clamp(0., max)));
         self.show_controls();
     }
 
@@ -1070,8 +1073,9 @@ impl PlayerPage {
         painter.galley(label.center() - galley.size() / 2., galley, over_video::FOREGROUND);
     }
 
-    /// The volume slider: a drag bar from 0 to 100. egui's `Slider` is focusable, which would
-    /// let Tab take the player's keys from it.
+    /// The volume slider: a drag bar from 0 to the most the volume reaches (150% on the
+    /// desktop's mpv, with a mark at 100%; a cast's TV stops at 100). egui's `Slider` is
+    /// focusable, which would let Tab take the player's keys from it.
     fn volume_slider(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
         let (rect, response) = ui.allocate_exact_size(vec2(VOLUME_W, VOLUME_H), Sense::CLICK | Sense::DRAG);
         let volume = if self.adjusting_volume {
@@ -1082,12 +1086,23 @@ impl PlayerPage {
         // A slider to AccessKit, in percent.
         let name = tr!("player-volume");
         response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), volume, &name));
-        let fraction = (volume / 100.).clamp(0., 1.) as f32;
+        let max = if cx.services.cast.casting().is_some() {
+            100.
+        } else {
+            volume_max()
+        };
+        let fraction = (volume / max).clamp(0., 1.) as f32;
         let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
         painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
         painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::FOREGROUND);
+        // Where 100% is, when the slider goes past it.
+        if max > 100. {
+            let x = track.left() + track.width() * (100. / max) as f32;
+            let mark = Rect::from_center_size(pos2(x, track.center().y), vec2(2., TRACK_H + 4.));
+            painter.rect_filled(mark, CornerRadius::ZERO, over_video::MUTED_FOREGROUND);
+        }
         slider_thumb(painter, pos2(filled.right(), track.center().y));
 
         let pressed = response.is_pointer_button_down_on();
@@ -1100,7 +1115,7 @@ impl PlayerPage {
         if let Some(pos) = response.interact_pointer_pos()
             && (pressed || released)
         {
-            let value = (((pos.x - rect.left()) / rect.width()).clamp(0., 1.) * 100.).round() as f64;
+            let value = (((pos.x - rect.left()) / rect.width()).clamp(0., 1.) as f64 * max).round();
             if value != self.volume {
                 self.volume = value;
                 cx.services.control(UiCommand::SetVolume(value));
@@ -2076,11 +2091,11 @@ fn settings_body(
                     adjustments.audio_delay = stepped_delay(delay, step);
                     adjusted = true;
                 }
-                if !cfg!(target_os = "android") {
-                    if let Some(on) = night_mode_row(ui, adjustments.night_mode, menu.night_available) {
-                        adjustments.night_mode = on;
-                        adjusted = true;
-                    }
+                if !cfg!(target_os = "android")
+                    && let Some(on) = night_mode_row(ui, adjustments.night_mode, menu.night_available)
+                {
+                    adjustments.night_mode = on;
+                    adjusted = true;
                 }
             }
         }

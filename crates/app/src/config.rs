@@ -485,9 +485,12 @@ mod tests {
 
     #[test]
     fn a_config_from_before_the_audio_settings_plays_as_mpv_does() {
-        let config: Config = toml::from_str("device_id = \"d\"
+        let config: Config = toml::from_str(
+            "device_id = \"d\"
 volume = 80.0
-").expect("parses");
+",
+        )
+        .expect("parses");
         assert_eq!(config.audio_settings(), player::AudioSettings::default());
     }
 

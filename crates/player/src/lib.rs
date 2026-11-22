@@ -28,7 +28,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-pub use audio::{AudioDevice, AudioSettings, Channels, Passthrough, night_filter};
+pub use audio::{AudioDevice, AudioSettings, Channels, MAX_VOLUME, Passthrough, night_filter};
 pub use events::{Cue, CueImage, Cues, EndReason, PlayerEvent};
 
 #[derive(Debug, thiserror::Error)]
