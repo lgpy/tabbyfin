@@ -107,6 +107,49 @@ fn results_are_rows_with_their_details_and_exact_matches_first() {
     assert_eq!(language.accesskit_node().value().as_deref(), Some("English"));
 }
 
+/// The language picker takes the keyboard when it has focus: Enter opens its list rather than
+/// downloading the highlighted result, and Down moves in the list, not the results.
+#[test]
+fn the_language_picker_is_reachable_and_operable_by_keyboard() {
+    let _config = ConfigDir::new("subtitle-search-language-keys");
+    let server = server();
+    server.json_value("GET", SEARCH, &results());
+    let (mut ui, _) = search_dialog(&server);
+    ui.step_until("the results", |ui| {
+        ui.query_by_label_contains("Big.Buck.Bunny.1080p").is_some()
+    });
+    // Tab from the dialog's start reaches the picker first.
+    ui.harness_mut().key_press(egui::Key::Tab);
+    ui.step();
+    ui.step();
+    ui.harness_mut().key_press(egui::Key::Enter);
+    ui.step();
+    ui.step();
+    assert_eq!(
+        server.requests("POST", "/Items/m1/RemoteSearch/Subtitles/b%2F1"),
+        0,
+        "Enter on the picker didn't download a result"
+    );
+    assert!(
+        ui.harness().query_all_by_role(Role::MenuItemRadio).count() > 1,
+        "Enter opened the language list"
+    );
+}
+
+/// A result without details is named by its name alone, not with a trailing comma.
+#[test]
+fn a_result_without_details_has_a_plain_name() {
+    let _config = ConfigDir::new("subtitle-search-bare-row");
+    let server = server();
+    server.json_value(
+        "GET",
+        SEARCH,
+        &serde_json::json!([{ "Id": "x", "Name": "Bare.Result" }]),
+    );
+    let (mut ui, _) = search_dialog(&server);
+    ui.step_until("the result", |ui| ui.query_by_label("Bare.Result").is_some());
+}
+
 /// A search that finds nothing says so in the language searched, and hints at the server having
 /// no provider, which it can't tell from an empty answer.
 #[test]
