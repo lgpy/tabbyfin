@@ -15,10 +15,11 @@
 //! toggle.
 //!
 //! The cast button sits just left of SyncPlay once a Chromecast has been found (or while
-//! casting). Its panel lists the TVs on the network, and while casting offers *Disconnect* and
-//! *Stop casting*; the keyboard walks it as it does the SyncPlay panel. While a cast goes on and
-//! the player is closed, the now-casting bar floats over the pages and brings the player back
-//! (`views::casting`).
+//! casting). Its panel lists the TVs on the network, with what plays on the TV and its controls
+//! on top while casting, and *Stop casting* under the list with the link that leaves the TV
+//! playing; the keyboard walks it as it does the SyncPlay panel. While a cast goes on and the
+//! player is closed, the now-casting bar floats over the pages, which keep room under their
+//! last row for it, and brings the player back (`views::casting`).
 //!
 //! The search box is the bar's only text field: typing opens the results page (or comes back
 //! to it from a page opened from them), clearing it closes them, and Enter or Down moves into
@@ -471,7 +472,21 @@ impl Shell {
                     .show(ui, |ui| self.bottom_bar(ui, shown, cx));
             }
             cx.under_bar = Some(under_bar);
-            egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+            // While the now-casting bar floats over the page, the page keeps room under its last
+            // row for it, so nothing is left covered at the end of its scroll. The page's own
+            // bottom padding comes on top of that.
+            let room = if casting::has_bar(cx.services) {
+                casting::room(compact)
+            } else {
+                0.
+            };
+            let frame = egui::Frame::NONE.inner_margin(egui::Margin {
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: room.round() as i8,
+            });
+            egui::CentralPanel::default().frame(frame).show(ui, |ui| {
                 // Each page's widgets and scroll areas live under its own id scope, so stacked
                 // pages can use the same names for theirs (two `"cast"` shelves, two
                 // `ScrollArea`s).
@@ -846,6 +861,12 @@ impl Shell {
         self.close_cast_panel(cx.ctx);
         if from_keyboard {
             self.leave_top_bar(cx);
+        }
+        // The card goes back to the player, as the now-casting bar does; the player is the
+        // shell's, so it isn't one of `casting::choose`'s.
+        if entry == CastEntry::NowPlaying {
+            self.player_started(cx.ctx);
+            return;
         }
         casting::choose(entry, cx.services);
     }

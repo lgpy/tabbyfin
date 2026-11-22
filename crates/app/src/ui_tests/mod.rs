@@ -35,6 +35,7 @@ use crate::session::{self, Session};
 use crate::views::{Page, PageCx};
 
 pub mod cast;
+pub mod controller;
 pub mod dialogs;
 #[cfg(feature = "mockup")]
 pub mod gallery;

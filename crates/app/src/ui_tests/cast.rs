@@ -6,6 +6,9 @@ use std::time::Instant;
 
 use cast::Device;
 use cast::fake::FakeDevice;
+use egui::accesskit::Role;
+use egui::{Event, Modifiers, MouseWheelSource, MouseWheelUnit, TouchPhase, vec2};
+use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use jellyfin::Ticks;
 use jellyfin::models::BaseItemDto;
@@ -13,6 +16,7 @@ use serde_json::Value;
 
 use super::{ConfigDir, FixtureServer, TIMEOUT, TOKEN, block_on, fixture_json, session};
 use crate::config::Config;
+use crate::keys::{self, Press, Scope};
 use crate::playback::{PlayOptions, SubtitleChoice, UiCommand};
 use crate::services::{AppEvent, Services};
 
@@ -683,6 +687,8 @@ struct ShellRun {
     device: Option<FakeDevice>,
     /// What the device's ad says it runs (`rs`): the reconnect offer's signal.
     running_app: Option<String>,
+    /// The presses [`keys::take`] took from egui, for the next frame.
+    keys: Vec<Press>,
     /// Kept for the session's requests.
     _server: FixtureServer,
 }
@@ -695,12 +701,19 @@ impl ShellRun {
     /// The shell with the fake device on the network, its ad saying it runs `running_app`.
     fn with_running_app(running_app: Option<&str>) -> Self {
         let server = FixtureServer::start();
+        server.json("GET", "/UserViews", "user_views");
+        server.json("GET", "/UserItems/Resume", "resume");
+        server.json("GET", "/Shows/NextUp", "next_up");
+        server.json("GET", "/Items/Latest", "latest");
+        server.json("GET", "/Items", "items_movies");
+        server.json("GET", "/Items/Filters", "item_filters");
         Self {
             session: Some(session(&server)),
             services: None,
             shell: None,
             device: Some(block_on(FakeDevice::start()).expect("the fake device starts")),
             running_app: running_app.map(str::to_owned),
+            keys: Vec::new(),
             _server: server,
         }
     }
@@ -745,7 +758,8 @@ impl ShellRun {
                 _ => {}
             }
         }
-        shell.show(ui, Vec::new(), &mut cx);
+        let presses = std::mem::take(&mut self.keys);
+        shell.show(ui, presses, &mut cx);
     }
 
     fn services(&mut self) -> &mut Services {
@@ -775,10 +789,68 @@ fn sent(harness: &mut egui_kittest::Harness<'static, ShellRun>, command: &str) {
     });
 }
 
+/// Presses `key` and its release, taken from egui the way `App::raw_input_hook` takes them when
+/// no widget, menu or popup has the keyboard, and hands them to the shell.
+fn press(harness: &mut Harness<'static, ShellRun>, key: egui::Key) {
+    let ctx = harness.ctx.clone();
+    let scopes = harness
+        .state()
+        .shell
+        .as_ref()
+        .map(crate::views::shell::Shell::scopes)
+        .unwrap_or_else(|| vec![Scope::Shell]);
+    {
+        let input = harness.input_mut();
+        for pressed in [true, false] {
+            input.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            });
+        }
+    }
+    let presses = keys::take(&ctx, harness.input_mut(), &scopes);
+    harness.state_mut().keys.extend(presses);
+    harness.step();
+}
+
+/// What the now-casting bar and the panel's card are called to a screen reader.
+fn bar_label(movie: &BaseItemDto) -> String {
+    format!("{}, on Living room TV", movie.name)
+}
+
+/// Casts the movie to the fake TV, then leaves the player for the pages: the now-casting bar is
+/// there and so is the panel's card.
+fn cast_and_leave(harness: &mut Harness<'static, ShellRun>) -> BaseItemDto {
+    super::step_until(harness, "Home's shelves", |harness| {
+        harness.query_by_label("My Media").is_some()
+    });
+    harness.state_mut().services().start_cast("fake-tv");
+    super::step_until(harness, "the receiver to connect", |harness| {
+        harness
+            .state()
+            .services
+            .as_ref()
+            .and_then(|services| services.cast.session.as_ref())
+            .is_some_and(|session| session.connected)
+    });
+    let movie = movie();
+    harness.state_mut().services().play(&movie, PlayOptions::default());
+    sent(harness, "PlayNow");
+    super::step_until(harness, "the casting player", |harness| {
+        harness.query_by_label("Pause").is_some()
+    });
+    harness.get_by_label("Back").click();
+    super::step_until(harness, "the now-casting bar", |harness| {
+        harness.query_by_label(&bar_label(&movie)).is_some()
+    });
+    movie
+}
+
 #[test]
 fn the_cast_panel_lists_the_tv_and_casts_to_it() {
-    use egui::accesskit::Role;
-
     let _config = ConfigDir::new("cast-panel");
     let mut harness = shell();
     super::step_until(&mut harness, "the cast button", |harness| {
@@ -800,10 +872,130 @@ fn the_cast_panel_lists_the_tv_and_casts_to_it() {
     super::step_until(&mut harness, "the casting panel", |harness| {
         harness.query_by_label("Living room TV, casting").is_some()
     });
+    assert!(
+        harness.query_by_label("Disconnect, and leave it playing").is_some(),
+        "leaving the TV playing is a link under Stop casting"
+    );
+    assert!(
+        harness.query_by_label("Disconnect").is_none(),
+        "the old full-width Disconnect button is gone"
+    );
     harness.get_by_label("Stop casting").click();
     super::step_until(&mut harness, "the cast to stop", |harness| {
         !harness.state().services.as_ref().is_some_and(Services::is_casting)
     });
+}
+
+/// The panel's card is the TV's remote: its play/pause, its skips and its volume go to the
+/// receiver, and its body goes back to the player.
+#[test]
+fn the_cast_panels_card_controls_the_tv() {
+    let _config = ConfigDir::new("cast-panel-card");
+    let mut harness = shell();
+    let movie = cast_and_leave(&mut harness);
+    harness.get_by_label("Casting (cast to a TV)").click();
+    // The bar has a pause of its own: the card's is the upper one, in the panel.
+    super::step_until(&mut harness, "the panel's card", |harness| {
+        harness.query_all_by_label("Pause").count() == 2
+    });
+    let pause = harness
+        .query_all_by_label("Pause")
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .expect("the card's pause");
+    pause.click();
+    sent(&mut harness, "PlayPause");
+
+    harness.get_by_label("Forward 10 s").click();
+    super::step_until(&mut harness, "the TV to seek", |harness| {
+        harness.state().device().envelopes().iter().any(|envelope| {
+            envelope["command"] == "Seek" && envelope["options"]["position"].as_f64().is_some_and(|at| at >= 10.)
+        })
+    });
+
+    // The volume is the TV's: pressing a quarter of the way along the card's slider sets it.
+    let slider = harness.get_by_role_and_label(Role::Slider, "TV volume").rect();
+    let at = egui::pos2(slider.left() + slider.width() / 4., slider.center().y);
+    harness.hover_at(at);
+    harness.drag_at(at);
+    harness.step();
+    harness.drop_at(at);
+    harness.step();
+    super::step_until(&mut harness, "the TV's volume", |harness| {
+        harness.state().device().messages().iter().any(|message| {
+            message.payload["type"] == "SET_VOLUME"
+                && message.payload["volume"]["level"]
+                    .as_f64()
+                    .is_some_and(|level| (level - 0.25).abs() < 0.05)
+        })
+    });
+
+    // Its body, not its controls, goes back to the player.
+    let label = bar_label(&movie);
+    let card = harness
+        .query_all_by_label(&label)
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .expect("the card");
+    card.click();
+    super::step_until(&mut harness, "the player again", |harness| {
+        harness.query_by_label("Back").is_some() && harness.query_by_label("Disconnect, and leave it playing").is_none()
+    });
+}
+
+/// The keyboard walks to the panel's card first: Enter opens the player, as a click on it does.
+#[test]
+fn enter_on_the_cards_now_playing_opens_the_player() {
+    let _config = ConfigDir::new("cast-panel-now-playing");
+    let mut harness = shell();
+    cast_and_leave(&mut harness);
+    // Enter shows the page's cursor, Up goes into the bar, Right along to Cast, Enter opens the
+    // panel on the card.
+    press(&mut harness, egui::Key::Enter);
+    press(&mut harness, egui::Key::ArrowUp);
+    press(&mut harness, egui::Key::ArrowRight);
+    press(&mut harness, egui::Key::Enter);
+    super::step_until(&mut harness, "the cast panel", |harness| {
+        harness.query_by_label("Stop casting").is_some()
+    });
+    press(&mut harness, egui::Key::Enter);
+    super::step_until(&mut harness, "the player again", |harness| {
+        harness.query_by_label("Back").is_some() && harness.query_by_label("Disconnect, and leave it playing").is_none()
+    });
+    assert!(
+        harness.state().services.as_ref().is_some_and(Services::is_casting),
+        "the cast goes on"
+    );
+}
+
+/// The bar floats over the pages, so they keep room under their last row: scrolled to its end,
+/// Home's lowest control is above the bar rather than behind it.
+#[test]
+fn the_pages_keep_room_under_the_now_casting_bar() {
+    let _config = ConfigDir::new("cast-bar-room");
+    let mut harness = shell();
+    let movie = cast_and_leave(&mut harness);
+    let window = harness.ctx.content_rect();
+    harness.hover_at(window.center());
+    for _ in 0..80 {
+        harness.input_mut().events.push(Event::MouseWheel {
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0., -300.),
+            phase: TouchPhase::Move,
+            source: MouseWheelSource::Unknown,
+            modifiers: Modifiers::NONE,
+        });
+        harness.step();
+    }
+    let bar = harness.get_by_label(&bar_label(&movie)).rect();
+    let page_bottom = harness
+        .query_all_by_role(Role::Button)
+        .filter(|node| !bar.contains_rect(node.rect()))
+        .map(|node| node.rect().bottom())
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        page_bottom <= bar.top(),
+        "the page's last row ends at {page_bottom}, under the bar at {}",
+        bar.top()
+    );
 }
 
 #[test]

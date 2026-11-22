@@ -25,13 +25,17 @@
 //! Auto-skip and the clock's "time left" are config settings read when the page opens; the clock
 //! saves its choice when clicked.
 //!
-//! **While casting** the page draws the cast's state (`cast::Casting`) instead of `NowPlaying`, in
-//! the same layout: the item's backdrop, dimmed, where the video was, with *Playing on <TV>* in the
-//! middle, and the same bars without what the receiver has no control for (speed, the delays,
-//! subtitle size, fullscreen and the settings button; audio and subtitles keep theirs). The
-//! controls go through the same `Services` calls, which send them to the TV. Back leaves the page
-//! while the cast goes on; the shell's now-casting bar brings it back.
+//! **While casting** the page is a remote for the TV rather than a video player
+//! (`controller.rs`): there's no picture here, so it draws in the app's own theme, not over
+//! `over_video`. The desktop shows the item's backdrop as a card in one column, with its title,
+//! meta, seek bar, transport, the TV's volume and a chip for each track; a phone puts the
+//! backdrop across the top and the controls on a sheet under it, with full-width rows for the
+//! tracks. Both go through the same `Services` calls, which send them to the TV, and leave out
+//! what the receiver has no control for (speed, the delays, subtitle size, fullscreen). Controls
+//! stay up: there's no video to watch behind them. Back leaves the page while the cast goes on;
+//! the shell's now-casting bar brings it back.
 
+mod controller;
 mod phone;
 mod touch;
 
@@ -65,7 +69,6 @@ use crate::views::PageCx;
 use crate::widgets::badge;
 use crate::widgets::button::Focus;
 use crate::widgets::countdown_pill;
-use crate::widgets::image;
 use crate::widgets::label;
 use crate::widgets::mascot;
 use crate::widgets::media_row;
@@ -94,9 +97,6 @@ pub const MAX_STEPS_PER_SCROLL: f32 = 4.;
 
 /// The mascot's size over the video.
 const LOADER_SIZE: f32 = 128.;
-/// The casting mark's circle in the middle of the backdrop, and its icon.
-const CAST_MARK: f32 = 88.;
-const CAST_MARK_ICON: f32 = 44.;
 
 /// How long the controls stay up without the mouse moving (and while nothing is paused).
 const HIDE_CONTROLS_AFTER: Duration = Duration::from_secs(3);
@@ -329,78 +329,6 @@ impl PlayerPage {
         if let Some(response) = response {
             self.video_input(&response, ui, &view, cx, bars);
         }
-        self.settle(ui, view.paused);
-    }
-
-    /// The page while casting: the item's backdrop, dimmed, with what plays where in the middle,
-    /// under today's bars. A click on the picture pauses or plays, as on the video.
-    fn show_casting(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
-        let menus = Menus {
-            chapters: egui::Popup::is_id_open(ui.ctx(), chapters_id()),
-            settings: egui::Popup::is_id_open(ui.ctx(), settings_id()),
-        };
-        let Some(session) = cx.services.cast.session.as_ref() else {
-            return;
-        };
-        let view = View::read_cast(
-            &session.casting,
-            &session.device,
-            session.reconnecting.is_some(),
-            menus,
-            self.show_remaining,
-        );
-        let cast = view.cast.clone().unwrap_or_default();
-        let now = ui.input(|input| input.time);
-        if std::mem::take(&mut self.controls_appeared) || self.controls_since.is_none() {
-            self.controls_since = Some(now);
-        }
-        // No phone layout of its own: a phone draws the desktop's bars in its safe area.
-        let window = ui.max_rect();
-        let safe = if touch::on(ui.ctx()) {
-            phone::safe_area(ui.ctx().viewport_rect(), ui.ctx().content_rect())
-        } else {
-            window
-        };
-        let top = Rect::from_min_size(safe.min, vec2(safe.width(), TOP_BAR_H));
-        let bottom = Rect::from_min_max(pos2(safe.left(), safe.bottom() - BOTTOM_BAR_H), safe.right_bottom());
-
-        ui.painter().rect_filled(window, 0., over_video::BACKDROP);
-        image::show(
-            ui,
-            &mut cx.services.images,
-            window,
-            cast.backdrop.as_ref(),
-            cast.item.as_ref(),
-            0,
-        );
-        ui.painter().rect_filled(window, 0., over_video::VEIL);
-        let response = ui.interact(window, Id::unique("casting_picture"), Sense::CLICK);
-        casting_mark(ui, window.center(), &cast);
-        // Until the TV reports the item playing.
-        if view.loading {
-            loader(
-                ui,
-                Rect::from_center_size(window.center() + vec2(0., 150.), Vec2::splat(LOADER_SIZE)),
-            );
-        }
-
-        let mut bars = None;
-        if self.controls_visible {
-            let alpha = self.controls_alpha(ui.ctx(), now);
-            motion::faded(ui, alpha, |ui| {
-                self.top_bar(ui, &view, cx, top);
-                self.controls(ui, &view, cx, bottom);
-            });
-            bars = Some([top, bottom]);
-        }
-        let over_bar = ui
-            .input(|input| input.pointer.interact_pos())
-            .is_some_and(|pos| bars.is_some_and(|bars| bars.iter().any(|bar| bar.contains(pos))));
-        if !over_bar && response.clicked() {
-            cx.services.control(UiCommand::TogglePause);
-            self.show_controls();
-        }
-        self.scroll_volume(ui, over_bar, cx);
         self.settle(ui, view.paused);
     }
 
@@ -1544,14 +1472,21 @@ struct View {
 /// What the page shows of a cast beyond the controls.
 #[derive(Clone, Default)]
 struct CastView {
-    /// The TV's name and model.
+    /// The TV's name.
     device: String,
-    model: String,
     backdrop: Option<ImageRequest>,
     /// The casting item, for its backdrop's blurhash.
     item: Option<jellyfin::models::BaseItemDto>,
     /// The connection dropped and is being retried.
     reconnecting: bool,
+    /// The receiver can seek the stream it plays.
+    can_seek: bool,
+    /// The audio and subtitle choices' labels for the track showing, for the controller's chips
+    /// and rows.
+    audio: Option<String>,
+    subtitle: Option<String>,
+    /// The chapter playing, for the phone's row.
+    chapter: Option<String>,
 }
 
 struct ChaptersMenu {
@@ -1735,13 +1670,7 @@ impl View {
 
     /// The view of a cast: what the TV reported, with the item's versions, tracks and chapters
     /// once it's fetched from the server.
-    fn read_cast(
-        casting: &Casting,
-        device: &cast::Device,
-        reconnecting: bool,
-        menus: Menus,
-        show_remaining: bool,
-    ) -> Self {
+    fn read_cast(casting: &Casting, device: &cast::Device, reconnecting: bool, menus: Menus) -> Self {
         let item = casting.item.as_ref();
         let position = casting.position();
         let title = item.map_or_else(|| casting.name.clone(), |item| item.name.clone());
@@ -1757,29 +1686,6 @@ impl View {
             None => casting.series_name.clone(),
         };
         let chapters = item.map(|item| markers::chapters(&item.chapters)).unwrap_or_default();
-        let mut time = match casting.duration {
-            Some(duration) if show_remaining => format!(
-                "-{} / {}",
-                timestamp(duration.saturating_sub(position)),
-                timestamp(duration)
-            ),
-            duration => format!(
-                "{} / {}",
-                timestamp(position),
-                duration.map(timestamp).unwrap_or_else(|| "--:--".into())
-            ),
-        };
-        if let Some(name) = markers::current_chapter(&chapters, position).and_then(|c| c.name.as_ref()) {
-            time = format!("{time} · {name}");
-        }
-        let chapter_marks = match casting.duration.filter(|duration| !duration.is_zero()) {
-            Some(duration) => chapters
-                .iter()
-                .filter(|chapter| !chapter.start.is_zero() && chapter.start < duration)
-                .map(|chapter| chapter.start.as_secs_f32() / duration.as_secs_f32())
-                .collect(),
-            None => Vec::new(),
-        };
         let sources = item.map(|item| item.media_sources.as_slice()).unwrap_or_default();
         let versions: Vec<Version> = sources
             .iter()
@@ -1807,9 +1713,26 @@ impl View {
         let subtitle = casting.subtitle_choice();
         let (audio_choices, subtitle_choices) = source.map(tracks::track_choices).unwrap_or_default();
         let count = |kind| source.map_or(0, |source| tracks::count(source, kind));
+        let default_audio = source.and_then(|source| source.default_audio_stream_index);
         let default_subtitle = source
             .and_then(|source| source.default_subtitle_stream_index)
             .filter(|&index| index >= 0);
+        let subtitle_shown = match subtitle {
+            SubtitleChoice::Stream(index) => Some(index),
+            SubtitleChoice::Off => None,
+            SubtitleChoice::Auto => default_subtitle,
+        };
+        // The labels the controller's chips and rows show for what plays now: the same lists the
+        // menus offer, so they name the chosen track the way it's listed there.
+        let chosen = |choices: &[Choice], index: Option<i32>| {
+            choices
+                .iter()
+                .find(|choice| Some(choice.value) == index)
+                .map(|choice| choice.label.clone())
+        };
+        let audio_label = chosen(&audio_choices, casting.audio.or(default_audio))
+            .or_else(|| audio_choices.first().map(|choice| choice.label.clone()));
+        let subtitle_label = chosen(&subtitle_choices, subtitle_shown.or(Some(SUBTITLES_OFF)));
         Self {
             title,
             title_aside,
@@ -1823,8 +1746,10 @@ impl View {
             speed: 1.,
             group: false,
             transcoding: false,
-            time,
-            chapter_marks,
+            // The controller draws its own seek bar's times, so the clock's text and the bar's
+            // chapter marks are the video player's.
+            time: String::new(),
+            chapter_marks: Vec::new(),
             chapter_count: chapters.len(),
             // The receiver keeps its own queue, which it doesn't report: the buttons are always
             // there, and it ignores what it has nothing for.
@@ -1851,23 +1776,22 @@ impl View {
                 subtitle,
                 audio_choices,
                 subtitle_choices,
-                default_audio: source.and_then(|source| source.default_audio_stream_index),
+                default_audio,
                 default_subtitle,
             }),
             audio_button: count(MediaStreamType::Audio) > 1,
             subtitles_button: count(MediaStreamType::Subtitle) > 0,
-            subtitle_shown: match subtitle {
-                SubtitleChoice::Stream(index) => Some(index),
-                SubtitleChoice::Off => None,
-                SubtitleChoice::Auto => default_subtitle,
-            },
+            subtitle_shown,
             subtitle_default: default_subtitle,
             cast: Some(CastView {
                 device: device.name.clone(),
-                model: device.model.clone(),
                 backdrop: item.and_then(|item| item.backdrop_image()),
                 item: item.cloned(),
                 reconnecting,
+                can_seek: casting.can_seek,
+                audio: audio_label,
+                subtitle: subtitle_label,
+                chapter: markers::current_chapter(&chapters, position).and_then(|chapter| chapter.name.clone()),
             }),
         }
     }
@@ -2060,37 +1984,6 @@ fn control(icon: MaterialIcon, size: f32, tooltip: &str) -> RoundButton<'_> {
 }
 
 /// A button that opens a menu, lit while it's `open`.
-/// In the middle of the backdrop while casting: the cast mark in a dark circle, over *Playing on
-/// <TV>* and the TV's model.
-fn casting_mark(ui: &egui::Ui, center: egui::Pos2, cast: &CastView) {
-    let painter = ui.painter();
-    let circle = center - vec2(0., 40.);
-    painter.circle_filled(circle, CAST_MARK / 2., over_video::SURFACE);
-    round_button::glyph(ui, circle, ICON_CAST_CONNECTED, CAST_MARK_ICON, over_video::FOREGROUND);
-    let line = circle.y + CAST_MARK / 2. + 28.;
-    let title = if cast.reconnecting {
-        tr!("player-reconnecting-to", device = cast.device.as_str())
-    } else {
-        tr!("player-playing-on", device = cast.device.as_str())
-    };
-    painter.text(
-        pos2(center.x, line),
-        Align2::CENTER_CENTER,
-        title,
-        theme::text::font(ui, "xl"),
-        over_video::FOREGROUND,
-    );
-    if !cast.model.is_empty() {
-        painter.text(
-            pos2(center.x, line + 30.),
-            Align2::CENTER_CENTER,
-            &cast.model,
-            theme::text::font(ui, "sm"),
-            over_video::MUTED_FOREGROUND,
-        );
-    }
-}
-
 fn menu_button(ui: &mut egui::Ui, icon: MaterialIcon, tooltip: &str, open: bool) -> Response {
     control(icon, CONTROL, tooltip).on(open).show(ui)
 }
@@ -2171,11 +2064,14 @@ fn settings_body(
                 &menu.audio_choices,
                 menu.audio.or(menu.default_audio),
             );
-            popup::separator_in(ui, over_video::MENU_BORDER);
-            let delay = adjustments.audio_delay;
-            if let Some(step) = delay_stepper(ui, None, delay) {
-                adjustments.audio_delay = stepped_delay(delay, step);
-                adjusted = true;
+            // The TV has no delay or size of its own: a cast's menu is the tracks only.
+            if !menu.casting {
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                let delay = adjustments.audio_delay;
+                if let Some(step) = delay_stepper(ui, None, delay) {
+                    adjustments.audio_delay = stepped_delay(delay, step);
+                    adjusted = true;
+                }
             }
         }
         SettingsTab::Subtitles => {
@@ -2195,23 +2091,25 @@ fn settings_body(
                 SUBTITLES_OFF => SubtitleChoice::Off,
                 index => SubtitleChoice::Stream(index),
             });
-            popup::separator_in(ui, over_video::MENU_BORDER);
-            let delay = adjustments.subtitle_delay;
-            if let Some(step) = delay_stepper(ui, keys.then_some("z  x"), delay) {
-                adjustments.subtitle_delay = stepped_delay(delay, step);
-                adjusted = true;
-            }
-            let scale = adjustments.subtitle_scale;
-            let size = format!("{:.0}%", scale * 100.);
-            let moved = (scale - 1.).abs() >= 0.005;
-            let label = tr!("player-size");
-            if let Some(step) = stepper::row(ui, &label, None, &size, moved, stepper_colours()) {
-                match step {
-                    Step::Down => adjustments.subtitle_scale -= Adjustments::SCALE_STEP,
-                    Step::Up => adjustments.subtitle_scale += Adjustments::SCALE_STEP,
-                    Step::Reset => adjustments.subtitle_scale = 1.,
+            if !menu.casting {
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                let delay = adjustments.subtitle_delay;
+                if let Some(step) = delay_stepper(ui, keys.then_some("z  x"), delay) {
+                    adjustments.subtitle_delay = stepped_delay(delay, step);
+                    adjusted = true;
                 }
-                adjusted = true;
+                let scale = adjustments.subtitle_scale;
+                let size = format!("{:.0}%", scale * 100.);
+                let moved = (scale - 1.).abs() >= 0.005;
+                let label = tr!("player-size");
+                if let Some(step) = stepper::row(ui, &label, None, &size, moved, stepper_colours()) {
+                    match step {
+                        Step::Down => adjustments.subtitle_scale -= Adjustments::SCALE_STEP,
+                        Step::Up => adjustments.subtitle_scale += Adjustments::SCALE_STEP,
+                        Step::Reset => adjustments.subtitle_scale = 1.,
+                    }
+                    adjusted = true;
+                }
             }
         }
         SettingsTab::General => {

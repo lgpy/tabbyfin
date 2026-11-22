@@ -3,8 +3,12 @@
 //! closed and a cast goes on. The player's own casting view is `views::player`'s.
 
 use egui::accesskit::Role;
-use egui::{Id, Key, Modifiers, Rect, Sense, Ui, WidgetInfo, pos2, vec2};
-use egui_material_icons::icons::{ICON_CAST_CONNECTED, ICON_PAUSE, ICON_PLAY_ARROW, ICON_SPEAKER_GROUP, ICON_TV};
+use egui::{CursorIcon, Id, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
+use egui_material_icons::MaterialIcon;
+use egui_material_icons::icons::{
+    ICON_CAST_CONNECTED, ICON_FORWARD_10, ICON_PAUSE, ICON_PLAY_ARROW, ICON_REPLAY_10, ICON_SPEAKER_GROUP, ICON_TV,
+    ICON_VOLUME_OFF, ICON_VOLUME_UP,
+};
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemDto, BaseItemKind, ImageType};
 
@@ -36,26 +40,53 @@ const PHONE_SIDE: f32 = 8.;
 const PHONE_BAR_H: f32 = 64.;
 /// The progress along the bar's bottom edge.
 const PROGRESS_H: f32 = 3.;
+/// The gap a page keeps between its last row and the bar.
+const BAR_GAP: f32 = 12.;
+
+/// The panel's now-playing card: its height, the room inside it and its 16:9 thumbnail's height.
+const CARD_H: f32 = 124.;
+const CARD_PAD: f32 = 12.;
+const CARD_THUMB_H: f32 = 54.;
+/// The card's skips move the TV this many seconds, as the player's do.
+const SKIP: f64 = 10.;
+
+/// The room a page leaves under its contents while the now-casting bar shows: the bar, its lift
+/// and a gap, so the last row scrolls clear of it. The page keeps its own padding under that.
+pub fn room(compact: bool) -> f32 {
+    let (lift, height) = if compact {
+        (PHONE_SIDE, PHONE_BAR_H)
+    } else {
+        (BAR_LIFT, BAR_H)
+    };
+    lift + height + BAR_GAP
+}
 
 /// A choice in the cast panel, in the order it lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CastEntry {
+    /// The panel's now-playing card: goes back to the player. The shell opens it.
+    NowPlaying,
     /// A device on the network, by id: casts to it (or, the one in use, does nothing).
     Device(String),
-    Disconnect,
     Stop,
+    Disconnect,
+}
+
+/// Whether the cast has an item to show: the bar and the panel's card show for one.
+fn has_item(casting: &Casting) -> bool {
+    casting.item_id.is_some() || casting.item.is_some()
 }
 
 /// What the panel lists, in the order the keyboard walks it.
 pub fn entries(cast: &Cast) -> Vec<CastEntry> {
-    let mut entries: Vec<CastEntry> = cast
-        .devices
-        .iter()
-        .map(|device| CastEntry::Device(device.id.clone()))
-        .collect();
+    let mut entries = Vec::new();
+    if cast.casting().is_some_and(has_item) {
+        entries.push(CastEntry::NowPlaying);
+    }
+    entries.extend(cast.devices.iter().map(|device| CastEntry::Device(device.id.clone())));
     if cast.is_casting() {
-        entries.push(CastEntry::Disconnect);
         entries.push(CastEntry::Stop);
+        entries.push(CastEntry::Disconnect);
     }
     entries
 }
@@ -63,27 +94,30 @@ pub fn entries(cast: &Cast) -> Vec<CastEntry> {
 /// Does what an entry says.
 pub fn choose(entry: CastEntry, services: &mut Services) {
     match entry {
+        // The player's state is the shell's, so it opens it itself.
+        CastEntry::NowPlaying => {}
         CastEntry::Device(id) => services.start_cast(&id),
-        CastEntry::Disconnect => services.disconnect_cast(),
         CastEntry::Stop => services.stop_cast(),
+        CastEntry::Disconnect => services.disconnect_cast(),
     }
 }
 
-/// The panel's body: its heading, the devices and, while casting, *Disconnect* and *Stop
-/// casting*. Returns the entry a click picked. `highlight` is the keyboard's.
-pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEntry>) -> Option<CastEntry> {
-    let cast = &services.cast;
+/// The panel's body: its heading, the now-playing card while something casts, the devices and,
+/// while casting, *Stop casting* under them and the link that leaves the TV playing. Returns the
+/// entry a click picked. `highlight` is the keyboard's.
+pub fn panel_content(ui: &mut Ui, services: &mut Services, highlight: Option<&CastEntry>) -> Option<CastEntry> {
     let tokens = theme::tokens_of(ui);
     let width = ui.available_width();
     let radius = tokens.radius_control as f32;
-    let casting_on = cast.session.as_ref().map(|session| session.device.id.as_str());
-    let reconnecting = cast
-        .session
-        .as_ref()
-        .is_some_and(|session| session.reconnecting.is_some());
+    let session = services.cast.session.as_ref();
+    let casting_on = session.map(|session| session.device.id.clone());
+    let device = session.map_or_else(String::new, |session| session.device.name.clone());
+    let reconnecting = session.is_some_and(|session| session.reconnecting.is_some());
+    let casting = services.cast.casting().filter(|cast| has_item(cast)).cloned();
+    let connected = casting_on.is_some();
     // The panel's status and each row's are the same two words: looked up once for the frame.
     let (casting_note, reconnecting_note) = (tr!("cast-status-casting"), tr!("cast-status-reconnecting"));
-    let status = match casting_on {
+    let status = match &casting_on {
         Some(_) if reconnecting => Some((reconnecting_note.as_str(), tokens.warning)),
         Some(_) => Some((casting_note.as_str(), tokens.success)),
         None => None,
@@ -91,15 +125,22 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
     popup::panel_heading(ui, &tr!("cast-panel-title"), status, &tr!("cast-panel-note"));
     ui.add_space(surface::GAP_GROUP);
     let mut chosen = None;
-    if cast.devices.is_empty() {
+    if let Some(casting) = &casting {
+        let highlighted = highlight == Some(&CastEntry::NowPlaying);
+        if now_playing_card(ui, services, casting, &device, reconnecting, highlighted) {
+            chosen = Some(CastEntry::NowPlaying);
+        }
+        ui.add_space(surface::GAP_GROUP);
+    }
+    if services.cast.devices.is_empty() {
         state::icon_message(ui, ICON_TV, &tr!("cast-looking"));
     } else {
         popup::panel_section(ui, &tr!("cast-section-network"), SECTION_H, |_| {});
         list_row::block(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
-            for device in &cast.devices {
+            for device in &services.cast.devices {
                 let entry = CastEntry::Device(device.id.clone());
-                let in_use = casting_on == Some(device.id.as_str());
+                let in_use = casting_on.as_deref() == Some(device.id.as_str());
                 let leading = if in_use {
                     Leading::Icon(ICON_CAST_CONNECTED, tokens.brand)
                 } else if device.is_group() {
@@ -142,16 +183,8 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
             }
         });
     }
-    if cast.is_casting() {
+    if connected {
         ui.add_space(surface::GAP_GROUP);
-        let disconnect = button::quiet(ui, &tr!("cast-disconnect"), width, State::Ready, Focus::Skip);
-        if highlight == Some(&CastEntry::Disconnect) {
-            focus::ring(ui, disconnect.rect, radius, Place::Outside);
-        }
-        if disconnect.clicked() {
-            chosen = Some(CastEntry::Disconnect);
-        }
-        ui.add_space(surface::GAP_ITEM);
         let stop = button::quiet_danger(ui, &tr!("cast-stop"), width, State::Ready, Focus::Skip);
         if highlight == Some(&CastEntry::Stop) {
             focus::ring(ui, stop.rect, radius, Place::Outside);
@@ -159,17 +192,237 @@ pub fn panel_content(ui: &mut Ui, services: &Services, highlight: Option<&CastEn
         if stop.clicked() {
             chosen = Some(CastEntry::Stop);
         }
+        ui.add_space(4.);
+        let disconnect = ui
+            .vertical_centered(|ui| button::link(ui, &tr!("cast-disconnect-leave"), "sm"))
+            .inner;
+        if highlight == Some(&CastEntry::Disconnect) {
+            focus::ring(ui, disconnect.rect, radius, Place::Outside);
+        }
+        if disconnect.clicked() {
+            chosen = Some(CastEntry::Disconnect);
+        }
     }
     chosen
+}
+
+/// The card at the top of the panel while something casts: the item's picture, its name and
+/// position over a thin progress track, then play/pause, the 10 s skips and the TV's volume. Its
+/// body goes back to the player; returns whether it was clicked (its controls say their own).
+fn now_playing_card(
+    ui: &mut Ui,
+    services: &mut Services,
+    casting: &Casting,
+    device: &str,
+    reconnecting: bool,
+    highlighted: bool,
+) -> bool {
+    let tokens = theme::tokens_of(ui);
+    let width = ui.available_width();
+    let (rect, card) = ui.allocate_exact_size(vec2(width, CARD_H), Sense::CLICK);
+    let radius = tokens.radius_control;
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(radius), tokens.inset);
+    let name = bar_title(casting);
+    let label = if reconnecting {
+        tr!("cast-bar-label-reconnecting", name = name.as_str(), device = device)
+    } else {
+        tr!("cast-bar-label-on", name = name.as_str(), device = device)
+    };
+    card.widget_info(|| WidgetInfo::labeled(Role::Button, true, label.clone()));
+    if card.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    if highlighted {
+        focus::ring(ui, rect, radius as f32, Place::Outside);
+    }
+
+    // The picture, the name and the position, over how far it got.
+    let thumb = Rect::from_min_size(
+        rect.min + vec2(CARD_PAD, CARD_PAD),
+        vec2(CARD_THUMB_H * 16. / 9., CARD_THUMB_H),
+    );
+    let request = casting.item.as_ref().and_then(thumbnail);
+    image::show(
+        ui,
+        &mut services.images,
+        thumb,
+        request.as_ref(),
+        casting.item.as_ref(),
+        6,
+    );
+    let left = thumb.right() + 12.;
+    let right = rect.right() - CARD_PAD;
+    let painter = ui.painter().with_clip_rect(Rect::from_min_max(
+        pos2(left, thumb.top()),
+        pos2(right, thumb.bottom() - 10.),
+    ));
+    let title = painter.layout(name, text::font(ui, "sm"), tokens.ink, right - left);
+    painter.galley(pos2(left, thumb.top() + 2.), title, tokens.ink);
+    let time = match casting.duration {
+        Some(duration) => format!("{} / {}", timestamp(casting.position()), timestamp(duration)),
+        None => timestamp(casting.position()),
+    };
+    let time = painter.layout_no_wrap(time, text::font(ui, "xs"), tokens.ink_muted);
+    painter.galley(pos2(left, thumb.top() + 24.), time, tokens.ink_muted);
+    if let Some(duration) = casting.duration.filter(|duration| !duration.is_zero()) {
+        let done = (casting.position().as_secs_f32() / duration.as_secs_f32()).clamp(0., 1.);
+        track(
+            ui,
+            Rect::from_min_size(pos2(left, thumb.bottom() - 8.), vec2(right - left, 8.)),
+            done,
+            false,
+        );
+        if casting.playing && !casting.paused {
+            // The position moves between the receiver's reports.
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+        }
+    }
+
+    // The controls: play/pause, the skips, then the TV's volume.
+    let row_y = rect.bottom() - CARD_PAD - 20.;
+    let mut taken = false;
+    let (icon, tip) = if casting.paused {
+        (ICON_PLAY_ARROW, tr!("cast-bar-play"))
+    } else {
+        (ICON_PAUSE, tr!("cast-bar-pause"))
+    };
+    let play = brand_round(
+        ui,
+        pos2(rect.left() + CARD_PAD + 20., row_y),
+        icon,
+        &tip,
+        40.,
+        20.,
+        Id::unique("cast_panel_play"),
+    );
+    if play.clicked() {
+        services.control(UiCommand::TogglePause);
+        taken = true;
+    }
+    let back = RoundButton::icon(ICON_REPLAY_10, &tr!("cast-back-10s"))
+        .size(36., 22.)
+        .focus(Focus::Skip)
+        .show_at(
+            ui,
+            pos2(rect.left() + CARD_PAD + 66., row_y),
+            Id::unique("cast_panel_back"),
+        );
+    if back.clicked() {
+        services.control(UiCommand::SeekBy(-SKIP));
+        taken = true;
+    }
+    let forward = RoundButton::icon(ICON_FORWARD_10, &tr!("cast-forward-10s"))
+        .size(36., 22.)
+        .focus(Focus::Skip)
+        .show_at(
+            ui,
+            pos2(rect.left() + CARD_PAD + 104., row_y),
+            Id::unique("cast_panel_forward"),
+        );
+    if forward.clicked() {
+        services.control(UiCommand::SeekBy(SKIP));
+        taken = true;
+    }
+    let volume = Rect::from_min_max(
+        pos2(rect.left() + CARD_PAD + 136., row_y - 12.),
+        pos2(right, row_y + 12.),
+    );
+    taken |= volume_control(ui, services, volume, casting.volume, casting.muted);
+    card.clicked() && !taken
+}
+
+/// A round `brand` button that keeps its fill at rest (the card's play/pause): a [`RoundButton`]
+/// has no circle until the pointer is on it, which would leave a playing card's main control
+/// looking like the skips beside it.
+fn brand_round(
+    ui: &mut Ui,
+    center: Pos2,
+    icon: MaterialIcon,
+    label: &str,
+    size: f32,
+    icon_size: f32,
+    id: Id,
+) -> Response {
+    let tokens = theme::tokens_of(ui);
+    let response = ui.interact(Rect::from_center_size(center, vec2(size, size)), id, Sense::CLICK);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
+    let fill = if response.hovered() {
+        tokens.brand_hover
+    } else {
+        tokens.brand
+    };
+    ui.painter().circle_filled(center, size / 2., fill);
+    round_button::glyph(ui, center, icon, icon_size, tokens.brand_foreground);
+    response.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(label)
+}
+
+/// A thin track, sunk in the surface it's on, with the done part in `brand` and a knob at its
+/// end when it can be dragged.
+fn track(ui: &Ui, rect: Rect, done: f32, knob: bool) {
+    let tokens = theme::tokens_of(ui);
+    let bar = Rect::from_center_size(rect.center(), vec2(rect.width(), 4.));
+    ui.painter().rect_filled(bar, 2, tokens.inset_hover);
+    let filled = Rect::from_min_size(bar.min, vec2(bar.width() * done.clamp(0., 1.), bar.height()));
+    ui.painter().rect_filled(filled, 2, tokens.brand);
+    if knob {
+        ui.painter()
+            .circle_filled(pos2(filled.right(), bar.center().y), 7., tokens.brand);
+    }
+}
+
+/// The TV's volume on the card: a speaker, a draggable track and the level. Returns whether it
+/// took the pointer, so the card's own click doesn't also open the player.
+fn volume_control(ui: &mut Ui, services: &mut Services, rect: Rect, volume: f64, muted: bool) -> bool {
+    let tokens = theme::tokens_of(ui);
+    let icon = if muted || volume <= 0. {
+        ICON_VOLUME_OFF
+    } else {
+        ICON_VOLUME_UP
+    };
+    round_button::glyph(
+        ui,
+        pos2(rect.left() + 10., rect.center().y),
+        icon,
+        20.,
+        tokens.ink_muted,
+    );
+    let slider = Rect::from_min_max(
+        pos2(rect.left() + 30., rect.top()),
+        pos2(rect.right() - 38., rect.bottom()),
+    );
+    let response = ui.interact(slider, Id::unique("cast_panel_volume"), Sense::CLICK | Sense::DRAG);
+    let moving = response.dragged() || response.clicked();
+    let shown = match response.interact_pointer_pos() {
+        Some(at) if moving => f64::from(((at.x - slider.left()) / slider.width()).clamp(0., 1.)) * 100.,
+        _ => volume,
+    };
+    let name = tr!("cast-volume");
+    response.widget_info(|| WidgetInfo::slider(true, shown, &name));
+    track(
+        ui,
+        Rect::from_center_size(slider.center(), vec2(slider.width(), 16.)),
+        (shown / 100.) as f32,
+        true,
+    );
+    let level = ui
+        .painter()
+        .layout_no_wrap(format!("{shown:.0}"), text::font(ui, "sm"), tokens.ink_muted);
+    ui.painter().galley(
+        pos2(rect.right() - level.size().x, rect.center().y - level.size().y / 2.),
+        level,
+        tokens.ink_muted,
+    );
+    if moving && (shown - volume).abs() >= 0.5 {
+        services.control(UiCommand::SetVolume(shown.round()));
+    }
+    moving
 }
 
 /// Whether the now-casting bar shows: something casts and the player is closed (the caller's
 /// part).
 pub fn has_bar(services: &Services) -> bool {
-    services
-        .cast
-        .casting()
-        .is_some_and(|casting| casting.item_id.is_some() || casting.item.is_some())
+    services.cast.casting().is_some_and(has_item)
 }
 
 /// What a SyncPlay choice waits on while a cast is going: casting and SyncPlay don't mix.
@@ -281,7 +534,21 @@ fn draw_bar(
     let tokens = theme::tokens_of(ui);
     ui.set_min_size(rect.size());
     let painter = ui.painter().clone();
-    let frame = popup::frame(tokens).corner_radius(BAR_RADIUS);
+    // On the pale page a white bar's outline and popup shadow are too faint to read: in the
+    // light theme it takes a lavender edge and a deeper shadow. The dark theme's already tell.
+    let frame = if tokens.dark {
+        popup::frame(tokens).corner_radius(BAR_RADIUS)
+    } else {
+        popup::frame(tokens)
+            .corner_radius(BAR_RADIUS)
+            .stroke(Stroke::new(1., tokens.brand.gamma_multiply(0.45)))
+            .shadow(egui::epaint::Shadow {
+                offset: [0, 8],
+                blur: 28,
+                spread: 0,
+                color: tokens.ink_muted.gamma_multiply(0.24),
+            })
+    };
     painter.add(frame.paint(rect));
     let response = ui.interact(rect, Id::unique("now_casting_bar_open"), Sense::CLICK);
     let name = bar_title(casting);
