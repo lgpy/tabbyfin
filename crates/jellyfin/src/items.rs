@@ -3,7 +3,7 @@ use crate::models::{
     BaseItemDto, BaseItemKind, ItemField, ItemFilter, ItemFilterValues, ItemSortBy, MediaSegmentDto, QueryResult,
     wire_list,
 };
-use crate::{Client, Error, Result};
+use crate::{Client, Error, Result, Ticks};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
@@ -326,6 +326,15 @@ impl Client {
 
     pub async fn mark_unplayed(&self, item_id: &str) -> Result<()> {
         self.delete(&format!("/UserPlayedItems/{item_id}")).await
+    }
+
+    /// Sets where playback resumes, leaving the watched state alone: zero takes the item out of
+    /// Continue Watching without marking it played. Both 10.11 and 12.x have this endpoint
+    /// (`UserItems/{id}/UserData`; only the fields sent are changed).
+    pub async fn set_resume_position(&self, item_id: &str, position: Ticks) -> Result<()> {
+        let body = serde_json::json!({ "PlaybackPositionTicks": position.0 });
+        self.post_no_content(&format!("/UserItems/{item_id}/UserData"), &Query::new(), Some(&body))
+            .await
     }
 
     pub async fn mark_favorite(&self, item_id: &str) -> Result<()> {

@@ -69,3 +69,77 @@ fn enter_opens_the_tile_under_the_cursor() {
     ui.press(Key::Enter);
     assert_eq!(ui.state().nav, [NavRequest::Push(Route::for_item(&views[1]))]);
 }
+
+/// *Remove from Continue Watching* is on a card with a resume point: it clears the position (and
+/// only that, so the item stays unwatched) and offers an undo that puts it back.
+#[test]
+fn remove_from_continue_watching_clears_the_position_and_can_be_undone() {
+    use crate::services::AppEvent;
+    use crate::toasts::ToastAction;
+
+    let _config = ConfigDir::new("home-remove-continue");
+    let server = fixture_server();
+    server.json_value(
+        "POST",
+        "/UserItems/7eb36de4ac7adf33cc892d940ad0f3f4/UserData",
+        &serde_json::json!({}),
+    );
+    let mut ui = home(&server);
+    ui.step_until("the resume row", |harness| {
+        harness
+            .query_by_role_and_label(Role::Button, "Test Show S02E01")
+            .is_some()
+    });
+    ui.harness()
+        .get_by_role_and_label(Role::Button, "Test Show S02E01")
+        .click_secondary();
+    for _ in 0..3 {
+        ui.step();
+    }
+    ui.harness()
+        .get_by_role_and_label(Role::MenuItem, "Remove from Continue Watching")
+        .click();
+    ui.step_until("the position cleared", |_| {
+        server.requests("POST", "/UserItems/7eb36de4ac7adf33cc892d940ad0f3f4/UserData") == 1
+    });
+    assert_eq!(
+        server.bodies("POST", "/UserItems/7eb36de4ac7adf33cc892d940ad0f3f4/UserData"),
+        [serde_json::json!({ "PlaybackPositionTicks": 0 })]
+    );
+    let mut undo = None;
+    for _ in 0..50 {
+        ui.step();
+        undo = ui
+            .harness_mut()
+            .state_mut()
+            .services_mut()
+            .events
+            .iter()
+            .find_map(|event| match event {
+                AppEvent::Toast(toast) => toast.attached_action().cloned(),
+                _ => None,
+            });
+        if undo.is_some() {
+            break;
+        }
+    }
+    let Some(ToastAction::RestoreResume {
+        item_id,
+        name,
+        position,
+    }) = undo
+    else {
+        panic!("a toast with an undo");
+    };
+    ui.harness_mut()
+        .state_mut()
+        .services_mut()
+        .restore_resume(item_id, name, position);
+    ui.step_until("the position restored", |_| {
+        server.requests("POST", "/UserItems/7eb36de4ac7adf33cc892d940ad0f3f4/UserData") == 2
+    });
+    assert_eq!(
+        server.bodies("POST", "/UserItems/7eb36de4ac7adf33cc892d940ad0f3f4/UserData")[1],
+        serde_json::json!({ "PlaybackPositionTicks": 391250000 })
+    );
+}

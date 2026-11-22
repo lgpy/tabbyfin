@@ -38,7 +38,7 @@ Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay t
 
 ## 3. Browsing and library
 
-Done: keyboard navigation everywhere, library sort and filters, favorites, cast and crew, collections and playlists (with editing), blurhash placeholders, item page extras (trailers, extras, more like this), Home following the web client's settings, the alphabet jump, context menus, playing a series or season, loading an item's page ahead of the click.
+Done: keyboard navigation everywhere, library sort and filters, favorites, cast and crew, collections and playlists (with editing), blurhash placeholders, item page extras (trailers, extras, more like this), Home following the web client's settings, the alphabet jump, context menus, playing a series or season, loading an item's page ahead of the click, Remove from Continue Watching with an undo.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|

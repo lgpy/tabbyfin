@@ -345,3 +345,19 @@ async fn a_failed_download_maps_to_the_error() {
     let err = client.download(client.download_url("item"), 0).await.err();
     assert!(matches!(err, Some(Error::Unauthorized)), "{err:?}");
 }
+
+/// Taking an item out of Continue Watching sends only the position, so the watched state stays.
+#[tokio::test]
+async fn clearing_a_resume_position_sends_only_the_position() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/UserItems/item/UserData"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "PlaybackPositionTicks": 0, "Played": false })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    client.set_resume_position("item", Ticks(0)).await.expect("cleared");
+    let requests = server.received_requests().await.expect("recording is on");
+    assert_eq!(body(&requests[0]), json!({ "PlaybackPositionTicks": 0 }));
+}

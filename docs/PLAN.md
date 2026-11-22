@@ -151,6 +151,7 @@ All of these exist in the 12.2 OpenAPI spec and none are marked obsolete (checke
 | Libraries | `GET /UserViews` |
 | Library contents | `GET /Items?ParentId=&IncludeItemTypes=&Recursive=&SortBy=&StartIndex=&Limit=&Fields=` |
 | Continue watching | `GET /UserItems/Resume` |
+| Remove from Continue Watching | `POST /UserItems/{itemId}/UserData` with `{"PlaybackPositionTicks":0}` (only the fields sent change; the same body with the old ticks is the undo) |
 | Next up | `GET /Shows/NextUp` |
 | Latest | `GET /Items/Latest?ParentId=` |
 | Item detail | `GET /Items/{itemId}` |

@@ -342,6 +342,11 @@ impl PageRun {
         }
     }
 
+    /// The services the page draws with, for a test to read what they raised.
+    pub fn services_mut(&mut self) -> &mut Services {
+        self.services.as_mut().expect("the services are made")
+    }
+
     /// One frame: the app's logic (the services' work), then the keys the shell routes, then
     /// the page.
     fn show(&mut self, ui: &mut egui::Ui) {
