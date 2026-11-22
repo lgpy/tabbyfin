@@ -187,13 +187,19 @@ public class MainActivity extends GameActivity {
      * The Rust app runs once per process: eframe can't start its event loop twice, and winit
      * doesn't end it when the activity goes, so a new activity in this process would never draw.
      * The process ends with the activity instead; the config and the session are saved as they
-     * change, so the next launch starts afresh where this one was.
+     * change, so the next launch starts afresh where this one was. Only when the activity is
+     * really going: a recreation for a configuration change must not end the process (the page
+     * stack and the playback would go with it), which is why the manifest's `configChanges`
+     * lists what the app takes on itself, so the activity isn't recreated at all.
      */
     @Override
     protected void onDestroy() {
         if (networks != null) connectivity.unregisterNetworkCallback(networks);
         networks = null;
-        System.exit(0);
+        super.onDestroy();
+        if (isFinishing() && !isChangingConfigurations()) {
+            System.exit(0);
+        }
     }
 
     @Override
