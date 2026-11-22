@@ -474,3 +474,33 @@ fn queueing_after_dismissing_the_up_next_card_plays_the_queued_item() {
     assert!(!services.playback.now_playing().expect("the session").next_cancelled);
     assert_eq!(services.end_for_test(), Some(episode(2).id));
 }
+
+/// Repeat all starts over at the end of what the queue holds, a lone item included, rather than
+/// moving on to the series' following episode.
+#[test]
+fn repeat_all_wraps_before_the_following_episode() {
+    use jellyfin::RepeatMode;
+
+    let _config = ConfigDir::new("queue-repeat-all-wrap");
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    services.set_repeat(RepeatMode::RepeatAll);
+    {
+        // As the details leave a mid-season episode: a following one, and nothing queued.
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.autoplay = true;
+        state.next = Some(episode(2));
+    }
+    assert_eq!(services.end_for_test(), Some(episode(1).id), "the lone item plays again");
+
+    // Without repeat the following episode plays, as before.
+    let (_server, mut harness) = playing();
+    let services = harness.state_mut().services();
+    {
+        let state = services.playback.now_playing_mut().expect("the session");
+        state.autoplay = true;
+        state.next = Some(episode(2));
+    }
+    assert_eq!(services.end_for_test(), Some(episode(2).id));
+}
+

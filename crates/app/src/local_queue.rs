@@ -183,21 +183,22 @@ impl LocalQueue {
     }
 
     /// What follows an item that played to its end, by the repeat mode: the same item again for
-    /// *repeat one*; otherwise `next` (the queue's front, or the following episode, when the
-    /// setting lets it start by itself); at the end of the queue, *repeat all* starts it over.
+    /// *repeat one*; with *repeat all*, the queue starts over once nothing is waiting in it, even
+    /// when `next` is the series' following episode, which isn't the queue's; otherwise `next`
+    /// (the queue's front, or the following episode, when the setting lets it start by itself).
     pub fn after_end(&mut self, current: &BaseItemDto, next: Option<BaseItemDto>) -> AfterEnd {
         if self.repeat == RepeatMode::RepeatOne {
             return AfterEnd::Replay;
-        }
-        if let Some(next) = next {
-            return AfterEnd::Next(next);
         }
         if self.repeat == RepeatMode::RepeatAll
             && let Some(first) = self.restart(current)
         {
             return AfterEnd::Restart(first);
         }
-        AfterEnd::Stop
+        match next {
+            Some(next) => AfterEnd::Next(next),
+            None => AfterEnd::Stop,
+        }
     }
 
     /// Repeating the whole queue, at its end: everything that played plus `current` again, the
@@ -362,6 +363,26 @@ mod tests {
             "{after:?}"
         );
         assert_eq!(ids(&queue), ["b", "c"]);
+    }
+
+    #[test]
+    fn repeat_all_wraps_even_when_a_following_episode_is_offered() {
+        // A lone item, with the series' next episode as `next`: it plays again.
+        let mut lone = LocalQueue::default();
+        lone.repeat = RepeatMode::RepeatAll;
+        let after = lone.after_end(&item("a"), Some(item("episode-after")));
+        assert!(matches!(&after, AfterEnd::Restart(first) if first.id == "a"), "{after:?}");
+
+        // With entries waiting, they come first.
+        let mut waiting = queue(&["b"]);
+        waiting.repeat = RepeatMode::RepeatAll;
+        let after = waiting.after_end(&item("a"), Some(item("b")));
+        assert!(matches!(&after, AfterEnd::Next(next) if next.id == "b"), "{after:?}");
+
+        // Without repeat all, the following episode plays.
+        let mut off = LocalQueue::default();
+        let after = off.after_end(&item("a"), Some(item("episode-after")));
+        assert!(matches!(&after, AfterEnd::Next(next) if next.id == "episode-after"), "{after:?}");
     }
 
     #[test]
