@@ -126,6 +126,8 @@ pub struct PlaybackState {
     pub transport: Transport,
     pub position: Duration,
     pub duration: Option<Duration>,
+    /// The playback speed: how fast the position moves on while it plays.
+    pub rate: f64,
 }
 
 /// One frame's reading of `NowPlaying`.
@@ -219,6 +221,7 @@ impl Snapshot {
                 transport,
                 position,
                 duration: state.duration,
+                rate: state.adjustments.speed.max(0.),
             },
         }
     }
@@ -258,13 +261,14 @@ impl Reporter {
         let due = match &self.told {
             None => true,
             Some((told, at)) => {
-                // Where the position should be by now if nothing happened.
+                // Where the position should be by now if nothing happened: moved on at the speed.
                 let expected = match told.transport {
-                    Transport::Playing => told.position + now.saturating_duration_since(*at),
+                    Transport::Playing => told.position + now.saturating_duration_since(*at).mul_f64(told.rate.max(0.)),
                     Transport::Paused => told.position,
                 };
                 told.transport != snapshot.state.transport
                     || told.duration != snapshot.state.duration
+                    || told.rate != snapshot.state.rate
                     || expected.abs_diff(snapshot.state.position) > JUMP
                     || now.saturating_duration_since(*at) >= REFRESH
             }
@@ -446,6 +450,7 @@ mod tests {
             transport,
             position: Duration::from_secs(secs),
             duration: Some(Duration::from_secs(2600)),
+            rate: 1.,
         }
     }
 
@@ -505,6 +510,30 @@ mod tests {
         assert_eq!(seek, vec![Report::Playback(state(Transport::Paused, 900))]);
         let refresh = reporter.next(&snapshot(Transport::Paused, 900), t0 + Duration::from_secs(8));
         assert_eq!(refresh, vec![Report::Playback(state(Transport::Paused, 900))]);
+    }
+
+    /// At 2× the position moves on twice as fast, which is no jump to tell the OS about; a change
+    /// of speed is.
+    #[test]
+    fn a_faster_playback_is_not_a_jump_but_a_new_speed_is_told() {
+        let mut reporter = Reporter::default();
+        let t0 = Instant::now();
+        let at = |secs, rate| Snapshot {
+            info: info(),
+            state: PlaybackState {
+                rate,
+                ..state(Transport::Playing, secs)
+            },
+        };
+        reporter.next(&at(10, 2.), t0);
+        let secs = Duration::from_secs;
+        assert!(reporter.next(&at(14, 2.), t0 + secs(2)).is_empty());
+        assert!(reporter.next(&at(19, 2.), t0 + secs(4) + secs(1) / 2).is_empty());
+        // Before the refresh is due, so it's the speed that's told.
+        let slowed = reporter.next(&at(19, 1.), t0 + secs(4) + secs(9) / 10);
+        assert_eq!(slowed.len(), 1, "told the new speed: {slowed:?}");
+        // And at 1× from there on, a second is a second again.
+        assert!(reporter.next(&at(20, 1.), t0 + secs(5) + secs(9) / 10).is_empty());
     }
 
     #[test]
@@ -613,6 +642,7 @@ mod tests {
     fn the_position_moves_on_at_the_playback_speed() {
         let doubled = episode_snapshot_at(false, Duration::from_secs(30), 2.);
         assert_eq!(doubled.state.position, Duration::from_secs(13 * 60));
+        assert_eq!(doubled.state.rate, 2.);
         let slowed = episode_snapshot_at(false, Duration::from_secs(30), 0.5);
         assert_eq!(slowed.state.position, Duration::from_secs(12 * 60 + 15));
     }
