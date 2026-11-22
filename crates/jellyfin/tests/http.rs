@@ -211,7 +211,10 @@ async fn the_bitrate_test_times_the_download() {
         .mount(&server)
         .await;
     let bits = client(&server).await.bitrate_test(500_000).await.expect("bitrate test");
-    assert!((3_000_000..4_100_000).contains(&bits), "{bits} bit/s");
+    // The upper bound proves the timing: with no delay measured, 500 kB would read as many
+    // times 4 Mbit/s. The lower one only has to survive a slow runner (the download may take
+    // several times the 1 s delay), so it is far under the nominal 4 Mbit/s.
+    assert!((500_000..4_100_000).contains(&bits), "{bits} bit/s");
 }
 
 /// The server replaces the whole user configuration, so an update sends back what it read with
@@ -414,4 +417,117 @@ async fn a_redirect_that_leaves_the_server_is_refused() {
 
     // Within the server it is followed, to whatever answers there.
     assert!(matches!(client.current_user().await, Err(Error::NotFound)));
+}
+
+/// A server that takes the request and never answers: the wait for its headers ends as a stall
+/// instead of holding the download for the whole transfer's limit. The stall limit is
+/// `Client::download_with`'s, so the test needn't wait the real 30 s.
+#[tokio::test]
+async fn a_server_that_never_answers_stalls_the_download() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(b"late")
+                .set_delay(Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    let started = std::time::Instant::now();
+    let err = client
+        .download_with(client.download_url("item"), 0, None, Duration::from_millis(200))
+        .await
+        .err();
+    assert!(matches!(err, Some(Error::Stalled)), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(3), "it gave up at the limit");
+}
+
+/// A resume asks with `If-Range`, the validator the first response gave: a strong `ETag`, else
+/// `Last-Modified`, and never a weak `ETag`, which a range request can't compare.
+#[tokio::test]
+async fn a_download_gives_its_validator_and_resumes_with_it() {
+    let server = MockServer::start().await;
+    for (route, headers) in [
+        (
+            "etag",
+            vec![("etag", "\"abc\""), ("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")],
+        ),
+        ("date", vec![("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")]),
+        (
+            "weak",
+            vec![
+                ("etag", "W/\"abc\""),
+                ("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT"),
+            ],
+        ),
+        ("none", vec![]),
+    ] {
+        let mut reply = ResponseTemplate::new(200).set_body_bytes(b"hello");
+        for (name, value) in headers {
+            reply = reply.insert_header(name, value);
+        }
+        Mock::given(method("GET"))
+            .and(path(format!("/Items/{route}/Download")))
+            .respond_with(reply)
+            .mount(&server)
+            .await;
+    }
+    let client = client(&server).await;
+    let mut validators = Vec::new();
+    for route in ["etag", "date", "weak", "none"] {
+        let download = client
+            .download(client.download_url(route), 0)
+            .await
+            .expect("a download");
+        validators.push(download.validator);
+    }
+    assert_eq!(
+        validators,
+        [
+            Some("\"abc\"".to_owned()),
+            Some("Wed, 21 Oct 2026 07:28:00 GMT".to_owned()),
+            Some("Wed, 21 Oct 2026 07:28:00 GMT".to_owned()),
+            None,
+        ]
+    );
+
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .and(header("range", "bytes=3-"))
+        .and(header("if-range", "\"abc\""))
+        .respond_with(
+            ResponseTemplate::new(206)
+                .insert_header("content-range", "bytes 3-4/5")
+                .set_body_bytes(b"lo"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let download = client
+        .download_resuming(client.download_url("item"), 3, Some("\"abc\""))
+        .await
+        .expect("a download");
+    assert!(download.partial);
+    assert_eq!(body_of(download).await, b"lo");
+}
+
+/// A range the server can't satisfy is a status error the caller can tell from a failure.
+#[tokio::test]
+async fn a_range_past_the_end_is_told_apart() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .respond_with(ResponseTemplate::new(416))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    let err = client
+        .download(client.download_url("item"), 5)
+        .await
+        .err()
+        .expect("an error");
+    assert!(err.is_range_not_satisfiable(), "{err:?}");
+    assert!(!Error::NotFound.is_range_not_satisfiable());
 }

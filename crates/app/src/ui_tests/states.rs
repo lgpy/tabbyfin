@@ -5,7 +5,7 @@ use egui_kittest::kittest::Queryable;
 use jellyfin::models::CollectionType;
 
 use crate::nav::Route;
-use crate::ui_tests::{FixtureServer, PageHarness, session};
+use crate::ui_tests::{ConfigDir, FixtureServer, PageHarness, session};
 use crate::views::Page;
 use crate::views::search::SearchPage;
 
@@ -47,6 +47,7 @@ fn retry(ui: &mut PageHarness, server: &FixtureServer) {
 /// to a screen reader), and *Retry* asks for the items again.
 #[test]
 fn a_failed_library_shows_a_notice_and_retries() {
+    let _config = ConfigDir::new("a_failed_library_shows_a_notice_and_retries");
     let server = FixtureServer::start();
     server.status("GET", "/Items", 500);
     server.json("GET", "/Items/Filters", "item_filters");
@@ -59,6 +60,7 @@ fn a_failed_library_shows_a_notice_and_retries() {
 /// A failed search had only a line of text; it now has *Retry*, which runs the search again.
 #[test]
 fn a_failed_search_can_be_retried() {
+    let _config = ConfigDir::new("a_failed_search_can_be_retried");
     let server = FixtureServer::start();
     server.status("GET", "/Items", 500);
     let mut ui = search_harness(&server);
@@ -70,6 +72,7 @@ fn a_failed_search_can_be_retried() {
 /// A search that finds nothing is the empty state, with no Retry.
 #[test]
 fn an_empty_search_is_the_empty_state() {
+    let _config = ConfigDir::new("an_empty_search_is_the_empty_state");
     let server = FixtureServer::start();
     server.json_value(
         "GET",

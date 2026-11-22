@@ -38,6 +38,7 @@ impl Casting {
     fn with_running_app(running_app: Option<&str>) -> Self {
         let server = FixtureServer::start();
         let ctx = egui::Context::default();
+        super::assert_config_dir();
         let mut services = Services::new(session(&server), &ctx);
         let device = block_on(FakeDevice::start()).expect("the fake device starts");
         services.cast.add_device(Device {
@@ -941,6 +942,7 @@ impl ShellRun {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             let mut services = Services::new(session, &ctx);
             let addr = self.device().addr();
             services.cast.add_device(Device {

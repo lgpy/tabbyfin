@@ -72,6 +72,13 @@ jobs:
         run: cargo fmt --all --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace
+      - name: Compile the component gallery and mockups
+        if: runner.os == 'Linux'
+        # Behind the off-by-default `mockup` feature, so nothing above builds them: a widget
+        # signature change would break them unnoticed. Compiled, not run.
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked -p tabbyfin --tests --features mockup
 
   # The Android APK (docs/android.md): the app's library in release for arm64 and x86_64. On a
   # `v*` tag, a release-signed APK per ABI for the GitHub release, with the key from the

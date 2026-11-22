@@ -44,6 +44,7 @@ impl ShellRun {
         let mut nav = Vec::new();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             self.services = Some(Services::new(session, &ctx));
         }
         let services = self.services.as_mut().expect("the services are made");
@@ -563,6 +564,7 @@ impl PlayerRun {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             let mut services = Services::new(session, &ctx);
             let episodes: serde_json::Value = crate::ui_tests::fixture_json("episodes");
             let item = |index: usize| -> jellyfin::models::BaseItemDto {
@@ -615,14 +617,6 @@ impl PlayerRun {
     pub fn commands(&mut self) -> Vec<crate::playback::UiCommand> {
         let sent = self.sent.as_mut().expect("the session started");
         std::iter::from_fn(|| sent.try_recv().ok()).collect()
-    }
-}
-
-/// Opens `run`'s settings sheet once its player is up, for a mockup.
-#[cfg(feature = "mockup")]
-pub fn open_sheet(run: &mut PlayerRun) {
-    if let Some(player) = &mut run.player {
-        player.open_settings_sheet();
     }
 }
 

@@ -40,6 +40,7 @@ impl ShellRun {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             self.services = Some(Services::new(session, &ctx));
         }
         let services = self.services.as_mut().expect("the services are made");
