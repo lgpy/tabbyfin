@@ -8,7 +8,7 @@
 //! `/24` directed broadcast too. A machine on several networks (a VPN beside the LAN) finds the
 //! servers of its default route's network.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket as StdUdpSocket};
 use std::time::Duration;
 
@@ -24,6 +24,8 @@ const QUERY: &[u8] = b"Who is JellyfinServer?";
 /// socket, the servers returned, and the characters of a name.
 const MAX_DATAGRAMS: usize = 128;
 const MAX_SERVERS: usize = 32;
+/// The replies kept from one address: a machine may run a few servers, not dozens.
+const MAX_PER_SENDER: usize = 4;
 const MAX_NAME_CHARS: usize = 80;
 /// Jellyfin's ids are 32 characters; an id is rejected rather than cut, since a cut one is
 /// another server's.
@@ -87,10 +89,18 @@ async fn discover_with(locals: &[Ipv4Addr], targets: &[SocketAddr], wait: Durati
 /// The servers the `replies` (each datagram with the address it came from) describe, one row
 /// per id and address, at most [`MAX_SERVERS`], by name.
 fn collect(replies: impl IntoIterator<Item = (Vec<u8>, SocketAddr)>) -> Vec<DiscoveredServer> {
+    // One host has no reason to answer for more than a few servers (several on one machine, at
+    // most), so its replies past that are dropped: the list can't be filled from one address.
+    let mut per_sender: HashMap<IpAddr, usize> = HashMap::new();
     let mut parsed: Vec<(DiscoveredServer, bool)> = replies
         .into_iter()
         .filter_map(|(datagram, from)| {
             let server = parse_reply(&datagram)?;
+            let sent = per_sender.entry(from.ip()).or_default();
+            *sent += 1;
+            if *sent > MAX_PER_SENDER {
+                return None;
+            }
             let own = advertises_sender(&server.address, from);
             Some((server, own))
         })
@@ -301,8 +311,17 @@ mod tests {
         // A server behind a reverse proxy advertises a hostname, so it can't match its sender.
         let proxied = (reply("https://jelly.example.com", "proxied", "Proxy"), from(9));
         replies.push(real.clone());
+        // The same host answering with its own address under many ids is no better.
+        replies.splice(
+            0..0,
+            (0..100).map(|n| (reply("http://192.168.1.66:8096", &format!("own{n}"), "Flood"), from(66))),
+        );
         let found = collect(replies);
-        assert_eq!(found.len(), MAX_SERVERS);
+        assert_eq!(
+            found.len(),
+            MAX_PER_SENDER + 1,
+            "a few of the flood's, and the real one"
+        );
         assert!(
             found.iter().any(|server| server.id == "real"),
             "the real server is listed"
@@ -325,7 +344,16 @@ mod tests {
             Duration::from_millis(400),
         )
         .await;
-        assert_eq!(found.len(), MAX_SERVERS);
+        assert_eq!(found.len(), MAX_PER_SENDER, "one address answered for all of them");
+        // From as many addresses as servers, the list's own cap is what holds.
+        let many = (0..100u8).map(|n| {
+            let from = SocketAddr::from((Ipv4Addr::new(192, 168, 1, n), PORT));
+            (
+                reply(&format!("http://192.168.1.{n}:8096"), &format!("id{n}"), "Many"),
+                from,
+            )
+        });
+        assert_eq!(collect(many).len(), MAX_SERVERS);
     }
 
     /// A host answering with the real server's id and name but its own address is another row,

@@ -259,7 +259,12 @@ impl SubtitleSearch {
                 };
                 ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, tab));
             }
-            let had_focus = ui.data(|data| data.get_temp::<bool>(select_id.with("had-focus"))) == Some(true);
+            // "Before it" is the frame before this one: a mark left by a dialog that closed with
+            // the picker focused is older, and mustn't take the first Escape of the next one.
+            let frame = ui.ctx().cumulative_frame_nr();
+            let had_focus = ui
+                .data(|data| data.get_temp::<u64>(select_id.with("had-focus")))
+                .is_some_and(|at| frame.saturating_sub(at) <= 1);
             let leave = had_focus
                 && !list_open
                 && ui.input_mut(|input| input.key_pressed(Key::Tab) | input.consume_key(Modifiers::NONE, Key::Escape));
@@ -268,7 +273,13 @@ impl SubtitleSearch {
             }
             has_keyboard = response.has_focus() || list_open;
             let focused_closed = response.has_focus() && !list_open;
-            ui.data_mut(|data| data.insert_temp(select_id.with("had-focus"), focused_closed));
+            ui.data_mut(|data| {
+                if focused_closed {
+                    data.insert_temp(select_id.with("had-focus"), frame);
+                } else {
+                    data.remove_temp::<u64>(select_id.with("had-focus"));
+                }
+            });
         });
         (picked, has_keyboard)
     }
