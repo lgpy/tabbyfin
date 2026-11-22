@@ -103,7 +103,7 @@ The result goes in a *Decision* section at the top of this file.
 
 ### Groundwork on the emulator
 
-On the `spike/android-video` branch, both players play the dev server's 1080p H.264 movie on the emulator, through the `Player` API and the software video path (`Frame::Pixels`). Nothing is measured yet: the emulator renders in software, so CPU, battery and dropped frames wait for a phone.
+On the `spike/android-video` tag, both players play the dev server's 1080p H.264 movie on the emulator, through the `Player` API and the software video path (`Frame::Pixels`). Nothing is measured yet: the emulator renders in software, so CPU, battery and dropped frames wait for a phone.
 
 **libmpv** (the default player on Android):
 - `build.sh` takes mpv-android's libraries from its release APKs (`mpv-android.lock`, tag 2026-09-17): `libmpv.so`, ffmpeg's shared libraries and `libc++_shared.so`, but not mpv-android's own JNI glue (`libplayer.so`). The existing loader finds `libmpv.so` by name.
