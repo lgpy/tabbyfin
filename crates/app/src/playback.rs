@@ -52,9 +52,15 @@ pub const fn volume_max() -> f64 {
         player::MAX_VOLUME
     }
 }
+
+/// The seconds a seek key or skip button jumps, as Settings offers them.
+pub const SEEK_STEPS: [u32; 4] = [5, 10, 15, 30];
+pub const DEFAULT_SEEK_STEP: u32 = 10;
 /// How long quitting the app waits for a running session to report its stop. The next launch
 /// reports it instead if this runs out (`report_unfinished`).
 const EXIT_WAIT: Duration = Duration::from_secs(3);
+/// How long after a frame step the pause and seek it causes go unreported.
+const FRAME_STEP_QUIET: Duration = Duration::from_millis(600);
 
 /// What to play. Stream indexes are Jellyfin's `MediaStream.Index`; `None` leaves the choice
 /// to mpv (and the user's mpv config).
@@ -168,6 +174,83 @@ impl Adjustments {
     }
 }
 
+/// How the picture fills the window. Not kept between items.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Aspect {
+    /// The whole picture, in its own aspect, with bars where it doesn't fill the window.
+    #[default]
+    Fit,
+    /// Fills the window, cropping what overflows.
+    Fill,
+    /// Fills the window, distorting the picture.
+    Stretch,
+    /// The picture taken as 16:9 whatever the file says.
+    Widescreen,
+    /// The picture taken as 4:3.
+    Standard,
+}
+
+impl Aspect {
+    pub const ALL: [Self; 5] = [Self::Fit, Self::Fill, Self::Stretch, Self::Widescreen, Self::Standard];
+
+    /// The next mode, after the last the first: what the key cycles through.
+    pub fn next(self) -> Self {
+        let index = Self::ALL.iter().position(|&aspect| aspect == self).unwrap_or(0);
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    /// The mpv properties that make this mode, all of them, so one mode's leftovers don't stay:
+    /// `panscan` crops to fill, `keepaspect` off stretches, `video-aspect-override` retakes the
+    /// aspect.
+    pub fn mpv_properties(self) -> [(&'static str, serde_json::Value); 3] {
+        use serde_json::json;
+        let (panscan, keep, ratio) = match self {
+            Self::Fit => (0., true, "no"),
+            Self::Fill => (1., true, "no"),
+            Self::Stretch => (0., false, "no"),
+            Self::Widescreen => (0., true, "16:9"),
+            Self::Standard => (0., true, "4:3"),
+        };
+        [
+            ("panscan", json!(panscan)),
+            ("keepaspect", json!(keep)),
+            ("video-aspect-override", json!(ratio)),
+        ]
+    }
+}
+
+/// The A–B loop's state: the next press of its key sets the point after the one it has.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AbLoop {
+    #[default]
+    Off,
+    /// The start is set, the end isn't.
+    A(Duration),
+    /// Playing from the start to the end and back.
+    Loop(Duration, Duration),
+}
+
+impl AbLoop {
+    /// What a press at `position` makes of this: sets A, then B, then clears both, as mpv's own
+    /// `ab-loop` command does.
+    pub fn next(self, position: Duration) -> Self {
+        match self {
+            Self::Off => Self::A(position),
+            Self::A(a) => Self::Loop(a, position),
+            Self::Loop(..) => Self::Off,
+        }
+    }
+
+    /// The two points, earliest first, for drawing: the end is `None` until it's set.
+    pub fn points(self) -> Option<(Duration, Option<Duration>)> {
+        match self {
+            Self::Off => None,
+            Self::A(a) => Some((a, None)),
+            Self::Loop(a, b) => Some((a.min(b), Some(a.max(b)))),
+        }
+    }
+}
+
 /// Requests from the player UI to the running session.
 #[derive(Debug, Clone)]
 pub enum UiCommand {
@@ -199,6 +282,14 @@ pub enum UiCommand {
     SetQueueModes(RepeatMode, PlaybackOrder),
     /// A subtitle the server downloaded while this plays: loaded into mpv and selected.
     AddSubtitle(Box<AddedSubtitle>),
+    /// A second text track shown with the first (a stream index), or none.
+    SetSecondarySubtitle(Option<i32>),
+    SetAspect(Aspect),
+    SetDeinterlace(bool),
+    /// One frame forward (`true`) or back, while paused.
+    FrameStep(bool),
+    /// mpv's `ab-loop`: sets A, then B, then clears both.
+    CycleAbLoop,
     Stop,
 }
 
@@ -310,6 +401,18 @@ pub struct NowPlaying {
     pub loading: bool,
     pub audio: Option<i32>,
     pub subtitle: SubtitleChoice,
+    /// A second text track shown at the top of the picture with the first, if one is picked.
+    /// Belongs to this item: the next starts without.
+    pub secondary_subtitle: Option<i32>,
+    /// libmpv plays this session; Media3 (Android) has no second subtitle, aspect modes and the
+    /// like, so the player hides those.
+    pub mpv: bool,
+    /// How the picture fills the window. Belongs to this item.
+    pub aspect: Aspect,
+    /// mpv deinterlaces the picture: on from the start when the video stream is interlaced.
+    pub deinterlace: bool,
+    /// The loop between two points this item plays.
+    pub ab_loop: AbLoop,
     pub volume: f64,
     pub muted: bool,
     pub adjustments: Adjustments,
@@ -369,6 +472,15 @@ impl NowPlaying {
     /// has ended go nowhere.
     pub(crate) fn commands(&self) -> mpsc::UnboundedSender<UiCommand> {
         self.commands.clone()
+    }
+
+    /// Where playback is now: the last position mpv reported, carried on for the time since while
+    /// it plays.
+    pub fn position_now(&self) -> Duration {
+        if self.paused || self.loading {
+            return self.position;
+        }
+        self.position + self.position_at.elapsed().mul_f64(self.adjustments.speed.max(0.))
     }
 
     /// The segment the skip button would skip, if one is playing. Credits are the up-next
@@ -518,6 +630,8 @@ pub struct PlaybackManager {
     volume: f64,
     muted: bool,
     adjustments: Adjustments,
+    /// Seconds per seek key press, skip button and remote fast-forward (a setting).
+    seek_step: f64,
     /// The item `adjustments` were made for; another one starts without the delays.
     adjusted_item: Option<String>,
     /// What the window's renderer can draw, which picks the player's video output. Pixels until
@@ -544,6 +658,8 @@ struct Running {
     autoplay: bool,
     skip_actions: SkipActions,
     resumed_from: Option<Duration>,
+    /// Plays through libmpv (see [`NowPlaying::mpv`]).
+    mpv: bool,
 }
 
 /// A session to start again after its stream was lost, once `due` fires.
@@ -563,6 +679,7 @@ impl PlaybackManager {
             subtitle_scale: config.subtitle_scale.unwrap_or(1.),
             subtitle_position: config.subtitle_position.unwrap_or(Adjustments::BOTTOM),
             night_mode: config.night_mode.unwrap_or(false),
+            speed: config.default_speed.unwrap_or(1.),
             ..Adjustments::default()
         }
         .clamped();
@@ -582,6 +699,7 @@ impl PlaybackManager {
             volume,
             muted: false,
             adjustments,
+            seek_step: Self::seek_step_of(config.seek_step),
             adjusted_item: None,
             video_import: VideoImport::Pixels,
             sleep: None,
@@ -627,6 +745,25 @@ impl PlaybackManager {
             ..self.adjustments
         }
         .clamped();
+    }
+
+    /// Sets the speed the next items start at (the settings page).
+    pub fn set_default_speed(&mut self, speed: f64) {
+        self.adjustments = Adjustments {
+            speed,
+            ..self.adjustments
+        }
+        .clamped();
+    }
+
+    /// Seconds per seek key press, skip button and remote fast-forward.
+    pub fn seek_step(&self) -> f64 {
+        self.seek_step
+    }
+
+    /// Sets the seek step, in seconds (the settings page).
+    pub fn set_seek_step(&mut self, seconds: Option<u32>) {
+        self.seek_step = Self::seek_step_of(seconds);
     }
 
     /// What plays after the current item, in order.
@@ -707,6 +844,11 @@ impl PlaybackManager {
             loading: false,
             audio: None,
             subtitle: SubtitleChoice::Auto,
+            secondary_subtitle: None,
+            mpv: true,
+            aspect: Aspect::Fit,
+            deinterlace: false,
+            ab_loop: AbLoop::Off,
             volume: self.volume,
             muted: false,
             adjustments: self.adjustments,
@@ -804,6 +946,8 @@ impl PlaybackManager {
         let config = Config::load();
         let autoplay = config.autoplay_next_episode.unwrap_or(true);
         let skip_actions = config.skip_actions;
+        let mpv =
+            !cfg!(target_os = "android") || config.android_player.unwrap_or_default().engine() == player::Engine::Mpv;
         let resumed_from = options.start.filter(|_| options.resumed).map(Duration::from);
         let (updates_tx, updates) = task::channel(&self.ctx);
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
@@ -849,6 +993,7 @@ impl PlaybackManager {
             autoplay,
             skip_actions,
             resumed_from,
+            mpv,
         });
     }
 
@@ -869,6 +1014,15 @@ impl PlaybackManager {
         } else {
             None
         }
+    }
+
+    /// The configured seek step in seconds: one of [`SEEK_STEPS`], else the default.
+    fn seek_step_of(configured: Option<u32>) -> f64 {
+        f64::from(
+            configured
+                .filter(|seconds| SEEK_STEPS.contains(seconds))
+                .unwrap_or(DEFAULT_SEEK_STEP),
+        )
     }
 
     /// Remembers the volume and subtitle size for the next launch.
@@ -1150,6 +1304,7 @@ impl Services {
             muted: false,
             adjustments: Adjustments::default(),
             night_available: true,
+            mpv: true,
             autoplay: true,
             skip_actions: SkipActions::default(),
             resumed_from: None,
@@ -1253,6 +1408,13 @@ impl Services {
             return;
         }
         state.subtitle = choice;
+        // The same track can't be both.
+        if let SubtitleChoice::Stream(index) = choice
+            && state.secondary_subtitle == Some(index)
+        {
+            state.secondary_subtitle = None;
+            state.send(UiCommand::SetSecondarySubtitle(None));
+        }
         let as_file = match choice {
             SubtitleChoice::Stream(index) => state.stream.subtitle_files.contains(&index),
             SubtitleChoice::Off | SubtitleChoice::Auto => true,
@@ -1307,6 +1469,84 @@ impl Services {
         state.subtitle = SubtitleChoice::Stream(index);
         state.send(command);
         true
+    }
+
+    /// Shows a second text track (a stream index) with the first, or none. mpv draws it at the
+    /// top; a transcode only has the tracks the server sends as files.
+    pub fn change_secondary_subtitle(&mut self, index: Option<i32>) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.secondary_subtitle == index {
+            return;
+        }
+        state.secondary_subtitle = index;
+        state.send(UiCommand::SetSecondarySubtitle(index));
+    }
+
+    /// Sets how the picture fills the window (the player's menu and key). mpv only, and not on
+    /// a TV.
+    pub fn set_aspect(&mut self, aspect: Aspect) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.aspect == aspect {
+            return;
+        }
+        state.aspect = aspect;
+        state.send(UiCommand::SetAspect(aspect));
+    }
+
+    /// Steps one frame forward or back, while paused (the keys `.` and `,`). Not in a SyncPlay
+    /// group, where the position is the group's, nor on a TV or without mpv.
+    pub fn frame_step(&mut self, forward: bool) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.current() else {
+            return;
+        };
+        if state.mpv && state.paused && state.group_item.is_none() {
+            state.send(UiCommand::FrameStep(forward));
+        }
+    }
+
+    /// Sets the loop's start, then its end, then clears it (the key `L`). The same limits as
+    /// [`Services::frame_step`]: a loop jumps back on its own, which the group wouldn't follow.
+    pub fn cycle_ab_loop(&mut self) {
+        if self.is_casting() {
+            return;
+        }
+        let generation = self.playback.generation;
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.group_item.is_some() || state.session != generation {
+            return;
+        }
+        state.ab_loop = state.ab_loop.next(state.position_now());
+        state.send(UiCommand::CycleAbLoop);
+    }
+
+    /// Turns mpv's deinterlacing on or off (the player's menu). mpv only, and not on a TV.
+    pub fn set_deinterlace(&mut self, on: bool) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.deinterlace == on {
+            return;
+        }
+        state.deinterlace = on;
+        state.send(UiCommand::SetDeinterlace(on));
     }
 
     /// Applies changes from the settings menu. Speed stays at normal in a SyncPlay group,
@@ -1450,6 +1690,7 @@ impl Services {
                 if matches!(playback.sleep, Some(SleepTimer::EndOfItem(session)) if session != generation) {
                     playback.sleep = None;
                 }
+                let deinterlace = deinterlaces_by_default(&source, stream.method);
                 playback.now_playing = Some(NowPlaying {
                     session: generation,
                     item: running.item.clone(),
@@ -1462,6 +1703,11 @@ impl Services {
                     loading: true,
                     audio,
                     subtitle,
+                    secondary_subtitle: None,
+                    mpv: running.mpv,
+                    aspect: Aspect::Fit,
+                    deinterlace,
+                    ab_loop: AbLoop::Off,
                     volume: running.volume,
                     muted: running.muted,
                     adjustments: running.adjustments,
@@ -1739,6 +1985,27 @@ fn added_subtitle<'a>(
     let added = *unmatched.first()?;
     files.push(added.index);
     Some((added, files))
+}
+
+/// Whether a session starts with deinterlacing on: when the server says the video stream is
+/// interlaced, and mpv gets the stream as it is. A transcode comes out of the server's encoder
+/// already progressive.
+fn deinterlaces_by_default(source: &MediaSourceInfo, method: PlayMethod) -> bool {
+    method == PlayMethod::DirectPlay
+        && source
+            .media_streams
+            .iter()
+            .any(|stream| stream.kind == MediaStreamType::Video && stream.is_interlaced)
+}
+
+/// mpv's id for the subtitle with Jellyfin stream `index`. A transcode has only the tracks sent as
+/// files, in the order they were added.
+fn subtitle_track(source: &MediaSourceInfo, stream: &StreamInfo, index: i32) -> Option<usize> {
+    if stream.method == PlayMethod::Transcode {
+        stream.subtitle_files.iter().position(|&i| i == index).map(|i| i + 1)
+    } else {
+        mpv_subtitle_id(source, &stream.subtitle_files, index)
+    }
 }
 
 /// The downloaded copy of `item`, when the account has one and the version asked for is the
@@ -2227,6 +2494,11 @@ async fn run_session(
     {
         tracing::debug!("mpv didn't take sub-pos: {err}");
     }
+    // Before the file loads, like the rest, so the first frame is already deinterlaced.
+    player
+        .set_property("deinterlace", deinterlaces_by_default(&source, method))
+        .await
+        .map_err(|err| err.to_string())?;
     for (name, value) in [
         ("speed", adjustments.speed),
         ("sub-delay", adjustments.subtitle_delay),
@@ -2282,6 +2554,9 @@ async fn run_session(
     };
     let mut reporting = Reporting::default();
     let mut stopping = false;
+    // Stepping frames pauses and resumes mpv each time; the server hears of it from the next
+    // progress report instead of a pair for every frame.
+    let mut stepping_until = None;
     let mut finished = false;
     let mut error = None;
     let mut duration = None;
@@ -2313,6 +2588,8 @@ async fn run_session(
                     PlayerEvent::Exited => break,
                     _ => {}
                 }
+                let quiet = stepping_until.is_some_and(|until| tokio::time::Instant::now() < until)
+                    && matches!(event, PlayerEvent::Paused(_) | PlayerEvent::Seeked);
                 match reporting.on_event(&event, &mut report, tokio::time::Instant::now()) {
                     Outgoing::Start => {
                         if online {
@@ -2320,7 +2597,7 @@ async fn run_session(
                         }
                         save_unfinished(Some(&report), &account);
                     }
-                    Outgoing::Progress if online => send(client.report_playback_progress(&report).await),
+                    Outgoing::Progress if online && !quiet => send(client.report_playback_progress(&report).await),
                     Outgoing::Progress => {}
                     Outgoing::Nothing => {}
                 }
@@ -2332,6 +2609,9 @@ async fn run_session(
                     continue;
                 }
                 tracing::debug!(?command, "player command");
+                if matches!(command, UiCommand::FrameStep(_)) {
+                    stepping_until = Some(tokio::time::Instant::now() + FRAME_STEP_QUIET);
+                }
                 let send_now = reporting.on_command(&command);
                 if let UiCommand::AddSubtitle(added) = &command {
                     match player.add_subtitle(added.url.as_str(), &added.title, added.language.as_deref(), true).await {
@@ -2579,14 +2859,7 @@ async fn apply_command(
         }
         UiCommand::Subtitle(choice) => {
             let sid = match choice {
-                SubtitleChoice::Stream(index) if stream.method == PlayMethod::Transcode => stream
-                    .subtitle_files
-                    .iter()
-                    .position(|&i| i == index)
-                    .map(|i| json!(i + 1)),
-                SubtitleChoice::Stream(index) => {
-                    mpv_subtitle_id(source, &stream.subtitle_files, index).map(|id| json!(id))
-                }
+                SubtitleChoice::Stream(index) => subtitle_track(source, stream, index).map(|id| json!(id)),
                 SubtitleChoice::Off => Some(json!("no")),
                 SubtitleChoice::Auto => Some(json!("auto")),
             };
@@ -2603,6 +2876,26 @@ async fn apply_command(
         }
         // The session takes it in itself, since it renumbers its tracks.
         UiCommand::AddSubtitle(_) => Ok(()),
+        UiCommand::SetSecondarySubtitle(index) => {
+            let sid = match index {
+                Some(index) => subtitle_track(source, stream, index).map(|id| json!(id)),
+                None => Some(json!("no")),
+            };
+            match sid {
+                Some(sid) => player.set_property("secondary-sid", sid).await,
+                None => Ok(()),
+            }
+        }
+        UiCommand::SetAspect(aspect) => {
+            for (name, value) in aspect.mpv_properties() {
+                player.set_property(name, value).await?;
+            }
+            Ok(())
+        }
+        UiCommand::SetDeinterlace(on) => player.set_property("deinterlace", on).await,
+        UiCommand::FrameStep(true) => player.command(json!(["frame-step"])).await,
+        UiCommand::FrameStep(false) => player.command(json!(["frame-back-step"])).await,
+        UiCommand::CycleAbLoop => player.command(json!(["ab-loop"])).await,
         UiCommand::Stop => player.quit().await,
         UiCommand::PollInfo => Ok(()),
     }
@@ -2759,6 +3052,47 @@ mod tests {
             ],
             ..source
         }
+    }
+
+    #[test]
+    fn the_ab_loop_sets_a_then_b_then_clears() {
+        use super::AbLoop;
+
+        let at = Duration::from_secs;
+        let a = AbLoop::Off.next(at(30));
+        assert_eq!(a, AbLoop::A(at(30)));
+        assert_eq!(a.points(), Some((at(30), None)));
+        let both = a.next(at(10));
+        assert_eq!(both, AbLoop::Loop(at(30), at(10)));
+        // Drawn earliest first, whichever was set first.
+        assert_eq!(both.points(), Some((at(10), Some(at(30)))));
+        assert_eq!(both.next(at(50)), AbLoop::Off);
+        assert_eq!(AbLoop::Off.points(), None);
+    }
+
+    #[test]
+    fn deinterlacing_starts_on_for_an_interlaced_stream_played_as_it_is() {
+        use super::deinterlaces_by_default;
+        use jellyfin::PlayMethod;
+
+        let source = |interlaced: bool| -> MediaSourceInfo {
+            serde_json::from_value(serde_json::json!({
+                "Id": "s",
+                "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": interlaced }],
+            }))
+            .unwrap()
+        };
+        assert!(deinterlaces_by_default(&source(true), PlayMethod::DirectPlay));
+        assert!(!deinterlaces_by_default(&source(false), PlayMethod::DirectPlay));
+        // A transcode is already progressive.
+        assert!(!deinterlaces_by_default(&source(true), PlayMethod::Transcode));
+        // The server leaves the field out of a stream it didn't probe.
+        let unknown: MediaSourceInfo = serde_json::from_value(serde_json::json!({
+            "Id": "s",
+            "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": null }],
+        }))
+        .unwrap();
+        assert!(!deinterlaces_by_default(&unknown, PlayMethod::DirectPlay));
     }
 
     #[test]

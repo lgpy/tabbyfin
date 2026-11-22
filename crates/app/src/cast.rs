@@ -704,6 +704,11 @@ fn outgoing_for(command: &UiCommand, casting: &Casting) -> Option<Outgoing> {
         // Tracks are a reload (`Services::cast_reload`), not a receiver command.
         UiCommand::Audio(_)
         | UiCommand::Subtitle(_)
+        | UiCommand::SetSecondarySubtitle(_)
+        | UiCommand::SetAspect(_)
+        | UiCommand::SetDeinterlace(_)
+        | UiCommand::FrameStep(_)
+        | UiCommand::CycleAbLoop
         | UiCommand::SetSpeed(_)
         | UiCommand::SetSubtitleDelay(_)
         | UiCommand::SetAudioDelay(_)
@@ -1702,6 +1707,11 @@ mod tests {
         for ignored in [
             UiCommand::Audio(2),
             UiCommand::Subtitle(SubtitleChoice::Off),
+            UiCommand::SetSecondarySubtitle(Some(3)),
+            UiCommand::SetAspect(crate::playback::Aspect::Fill),
+            UiCommand::SetDeinterlace(true),
+            UiCommand::FrameStep(true),
+            UiCommand::CycleAbLoop,
             UiCommand::SetSpeed(1.5),
             UiCommand::SetSubtitleDelay(1.),
             UiCommand::SetAudioDelay(1.),

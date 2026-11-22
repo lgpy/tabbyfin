@@ -20,7 +20,7 @@ use crate::services::{AppEvent, Services};
 use crate::task::Task;
 use crate::toasts::Toast;
 use crate::views::item::shuffle;
-use crate::views::player::{SEEK_STEP, VOLUME_STEP};
+use crate::views::player::VOLUME_STEP;
 
 /// A remote "previous" goes back to the start of the item unless it's this close to it.
 const RESTART_WITHIN: Duration = Duration::from_secs(5);
@@ -180,8 +180,8 @@ impl Services {
                     Some(position) => UiCommand::SeekTo(position.into()),
                     None => return,
                 },
-                PlaystateCommand::Rewind => UiCommand::SeekBy(-SEEK_STEP),
-                PlaystateCommand::FastForward => UiCommand::SeekBy(SEEK_STEP),
+                PlaystateCommand::Rewind => UiCommand::SeekBy(-self.playback.seek_step()),
+                PlaystateCommand::FastForward => UiCommand::SeekBy(self.playback.seek_step()),
                 PlaystateCommand::NextTrack => return self.play_next(),
                 PlaystateCommand::PreviousTrack if casting.position() <= RESTART_WITHIN => {
                     return self.play_previous();
@@ -209,8 +209,8 @@ impl Services {
                 Some(position) => UiCommand::SeekTo(position.into()),
                 None => return,
             },
-            PlaystateCommand::Rewind => UiCommand::SeekBy(-SEEK_STEP),
-            PlaystateCommand::FastForward => UiCommand::SeekBy(SEEK_STEP),
+            PlaystateCommand::Rewind => UiCommand::SeekBy(-self.playback.seek_step()),
+            PlaystateCommand::FastForward => UiCommand::SeekBy(self.playback.seek_step()),
             PlaystateCommand::NextTrack => {
                 self.play_next();
                 return;

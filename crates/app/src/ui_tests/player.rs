@@ -97,7 +97,8 @@ fn the_volume_keys_are_down_and_up_and_m_mutes() {
     let mut harness = desktop_player(&server);
     harness.state_mut().commands();
 
-    // A full volume to start with: down moves it, and up asks for full again.
+    // A full volume to start with: down moves it, and up goes on into the boost (volume-max is
+    // 150 on the desktop), since the test's volume is still 100 when it's pressed.
     plain(&mut harness, egui::Key::ArrowDown);
     let sent = harness.state_mut().commands();
     assert!(
@@ -108,7 +109,7 @@ fn the_volume_keys_are_down_and_up_and_m_mutes() {
     plain(&mut harness, egui::Key::ArrowUp);
     let sent = harness.state_mut().commands();
     assert!(
-        matches!(sent.as_slice(), [UiCommand::SetVolume(level)] if *level == 100.),
+        matches!(sent.as_slice(), [UiCommand::SetVolume(level)] if *level == 105.),
         "{sent:?}"
     );
 
@@ -505,4 +506,232 @@ fn the_subtitle_position_goes_to_the_player() {
         "{sent:?}"
     );
     assert_eq!(harness.state().now_playing().unwrap().adjustments.subtitle_position, 90);
+}
+
+/// A second subtitle is the menu's pick: it goes to the session, a track can't be both the first
+/// and the second, and a cast has none.
+#[test]
+fn a_second_subtitle_is_picked_and_cleared() {
+    use crate::playback::SubtitleChoice;
+
+    let _config = ConfigDir::new("player-second-subtitle");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    let state = harness.state_mut().now_playing_mut().expect("the session");
+    let mut extra = state.source.media_streams.last().expect("a subtitle").clone();
+    extra.index = 4;
+    state.source.media_streams.push(extra);
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.change_secondary_subtitle(Some(4));
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SetSecondarySubtitle(Some(4))]),
+        "{sent:?}"
+    );
+    assert_eq!(harness.state().now_playing().unwrap().secondary_subtitle, Some(4));
+
+    // Asking for the same again sends nothing.
+    harness
+        .state_mut()
+        .services_mut()
+        .unwrap()
+        .change_secondary_subtitle(Some(4));
+    assert!(harness.state_mut().commands().is_empty());
+
+    // Making it the first track drops it as the second.
+    harness
+        .state_mut()
+        .services_mut()
+        .unwrap()
+        .change_subtitle(SubtitleChoice::Stream(4));
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [
+                UiCommand::SetSecondarySubtitle(None),
+                UiCommand::Subtitle(SubtitleChoice::Stream(4))
+            ]
+        ),
+        "{sent:?}"
+    );
+    assert_eq!(harness.state().now_playing().unwrap().secondary_subtitle, None);
+}
+
+/// The seek step setting is how far the arrow keys jump, in both directions.
+#[test]
+fn the_seek_step_setting_sets_how_far_the_arrows_jump() {
+    let _config = ConfigDir::new("player-seek-step");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    harness
+        .state_mut()
+        .services_mut()
+        .expect("the services")
+        .playback
+        .set_seek_step(Some(30));
+
+    plain(&mut harness, egui::Key::ArrowRight);
+    plain(&mut harness, egui::Key::ArrowLeft);
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(sent.as_slice(), [UiCommand::SeekBy(a), UiCommand::SeekBy(b)] if *a == 30. && *b == -30.),
+        "{sent:?}"
+    );
+
+    // A value Settings doesn't offer falls back to ten seconds.
+    let playback = &mut harness.state_mut().services_mut().unwrap().playback;
+    playback.set_seek_step(Some(7));
+    assert_eq!(playback.seek_step(), 10.);
+    playback.set_seek_step(None);
+    assert_eq!(playback.seek_step(), 10.);
+}
+
+/// A cycles the aspect modes, fit, fill, stretch, 16:9, 4:3 and round to fit, each a command to
+/// the session; each mode sets every property it uses, so the last one's leftovers don't stay.
+#[test]
+fn a_cycles_the_aspect_modes() {
+    use crate::playback::Aspect;
+
+    let _config = ConfigDir::new("player-aspect");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    for expected in [
+        Aspect::Fill,
+        Aspect::Stretch,
+        Aspect::Widescreen,
+        Aspect::Standard,
+        Aspect::Fit,
+    ] {
+        plain(&mut harness, egui::Key::A);
+        let sent = harness.state_mut().commands();
+        assert!(
+            matches!(sent.as_slice(), [UiCommand::SetAspect(a)] if *a == expected),
+            "{sent:?}"
+        );
+        assert_eq!(harness.state().now_playing().unwrap().aspect, expected);
+    }
+
+    // Not on a player that can't (Media3).
+    harness.state_mut().now_playing_mut().unwrap().mpv = false;
+    plain(&mut harness, egui::Key::A);
+    assert!(harness.state_mut().commands().is_empty());
+
+    let names = |aspect: Aspect| aspect.mpv_properties().map(|(name, _)| name);
+    assert!(Aspect::ALL.iter().all(|&aspect| names(aspect) == names(Aspect::Fit)));
+    let props: Vec<_> = Aspect::Fill.mpv_properties().into_iter().collect();
+    assert_eq!(props[0], ("panscan", serde_json::json!(1.)));
+    assert_eq!(
+        Aspect::Stretch.mpv_properties()[1],
+        ("keepaspect", serde_json::json!(false))
+    );
+    assert_eq!(
+        Aspect::Widescreen.mpv_properties()[2],
+        ("video-aspect-override", serde_json::json!("16:9"))
+    );
+}
+
+/// Deinterlacing is the menu's switch, and starts on only for an interlaced stream that mpv gets
+/// as it is.
+#[test]
+fn deinterlacing_is_a_switch_that_starts_on_for_interlaced_video() {
+    let _config = ConfigDir::new("player-deinterlace");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.set_deinterlace(true);
+    services.set_deinterlace(true);
+    services.set_deinterlace(false);
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [UiCommand::SetDeinterlace(true), UiCommand::SetDeinterlace(false)]
+        ),
+        "{sent:?}"
+    );
+}
+
+/// The period and comma step a frame forward and back, only while paused.
+#[test]
+fn the_period_and_comma_step_frames_while_paused() {
+    let _config = ConfigDir::new("player-frame-step");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    // Playing: nothing to step.
+    plain(&mut harness, egui::Key::Period);
+    assert!(harness.state_mut().commands().is_empty());
+
+    harness.state_mut().now_playing_mut().unwrap().paused = true;
+    plain(&mut harness, egui::Key::Period);
+    plain(&mut harness, egui::Key::Comma);
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [UiCommand::FrameStep(true), UiCommand::FrameStep(false)]
+        ),
+        "{sent:?}"
+    );
+}
+
+/// L sets the loop's start, then its end, then clears both.
+#[test]
+fn l_cycles_the_ab_loop() {
+    use crate::playback::AbLoop;
+
+    let _config = ConfigDir::new("player-ab-loop");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    plain(&mut harness, egui::Key::L);
+    assert!(matches!(harness.state().now_playing().unwrap().ab_loop, AbLoop::A(_)));
+    plain(&mut harness, egui::Key::L);
+    assert!(matches!(
+        harness.state().now_playing().unwrap().ab_loop,
+        AbLoop::Loop(..)
+    ));
+    plain(&mut harness, egui::Key::L);
+    assert_eq!(harness.state().now_playing().unwrap().ab_loop, AbLoop::Off);
+    let sent = harness.state_mut().commands();
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [UiCommand::CycleAbLoop, UiCommand::CycleAbLoop, UiCommand::CycleAbLoop]
+        ),
+        "{sent:?}"
+    );
+}
+
+/// In a SyncPlay group neither goes anywhere: a frame step or a loop's jump back would move this
+/// member alone.
+#[test]
+fn a_syncplay_group_has_no_frame_step_or_ab_loop() {
+    let _config = ConfigDir::new("player-group-steps");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+    let state = harness.state_mut().now_playing_mut().unwrap();
+    state.paused = true;
+    state.group_item = Some("queue-item".into());
+
+    plain(&mut harness, egui::Key::Period);
+    plain(&mut harness, egui::Key::Comma);
+    plain(&mut harness, egui::Key::L);
+    let sent = harness.state_mut().commands();
+    assert!(sent.is_empty(), "{sent:?}");
+    assert_eq!(
+        harness.state().now_playing().unwrap().ab_loop,
+        crate::playback::AbLoop::Off
+    );
 }

@@ -85,6 +85,13 @@ pub enum Action {
     SubtitleDelayDown,
     /// The queue panel.
     ToggleQueue,
+    /// Fit, fill, stretch, 16:9, 4:3.
+    CycleAspect,
+    /// While paused: one frame forward or back.
+    FrameForward,
+    FrameBack,
+    /// Sets the A–B loop's start, then its end, then clears it.
+    CycleAbLoop,
 }
 
 pub struct Binding {
@@ -152,6 +159,10 @@ pub const BINDINGS: &[Binding] = {
         bind(Player, NONE, Key::X, SubtitleDelayUp),
         bind(Player, NONE, Key::Z, SubtitleDelayDown),
         bind(Player, NONE, Key::Q, ToggleQueue),
+        bind(Player, NONE, Key::A, CycleAspect),
+        bind(Player, NONE, Key::Period, FrameForward),
+        bind(Player, NONE, Key::Comma, FrameBack),
+        bind(Player, NONE, Key::L, CycleAbLoop),
     ]
 };
 

@@ -105,6 +105,12 @@ pub struct Config {
     /// Play the next episode when one ends. `None` means yes.
     #[serde(default)]
     pub autoplay_next_episode: Option<bool>,
+    /// Seconds a seek key, skip button or double tap jumps: 5, 10, 15 or 30. `None` means 10.
+    #[serde(default)]
+    pub seek_step: Option<u32>,
+    /// The speed playback starts at, one of the player menu's. `None` means 1.0.
+    #[serde(default)]
+    pub default_speed: Option<f64>,
     /// The old "skip intros and recaps automatically" switch. Only read: [`Config::load`] turns
     /// it into [`Config::skip_actions`] and it's never written back.
     #[serde(default, skip_serializing)]

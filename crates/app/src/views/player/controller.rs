@@ -26,15 +26,14 @@ use egui::{
 };
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_EXPAND_MORE, ICON_FORWARD_10,
-    ICON_PAUSE, ICON_PLAY_ARROW, ICON_REPLAY_10, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_TV, ICON_VIEW_LIST,
-    ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_EXPAND_MORE, ICON_PAUSE,
+    ICON_PLAY_ARROW, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_TV, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 use jellyfin::models::BaseItemKind;
 
 use super::{
-    CastView, Menus, PlayerPage, SEEK_STEP, SettingsTab, View, chapters_id, loader, phone, settings_id, time_at, touch,
-    versions_id,
+    CastView, Menus, PlayerPage, SettingsTab, View, chapters_id, loader, phone, seek_icons, settings_id, time_at,
+    touch, versions_id,
 };
 use crate::i18n::tr;
 use crate::playback::UiCommand;
@@ -83,10 +82,17 @@ impl PlayerPage {
             chapters: egui::Popup::is_id_open(&ctx, chapters_id()) || self.sheet == Some(phone::Sheet::Chapters),
             settings: egui::Popup::is_id_open(&ctx, settings_id()) || self.sheet == Some(phone::Sheet::Settings),
         };
+        let seek_step = cx.services.playback.seek_step();
         let Some(session) = cx.services.cast.session.as_ref() else {
             return;
         };
-        let view = View::read_cast(&session.casting, &session.device, session.reconnecting.is_some(), menus);
+        let view = View::read_cast(
+            &session.casting,
+            &session.device,
+            session.reconnecting.is_some(),
+            menus,
+            seek_step,
+        );
         let window = ui.max_rect();
         if touch::on(&ctx) {
             let safe = phone::safe_area(window, ctx.content_rect());
@@ -684,25 +690,31 @@ fn cast_transport(
     }
     let step = play / 2. + gap * scale + 24. * scale;
     let far = step + 48. * scale + gap * scale * 0.6;
-    let back = RoundButton::icon(ICON_REPLAY_10, name(&tr!("player-back-10s")))
+    let seconds = view.seek_step;
+    let (back_icon, forward_icon) = seek_icons(seconds);
+    let (back_tip, forward_tip) = (
+        tr!("player-back-seconds", seconds = seconds),
+        tr!("player-forward-seconds", seconds = seconds),
+    );
+    let back = RoundButton::icon(back_icon, name(&back_tip))
         .size(48. * scale, 30. * scale)
-        .tooltip(&tr!("player-back-10s"))
+        .tooltip(&back_tip)
         .colours(controller_colours(ui))
         .enabled(can_seek)
         .focus(Focus::Skip)
         .show_at(ui, center - vec2(step, 0.), Id::unique("player_cast_back_10"));
     if back.clicked() {
-        cx.services.control(UiCommand::SeekBy(-SEEK_STEP));
+        cx.services.control(UiCommand::SeekBy(-seconds));
     }
-    let forward = RoundButton::icon(ICON_FORWARD_10, name(&tr!("player-forward-10s")))
+    let forward = RoundButton::icon(forward_icon, name(&forward_tip))
         .size(48. * scale, 30. * scale)
-        .tooltip(&tr!("player-forward-10s"))
+        .tooltip(&forward_tip)
         .colours(controller_colours(ui))
         .enabled(can_seek)
         .focus(Focus::Skip)
         .show_at(ui, center + vec2(step, 0.), Id::unique("player_cast_forward_10"));
     if forward.clicked() {
-        cx.services.control(UiCommand::SeekBy(SEEK_STEP));
+        cx.services.control(UiCommand::SeekBy(seconds));
     }
     if let Some(tip) = &view.previous_tip {
         let previous = RoundButton::icon(ICON_SKIP_PREVIOUS, name(tip))

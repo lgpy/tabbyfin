@@ -843,6 +843,9 @@ fn a_phones_settings_sheet_sets_the_sleep_timer_and_the_info() {
     let _config = ConfigDir::new("touch-player-sleep");
     let server = FixtureServer::start();
     let mut harness = phone_player(&server);
+    // A phone plays through Media3, which has no aspect or deinterlace rows: with them the sheet
+    // (which doesn't scroll) is taller than this test's screen and pushes the timer off it.
+    harness.state_mut().now_playing_mut().expect("the session").mpv = false;
     harness.get_by_label("Settings").click();
     for _ in 0..3 {
         harness.step();
