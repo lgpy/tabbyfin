@@ -8,7 +8,7 @@
 use jellyfin::PlayMethod;
 use jellyfin::models::{MediaSourceInfo, MediaStream, MediaStreamType};
 
-use crate::i18n::tr;
+use crate::i18n::{self, tr};
 use crate::playback::{NowPlaying, StreamInfo};
 
 /// The mpv properties [`Stats::parse`] reads, in order.
@@ -227,7 +227,7 @@ pub fn rows(state: &NowPlaying, path: Option<OutputPath>) -> Vec<Row> {
         if let Some(buffered) = stats.buffered {
             rows.push(row(
                 tr!("player-info-buffered"),
-                tr!("player-info-seconds", seconds = format!("{buffered:.1}")),
+                tr!("player-info-seconds", seconds = i18n::decimal(format!("{buffered:.1}"))),
             ));
         }
     }
@@ -258,14 +258,25 @@ fn codec_name(codec: &str) -> String {
 }
 
 fn fps_text(fps: f64) -> String {
-    let text = format!("{fps:.3}");
-    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+    fps_in(i18n::current(), fps)
 }
 
-/// Bits per second as kbit/s or Mbit/s.
+fn fps_in(language: i18n::Language, fps: f64) -> String {
+    let text = format!("{fps:.3}");
+    i18n::decimal_in(language, text.trim_end_matches('0').trim_end_matches('.'))
+}
+
+/// Bits per second as kbit/s or Mbit/s, with the language's decimal mark.
 pub fn bitrate_text(bits: f64) -> String {
+    bitrate_in(i18n::current(), bits)
+}
+
+fn bitrate_in(language: i18n::Language, bits: f64) -> String {
     if bits >= 1_000_000. {
-        format!("{:.1} Mbit/s", bits / 1_000_000.)
+        format!(
+            "{} Mbit/s",
+            i18n::decimal_in(language, format!("{:.1}", bits / 1_000_000.))
+        )
     } else {
         format!("{:.0} kbit/s", bits / 1_000.)
     }
@@ -304,7 +315,11 @@ fn channels_text(audio: &MediaStream) -> Option<String> {
         .channel_layout
         .clone()
         .filter(|layout| !layout.is_empty())
-        .or_else(|| audio.channels.map(|channels| format!("{channels} ch")))
+        .or_else(|| {
+            audio
+                .channels
+                .map(|channels| tr!("player-info-channel-count", count = i64::from(channels)))
+        })
 }
 
 /// mpv's `hwdec-current` in words: `no` is software decoding.
@@ -414,6 +429,11 @@ mod tests {
         assert_eq!(bitrate_text(192_000.), "192 kbit/s");
         assert_eq!(fps_text(24.), "24");
         assert_eq!(fps_text(23.976), "23.976");
+        // The decimal mark is the language's.
+        assert_eq!(bitrate_in(i18n::Language::PortuguesePortugal, 7_636_775.), "7,6 Mbit/s");
+        assert_eq!(bitrate_in(i18n::Language::Spanish, 7_636_775.), "7,6 Mbit/s");
+        assert_eq!(fps_in(i18n::Language::Spanish, 23.976), "23,976");
+        assert_eq!(fps_in(i18n::Language::English, 23.976), "23.976");
         assert_eq!(codec_name("h264"), "H.264");
         assert_eq!(codec_name("aac"), "AAC");
         assert!(zero_copy("d3d11va") && !zero_copy("d3d11va-copy") && !zero_copy("no"));

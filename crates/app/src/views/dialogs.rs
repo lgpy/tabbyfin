@@ -695,8 +695,8 @@ pub struct AuthoriseDevice {
     /// What went wrong with the last try, in words.
     error: Option<String>,
     focus: bool,
-    /// The authorise request while it runs.
-    authorising: Option<Task<jellyfin::Result<()>>>,
+    /// The authorise request while it runs, and for a `401` whether Quick Connect is off.
+    authorising: Option<Task<(jellyfin::Result<()>, bool)>>,
 }
 
 impl AuthoriseDevice {
@@ -711,16 +711,16 @@ impl AuthoriseDevice {
 
     /// Draws the dialog: `false` once it should be dropped (authorised, or closed).
     pub fn show(&mut self, cx: &mut PageCx) -> bool {
-        if let Some(result) = self.authorising.as_mut().and_then(Task::poll) {
+        if let Some((result, off)) = self.authorising.as_mut().and_then(Task::poll) {
             self.authorising = None;
             match result {
                 Ok(()) => {
                     cx.services.toast(Toast::success(tr!("dialog-authorise-done")));
                     return false;
                 }
-                // Not `handle_error`: this server's `401` says Quick Connect is off, not that
-                // the session's token is gone.
-                Err(jellyfin::Error::Unauthorized) => self.error = Some(tr!("dialog-authorise-off")),
+                // The server answers `401` when Quick Connect is off, and for a dead token too;
+                // only the first is worded here, the second is an expired session.
+                Err(jellyfin::Error::Unauthorized) if off => self.error = Some(tr!("dialog-authorise-off")),
                 Err(jellyfin::Error::NotFound) => self.error = Some(tr!("dialog-authorise-wrong")),
                 Err(jellyfin::Error::Status { .. }) => self.error = Some(tr!("dialog-authorise-failed")),
                 Err(err) => self.error = Some(cx.services.handle_error(&err)),
@@ -771,7 +771,10 @@ impl AuthoriseDevice {
             // The code's spaces (it's often read out in groups) aren't part of it.
             let code: String = self.typed.split_whitespace().collect();
             self.authorising = Some(Task::spawn(cx.ctx, async move {
-                client.quick_connect_authorize(&code).await
+                let result = client.quick_connect_authorize(&code).await;
+                let off = matches!(result, Err(jellyfin::Error::Unauthorized))
+                    && matches!(client.quick_connect_enabled().await, Ok(false));
+                (result, off)
             }));
         }
         !modal.should_close()

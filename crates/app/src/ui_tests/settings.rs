@@ -162,6 +162,38 @@ fn the_menu_scrolls_to_a_section() {
     });
 }
 
+/// The audio devices are asked of mpv (a player host process) once the Audio section is on
+/// screen, not when the page opens, and once per visit however the page is scrolled after.
+#[test]
+fn the_audio_devices_are_asked_once_the_audio_section_is_on_screen() {
+    use crate::views::settings::DEVICES_ASKED;
+
+    let _config = ConfigDir::new("settings-audio-devices");
+    let server = FixtureServer::start();
+    serve_the_users_settings(&server);
+    DEVICES_ASKED.with(|asked| asked.set(0));
+    let asked = || DEVICES_ASKED.with(std::cell::Cell::get);
+    let mut ui = settings_harness(&server);
+    for _ in 0..5 {
+        ui.step();
+    }
+    let (audio_top, _) = section_state(ui.harness(), "Audio");
+    assert!(audio_top > 720., "Audio starts below the window: {audio_top}");
+    assert_eq!(asked(), 0, "opening Settings doesn't ask");
+
+    click_menu_entry(&mut ui, "Audio");
+    ui.step_until("Audio at the top", |harness| section_state(harness, "Audio").0 < 80.);
+    assert_eq!(asked(), 1, "the Audio section on screen asks");
+
+    click_menu_entry(&mut ui, "Appearance");
+    ui.step_until("Appearance at the top", |harness| {
+        section_state(harness, "Appearance").0 < 80.
+    });
+    click_menu_entry(&mut ui, "Audio");
+    ui.step_until("Audio at the top", |harness| section_state(harness, "Audio").0 < 80.);
+    assert_eq!(asked(), 1, "once per visit");
+}
+
 /// A setting off its default has an undo button, and the button leaves its key out of the file
 /// again, so the default applies; a setting on its default has none.
 #[test]

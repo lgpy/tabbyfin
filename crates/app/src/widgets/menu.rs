@@ -150,7 +150,11 @@ fn menu(
     }
     if resume_point(item).is_some() {
         actions.push(MenuAction::RemoveFromContinue);
-        entries.push(Entry::new(tr!("item-remove-from-continue")).icon(ICON_CLOSE));
+        entries.push(
+            Entry::new(tr!("item-remove-from-continue"))
+                .icon(ICON_CLOSE)
+                .separated(),
+        );
     }
     if !can_mark(item) {
         let chosen = PopupMenu::new(id)

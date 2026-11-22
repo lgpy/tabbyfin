@@ -231,7 +231,7 @@ player-speed = Velocidad
 player-size = Tamaño
 player-delay = Retardo
 player-night-mode = Modo nocturno
-player-night-mode-passthrough = Desactivado con el passthrough activado
+player-night-mode-passthrough = Desactivado con el paso directo activado
 player-aspect = Relación de aspecto
 player-aspect-fit = Ajustar
 player-aspect-fill = Rellenar
@@ -287,6 +287,10 @@ player-info-output-software = Software
 player-info-output-surface = Superficie propia del reproductor
 player-info-fps = { $fps } fps
 player-info-seconds = { $seconds } s
+player-info-channel-count = { $count ->
+    [one] { $count } canal
+   *[other] { $count } canales
+    }
 player-info-reason =
     { $reason ->
         [ContainerNotSupported] El contenedor no es compatible con este reproductor
@@ -312,9 +316,9 @@ player-info-reason =
         [ContainerBitrateExceedsLimit] La tasa de bits supera el límite de transmisión
         [VideoBitrateNotSupported] La tasa de bits del vídeo es demasiado alta
         [AudioBitrateNotSupported] La tasa de bits del audio es demasiado alta
-        [UnknownVideoStreamInfo] El servidor no pudo leer los detalles del vídeo
-        [UnknownAudioStreamInfo] El servidor no pudo leer los detalles del audio
-        [DirectPlayError] Falló la reproducción directa
+        [UnknownVideoStreamInfo] El servidor no ha podido leer los detalles del vídeo
+        [UnknownAudioStreamInfo] El servidor no ha podido leer los detalles del audio
+        [DirectPlayError] Ha fallado la reproducción directa
         [StreamCountExceedsLimit] El archivo tiene más flujos de los que admite este reproductor
        *[other] { $reason }
     }
@@ -343,7 +347,7 @@ settings-section-appearance-summary = Tema, tamaño del texto, animaciones e idi
 settings-section-playback = Reproducción
 settings-section-playback-summary = Episodio siguiente, intros, calidad y el reproductor
 settings-section-audio = Audio
-settings-section-audio-summary = Dispositivo de salida, canales, passthrough y modo nocturno
+settings-section-audio-summary = Dispositivo de salida, canales, paso directo y modo nocturno
 settings-section-subtitles = Subtítulos
 settings-section-subtitles-summary = Color, estilo y tamaño
 settings-section-downloads = Descargas
@@ -382,7 +386,7 @@ settings-tracks-note = Las pistas de audio y subtítulos con las que empieza un 
 settings-autoplay = Reproducir el siguiente episodio automáticamente
 settings-autoplay-description = Cuando termina un episodio, así el reproductor sigue abierto. A partir del siguiente elemento.
 settings-autoplay-unset = activado
-settings-seek-step = Salto al avanzar
+settings-seek-step = Salto de avance y retroceso
 settings-seek-step-description = Cuánto saltan las flechas, los botones de saltar, el doble toque y el avance rápido de un mando a distancia. Se aplica al momento.
 settings-seek-step-unset = 10 s
 settings-default-speed = Velocidad predeterminada
@@ -443,10 +447,10 @@ settings-passthrough-truehd = Pasar TrueHD sin decodificar
 settings-passthrough-truehd-description = Envía el Dolby TrueHD al receptor tal cual. Necesita un receptor y una conexión HDMI que lo acepten, y desactiva el modo nocturno. Se lee cuando empieza el siguiente elemento.
 settings-passthrough-unset = desactivado
 settings-audio-exclusive = Modo exclusivo
-settings-audio-exclusive-description = Se queda con el dispositivo de audio solo para esta aplicación mientras reproduce, lo que el passthrough y la salida sin alterar suelen necesitar. Los demás programas se quedan sin sonido mientras tanto. Solo algunas salidas lo tienen (WASAPI en Windows, PipeWire y CoreAudio en el resto). Se lee cuando empieza el siguiente elemento.
+settings-audio-exclusive-description = Se queda con el dispositivo de audio solo para esta aplicación mientras reproduce, lo que el paso directo y la salida sin alterar suelen necesitar. Los demás programas se quedan sin sonido mientras tanto. Solo algunas salidas lo tienen (WASAPI en Windows, PipeWire y CoreAudio en el resto). Se lee cuando empieza el siguiente elemento.
 settings-audio-exclusive-unset = desactivado
 settings-night-mode = Modo nocturno
-settings-night-mode-description = Iguala las partes fuertes y las bajas, para que las voces se entiendan con poco volumen. El menú del reproductor lo activa o desactiva para lo que suena. No puede actuar sobre un formato pasado sin decodificar al receptor, así que se queda desactivado mientras haya passthrough activado. Se lee cuando empieza el siguiente elemento.
+settings-night-mode-description = Iguala las partes fuertes y las bajas, para que las voces se entiendan con poco volumen. El menú del reproductor lo activa o desactiva para lo que suena. No puede actuar sobre un formato pasado sin decodificar al receptor, así que se queda desactivado mientras haya paso directo activado. Se lee cuando empieza el siguiente elemento.
 settings-night-mode-unset = desactivado
 settings-subtitles-note = Cómo se ven los subtítulos de texto como SRT; los subtítulos con estilo (ASS) mantienen su aspecto y solo cambian de tamaño. El menú de ajustes del reproductor también cambia el tamaño mientras ves algo.
 settings-subtitle-tracks-note = Qué subtítulos se activan solos, y en qué idioma, se guarda en el servidor.

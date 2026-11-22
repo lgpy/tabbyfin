@@ -279,7 +279,7 @@ player-info-audio-bitrate = Taxa de bits do áudio
 player-info-decoder = Descodificador
 player-info-decoder-software = Software
 player-info-dropped = Fotogramas perdidos
-player-info-buffered = Em memória
+player-info-buffered = Em memória intermédia
 player-info-output = Saída
 player-info-output-zero-copy = GPU, sem cópia
 player-info-output-gpu = GPU
@@ -287,6 +287,10 @@ player-info-output-software = Software
 player-info-output-surface = Superfície própria do leitor
 player-info-fps = { $fps } fps
 player-info-seconds = { $seconds } s
+player-info-channel-count = { $count ->
+    [one] { $count } canal
+   *[other] { $count } canais
+    }
 player-info-reason =
     { $reason ->
         [ContainerNotSupported] O contentor não é suportado por este leitor
@@ -663,7 +667,7 @@ dialog-save = Guardar
 dialog-deleted = { $name } eliminada.
 dialog-delete-forbidden = { $name } pertence a outra pessoa e não pode ser eliminada.
 dialog-authorise-title = Autorizar um dispositivo
-dialog-authorise-note = Introduza o código que o outro dispositivo mostra no Quick Connect. Entra com a sessão de { $name }.
+dialog-authorise-note = Introduza o código que o outro dispositivo mostra no Quick Connect. Inicia sessão como { $name }.
 dialog-authorise-code = Código
 dialog-authorise = Autorizar
 dialog-authorise-done = O dispositivo iniciou sessão.

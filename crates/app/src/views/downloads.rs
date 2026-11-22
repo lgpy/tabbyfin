@@ -227,12 +227,16 @@ fn row(
     };
     let picture = Rect::from_min_size(rect.min + vec2(PAD, PAD), vec2(image_w, IMAGE_H));
     // The poster saved with the download, which needs no server; the server's while it's on
-    // its way.
-    match poster.and_then(|path| images.get_file(path)) {
+    // its way. Spoiler protection leaves an unwatched episode its placeholder: the saved file
+    // is the real thumbnail, so it isn't even loaded.
+    let saved = poster
+        .filter(|_| !crate::spoilers::hides(ui.ctx(), item))
+        .and_then(|path| images.get_file(path));
+    match saved {
         Some(texture) => image::texture(ui, picture, &texture, tokens.radius_control),
         None => {
             let request = item.primary_image().map(|req| req.fill_width((2. * image_w) as u32));
-            image::show(ui, images, picture, request.as_ref(), Some(item), tokens.radius_control);
+            image::show_item(ui, images, picture, request.as_ref(), item, tokens.radius_control);
         }
     }
 

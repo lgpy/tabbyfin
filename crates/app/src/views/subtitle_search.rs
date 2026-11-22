@@ -163,14 +163,21 @@ impl SubtitleSearch {
         let id = self.id;
         let subtitle = self.item_name.clone();
         let modal = dialog::show(ctx, id, WIDTH, &tr!("subtitle-search-title"), Some(&subtitle), |ui| {
-            let (enter, up, down) = ui.input_mut(|input| {
-                (
-                    input.consume_key(Modifiers::NONE, Key::Enter),
-                    input.consume_key(Modifiers::NONE, Key::ArrowUp),
-                    input.consume_key(Modifiers::NONE, Key::ArrowDown),
-                )
-            });
-            language = self.language_select(ui, id);
+            // The picker goes first: while it has focus or its list is open, Enter, Up and Down
+            // are its own, and only otherwise the results'.
+            let (picked, picker_busy) = self.language_select(ui, id);
+            language = picked;
+            let (enter, up, down) = if picker_busy {
+                (false, false, false)
+            } else {
+                ui.input_mut(|input| {
+                    (
+                        input.consume_key(Modifiers::NONE, Key::Enter),
+                        input.consume_key(Modifiers::NONE, Key::ArrowUp),
+                        input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                    )
+                })
+            };
             ui.add_space(surface::GAP_FIELD);
 
             let count = match &self.results {
@@ -211,8 +218,9 @@ impl SubtitleSearch {
         }
     }
 
-    /// The language picker; the language picked, when it changed.
-    fn language_select(&self, ui: &mut Ui, id: egui::Id) -> Option<String> {
+    /// The language picker; the language picked, when it changed, and whether the picker has the
+    /// keyboard (focus, or its list open).
+    fn language_select(&self, ui: &mut Ui, id: egui::Id) -> (Option<String>, bool) {
         let mut options: Vec<(&str, &str)> = self
             .languages
             .iter()
@@ -230,12 +238,19 @@ impl SubtitleSearch {
             .unwrap_or_default();
         let name = tr!("subtitle-search-language");
         let mut picked = None;
+        let mut has_keyboard = false;
+        let select_id = id.with("language");
         ui.horizontal(|ui| {
             ui.label(label::muted(ui, name.as_str()));
-            let (_, chosen) = select::select(ui, id.with("language"), LANGUAGE_W, &name, &labels, selected, false);
+            let (response, chosen) = select::select(ui, select_id, LANGUAGE_W, &name, &labels, selected, true);
             picked = chosen.map(|chosen| options[chosen].0.to_owned());
+            // A language chosen hands the keys back to the new results.
+            if picked.is_some() {
+                response.surrender_focus();
+            }
+            has_keyboard = response.has_focus() || popup::PopupMenu::is_open(ui.ctx(), select_id);
         });
-        picked
+        (picked, has_keyboard)
     }
 
     /// The results (or what stands in for them), in the height they need up to [`LIST_MAX_H`].
@@ -384,11 +399,15 @@ fn subtitle_row(ui: &mut Ui, subtitle: &RemoteSubtitleInfo, highlighted: bool, r
         Leading::Icon(ICON_SUBTITLES, tokens.ink_muted)
     };
     let detail = detail(subtitle);
-    let label = tr!(
-        "subtitle-search-row-label",
-        name = subtitle.name.as_str(),
-        detail = detail.as_str()
-    );
+    let label = if detail.is_empty() {
+        subtitle.name.clone()
+    } else {
+        tr!(
+            "subtitle-search-row-label",
+            name = subtitle.name.as_str(),
+            detail = detail.as_str()
+        )
+    };
     ListRow::new(&subtitle.name)
         .sunk()
         .leading(leading)

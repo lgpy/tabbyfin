@@ -1457,9 +1457,12 @@ impl Shell {
         // What follows the accounts, in order; the menu returns an index into the whole list.
         let mut actions = vec![AccountAction::Downloads];
         entries.push(Entry::new(tr!("shell-downloads")).checked(false).separated());
-        actions.push(AccountAction::History);
-        entries.push(Entry::new(tr!("shell-history")).checked(false));
-        if self.quick_connect == Some(true) {
+        // Both need the server: Downloads is what an offline session has.
+        if self.online {
+            actions.push(AccountAction::History);
+            entries.push(Entry::new(tr!("shell-history")).checked(false));
+        }
+        if self.online && self.quick_connect == Some(true) {
             actions.push(AccountAction::AuthoriseDevice);
             entries.push(Entry::new(tr!("shell-authorise-device")).checked(false));
         }

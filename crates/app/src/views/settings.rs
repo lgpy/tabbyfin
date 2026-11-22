@@ -892,7 +892,14 @@ pub struct SettingsPage {
     push: Option<Section>,
 }
 
-/// The audio devices, asked of mpv the first time the Audio section is drawn.
+// How many times a test's page asked for the audio devices (the page asks none in tests, and
+// lists none): per thread, so tests don't count each other's.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static DEVICES_ASKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The audio devices, asked of mpv the first time the Audio section is on screen.
 enum Devices {
     Unasked,
     Loading(Task<player::Result<Vec<player::AudioDevice>>>),
@@ -1528,10 +1535,17 @@ impl SettingsPage {
     }
 
     fn audio(&mut self, ui: &mut Ui, cx: &mut PageCx) {
-        // Asked once per visit: the list is mpv's, which runs in a process of its own.
-        if matches!(self.devices, Devices::Unasked) && !cfg!(test) {
-            let task = Task::spawn(ui.ctx(), player::list_audio_devices());
-            self.devices = Devices::Loading(task);
+        // Asked once per visit, and only when the section is on screen: the list is mpv's, which
+        // runs in a process of its own, and every section is in the one column.
+        let top = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 1.));
+        if matches!(self.devices, Devices::Unasked) && ui.is_rect_visible(top) {
+            self.devices = if cfg!(test) {
+                #[cfg(test)]
+                DEVICES_ASKED.with(|asked| asked.set(asked.get() + 1));
+                Devices::Ready(Vec::new())
+            } else {
+                Devices::Loading(Task::spawn(ui.ctx(), player::list_audio_devices()))
+            };
         }
         if let Devices::Loading(task) = &mut self.devices
             && let Some(result) = task.poll()
