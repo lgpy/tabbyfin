@@ -46,6 +46,10 @@ pub struct Services {
     /// back what they showed ahead of the server. A page remembers the last sequence it applied
     /// and takes the newer ones as it draws (`widgets/menu.rs` starts the marks).
     pub(crate) refused_marks: RefusedMarks,
+    /// Resume positions cleared or put back on the server, for `apply_menu_requests`
+    /// (*Remove from Continue Watching* and its undo, `widgets/menu.rs`).
+    pub(crate) resumed: task::Receiver<Resumed>,
+    pub(crate) resuming: task::Sender<Resumed>,
     /// A series' or season's next episode, fetched for the item menu's *Play*: `widgets/menu.rs`
     /// plays it (or says there's nothing to play) when it arrives.
     pub(crate) up_next: task::Receiver<UpNext>,
@@ -83,6 +87,17 @@ pub struct Services {
 /// A watched or favorite change, as its request finishes: what was asked for, on which item,
 /// and how it went.
 pub(crate) type Marked = (Mark, String, jellyfin::Result<()>);
+
+/// A resume position cleared or restored, as its request finishes.
+pub(crate) struct Resumed {
+    pub(crate) item_id: String,
+    pub(crate) name: String,
+    /// The position the item had before it was cleared: what undo restores.
+    pub(crate) was: jellyfin::Ticks,
+    /// Whether this was the undo.
+    pub(crate) undone: bool,
+    pub(crate) result: jellyfin::Result<()>,
+}
 
 /// The episode a series or season plays next, once it's fetched.
 pub(crate) type UpNext = jellyfin::Result<Option<jellyfin::models::BaseItemDto>>;
@@ -151,10 +166,13 @@ impl Services {
 
     fn build(session: Session, ctx: &egui::Context, online: bool) -> Self {
         let (marking, marked) = task::channel(ctx);
+        let (resuming, resumed) = task::channel(ctx);
         let (up_next_from, up_next) = task::channel(ctx);
         let (shuffle_from, shuffles) = task::channel(ctx);
         let account = session.account_key();
-        let wifi_only = crate::config::Config::load().download_wifi_only();
+        let config = crate::config::Config::load();
+        crate::spoilers::set(ctx, config.hide_spoilers.unwrap_or(false));
+        let wifi_only = config.download_wifi_only();
         let mut downloads = Downloads::new(session.client.clone(), &account, ctx, wifi_only);
         let mut playback = PlaybackManager::new(ctx, session.client.clone(), account);
         if !online {
@@ -182,6 +200,8 @@ impl Services {
             marked,
             marking,
             refused_marks: RefusedMarks::default(),
+            resumed,
+            resuming,
             up_next,
             up_next_from,
             shuffles,

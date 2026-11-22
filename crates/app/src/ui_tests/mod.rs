@@ -39,6 +39,7 @@ pub mod controller;
 pub mod dialogs;
 #[cfg(feature = "mockup")]
 pub mod gallery;
+pub mod history;
 pub mod home;
 pub mod item;
 pub mod library;
@@ -340,6 +341,11 @@ impl PageRun {
             keys: Vec::new(),
             handled: Vec::new(),
         }
+    }
+
+    /// The services the page draws with, for a test to read what they raised.
+    pub fn services_mut(&mut self) -> &mut Services {
+        self.services.as_mut().expect("the services are made")
     }
 
     /// One frame: the app's logic (the services' work), then the keys the shell routes, then

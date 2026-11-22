@@ -16,7 +16,7 @@ use crate::config::{Config, SavedServer};
 use crate::keys::{self, Press, Scope};
 use crate::services::Services;
 use crate::session::Session;
-use crate::ui_tests::{ConfigDir, FixtureServer, build_harness, fixture_json, session, step_until};
+use crate::ui_tests::{ConfigDir, FixtureServer, block_on, build_harness, fixture_json, session, step_until};
 use crate::views::PageCx;
 use crate::views::shell::Shell;
 
@@ -364,4 +364,118 @@ fn the_account_menu_opens_from_the_keyboard_and_lists_the_account() {
     bar.step_until("the account menu", |harness| {
         harness.query_by_role_and_label(Role::MenuItemRadio, &row).is_some()
     });
+}
+
+/// Home with the account menu open from the keyboard, on a server whose Quick Connect is `on`.
+fn account_menu(name: &str, quick_connect: bool) -> (ConfigDir, FixtureServer, Bar) {
+    let config = config_dir(name);
+    let server = home_server();
+    server.json_value("GET", "/QuickConnect/Enabled", &serde_json::json!(quick_connect));
+    let mut bar = home(&server);
+    // Quick Connect's answer comes with the first frames.
+    bar.step_until("Quick Connect's answer", |harness| {
+        harness
+            .state()
+            .shell
+            .as_ref()
+            .is_some_and(|shell| shell.quick_connect_known())
+    });
+    bar.press(Key::Enter);
+    bar.press(Key::ArrowUp);
+    for _ in 0..3 {
+        bar.press(Key::ArrowRight);
+    }
+    bar.press(Key::Enter);
+    bar.step_until("the account menu", |harness| {
+        harness
+            .query_by_role_and_label(Role::MenuItemRadio, "Sign out")
+            .is_some()
+    });
+    (config, server, bar)
+}
+
+/// *Authorise a device…* is in the account menu when the server has Quick Connect on.
+#[test]
+fn authorise_a_device_is_offered_with_quick_connect_on() {
+    let (_config, _server, bar) = account_menu("shell-authorise-on", true);
+    assert!(
+        bar.harness
+            .query_by_role_and_label(Role::MenuItemRadio, "Authorise a device…")
+            .is_some()
+    );
+}
+
+/// ...and left out when it's off.
+#[test]
+fn authorise_a_device_is_left_out_with_quick_connect_off() {
+    let (_config, _server, bar) = account_menu("shell-authorise-off", false);
+    assert!(
+        bar.harness
+            .query_by_role_and_label(Role::MenuItemRadio, "Authorise a device…")
+            .is_none()
+    );
+}
+
+/// *Watch history* is in the account menu whatever Quick Connect does.
+#[test]
+fn watch_history_is_in_the_account_menu() {
+    let (_config, _server, bar) = account_menu("shell-history-entry", false);
+    assert!(
+        bar.harness
+            .query_by_role_and_label(Role::MenuItemRadio, "Watch history")
+            .is_some()
+    );
+}
+
+/// The dialog takes the code, Enter sends it (without the spaces it was read out with), and the
+/// device being signed in is a toast.
+#[test]
+fn authorising_a_device_sends_the_typed_code() {
+    use crate::services::AppEvent;
+
+    let (_config, server, mut bar) = account_menu("shell-authorise-send", true);
+    server.json_value("POST", "/QuickConnect/Authorize", &serde_json::json!(true));
+    bar.harness
+        .get_by_role_and_label(Role::MenuItemRadio, "Authorise a device…")
+        .click();
+    bar.step_until("the dialog", |harness| harness.query_by_label("Code").is_some());
+    bar.type_text("123 456");
+    bar.harness.key_press(Key::Enter);
+    bar.step_until("the request", |_| {
+        server.requests("POST", "/QuickConnect/Authorize") == 1
+    });
+    bar.step_until("the toast", |harness| {
+        harness
+            .state()
+            .services
+            .as_ref()
+            .is_some_and(|services| services.events.iter().any(|event| matches!(event, AppEvent::Toast(_))))
+    });
+    let request = block_on({
+        let mock = server.mock.clone();
+        async move { mock.received_requests().await.unwrap_or_default() }
+    });
+    let sent = request
+        .iter()
+        .find(|request| request.url.path() == "/QuickConnect/Authorize")
+        .expect("the request");
+    assert_eq!(sent.url.query(), Some("code=123456"));
+    assert!(bar.harness.query_by_label("Code").is_none(), "the dialog closed");
+}
+
+/// A code the server doesn't know is worded under the field, and the dialog stays for another try.
+#[test]
+fn a_wrong_code_is_said_in_words_and_keeps_the_dialog() {
+    let (_config, server, mut bar) = account_menu("shell-authorise-wrong", true);
+    server.status("POST", "/QuickConnect/Authorize", 404);
+    bar.harness
+        .get_by_role_and_label(Role::MenuItemRadio, "Authorise a device…")
+        .click();
+    bar.step_until("the dialog", |harness| harness.query_by_label("Code").is_some());
+    bar.type_text("000000");
+    bar.harness.key_press(Key::Enter);
+    bar.step_until("the explanation", |harness| {
+        harness.query_by_label_contains("isn't right").is_some()
+    });
+    assert!(bar.harness.query_by_label("Code").is_some(), "the dialog is still open");
 }

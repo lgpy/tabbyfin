@@ -7,6 +7,7 @@
 
 mod auth;
 mod client;
+mod discovery;
 mod download;
 mod error;
 mod images;
@@ -21,6 +22,7 @@ mod ticks;
 pub mod time;
 
 pub use client::{Client, ClientInfo, parse_server_url};
+pub use discovery::{DiscoveredServer, discover_servers};
 pub use download::Download;
 pub use error::{Error, Result};
 pub use images::ImageRequest;

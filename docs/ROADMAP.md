@@ -38,7 +38,7 @@ Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay t
 
 ## 3. Browsing and library
 
-Done: keyboard navigation everywhere, library sort and filters, favorites, cast and crew, collections and playlists (with editing), blurhash placeholders, item page extras (trailers, extras, more like this), Home following the web client's settings, the alphabet jump, context menus, playing a series or season, loading an item's page ahead of the click.
+Done: keyboard navigation everywhere, library sort and filters, favorites, cast and crew, collections and playlists (with editing), blurhash placeholders, item page extras (trailers, extras, more like this), Home following the web client's settings, the alphabet jump, context menus, playing a series or season, loading an item's page ahead of the click, Remove from Continue Watching with an undo.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
@@ -48,7 +48,7 @@ Done: keyboard navigation everywhere, library sort and filters, favorites, cast 
 
 ## 4. Accounts and settings
 
-Done: player preferences, subtitle appearance, theme, window size and position, several servers and users, Settings for this device and the server (languages, Home), 10.11 support (the API smoke test, and the app clicked through on 10.11.11).
+Done: spoiler protection (a setting), a watch history page, servers found on the network at sign-in, authorising another device's Quick Connect code from the account menu, player preferences, subtitle appearance, theme, window size and position, several servers and users, Settings for this device and the server (languages, Home), 10.11 support (the API smoke test, and the app clicked through on 10.11.11).
 
 ## 5. Platform and packaging
 

@@ -892,6 +892,15 @@ impl eframe::App for App {
         if let Some(action) = self.toasts.show(&ctx) {
             match action {
                 ToastAction::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
+                ToastAction::RestoreResume {
+                    item_id,
+                    name,
+                    position,
+                } => {
+                    if let Some(Screen::SignedIn(signed_in)) = &mut self.screen {
+                        signed_in.services.restore_resume(item_id, name, position);
+                    }
+                }
             }
         }
     }

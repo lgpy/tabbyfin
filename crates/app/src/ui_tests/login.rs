@@ -4,6 +4,7 @@
 
 use egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
+use jellyfin::DiscoveredServer;
 use jellyfin::models::AuthenticationResult;
 
 use crate::config::SavedServer;
@@ -458,4 +459,36 @@ fn a_tall_form_reveals_the_focused_field() {
         "the newly focused account is on screen: {:?}",
         account.rect()
     );
+}
+
+/// Servers found on the network are listed under the address box, and choosing one puts its
+/// address in the box without connecting.
+#[test]
+fn a_server_found_on_the_network_fills_the_address() {
+    let mut ui = login_harness(|ctx| Login::new(ctx, "ui-test-device".into(), Vec::new(), false, None));
+    assert!(
+        ui.query_by_label("Servers found on your network").is_none(),
+        "nothing found, nothing listed"
+    );
+    ui.state_mut().login_mut().set_discovered(vec![DiscoveredServer {
+        address: "http://192.168.1.5:8096".into(),
+        id: "abc".into(),
+        name: "Attic".into(),
+    }]);
+    // The form recentres over a frame or two as it grows.
+    for _ in 0..4 {
+        ui.step();
+    }
+    assert!(ui.query_by_label("Servers found on your network").is_some());
+    ui.get_by_label("Attic at http://192.168.1.5:8096").click();
+    ui.step();
+    ui.step();
+    ui.step();
+    ui.step();
+    assert!(
+        ui.query_all_by_value("http://192.168.1.5:8096")
+            .any(|node| node.accesskit_node().role() == Role::TextInput),
+        "the address box holds the server's address"
+    );
+    assert!(ui.query_by_label("Username").is_none(), "choosing only fills the box");
 }

@@ -30,6 +30,7 @@ mod runtime;
 mod services;
 mod session;
 mod smooth_scroll;
+mod spoilers;
 mod syncplay;
 mod task;
 mod theme;

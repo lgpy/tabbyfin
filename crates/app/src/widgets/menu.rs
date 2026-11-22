@@ -31,9 +31,9 @@ use crate::downloads::{Downloads, Offer};
 use crate::i18n::tr;
 use crate::item_menu::{self, Mark, can_add_to_playlist, can_mark, is_favorite, is_playable, is_played, resume_point};
 use crate::playback::PlayOptions;
-use crate::services::{Marked, Services, Shuffled, UpNext};
+use crate::services::{Marked, Resumed, Services, Shuffled, UpNext};
 use crate::theme;
-use crate::toasts::Toast;
+use crate::toasts::{Toast, ToastAction};
 use crate::views::item::shuffle;
 use crate::widgets::popup::{Entry, PopupMenu};
 use crate::widgets::text::timestamp;
@@ -47,6 +47,8 @@ pub enum MenuAction {
     UpNext,
     /// Set watched or favorite state.
     Mark(Mark),
+    /// Take the item out of Continue Watching: clear its resume point, keep its watched state.
+    RemoveFromContinue,
     /// Open the *Add to playlist* dialog.
     AddToPlaylist,
     /// Start, stop, delete or retry its download.
@@ -91,6 +93,10 @@ pub fn item_menu(response: &Response, item: &BaseItemDto, downloads: &Downloads)
         // it, and this asks the page to play it.
         actions.push(MenuAction::UpNext);
         entries.push(Entry::new(tr!("item-play")).icon(ICON_PLAY_ARROW));
+    }
+    if resume_point(item).is_some() {
+        actions.push(MenuAction::RemoveFromContinue);
+        entries.push(Entry::new(tr!("item-remove-from-continue")).icon(ICON_CLOSE));
     }
     // Named and drawn like the item page's toggles: the icon shows whether it's on.
     let played = is_played(item);
@@ -217,6 +223,10 @@ impl Services {
                 self.mark(item.id.clone(), mark);
                 None
             }
+            MenuAction::RemoveFromContinue => {
+                self.clear_resume(item);
+                None
+            }
             MenuAction::AddToPlaylist => Some(action),
             MenuAction::Download(offer) => {
                 self.download(offer, item);
@@ -269,6 +279,36 @@ impl Services {
         });
     }
 
+    /// Takes an item out of Continue Watching by clearing its resume point (its watched state
+    /// stays). It comes back as a toast with an undo that restores the position.
+    pub fn clear_resume(&mut self, item: &BaseItemDto) {
+        let Some(was) = resume_point(item) else {
+            return;
+        };
+        self.set_resume(item.id.clone(), item.name.clone(), was, false);
+    }
+
+    /// The undo of [`Services::clear_resume`].
+    pub fn restore_resume(&mut self, item_id: String, name: String, position: jellyfin::Ticks) {
+        self.set_resume(item_id, name, position, true);
+    }
+
+    fn set_resume(&mut self, item_id: String, name: String, was: jellyfin::Ticks, undone: bool) {
+        let client = self.session.client.clone();
+        let sender = self.resuming.clone();
+        crate::runtime::detach(async move {
+            let position = if undone { was } else { jellyfin::Ticks(0) };
+            let result = client.set_resume_position(&item_id, position).await;
+            let _ = sender.send(Resumed {
+                item_id,
+                name,
+                was,
+                undone,
+                result,
+            });
+        });
+    }
+
     /// The requests those actions started that have finished, as of this frame: a mark that
     /// makes the pages reload, or the episode to play next (or why there isn't one).
     /// `Services::tick` calls it, so it runs while the window is hidden too.
@@ -288,6 +328,37 @@ impl Services {
                     // The page (or menu) may have shown the change already; it takes it back
                     // when it draws, however long from now that is.
                     self.refused_marks.push(item_id, mark);
+                }
+            }
+        }
+        let resumed: Vec<Resumed> = self.resumed.drain().collect();
+        for Resumed {
+            item_id,
+            name,
+            was,
+            undone,
+            result,
+        } in resumed
+        {
+            match result {
+                Ok(()) => {
+                    self.user_data += 1;
+                    if !undone {
+                        self.toast(
+                            Toast::success(tr!("item-removed-from-continue", name = name.as_str())).action(
+                                tr!("toast-undo"),
+                                ToastAction::RestoreResume {
+                                    item_id,
+                                    name,
+                                    position: was,
+                                },
+                            ),
+                        );
+                    }
+                }
+                Err(err) => {
+                    let message = self.handle_error(&err);
+                    self.toast(Toast::error(message));
                 }
             }
         }

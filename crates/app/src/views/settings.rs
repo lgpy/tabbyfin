@@ -316,6 +316,16 @@ fn animations_row() -> Row {
     }
 }
 
+fn spoilers_row() -> Row {
+    Row {
+        section: Section::Appearance,
+        label: tr!("settings-spoilers"),
+        description: tr!("settings-spoilers-description"),
+        key: "hide_spoilers",
+        unset: tr!("settings-spoilers-unset"),
+    }
+}
+
 fn tracks_note_row() -> Row {
     note_row(Section::Playback, tr!("settings-tracks-note"))
 }
@@ -553,6 +563,7 @@ fn all_rows() -> Vec<Row> {
         theme_row(),
         text_size_row(),
         animations_row(),
+        spoilers_row(),
         language_row(),
         tracks_note_row(),
         autoplay_row(),
@@ -1135,6 +1146,13 @@ impl SettingsPage {
         let current = self.config.animations.unwrap_or(true);
         if let Some(edit) = toggle(ui, &self.search, animations_row(), current, Some(true)) {
             self.save_appearance(cx, |config| config.animations = edit.or_unset());
+        }
+
+        let current = self.config.hide_spoilers.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, spoilers_row(), current, Some(false)) {
+            let hide = edit.or_unset();
+            self.save(|config| config.hide_spoilers = hide);
+            crate::spoilers::set(cx.ctx, hide.unwrap_or(false));
         }
 
         // Each language by its own name; following the system says which one that is.
@@ -2250,6 +2268,7 @@ mod tests {
         assert_eq!(config.theme, ThemePreference::System);
         assert_eq!(config.text_size, None); // the system's
         assert_eq!(config.animations, None); // on
+        assert_eq!(config.hide_spoilers, None); // off
         assert_eq!(config.autoplay_next_episode, None); // on
         assert_eq!(config.auto_skip_intro, None); // off
         assert_eq!(config.prefer_hevc, None); // off

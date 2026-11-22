@@ -345,3 +345,55 @@ async fn a_failed_download_maps_to_the_error() {
     let err = client.download(client.download_url("item"), 0).await.err();
     assert!(matches!(err, Some(Error::Unauthorized)), "{err:?}");
 }
+
+/// Taking an item out of Continue Watching sends only the position, so the watched state stays.
+#[tokio::test]
+async fn clearing_a_resume_position_sends_only_the_position() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/UserItems/item/UserData"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "PlaybackPositionTicks": 0, "Played": false })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    client.set_resume_position("item", Ticks(0)).await.expect("cleared");
+    let requests = server.received_requests().await.expect("recording is on");
+    assert_eq!(body(&requests[0]), json!({ "PlaybackPositionTicks": 0 }));
+}
+
+/// Approving a device sends its code as a query parameter, and the server's refusals keep their
+/// meaning: `404` for a code it doesn't know, `401` when Quick Connect is off.
+#[tokio::test]
+async fn authorising_a_device_sends_the_code_and_maps_the_refusals() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "123456"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(true))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "000000"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "off"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("Quick connect is disabled"))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    client.quick_connect_authorize("123456").await.expect("approved");
+    assert!(matches!(
+        client.quick_connect_authorize("000000").await,
+        Err(Error::NotFound)
+    ));
+    assert!(matches!(
+        client.quick_connect_authorize("off").await,
+        Err(Error::Unauthorized)
+    ));
+}

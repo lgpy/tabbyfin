@@ -296,3 +296,31 @@ fn enter_opens_a_pickers_list_and_the_keyboard_picks_from_it() {
     assert_eq!(Config::load().theme, ThemePreference::Light);
     assert!(ui.harness().query_by_label("Dark").is_none(), "the list closed");
 }
+
+/// Spoiler protection is off by default, and its switch saves and applies at once to the
+/// widgets that draw episodes (`spoilers`).
+#[test]
+fn the_spoiler_protection_switch_saves_and_applies() {
+    let _config = ConfigDir::new("settings-spoilers");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    let episode: jellyfin::models::BaseItemDto = serde_json::from_value(serde_json::json!({
+        "Id": "e", "Name": "e", "Type": "Episode",
+        "UserData": { "Played": false, "PlaybackPositionTicks": 0 },
+    }))
+    .expect("an episode");
+    let ctx = ui.harness().ctx.clone();
+    assert!(!crate::spoilers::hides(&ctx, &episode));
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Spoiler protection");
+    assert_eq!(
+        switch.accesskit_node().toggled(),
+        Some(Toggled::False),
+        "off by default"
+    );
+    switch.click();
+    ui.step();
+    assert_eq!(Config::load().hide_spoilers, Some(true));
+    assert!(crate::spoilers::hides(&ctx, &episode));
+}
