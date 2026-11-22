@@ -1623,6 +1623,7 @@ async fn run_session(
                         subtitle_stream_index: subtitle_index(options.subtitle),
                         max_streaming_bitrate: max_bitrate(&client).await,
                         prefer_hevc: Config::load().prefer_hevc.unwrap_or(false),
+                        passthrough_eac3: Config::load().passthrough_eac3.unwrap_or(false),
                     },
                 )
                 .await

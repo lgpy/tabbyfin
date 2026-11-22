@@ -19,6 +19,10 @@ pub struct PlaybackInfoRequest {
     /// bandwidth. Only used when the server allows HEVC encoding, which is off by default
     /// because it costs the server much more.
     pub prefer_hevc: bool,
+    /// The player passes E-AC-3 through to a receiver: a transcode keeps that audio as it is
+    /// instead of converting it to AC-3 (a direct play never touches the audio). DTS and TrueHD
+    /// can't ride in the HLS stream a transcode makes, so those are converted whatever this is.
+    pub passthrough_eac3: bool,
 }
 
 /// No limit: high enough that the server never transcodes for bitrate.
@@ -123,7 +127,7 @@ impl PlaybackReport {
 /// codec. The server only transcodes (to H.264/AAC over HLS) when it won't direct play, e.g.
 /// above `max_bitrate`. External text subtitles are delivered as files; anything else stays
 /// embedded (or is burned into a transcode).
-fn device_profile(max_bitrate: u64, prefer_hevc: bool) -> serde_json::Value {
+fn device_profile(max_bitrate: u64, prefer_hevc: bool, passthrough_eac3: bool) -> serde_json::Value {
     let external = ["srt", "subrip", "ass", "ssa", "vtt", "webvtt", "sub", "smi", "ttml"];
     let mut subtitle_profiles: Vec<serde_json::Value> = external
         .iter()
@@ -153,7 +157,7 @@ fn device_profile(max_bitrate: u64, prefer_hevc: bool) -> serde_json::Value {
                 // (listed second) when it isn't allowed to encode HEVC.
                 "Container": if prefer_hevc { "mp4" } else { "ts" },
                 "VideoCodec": if prefer_hevc { "hevc,h264" } else { "h264" },
-                "AudioCodec": "aac,mp3,ac3",
+                "AudioCodec": if passthrough_eac3 { "aac,mp3,ac3,eac3" } else { "aac,mp3,ac3" },
                 "MaxAudioChannels": "6",
                 "BreakOnNonKeyFrames": true,
             },
@@ -193,7 +197,7 @@ impl Client {
             enable_direct_play: true,
             enable_direct_stream: true,
             enable_transcoding: true,
-            device_profile: device_profile(max_bitrate, req.prefer_hevc),
+            device_profile: device_profile(max_bitrate, req.prefer_hevc, req.passthrough_eac3),
         };
         self.post(&format!("/Items/{item_id}/PlaybackInfo"), &Query::new(), Some(&body))
             .await
@@ -299,12 +303,23 @@ mod tests {
 
     #[test]
     fn hevc_transcodes_use_fragmented_mp4() {
-        let profile = &device_profile(8_000_000, true)["TranscodingProfiles"][0];
+        let profile = &device_profile(8_000_000, true, false)["TranscodingProfiles"][0];
         assert_eq!(profile["VideoCodec"], "hevc,h264");
         assert_eq!(profile["Container"], "mp4");
-        let profile = &device_profile(8_000_000, false)["TranscodingProfiles"][0];
+        let profile = &device_profile(8_000_000, false, false)["TranscodingProfiles"][0];
         assert_eq!(profile["VideoCodec"], "h264");
         assert_eq!(profile["Container"], "ts");
+    }
+
+    /// Direct play allows every audio codec, so passthrough formats are never converted there;
+    /// a transcode keeps E-AC-3 only when it's passed through.
+    #[test]
+    fn passthrough_keeps_eac3_in_transcodes() {
+        let profile = device_profile(8_000_000, false, false);
+        assert_eq!(profile["TranscodingProfiles"][0]["AudioCodec"], "aac,mp3,ac3");
+        assert!(profile["DirectPlayProfiles"][0].get("AudioCodec").is_none());
+        let profile = device_profile(8_000_000, false, true);
+        assert_eq!(profile["TranscodingProfiles"][0]["AudioCodec"], "aac,mp3,ac3,eac3");
     }
 
     /// The bodies the server actually receives, as JSON. `PlaybackStartInfo` and

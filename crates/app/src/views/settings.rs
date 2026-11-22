@@ -403,6 +403,61 @@ fn audio_channels_row() -> Row {
     }
 }
 
+fn passthrough_ac3_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-ac3"),
+        description: tr!("settings-passthrough-ac3-description"),
+        key: "passthrough_ac3",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_eac3_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-eac3"),
+        description: tr!("settings-passthrough-eac3-description"),
+        key: "passthrough_eac3",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_dts_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-dts"),
+        description: tr!("settings-passthrough-dts-description"),
+        key: "passthrough_dts",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_dts_hd_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-dts-hd"),
+        description: tr!("settings-passthrough-dts-hd-description"),
+        key: "passthrough_dts_hd",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn passthrough_truehd_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-passthrough-truehd"),
+        description: tr!("settings-passthrough-truehd-description"),
+        key: "passthrough_truehd",
+        unset: tr!("settings-passthrough-unset"),
+    }
+}
+fn audio_exclusive_row() -> Row {
+    Row {
+        section: Section::Audio,
+        label: tr!("settings-audio-exclusive"),
+        description: tr!("settings-audio-exclusive-description"),
+        key: "audio_exclusive",
+        unset: tr!("settings-audio-exclusive-unset"),
+    }
+}
+
 fn subtitles_note_row() -> Row {
     note_row(Section::Subtitles, tr!("settings-subtitles-note"))
 }
@@ -592,6 +647,12 @@ fn all_rows() -> Vec<Row> {
         player_row(),
         audio_device_row(),
         audio_channels_row(),
+        passthrough_ac3_row(),
+        passthrough_eac3_row(),
+        passthrough_dts_row(),
+        passthrough_dts_hd_row(),
+        passthrough_truehd_row(),
+        audio_exclusive_row(),
         subtitles_note_row(),
         subtitle_tracks_note_row(),
         subtitle_color_row(),
@@ -1361,6 +1422,36 @@ impl SettingsPage {
         );
         if let Some(edit) = picked {
             self.save(|config| config.audio_channels = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_ac3.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_ac3_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_ac3 = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_eac3.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_eac3_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_eac3 = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_dts.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_dts_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_dts = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_dts_hd.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_dts_hd_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_dts_hd = edit.or_unset());
+        }
+
+        let current = self.config.passthrough_truehd.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, passthrough_truehd_row(), current, Some(false)) {
+            self.save(|config| config.passthrough_truehd = edit.or_unset());
+        }
+
+        let current = self.config.audio_exclusive.unwrap_or(false);
+        if let Some(edit) = toggle(ui, &self.search, audio_exclusive_row(), current, Some(false)) {
+            self.save(|config| config.audio_exclusive = edit.or_unset());
         }
     }
 
