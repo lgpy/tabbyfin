@@ -289,15 +289,20 @@ mod tests {
         );
     }
 
+    /// Every shipped language parses and answers: a syntax error in a file would only warn at
+    /// run time and leave English showing.
     #[test]
     fn reads_a_translation() {
         // The tests share the app's loader, so this one has its own.
         let loader = i18n_embed::fluent::fluent_language_loader!();
-        super::select(&loader, Language::PortuguesePortugal);
-        let args = std::collections::HashMap::from([("language", "English")]);
-        assert_eq!(
-            loader.get_args("settings-language-system", args),
-            "Seguir o sistema (English)"
-        );
+        let args = || std::collections::HashMap::from([("language", "English")]);
+        for (language, expected) in [
+            (Language::English, "Follow the system (English)"),
+            (Language::PortuguesePortugal, "Seguir o sistema (English)"),
+            (Language::Spanish, "Seguir el sistema (English)"),
+        ] {
+            super::select(&loader, language);
+            assert_eq!(loader.get_args("settings-language-system", args()), expected);
+        }
     }
 }

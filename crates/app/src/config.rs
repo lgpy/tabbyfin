@@ -248,7 +248,8 @@ impl SavedServer {
         account_key(&self.server_id, &self.user_id)
     }
 
-    /// "dev on tabbyfin dev", or the address without a server name.
+    /// "dev on tabbyfin dev", or the address without a server name. For logs only: what the UI
+    /// shows is the `shell-account-on` message.
     pub fn label(&self) -> String {
         let server = self.server_name.clone().unwrap_or_else(|| self.url.clone());
         format!("{} on {server}", self.username)

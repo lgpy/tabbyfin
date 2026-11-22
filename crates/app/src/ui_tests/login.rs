@@ -421,7 +421,7 @@ fn a_saved_account_is_offered_and_chosen() {
     let mut ui = login_harness(move |ctx| Login::new(ctx, "ui-test-device".into(), vec![listed], false, None));
 
     assert!(ui.query_by_label("Welcome back").is_some());
-    ui.get_by_label(&account.label()).click();
+    ui.get_by_label("dev on tabbyfin dev").click();
     ui.step();
     match ui.state().event.as_ref() {
         Some(LoginEvent::UseAccount(chosen)) => assert_eq!(chosen, &account),

@@ -631,10 +631,10 @@ impl Login {
 
     fn server_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         for account in self.accounts.clone() {
-            let label = account.label();
+            let server = account.server_name.as_deref().unwrap_or(&account.url);
+            let label = tr!("shell-account-on", name = account.username.as_str(), server = server);
             let names = [account.username.as_str()];
-            let subtitle = account.server_name.as_deref().unwrap_or(&account.url);
-            let row = AvatarRow::new(&names, &account.username, subtitle, &label)
+            let row = AvatarRow::new(&names, &account.username, server, &label)
                 .remove(&tr!("login-remove-account"))
                 .show(ui, self.busy.is_none());
             if row.row.clicked() {
