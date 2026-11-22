@@ -7,7 +7,7 @@ use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection,
 };
 
-use super::{APP_NAME, Command, Controls, Link, MediaInfo, PlaybackState, SEEK_STEP, Transport};
+use super::{APP_NAME, Command, Controls, Link, MediaInfo, PlaybackState, Transport};
 
 pub struct SystemControls {
     inner: MediaControls,
@@ -44,7 +44,7 @@ pub fn command_of(event: MediaControlEvent) -> Option<Command> {
         MediaControlEvent::Stop => Command::Stop,
         MediaControlEvent::Next => Command::Next,
         MediaControlEvent::Previous => Command::Previous,
-        MediaControlEvent::Seek(direction) => Command::SeekBy(direction == SeekDirection::Forward, SEEK_STEP),
+        MediaControlEvent::Seek(direction) => Command::SeekStep(direction == SeekDirection::Forward),
         MediaControlEvent::SeekBy(direction, by) => Command::SeekBy(direction == SeekDirection::Forward, by),
         MediaControlEvent::SetPosition(MediaPosition(to)) => Command::SeekTo(to),
         _ => return None,
@@ -89,7 +89,7 @@ mod tests {
         assert_eq!(command_of(MediaControlEvent::Next), Some(Command::Next));
         assert_eq!(
             command_of(MediaControlEvent::Seek(SeekDirection::Backward)),
-            Some(Command::SeekBy(false, SEEK_STEP))
+            Some(Command::SeekStep(false))
         );
         assert_eq!(
             command_of(MediaControlEvent::SetPosition(MediaPosition(Duration::from_secs(5)))),

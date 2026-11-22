@@ -45,8 +45,6 @@ use windows as os;
 
 /// The app's name in the window's title and in the OS's media widgets.
 const APP_NAME: &str = "Tabbyfin";
-/// How far an OS "seek" without an amount goes.
-const SEEK_STEP: Duration = Duration::from_secs(10);
 /// A position the OS is told again after this long even when nothing changed, which keeps the
 /// taskbar's progress and a widget's timeline from drifting.
 const REFRESH: Duration = Duration::from_secs(5);
@@ -64,6 +62,9 @@ pub enum Command {
     Previous,
     /// Forward (`true`) or backward by this much.
     SeekBy(bool, Duration),
+    /// Forward (`true`) or backward by the seek step Settings holds: an OS "seek" without an
+    /// amount.
+    SeekStep(bool),
     SeekTo(Duration),
 }
 
@@ -76,7 +77,8 @@ enum Action {
 }
 
 impl Command {
-    fn action(self) -> Action {
+    /// What this does; `step` is the seek step in seconds.
+    fn action(self, step: f64) -> Action {
         match self {
             Command::Play => Action::Control(UiCommand::SetPause(false)),
             Command::Pause => Action::Control(UiCommand::SetPause(true)),
@@ -88,6 +90,7 @@ impl Command {
                 let seconds = by.as_secs_f64();
                 Action::Control(UiCommand::SeekBy(if forward { seconds } else { -seconds }))
             }
+            Command::SeekStep(forward) => Action::Control(UiCommand::SeekBy(if forward { step } else { -step })),
             Command::SeekTo(to) => Action::Control(UiCommand::SeekTo(to)),
         }
     }
@@ -194,7 +197,10 @@ impl Snapshot {
         };
         let mut position = state.position;
         if transport == Transport::Playing && !state.loading {
-            position += now.saturating_duration_since(state.position_at);
+            // At the playback speed, as `NowPlaying::position_now` carries it on.
+            position += now
+                .saturating_duration_since(state.position_at)
+                .mul_f64(state.adjustments.speed.max(0.));
         }
         if let Some(duration) = state.duration {
             position = position.min(duration);
@@ -366,7 +372,7 @@ impl Desktop {
                 continue;
             };
             tracing::debug!(?command, "media control");
-            match command.action() {
+            match command.action(services.playback.seek_step()) {
                 Action::Control(command) => services.control(command),
                 Action::Next => services.play_next(),
                 Action::Previous => services.play_previous(),
@@ -451,7 +457,7 @@ mod tests {
 
     /// What a command does, as text: `UiCommand` has no `PartialEq`.
     fn does(command: Command) -> String {
-        format!("{:?}", command.action())
+        format!("{:?}", command.action(15.))
     }
 
     #[test]
@@ -462,8 +468,17 @@ mod tests {
         assert_eq!(does(Command::Stop), "Control(Stop)");
         assert_eq!(does(Command::Next), "Next");
         assert_eq!(does(Command::Previous), "Previous");
-        assert_eq!(does(Command::SeekBy(false, SEEK_STEP)), "Control(SeekBy(-10.0))");
-        assert_eq!(does(Command::SeekBy(true, SEEK_STEP)), "Control(SeekBy(10.0))");
+        assert_eq!(
+            does(Command::SeekBy(false, Duration::from_secs(10))),
+            "Control(SeekBy(-10.0))"
+        );
+        assert_eq!(
+            does(Command::SeekBy(true, Duration::from_secs(10))),
+            "Control(SeekBy(10.0))"
+        );
+        // Without an amount the OS gets the seek step of Settings (15 s here).
+        assert_eq!(does(Command::SeekStep(false)), "Control(SeekBy(-15.0))");
+        assert_eq!(does(Command::SeekStep(true)), "Control(SeekBy(15.0))");
         assert_eq!(does(Command::SeekTo(Duration::from_secs(90))), "Control(SeekTo(90s))");
     }
 
@@ -569,6 +584,10 @@ mod tests {
 
     /// An episode playing from the fixtures, 12 minutes in, as the session leaves it.
     fn episode_snapshot(paused: bool, later: Duration) -> Snapshot {
+        episode_snapshot_at(paused, later, 1.)
+    }
+
+    fn episode_snapshot_at(paused: bool, later: Duration, speed: f64) -> Snapshot {
         use crate::playback::PlaybackManager;
         use crate::ui_tests::{ConfigDir, TOKEN, fixture_json};
 
@@ -583,8 +602,18 @@ mod tests {
         let _commands = playback.start_for_test(item, movie.media_sources[0].clone());
         let state = playback.now_playing_mut().unwrap();
         state.paused = paused;
+        state.adjustments.speed = speed;
         let at = state.position_at;
         Snapshot::of(playback.now_playing().unwrap(), &client, at + later)
+    }
+
+    /// The OS's timeline runs at the playback speed, as the player's seek bar does.
+    #[test]
+    fn the_position_moves_on_at_the_playback_speed() {
+        let doubled = episode_snapshot_at(false, Duration::from_secs(30), 2.);
+        assert_eq!(doubled.state.position, Duration::from_secs(13 * 60));
+        let slowed = episode_snapshot_at(false, Duration::from_secs(30), 0.5);
+        assert_eq!(slowed.state.position, Duration::from_secs(12 * 60 + 15));
     }
 
     #[test]
