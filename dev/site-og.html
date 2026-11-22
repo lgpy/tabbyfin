@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- The source of the website's social card, site/assets/og.jpg: open this in a browser window
+     1200 × 630 and save a screenshot of it (dev/README.md). -->
+<html lang="en">
+<meta charset="utf-8">
+<title>Tabbyfin's social card</title>
+<style>
+* { box-sizing: border-box; margin: 0; }
+html, body { width: 1200px; height: 630px; overflow: hidden; }
+body {
+  background: linear-gradient(180deg, #0e0b16, #1d1633); color: #f4f0fa;
+  font-family: "Ubuntu", "Segoe UI", system-ui, sans-serif; position: relative;
+}
+.glow {
+  position: absolute; left: -60px; top: -40px; width: 620px; height: 620px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(195, 150, 231, .34), rgba(195, 150, 231, 0));
+}
+.mascot { position: absolute; left: 84px; top: 52px; width: 230px; height: 230px; }
+h1 { position: absolute; left: 84px; top: 306px; font-size: 92px; line-height: 1; font-weight: 700; letter-spacing: -1.5px; }
+p { position: absolute; left: 88px; top: 420px; font-size: 34px; line-height: 1.3; color: #a89fbb; width: 470px; }
+.systems { position: absolute; left: 88px; top: 540px; display: flex; gap: 12px; }
+.systems span {
+  font-size: 22px; padding: 8px 18px; border-radius: 999px;
+  background: #1a1526; border: 1px solid #2c2440;
+}
+.window {
+  position: absolute; left: 600px; top: 96px; width: 760px; border-radius: 18px; overflow: hidden;
+  border: 1px solid #2c2440; box-shadow: 0 24px 80px rgba(0, 0, 0, .55);
+}
+.window img { display: block; width: 100%; }
+</style>
+<div class="glow"></div>
+<img class="mascot" src="../packaging/tabbyfin.svg" alt="">
+<h1>Tabbyfin</h1>
+<p>A native desktop client for Jellyfin.</p>
+<div class="systems"><span>Linux</span><span>Windows</span><span>macOS</span></div>
+<div class="window"><img src="../site/assets/screenshots/home.webp" alt=""></div>
+</html>

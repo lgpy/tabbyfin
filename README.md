@@ -6,7 +6,9 @@ A native desktop client for [Jellyfin](https://jellyfin.org), built with [egui](
 
 Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**; developed against 12.x.
 
-> Early days: version 0.2. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's missing.
+> Early days: version 0.3. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's missing.
+
+**Website:** [lgpy.github.io/tabbyfin](https://lgpy.github.io/tabbyfin/)
 
 ## Screenshots
 

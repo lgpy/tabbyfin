@@ -52,7 +52,7 @@ Done: player preferences, subtitle appearance, theme, window size and position, 
 
 ## 5. Platform and packaging
 
-Done: an Inno Setup installer for Windows, an AppImage and a Flatpak bundle beside the `.deb` and `.tar.gz`, the update notice, mirrored pinned downloads.
+Done: an Inno Setup installer for Windows, an AppImage and a Flatpak bundle beside the `.deb` and `.tar.gz`, the update notice, mirrored pinned downloads, the website (`site/`, on GitHub Pages).
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|

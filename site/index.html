@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tabbyfin: a native desktop client for Jellyfin</title>
+<meta name="description" content="Tabbyfin is a native desktop client for Jellyfin, for Linux, Windows and macOS. Video plays inside the window with mpv. Free and open source, GPL-3.0-or-later.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#fcfaff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e0b16" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://lgpy.github.io/tabbyfin/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Tabbyfin">
+<meta property="og:title" content="Tabbyfin: a native desktop client for Jellyfin">
+<meta property="og:description" content="Browse your Jellyfin server and play video inside the window with mpv. For Linux, Windows and macOS. Free and open source.">
+<meta property="og:url" content="https://lgpy.github.io/tabbyfin/">
+<meta property="og:image" content="https://lgpy.github.io/tabbyfin/assets/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Tabbyfin's jelly cat mascot and name beside the app's Home screen.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Tabbyfin: a native desktop client for Jellyfin">
+<meta name="twitter:description" content="Browse your Jellyfin server and play video inside the window with mpv. For Linux, Windows and macOS. Free and open source.">
+<meta name="twitter:image" content="https://lgpy.github.io/tabbyfin/assets/og.jpg">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<script src="theme.js"></script>
+<link rel="stylesheet" href="styles.css">
+<script src="script.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="wrap bar">
+  <a class="brandmark" href="./" aria-label="Tabbyfin, home">
+    <img src="assets/icon.svg" alt="" width="36" height="36">
+    <span>Tabbyfin</span>
+  </a>
+  <div class="bar-end">
+    <nav aria-label="Main">
+      <ul>
+        <li class="wide"><a href="#tour">Tour</a></li>
+        <li><a href="#download">Download</a></li>
+        <li><a href="https://github.com/lgpy/tabbyfin">Source</a></li>
+      </ul>
+    </nav>
+    <div class="theme-switch" id="theme-switch" role="group" aria-label="Colour theme">
+      <button type="button" data-theme-pick="system" aria-pressed="true" aria-label="System theme" title="System">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+      </button>
+      <button type="button" data-theme-pick="light" aria-pressed="false" aria-label="Light theme" title="Light">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
+      </button>
+      <button type="button" data-theme-pick="dark" aria-pressed="false" aria-label="Dark theme" title="Dark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap hero">
+    <div class="hero-text">
+      <p class="kicker"><span class="dot" aria-hidden="true"></span><span>Version <span data-version>0.3</span>: early days</span></p>
+      <h1>A native desktop client for Jellyfin.</h1>
+      <p class="lead">Tabbyfin browses your Jellyfin server and <strong>plays video inside its own window</strong> with mpv. Built in Rust with egui; on Linux and Windows the app draws its frames straight from the GPU, without copying them through the CPU.</p>
+      <div class="cta">
+        <a class="btn-brand" id="download-main" href="#download">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>
+          <span id="main-label">Download</span>
+        </a>
+        <span class="subtle"><a href="#download">All packages and install notes</a></span>
+      </div>
+      <p class="subtle" id="main-note">Free and open source, GPL-3.0-or-later.</p>
+      <ul class="systems">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Linux</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Windows</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>macOS</li>
+      </ul>
+      <p class="needs">Needs Jellyfin 10.11 or newer; developed against 12.x.</p>
+    </div>
+
+    <div class="stage" id="stage">
+      <button class="mascot" id="mascot" type="button" aria-label="Pet the jelly cat" tabindex="-1" aria-hidden="true">
+        <img src="assets/jelly.svg" alt="" width="160" height="160">
+      </button>
+      <div class="window">
+        <div class="titlebar" aria-hidden="true">
+          <span class="title"><b>Tabbyfin</b> · <span id="win-title">Home</span></span>
+          <span class="winctl"><i></i><i></i><i></i></span>
+        </div>
+        <div class="screens">
+          <figure class="screen" id="screen-home" data-name="Home"><img src="assets/screenshots/home.webp" srcset="assets/screenshots/home-640.webp 640w, assets/screenshots/home.webp 1280w" sizes="(max-width: 1080px) 92vw, 840px" width="1280" height="800" fetchpriority="high" alt="Tabbyfin's Home: Continue Watching, the Latest shelves, and your libraries along the top."></figure>
+          <figure class="screen" id="screen-library" data-name="Library" hidden><img src="assets/screenshots/library.webp" srcset="assets/screenshots/library-640.webp 640w, assets/screenshots/library.webp 1280w" sizes="(max-width: 1080px) 92vw, 840px" width="1280" height="800" loading="lazy" decoding="async" alt="A library grid, with its filters, sort and letter bar."></figure>
+          <figure class="screen" id="screen-item" data-name="Sintel" hidden><img src="assets/screenshots/item.webp" srcset="assets/screenshots/item-640.webp 640w, assets/screenshots/item.webp 1280w" sizes="(max-width: 1080px) 92vw, 840px" width="1280" height="800" loading="lazy" decoding="async" alt="A movie's page: poster, actions and chapters."></figure>
+          <figure class="screen" id="screen-player" data-name="Player" hidden><img src="assets/screenshots/player.webp" srcset="assets/screenshots/player-640.webp 640w, assets/screenshots/player.webp 1280w" sizes="(max-width: 1080px) 92vw, 840px" width="1280" height="800" loading="lazy" decoding="async" alt="The player paused, its controls over the video."></figure>
+          <figure class="screen" id="screen-settings" data-name="Settings" hidden><img src="assets/screenshots/settings.webp" srcset="assets/screenshots/settings-640.webp 640w, assets/screenshots/settings.webp 1280w" sizes="(max-width: 1080px) 92vw, 840px" width="1280" height="800" loading="lazy" decoding="async" alt="Settings, for this device and for the server."></figure>
+        </div>
+      </div>
+      <ul class="strip" id="strip">
+        <li><a href="#tour-home" data-screen="home"><img src="assets/screenshots/home-640.webp" alt="" width="640" height="400">Home</a></li>
+        <li><a href="#tour-library" data-screen="library"><img src="assets/screenshots/library-640.webp" alt="" width="640" height="400">Library</a></li>
+        <li><a href="#tour-item" data-screen="item"><img src="assets/screenshots/item-640.webp" alt="" width="640" height="400">Item</a></li>
+        <li><a href="#tour-player" data-screen="player"><img src="assets/screenshots/player-640.webp" alt="" width="640" height="400">Player</a></li>
+        <li><a href="#tour-settings" data-screen="settings"><img src="assets/screenshots/settings-640.webp" alt="" width="640" height="400">Settings</a></li>
+      </ul>
+      <p class="stage-caption">
+        <span id="stage-caption">The real app, dark theme. <span class="hint">Pick a screen, or use the arrow keys.</span></span>
+        <span>Films: Blender Studio's <a href="https://studio.blender.org/films/">open movies</a> (CC BY), with posters and metadata from TMDb.</span>
+      </p>
+    </div>
+  </div>
+
+  <section class="wrap tour" id="tour" aria-labelledby="tour-h">
+    <div class="section-head">
+      <h2 id="tour-h">What it does, screen by screen</h2>
+      <p>Each part of the app beside the screen it lives on. Everything here is in the current release.</p>
+    </div>
+
+    <article class="stop" id="tour-home" aria-labelledby="h-home">
+      <div>
+        <p class="eyebrow">Home</p>
+        <h3 id="h-home">Pick up where you left off</h3>
+        <p>Continue Watching, Next Up and Latest, with your libraries along the top. Favorites get their own shelf.</p>
+        <ul class="ticks">
+          <li>Several servers and users stay signed in side by side.<small>Switch from the menu under your name, or pick one on the sign-in screen.</small></li>
+          <li>Keyboard navigation.<small>The arrow keys move a highlight over the cards, Tab and Shift+Tab jump between rows, Enter opens, Esc or Backspace goes back, and Ctrl+F (⌘F on macOS) searches.</small></li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <div class="window">
+          <div class="titlebar" aria-hidden="true"><span class="title"><b>Tabbyfin</b> · Home</span><span class="winctl"><i></i><i></i><i></i></span></div>
+          <div class="pic"><div class="pic-in"><img src="assets/screenshots/home.webp" srcset="assets/screenshots/home-640.webp 640w, assets/screenshots/home.webp 1280w" sizes="(max-width: 720px) 170vw, (max-width: 1080px) 92vw, 50vw" width="1280" height="800" alt="Home: Continue Watching with two films part-watched, the Latest Movies shelf, and the Movies library along the top." loading="lazy" decoding="async"><span class="spot" aria-hidden="true"><span class="spot-label">Continue Watching</span></span></div></div>
+        </div>
+        <figcaption>Home: Continue Watching, the Latest shelves, and your libraries along the top.</figcaption>
+      </figure>
+    </article>
+
+    <article class="stop" id="tour-library" aria-labelledby="h-library">
+      <div>
+        <p class="eyebrow">Library</p>
+        <h3 id="h-library">Sort, filter, and jump to a letter</h3>
+        <p>Library grids with filters for progress, rating, genres and tags, year and resolution. The sort and filters are remembered per library.</p>
+        <ul class="ticks">
+          <li>In a library sorted by name, typing a letter jumps to it.<small>Or use the letter bar down the side.</small></li>
+          <li>Browse by cast and crew.</li>
+          <li>Collections and playlists, with Play all and Shuffle.</li>
+          <li>Mark items as watched or as favorites.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <div class="window">
+          <div class="titlebar" aria-hidden="true"><span class="title"><b>Tabbyfin</b> · Library</span><span class="winctl"><i></i><i></i><i></i></span></div>
+          <div class="pic"><div class="pic-in"><img src="assets/screenshots/library.webp" srcset="assets/screenshots/library-640.webp 640w, assets/screenshots/library.webp 1280w" sizes="(max-width: 720px) 160vw, (max-width: 1080px) 92vw, 50vw" width="1280" height="800" alt="A library of nine films as a poster grid, with the filter and sort bar above it and the letter bar at the right." loading="lazy" decoding="async"><span class="spot" aria-hidden="true"><span class="spot-label">Filters and sort, remembered per library</span></span></div></div>
+        </div>
+        <figcaption>A library grid, with its filters and sort.</figcaption>
+      </figure>
+    </article>
+
+    <article class="stop" id="tour-item" aria-labelledby="h-item">
+      <div>
+        <p class="eyebrow">Item</p>
+        <h3 id="h-item">Every film and episode has its page</h3>
+        <p>Movie, series, season and episode pages, with the poster, the actions, and the chapters.</p>
+        <ul class="ticks">
+          <li>Resume, start over, mark watched, add to favorites.</li>
+          <li>Download the original file and play it from disk.<small>An offline mode keeps what you downloaded watchable without the server.</small></li>
+          <li>Search across the server from the top bar.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <div class="window">
+          <div class="titlebar" aria-hidden="true"><span class="title"><b>Tabbyfin</b> · Sintel</span><span class="winctl"><i></i><i></i><i></i></span></div>
+          <div class="pic"><div class="pic-in"><img src="assets/screenshots/item.webp" srcset="assets/screenshots/item-640.webp 640w, assets/screenshots/item.webp 1280w" sizes="(max-width: 720px) 180vw, (max-width: 1080px) 92vw, 50vw" width="1280" height="800" alt="The page for the film Sintel: poster, year and genres, the Resume button with its actions, the overview, tags and a row of chapters." loading="lazy" decoding="async"><span class="spot end below" aria-hidden="true"><span class="spot-label">Resume, watched, favorite, download</span></span></div></div>
+        </div>
+        <figcaption>A movie's page: poster, actions and chapters.</figcaption>
+      </figure>
+    </article>
+
+    <article class="stop player" id="tour-player" aria-labelledby="h-player">
+      <div>
+        <p class="eyebrow">Player</p>
+        <h3 id="h-player">Video plays inside the window</h3>
+        <p>Direct play of nearly anything mpv can decode. Above a bitrate you set, or when your server requires it, the server transcodes instead.</p>
+        <ul class="ticks">
+          <li>Hardware decoding.<small>On Windows, frames go from the decoder to the screen without a copy.</small></li>
+          <li>Audio, subtitle and version pickers, including external subtitles from Jellyfin.</li>
+          <li>Chapters marked on the seek bar, trickplay thumbnails over it, and the time under the mouse.</li>
+          <li>Skip intro, recap and similar.<small>From the server's media segments (with a segment plugin such as Intro Skipper) or from chapter names like "Intro", "Opening" or "OP".</small></li>
+          <li>An up-next card that plays the next episode at the end (or not: it's a setting).</li>
+          <li>Playback speed, subtitle and audio delay, and subtitle size.</li>
+          <li>Resume points and watched state stay in sync with the server, including changes made on other devices.</li>
+          <li>Your own mpv configuration, scripts and key bindings are never loaded.<small>So they can't change how the embedded player looks.</small></li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <div class="window">
+          <div class="titlebar" aria-hidden="true"><span class="title"><b>Tabbyfin</b> · Sintel</span><span class="winctl"><i></i><i></i><i></i></span></div>
+          <div class="pic"><div class="pic-in"><img src="assets/screenshots/player.webp" srcset="assets/screenshots/player-640.webp 640w, assets/screenshots/player.webp 1280w" sizes="(max-width: 720px) 170vw, (max-width: 1080px) 92vw, 50vw" width="1280" height="800" alt="Sintel paused in the player: the seek bar with chapter marks, play, seek and volume controls, and the chapter, subtitle, settings and fullscreen buttons." loading="lazy" decoding="async"><span class="spot" aria-hidden="true"><span class="spot-label">Seek bar with chapter marks</span></span></div></div>
+        </div>
+        <figcaption>The player paused, its controls over the video.</figcaption>
+      </figure>
+    </article>
+
+    <div class="surface keys" aria-labelledby="keys-h" role="group">
+      <h4 id="keys-h">Player keys</h4>
+      <div class="keys-grid">
+          <table class="keytable" aria-labelledby="keys-h"><tbody>
+            <tr><th scope="row"><kbd>Space</kbd></th><td>Play/pause</td></tr>
+            <tr><th scope="row"><kbd>←</kbd> <kbd>→</kbd></th><td>Seek 10 s</td></tr>
+            <tr><th scope="row"><kbd>↑</kbd> <kbd>↓</kbd></th><td>Volume</td></tr>
+            <tr><th scope="row"><kbd>M</kbd></th><td>Mute</td></tr>
+            <tr><th scope="row"><kbd>Shift</kbd>+<kbd>N</kbd> / <kbd>Shift</kbd>+<kbd>P</kbd></th><td>Next / previous episode (or movie of the collection)</td></tr>
+            <tr><th scope="row"><kbd>PgUp</kbd> <kbd>PgDn</kbd></th><td>Previous / next chapter</td></tr>
+          </tbody></table>
+          <table class="keytable" aria-labelledby="keys-h"><tbody>
+            <tr><th scope="row"><kbd>Enter</kbd> or <kbd>S</kbd></th><td>Skip the intro, play the next episode from the up-next card, or start over after an automatic resume</td></tr>
+            <tr><th scope="row"><kbd>[</kbd> <kbd>]</kbd></th><td>Slower / faster</td></tr>
+            <tr><th scope="row"><kbd>Z</kbd> / <kbd>X</kbd></th><td>Subtitle delay −0.1 s / +0.1 s</td></tr>
+            <tr><th scope="row"><kbd>F</kbd></th><td>Fullscreen</td></tr>
+            <tr><th scope="row"><kbd>Esc</kbd></th><td>Leave fullscreen, then dismiss the up-next card, then leave the player</td></tr>
+          </tbody></table>
+      </div>
+    </div>
+
+    <div class="surface flow" id="frames">
+      <h3>What plays, and how</h3>
+      <p>mpv decodes and draws, in a player process of its own. The app imports the frames mpv draws into its own wgpu device, so on Linux and Windows the picture reaches the window without a copy through the CPU. On Windows with ANGLE the decoder's frames stay on the GPU too (the WGL fallback copies them back); on Linux, VA-API's are copied back before mpv draws them. On macOS the video is drawn in software: mpv renders pixels and the app uploads them.</p>
+      <svg class="dg dg-wide" viewBox="0 0 930 348" role="img" aria-labelledby="dgt dgd">
+<title id="dgt">A frame's path from mpv to the window, on Windows, Linux and macOS</title>
+<desc id="dgd">Four stages per system: mpv decodes, mpv draws, a handover, the window. On Windows and Linux, drawing, handover and display stay on the GPU; decoding does too on Windows with ANGLE, while Linux copies VA-API frames back before drawing. On macOS, pixels go through memory and the CPU.</desc><text class="h" x="112" y="14">player host process (libmpv)</text><path class="br" d="M112 26v-5h387v5"/><text class="h" x="542" y="14">handover</text><path class="br" d="M542 26v-5h172v5"/><text class="h" x="757" y="14">the app</text><path class="br" d="M757 26v-5h172v5"/><g class="lane gpu"><text class="ln" x="0" y="90">Windows</text><text class="lt" x="0" y="108">on the GPU</text><rect class="bx " x="112" y="52" width="172" height="80" rx="12"/><text class="t" x="126" y="78">mpv decodes</text><text class="s" x="126" y="98">d3d11va: stays on the GPU</text><text class="s" x="126" y="114">(copied back with WGL)</text><path class="ar " d="M287 92H319"/><path class="ah " d="M324 92l-9 -5v10z"/><rect class="bx gpu" x="327" y="52" width="172" height="80" rx="12"/><text class="t" x="341" y="78">mpv draws, OpenGL</text><text class="s" x="341" y="98">ANGLE (WGL as fallback),</text><text class="s" x="341" y="114">into a ring of 3 textures</text><path class="ar gpu" d="M502 92H534"/><path class="ah gpu" d="M539 92l-9 -5v10z"/><rect class="bx gpu" x="542" y="52" width="172" height="80" rx="12"/><text class="t" x="556" y="78">D3D11 texture</text><text class="s" x="556" y="98">shared by NT handle</text><path class="ar gpu" d="M717 92H749"/><path class="ah gpu" d="M754 92l-9 -5v10z"/><rect class="bx gpu" x="757" y="52" width="172" height="80" rx="12"/><text class="t" x="771" y="78">Window (DX12)</text><text class="s" x="771" y="98">wgpu imports it once</text></g><g class="lane gpu"><text class="ln" x="0" y="198">Linux</text><text class="lt" x="0" y="216">on the GPU</text><rect class="bx " x="112" y="160" width="172" height="80" rx="12"/><text class="t" x="126" y="186">mpv decodes</text><text class="s" x="126" y="206">VA-API: frames are copied</text><text class="s" x="126" y="222">back before drawing</text><path class="ar " d="M287 200H319"/><path class="ah " d="M324 200l-9 -5v10z"/><rect class="bx gpu" x="327" y="160" width="172" height="80" rx="12"/><text class="t" x="341" y="186">mpv draws, OpenGL</text><text class="s" x="341" y="206">EGL, on the window's GPU,</text><text class="s" x="341" y="222">into a ring of 3 images</text><path class="ar gpu" d="M502 200H534"/><path class="ah gpu" d="M539 200l-9 -5v10z"/><rect class="bx gpu" x="542" y="160" width="172" height="80" rx="12"/><text class="t" x="556" y="186">Vulkan memory</text><text class="s" x="556" y="206">exported as an fd</text><path class="ar gpu" d="M717 200H749"/><path class="ah gpu" d="M754 200l-9 -5v10z"/><rect class="bx gpu" x="757" y="160" width="172" height="80" rx="12"/><text class="t" x="771" y="186">Window (Vulkan)</text><text class="s" x="771" y="206">wgpu imports it once</text></g><g class="lane cpu"><text class="ln" x="0" y="306">macOS</text><text class="lt" x="0" y="324">through the CPU</text><rect class="bx " x="112" y="268" width="172" height="80" rx="12"/><text class="t" x="126" y="294">mpv decodes</text><text class="s" x="126" y="314">frames back in RAM</text><path class="ar " d="M287 308H319"/><path class="ah " d="M324 308l-9 -5v10z"/><rect class="bx cpu" x="327" y="268" width="172" height="80" rx="12"/><text class="t" x="341" y="294">mpv renders pixels</text><text class="s" x="341" y="314">software renderer, RGBA</text><path class="ar cpu" d="M502 308H534"/><path class="ah cpu" d="M539 308l-9 -5v10z"/><text class="cp" x="520.5" y="300" text-anchor="middle">copy</text><rect class="bx cpu" x="542" y="268" width="172" height="80" rx="12"/><text class="t" x="556" y="294">Pixels in memory</text><text class="s" x="556" y="314">the CPU hands them on</text><path class="ar cpu" d="M717 308H749"/><path class="ah cpu" d="M754 308l-9 -5v10z"/><text class="cp" x="735.5" y="300" text-anchor="middle">copy</text><rect class="bx cpu" x="757" y="268" width="172" height="80" rx="12"/><text class="t" x="771" y="294">Window (Metal)</text><text class="s" x="771" y="314">wgpu write_texture</text></g></svg>
+      <div class="dg-narrow-set"><div class="lane-m"><p class="lane-title">Windows</p><svg class="dg dg-narrow" viewBox="0 0 340 374" role="img" aria-label="Windows: mpv decodes, then mpv draws, OpenGL, then D3D11 texture, then Window (DX12). No copy through the CPU with ANGLE; the WGL fallback copies decoded frames back first."><rect class="bx " x="1" y="1" width="338" height="72" rx="12"/><text class="t" x="14" y="26">mpv decodes</text><text class="s tg" x="326" y="24" text-anchor="end">host process</text><text class="s" x="14" y="46">d3d11va: stays on the GPU</text><text class="s" x="14" y="62">(copied back with WGL)</text><path class="ar " d="M36 76V92"/><path class="ah " d="M36 98l-5 -9h10z"/><rect class="bx gpu" x="1" y="101" width="338" height="72" rx="12"/><text class="t" x="14" y="126">mpv draws, OpenGL</text><text class="s tg" x="326" y="124" text-anchor="end">host process</text><text class="s" x="14" y="146">ANGLE (WGL as fallback),</text><text class="s" x="14" y="162">into a ring of 3 textures</text><path class="ar gpu" d="M36 176V192"/><path class="ah gpu" d="M36 198l-5 -9h10z"/><rect class="bx gpu" x="1" y="201" width="338" height="72" rx="12"/><text class="t" x="14" y="226">D3D11 texture</text><text class="s tg" x="326" y="224" text-anchor="end">handover</text><text class="s" x="14" y="246">shared by NT handle</text><path class="ar gpu" d="M36 276V292"/><path class="ah gpu" d="M36 298l-5 -9h10z"/><rect class="bx gpu" x="1" y="301" width="338" height="72" rx="12"/><text class="t" x="14" y="326">Window (DX12)</text><text class="s tg" x="326" y="324" text-anchor="end">the app</text><text class="s" x="14" y="346">wgpu imports it once</text></svg></div>
+<div class="lane-m"><p class="lane-title">Linux</p><svg class="dg dg-narrow" viewBox="0 0 340 374" role="img" aria-label="Linux: mpv decodes, then mpv draws, OpenGL, then Vulkan memory, then Window (Vulkan). No copy through the CPU after drawing; VA-API's decoded frames are copied back first."><rect class="bx " x="1" y="1" width="338" height="72" rx="12"/><text class="t" x="14" y="26">mpv decodes</text><text class="s tg" x="326" y="24" text-anchor="end">host process</text><text class="s" x="14" y="46">VA-API: frames are copied</text><text class="s" x="14" y="62">back before drawing</text><path class="ar " d="M36 76V92"/><path class="ah " d="M36 98l-5 -9h10z"/><rect class="bx gpu" x="1" y="101" width="338" height="72" rx="12"/><text class="t" x="14" y="126">mpv draws, OpenGL</text><text class="s tg" x="326" y="124" text-anchor="end">host process</text><text class="s" x="14" y="146">EGL, on the window's GPU,</text><text class="s" x="14" y="162">into a ring of 3 images</text><path class="ar gpu" d="M36 176V192"/><path class="ah gpu" d="M36 198l-5 -9h10z"/><rect class="bx gpu" x="1" y="201" width="338" height="72" rx="12"/><text class="t" x="14" y="226">Vulkan memory</text><text class="s tg" x="326" y="224" text-anchor="end">handover</text><text class="s" x="14" y="246">exported as an fd</text><path class="ar gpu" d="M36 276V292"/><path class="ah gpu" d="M36 298l-5 -9h10z"/><rect class="bx gpu" x="1" y="301" width="338" height="72" rx="12"/><text class="t" x="14" y="326">Window (Vulkan)</text><text class="s tg" x="326" y="324" text-anchor="end">the app</text><text class="s" x="14" y="346">wgpu imports it once</text></svg></div>
+<div class="lane-m"><p class="lane-title">macOS</p><svg class="dg dg-narrow" viewBox="0 0 340 374" role="img" aria-label="macOS: mpv decodes, then mpv renders pixels, then Pixels in memory, then Window (Metal). Pixels are copied through the CPU."><rect class="bx " x="1" y="1" width="338" height="72" rx="12"/><text class="t" x="14" y="26">mpv decodes</text><text class="s tg" x="326" y="24" text-anchor="end">host process</text><text class="s" x="14" y="46">frames back in RAM</text><path class="ar " d="M36 76V92"/><path class="ah " d="M36 98l-5 -9h10z"/><rect class="bx cpu" x="1" y="101" width="338" height="72" rx="12"/><text class="t" x="14" y="126">mpv renders pixels</text><text class="s tg" x="326" y="124" text-anchor="end">host process</text><text class="s" x="14" y="146">software renderer, RGBA</text><path class="ar cpu" d="M36 176V192"/><path class="ah cpu" d="M36 198l-5 -9h10z"/><text class="cp" x="48" y="191">copy</text><rect class="bx cpu" x="1" y="201" width="338" height="72" rx="12"/><text class="t" x="14" y="226">Pixels in memory</text><text class="s tg" x="326" y="224" text-anchor="end">handover</text><text class="s" x="14" y="246">the CPU hands them on</text><path class="ar cpu" d="M36 276V292"/><path class="ah cpu" d="M36 298l-5 -9h10z"/><text class="cp" x="48" y="291">copy</text><rect class="bx cpu" x="1" y="301" width="338" height="72" rx="12"/><text class="t" x="14" y="326">Window (Metal)</text><text class="s tg" x="326" y="324" text-anchor="end">the app</text><text class="s" x="14" y="346">wgpu write_texture</text></svg></div></div>
+      <ul class="legend">
+        <li><svg viewBox="0 0 34 10" aria-hidden="true"><path d="M0 5h27" stroke="var(--brand)" stroke-width="2.5"/><path d="M33 5l-8 -4.5v9z" fill="var(--brand)"/></svg>stays on the GPU</li>
+        <li><svg viewBox="0 0 34 10" aria-hidden="true"><path d="M0 5h27" stroke="var(--muted)" stroke-width="2" stroke-dasharray="5 4"/><path d="M33 5l-8 -4.5v9z" fill="var(--muted)"/></svg>copied through the CPU</li>
+      </ul>
+    </div>
+
+    <article class="stop" id="tour-settings" aria-labelledby="h-settings">
+      <div>
+        <p class="eyebrow">Settings</p>
+        <h3 id="h-settings">Settings for this device, and for the server</h3>
+        <p>What belongs to this computer is kept here; what belongs to your account stays on the Jellyfin server.</p>
+        <ul class="ticks">
+          <li>Light and dark themes, or follow the system; text size and zoom.</li>
+          <li>The interface in English, European Portuguese and Spanish.</li>
+          <li>A notice when a new release is out.</li>
+          <li>Logs in a daily file.<small>Settings → Logs → Open log folder opens it; attach the log to bug reports.</small></li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <div class="window">
+          <div class="titlebar" aria-hidden="true"><span class="title"><b>Tabbyfin</b> · Settings</span><span class="winctl"><i></i><i></i><i></i></span></div>
+          <div class="pic"><div class="pic-in"><img src="assets/screenshots/settings.webp" srcset="assets/screenshots/settings-640.webp 640w, assets/screenshots/settings.webp 1280w" sizes="(max-width: 720px) 155vw, (max-width: 1080px) 92vw, 50vw" width="1280" height="800" alt="Settings: sections for this device (Appearance, Playback, Subtitles, Storage, About) and for the Jellyfin server (Account, Languages, Home), with the Appearance and Playback options open." loading="lazy" decoding="async"><span class="spot end" aria-hidden="true"><span class="spot-label">Theme, text size, animations</span></span></div></div>
+        </div>
+        <figcaption>Settings, for this device and for the server.</figcaption>
+      </figure>
+    </article>
+
+    <div class="surface beside signin">
+      <div class="jelly-spot"><img src="assets/jelly-shut.svg" alt="" width="150" height="150" loading="lazy" decoding="async"></div>
+      <div>
+        <h3>Signing in</h3>
+        <p>Sign in with a username and password, or with Quick Connect. The session is kept between launches, and the token is stored in the system keychain.</p>
+      </div>
+    </div>
+
+    <div class="pair">
+      <div class="surface">
+        <div class="icon-circle" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/></svg></div>
+        <h3>Remote control</h3>
+        <p>From the Jellyfin web dashboard or a phone app: play items here, pause, seek, skip to the next item, change the volume and tracks, or send a message.</p>
+      </div>
+      <div class="surface">
+        <div class="icon-circle" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><circle cx="17" cy="9.5" r="2.5"/><path d="M3 19c.6-3.3 3-5 6-5s5.4 1.7 6 5M15.5 14.2c2.6-.3 4.8 1 5.5 4"/></svg></div>
+        <h3>Watch together</h3>
+        <p>With Jellyfin's SyncPlay: create or join a group from the top bar, and play, pause and seek in sync with the other members.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap download" id="download" aria-labelledby="dl-h">
+    <div class="section-head">
+      <h2 id="dl-h">Download</h2>
+      <p>Version <span data-version>0.3</span><span data-date></span>, for x86_64 Linux and Windows and for macOS 12 or newer. You need a Jellyfin server, 10.11 or newer.</p>
+    </div>
+
+    <div class="oses">
+      <article class="surface os" id="download-windows" aria-labelledby="h-win">
+        <header>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <h3 id="h-win">Windows</h3><span class="yours-tag">Your system</span>
+        </header>
+        <p>Windows 10 or 11, x86_64. libmpv and ANGLE are included.</p>
+        <ul class="pkgs">
+          <li><a class="pkg" data-asset="win-setup" href="https://github.com/lgpy/tabbyfin/releases/latest"><b>Installer</b><span class="file">tabbyfin-*-windows-x86_64-setup.exe</span><span class="get"><span data-size>Download</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span></a></li>
+          <li><a class="pkg" data-asset="win-zip" href="https://github.com/lgpy/tabbyfin/releases/latest"><b>Portable</b><span class="file">tabbyfin-*-windows-x86_64.zip</span><span class="get"><span data-size>Download</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span></a></li>
+        </ul>
+        <ul class="notes">
+          <li><strong>Installer:</strong> installs for your user (no admin rights needed), with a Start-menu entry and an uninstaller in Settings → Apps.</li>
+          <li><strong>Portable:</strong> the same files. Unzip anywhere and run <code>tabbyfin.exe</code>.</li>
+        </ul>
+      </article>
+
+      <article class="surface os" id="download-linux" aria-labelledby="h-linux">
+        <header>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M6.5 9.5l3 2.5-3 2.5M12 15h5"/></svg>
+          <h3 id="h-linux">Linux</h3><span class="yours-tag">Your system</span>
+        </header>
+        <p>x86_64, as a package for Debian and Ubuntu, an AppImage, a Flatpak bundle or a tarball.</p>
+        <ul class="pkgs">
+          <li><a class="pkg" data-asset="deb" href="https://github.com/lgpy/tabbyfin/releases/latest"><b>Debian, Ubuntu</b><span class="file">tabbyfin_*_amd64.deb</span><span class="get"><span data-size>Download</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span></a></li>
+          <li><a class="pkg" data-asset="appimage" href="https://github.com/lgpy/tabbyfin/releases/latest"><b>AppImage, other Linux</b><span class="file">tabbyfin-*-linux-x86_64.AppImage</span><span class="get"><span data-size>Download</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span></a></li>
+          <li><a class="pkg" data-asset="flatpak" href="https://github.com/lgpy/tabbyfin/releases/latest"><b>Flatpak bundle</b><span class="file">tabbyfin-*.flatpak</span><span class="get"><span data-size>Download</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span></a></li>
+          <li><a class="pkg" data-asset="tar" href="https://github.com/lgpy/tabbyfin/releases/latest"><b>Tarball</b><span class="file">tabbyfin-*-linux-x86_64.tar.gz</span><span class="get"><span data-size>Download</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span></a></li>
+        </ul>
+        <ul class="notes">
+          <li><strong>.deb:</strong> <code>sudo apt install ./<span data-name="deb">tabbyfin_*_amd64.deb</span></code> pulls in <code>libmpv2</code>, Vulkan and the windowing libraries.</li>
+          <li><strong>AppImage:</strong> <code>chmod +x</code> it and run it. libmpv is included. Needs a Vulkan driver, the desktop's usual windowing libraries (xkbcommon, Wayland or X11) and a 2022 or newer distribution (glibc 2.35: Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21…). Without FUSE, run it with <code>--appimage-extract-and-run</code>.</li>
+          <li><strong>Flatpak:</strong> <code>flatpak install --user <span data-name="flatpak">tabbyfin-*.flatpak</span></code> (it fetches the freedesktop runtime from Flathub), then start it from the menu or with <code>flatpak run io.github.lgpy.tabbyfin</code>. mpv is included.</li>
+          <li><strong>Tarball:</strong> needs libmpv (<code>libmpv.so.2</code>), a Vulkan driver and the desktop's usual windowing libraries installed.</li>
+        </ul>
+      </article>
+
+      <article class="surface os" id="download-macos" aria-labelledby="h-mac">
+        <header>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="11" rx="1.6"/><path d="M2 19h20l-1.5-2.5h-17z"/></svg>
+          <h3 id="h-mac">macOS</h3><span class="yours-tag">Your system</span>
+        </header>
+        <p>macOS 12 or newer, on Apple silicon or Intel.</p>
+        <ul class="pkgs">
+          <li><a class="pkg" data-asset="mac-arm" href="https://github.com/lgpy/tabbyfin/releases/latest"><b>Apple silicon</b><span class="file">tabbyfin-*-macos-aarch64.zip</span><span class="get"><span data-size>Download</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span></a></li>
+          <li><a class="pkg" data-asset="mac-intel" href="https://github.com/lgpy/tabbyfin/releases/latest"><b>Intel</b><span class="file">tabbyfin-*-macos-x86_64.zip</span><span class="get"><span data-size>Download</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span></a></li>
+        </ul>
+        <ul class="notes">
+          <li><strong>Playback needs mpv:</strong> <code>brew install mpv</code>.</li>
+        </ul>
+        <p class="notice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>On macOS the video is drawn in software, not straight from the GPU as on Linux and Windows.</span></p>
+      </article>
+    </div>
+
+    <div class="surface beside firstrun">
+      <div class="jelly-spot"><img src="assets/jelly-puzzled.svg" alt="" width="150" height="150" loading="lazy" decoding="async"></div>
+      <div>
+        <h3>The first launch may ask a question</h3>
+        <div class="notices">
+          <p class="notice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span><strong>Windows:</strong> the build isn't code-signed, so SmartScreen may ask before it runs.</span></p>
+          <p class="notice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span><strong>macOS:</strong> the app is ad-hoc signed, not notarised. Right-click it and choose Open the first time.</span></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="after">
+      <div class="surface early">
+        <img src="assets/icon.svg" alt="" width="72" height="72" loading="lazy" decoding="async">
+        <div>
+          <h3>Early days</h3>
+          <p>Tabbyfin is at version <span data-version>0.3</span>, and some things are still missing; the <a href="https://github.com/lgpy/tabbyfin/blob/main/docs/ROADMAP.md">roadmap</a> lists them.</p>
+          <p>In the works: Android phones and tablets (an APK is attached to releases), and Chromecast.</p>
+        </div>
+      </div>
+      <div class="surface">
+        <h3>Build from source</h3>
+        <p>With <a href="https://mise.jdx.dev">mise</a>, which installs the pinned Rust toolchain and tools:</p>
+        <pre><code>mise install
+mise run run</code></pre>
+        <p>Plain <code>cargo run</code> works too. The <a href="https://github.com/lgpy/tabbyfin#build-from-source">README</a> lists the system libraries for each OS.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap cols">
+    <div class="jelly-spot"><img src="assets/jelly-asleep.svg" alt="" width="110" height="110" loading="lazy" decoding="async"></div>
+    <div class="links">
+      <div>
+        <p><a href="https://github.com/lgpy/tabbyfin">Tabbyfin on GitHub</a> · free and open source under the <a href="https://github.com/lgpy/tabbyfin/blob/main/LICENSE">GPL-3.0-or-later</a>.</p>
+        <p>Tabbyfin is not affiliated with the Jellyfin project.</p>
+      </div>
+      <div>
+        <p>Films in the screenshots: Blender Studio's <a href="https://studio.blender.org/films/">open movies</a> (CC BY), with posters and metadata from TMDb.</p>
+      </div>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

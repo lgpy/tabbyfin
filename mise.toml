@@ -138,3 +138,13 @@ run = "bash packaging/ci-build.sh"
 [tasks."ci:status"]
 description = "Show recent CI runs"
 run = "gh run list --workflow ci.yml --limit 10"
+
+# Website (site/, published by .github/workflows/pages.yml)
+
+[tasks.site]
+description = "Serve the website on http://localhost:8137"
+run = "python -m http.server 8137 --bind 127.0.0.1 --directory site"
+
+[tasks."site:assets"]
+description = "Regenerate the website's images from docs/screenshots and the app's icon (needs ImageMagick)"
+run = "bash dev/site-assets.sh"
