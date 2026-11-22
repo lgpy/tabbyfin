@@ -471,7 +471,9 @@ fn the_sleep_timers_end_of_item_holds_the_next_episode() {
     let item = state.item.clone();
     assert!(state.next.is_some());
 
-    services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
     assert_eq!(services.end_for_test(), None, "held back");
     assert_eq!(services.playback.sleep(), None, "and spent");
 }
@@ -491,7 +493,9 @@ fn the_sleep_timers_end_of_item_holds_repeat_too() {
         let services = harness.state_mut().services_mut().expect("the services");
         let item = services.playback.now_playing().expect("the session").item.clone();
         services.set_repeat(mode);
-        services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+        services
+            .playback
+            .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
         assert_eq!(services.end_for_test(), None, "repeat {name}: nothing plays after it");
         assert!(
             services
@@ -520,7 +524,9 @@ fn the_sleep_timers_end_of_item_survives_a_restart_of_its_item() {
     state.autoplay = true;
     let (item, source) = (state.item.clone(), state.source.clone());
     let next = state.next.clone().expect("a next episode");
-    services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
 
     // The same item again, as a restart does it.
     services.reload(PlayOptions::default());
@@ -529,11 +535,17 @@ fn the_sleep_timers_end_of_item_survives_a_restart_of_its_item() {
     let state = services.playback.now_playing_mut().expect("the new session");
     state.autoplay = true;
     state.next = Some(next.clone());
-    assert_eq!(services.end_for_test(), None, "so nothing plays after the restarted session");
+    assert_eq!(
+        services.end_for_test(),
+        None,
+        "so nothing plays after the restarted session"
+    );
     assert_eq!(services.playback.sleep(), None);
 
     // Another item starting takes it away.
-    services.playback.set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
+    services
+        .playback
+        .set_sleep(Some(SleepTimer::EndOfItem(item.id.clone())));
     services.play(&next, PlayOptions::default());
     assert_eq!(services.playback.sleep(), None, "not for another item");
 }
@@ -642,13 +654,20 @@ fn a_restart_of_the_item_keeps_the_picture_choices() {
     choose(&mut harness);
     let services = harness.state_mut().services_mut().expect("the services");
     services.lose_for_test();
-    assert_eq!(services.reconnect_options_for_test().and_then(|o| o.picture), Some(kept));
+    assert_eq!(
+        services.reconnect_options_for_test().and_then(|o| o.picture),
+        Some(kept)
+    );
 
     // Another item starts as a new one does.
     let mut harness = desktop_player(&server);
     choose(&mut harness);
     let services = harness.state_mut().services_mut().expect("the services");
-    let next = services.playback.now_playing().and_then(|s| s.next.clone()).expect("a next episode");
+    let next = services
+        .playback
+        .now_playing()
+        .and_then(|s| s.next.clone())
+        .expect("a next episode");
     services.play(&next, PlayOptions::default());
     assert_eq!(services.last_started_for_test().1.and_then(|o| o.picture), None);
 }

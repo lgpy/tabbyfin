@@ -330,7 +330,10 @@ mod tests {
     fn stepping_back_in_a_shuffled_queue_keeps_the_way_back_to_its_order() {
         let mut queue = queue(&["b", "c", "d"]);
         queue.set_shuffle(true);
-        queue.advance(&item(queue.front().expect("an entry").id.clone().as_str()), Some(&item("a")));
+        queue.advance(
+            &item(queue.front().expect("an entry").id.clone().as_str()),
+            Some(&item("a")),
+        );
         let playing = item("x");
         queue.step_back(&playing);
         assert_eq!(queue.front().map(|item| item.id.as_str()), Some("x"));
@@ -413,10 +416,15 @@ mod tests {
     #[test]
     fn repeat_all_wraps_even_when_a_following_episode_is_offered() {
         // A lone item, with the series' next episode as `next`: it plays again.
-        let mut lone = LocalQueue::default();
-        lone.repeat = RepeatMode::RepeatAll;
+        let mut lone = LocalQueue {
+            repeat: RepeatMode::RepeatAll,
+            ..LocalQueue::default()
+        };
         let after = lone.after_end(&item("a"), Some(item("episode-after")));
-        assert!(matches!(&after, AfterEnd::Restart(first) if first.id == "a"), "{after:?}");
+        assert!(
+            matches!(&after, AfterEnd::Restart(first) if first.id == "a"),
+            "{after:?}"
+        );
 
         // With entries waiting, they come first.
         let mut waiting = queue(&["b"]);
@@ -427,7 +435,10 @@ mod tests {
         // Without repeat all, the following episode plays.
         let mut off = LocalQueue::default();
         let after = off.after_end(&item("a"), Some(item("episode-after")));
-        assert!(matches!(&after, AfterEnd::Next(next) if next.id == "episode-after"), "{after:?}");
+        assert!(
+            matches!(&after, AfterEnd::Next(next) if next.id == "episode-after"),
+            "{after:?}"
+        );
     }
 
     #[test]

@@ -491,7 +491,11 @@ fn repeat_all_wraps_before_the_following_episode() {
         state.autoplay = true;
         state.next = Some(episode(2));
     }
-    assert_eq!(services.end_for_test(), Some(episode(1).id), "the lone item plays again");
+    assert_eq!(
+        services.end_for_test(),
+        Some(episode(1).id),
+        "the lone item plays again"
+    );
 
     // Without repeat the following episode plays, as before.
     let (_server, mut harness) = playing();
@@ -522,10 +526,7 @@ fn repeat_one_keeps_the_version_and_tracks() {
         state.source.id.clone()
     };
     // It was started with the defaults and the user chose since; what plays again is the choice.
-    assert_eq!(
-        services.end_with_for_test(PlayOptions::default()),
-        Some(episode(1).id)
-    );
+    assert_eq!(services.end_with_for_test(PlayOptions::default()), Some(episode(1).id));
     let (_, options) = services.last_started_for_test();
     let options = options.expect("a new session");
     assert_eq!(options.media_source_id, Some(source_id));
@@ -581,4 +582,3 @@ fn the_previous_button_offers_what_the_queue_played() {
     let previous = harness.state().now_playing().and_then(|state| state.previous.clone());
     assert_eq!(previous.map(|item| item.id), Some(episode(1).id));
 }
-

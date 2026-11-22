@@ -1458,7 +1458,10 @@ impl Services {
     /// What the waiting reconnect starts with.
     #[cfg(test)]
     pub fn reconnect_options_for_test(&self) -> Option<PlayOptions> {
-        self.playback.reconnect.as_ref().map(|reconnect| reconnect.options.clone())
+        self.playback
+            .reconnect
+            .as_ref()
+            .map(|reconnect| reconnect.options.clone())
     }
 
     /// The item the last session was started for, and what it was started with.
@@ -1811,7 +1814,11 @@ impl Services {
     /// Whether the player offers a sleep timer: not in a SyncPlay group, where the pause it
     /// makes would be every member's, and the end of an item is the server's to follow.
     pub fn sleep_timer_offered(&self) -> bool {
-        !self.in_group() && !self.playback.now_playing().is_some_and(|state| state.group_item.is_some())
+        !self.in_group()
+            && !self
+                .playback
+                .now_playing()
+                .is_some_and(|state| state.group_item.is_some())
     }
 
     /// Fires the sleep timer when it's due: pauses (so the position is reported and kept) and holds
@@ -1971,12 +1978,15 @@ impl Services {
         // What a reconnect keeps of the picture choices.
         let picture = playback.current().map(NowPlaying::picture);
         // Repeat one plays it again as it played, from its start.
-        let replay = playback.current().map(NowPlaying::track_options).unwrap_or_else(|| PlayOptions {
-            media_source_id: running.options.media_source_id.clone(),
-            audio_stream_index: running.options.audio_stream_index,
-            subtitle: running.options.subtitle,
-            ..Default::default()
-        });
+        let replay = playback
+            .current()
+            .map(NowPlaying::track_options)
+            .unwrap_or_else(|| PlayOptions {
+                media_source_id: running.options.media_source_id.clone(),
+                audio_stream_index: running.options.audio_stream_index,
+                subtitle: running.options.subtitle,
+                ..Default::default()
+            });
         let next = playback.take_next(running.generation);
         let group_item = running.options.group_item.clone();
         // What the queue's modes make of an item that played to its end; a group's queue is the
@@ -3203,8 +3213,8 @@ mod tests {
     use player::PlayerEvent;
 
     use super::{
-        Adjustments, Outgoing, Reporting, StepQuiet, UiCommand, VOLUME_REPORT_AFTER, added_subtitle, adjacent, mpv_subtitle_id,
-        mpv_track_id, volume_level, volume_max,
+        Adjustments, Outgoing, Reporting, StepQuiet, UiCommand, VOLUME_REPORT_AFTER, added_subtitle, adjacent,
+        mpv_subtitle_id, mpv_track_id, volume_level, volume_max,
     };
 
     #[test]
@@ -3378,7 +3388,10 @@ mod tests {
 
         quiet.on_command(&UiCommand::FrameStep(true), now);
         assert!(quiet.hushes(&pause, later(100)) && quiet.hushes(&seek, later(100)));
-        assert!(!quiet.hushes(&PlayerEvent::Volume(50.), later(100)), "only the pause and the seek");
+        assert!(
+            !quiet.hushes(&PlayerEvent::Volume(50.), later(100)),
+            "only the pause and the seek"
+        );
         assert!(!quiet.hushes(&pause, later(700)), "and not for long");
 
         // A pause, unpause or seek the user asks for inside the window ends it: its echo is
