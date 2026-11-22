@@ -158,7 +158,25 @@ pub enum UiCommand {
     ToggleMute,
     Audio(i32),
     Subtitle(SubtitleChoice),
+    /// A subtitle the server downloaded while this plays: loaded into mpv and selected.
+    AddSubtitle(Box<AddedSubtitle>),
     Stop,
+}
+
+/// A subtitle added to the item while it plays (the search's download), with what the session
+/// needs to number mpv's tracks again.
+#[derive(Debug, Clone)]
+pub struct AddedSubtitle {
+    /// The new stream's index in `source`.
+    pub index: i32,
+    pub url: Url,
+    pub title: String,
+    pub language: Option<String>,
+    /// The item's streams after the server's refresh.
+    pub source: MediaSourceInfo,
+    /// The external subtitles in the order mpv has them: the ones it had, then the new one
+    /// (their indexes may have moved with the refresh).
+    pub files: Vec<i32>,
 }
 
 /// Session to UI messages.
@@ -966,6 +984,51 @@ impl Services {
         }
     }
 
+    /// Takes in a subtitle the server downloaded for `item_id`, if that still plays: `sources`
+    /// are the item's versions as the server lists them now. Direct play loads it into mpv
+    /// and selects it with no restart; a transcode restarts with it chosen, as any switch to a
+    /// subtitle the stream doesn't carry does. Returns whether it was taken in.
+    pub fn add_downloaded_subtitle(&mut self, item_id: &str, sources: &[MediaSourceInfo]) -> bool {
+        if self.is_casting() {
+            return false;
+        }
+        let client = self.session.client.clone();
+        let Some(state) = self
+            .playback
+            .now_playing
+            .as_mut()
+            .filter(|state| state.item.id == item_id)
+        else {
+            return false;
+        };
+        let Some(new) = sources.iter().find(|source| source.id == state.source.id) else {
+            return false;
+        };
+        let Some((added, files)) = added_subtitle(&state.source, &state.stream.subtitle_files, new) else {
+            return false;
+        };
+        let index = added.index;
+        if state.is_transcoding() {
+            state.source = new.clone();
+            state.subtitle = SubtitleChoice::Stream(index);
+            self.restart();
+            return true;
+        }
+        let command = UiCommand::AddSubtitle(Box::new(AddedSubtitle {
+            index,
+            url: client.subtitle_url(item_id, &new.id, added),
+            title: added.display_title.clone().unwrap_or_else(|| "External".into()),
+            language: added.language.clone(),
+            source: new.clone(),
+            files: files.clone(),
+        }));
+        state.source = new.clone();
+        state.stream.subtitle_files = files;
+        state.subtitle = SubtitleChoice::Stream(index);
+        state.send(command);
+        true
+    }
+
     /// Applies changes from the settings menu. Speed stays at normal in a SyncPlay group,
     /// whose drift correction uses it.
     pub fn adjust(&mut self, adjustments: Adjustments) {
@@ -1269,18 +1332,58 @@ fn mpv_track_id(source: &MediaSourceInfo, kind: MediaStreamType, index: i32) -> 
 
 /// mpv's id for a subtitle once the file is loaded and the external ones were added (after
 /// the embedded tracks, in `media_streams` order).
-fn mpv_subtitle_id(source: &MediaSourceInfo, index: i32) -> Option<usize> {
+fn mpv_subtitle_id(source: &MediaSourceInfo, files: &[i32], index: i32) -> Option<usize> {
     if let Some(id) = mpv_track_id(source, MediaStreamType::Subtitle, index) {
         return Some(id);
     }
-    let subtitles = |external| {
-        source
-            .media_streams
-            .iter()
-            .filter(move |s| s.kind == MediaStreamType::Subtitle && s.is_external == external)
-    };
-    let position = subtitles(true).position(|s| s.index == index)?;
-    Some(subtitles(false).count() + position + 1)
+    let embedded = source
+        .media_streams
+        .iter()
+        .filter(|s| s.kind == MediaStreamType::Subtitle && !s.is_external)
+        .count();
+    let position = files.iter().position(|&file| file == index)?;
+    Some(embedded + position + 1)
+}
+
+/// How an external subtitle is told from the others when the server's list of streams is read
+/// again: by its file, or by its labels when it has none (a downloaded copy's).
+fn subtitle_key(stream: &MediaStream) -> (Option<&str>, Option<&str>, Option<&str>, Option<&str>) {
+    match stream.path.as_deref() {
+        Some(path) => (Some(path), None, None, None),
+        None => (
+            None,
+            stream.display_title.as_deref(),
+            stream.language.as_deref(),
+            stream.codec.as_deref(),
+        ),
+    }
+}
+
+/// The external subtitle `new` has that `old` didn't, and `files` (the externals in mpv's
+/// order) renumbered for `new`, with the new one last. Adding a subtitle file can move the
+/// others' indexes, so they're matched by [`subtitle_key`] rather than by index. `None` when
+/// nothing was added.
+fn added_subtitle<'a>(
+    old: &MediaSourceInfo,
+    old_files: &[i32],
+    new: &'a MediaSourceInfo,
+) -> Option<(&'a MediaStream, Vec<i32>)> {
+    let mut unmatched: Vec<&MediaStream> = new
+        .media_streams
+        .iter()
+        .filter(|s| s.kind == MediaStreamType::Subtitle && s.is_external)
+        .collect();
+    let mut files = Vec::with_capacity(old_files.len() + 1);
+    for stream in old_files
+        .iter()
+        .filter_map(|&index| old.media_streams.iter().find(|s| s.index == index))
+    {
+        let at = unmatched.iter().position(|s| subtitle_key(s) == subtitle_key(stream))?;
+        files.push(unmatched.remove(at).index);
+    }
+    let added = *unmatched.first()?;
+    files.push(added.index);
+    Some((added, files))
 }
 
 /// The downloaded copy of `item`, when the account has one and the version asked for is the
@@ -1570,7 +1673,7 @@ async fn run_session(
     let local_markers = local
         .as_ref()
         .map(|local| (local.chapters.clone(), local.segments.clone()));
-    let (source, url, method, subtitle_files, play_session_id) = match local {
+    let (mut source, url, method, subtitle_files, play_session_id) = match local {
         Some(local) => {
             tracing::info!(item = %item.name, path = %local.path.display(), "playing a downloaded file");
             let url = Url::from_file_path(&local.path)
@@ -1623,7 +1726,7 @@ async fn run_session(
         (SubtitleChoice::Auto, Some(index)) => SubtitleChoice::Stream(index),
         (choice, _) => choice,
     };
-    let stream = StreamInfo {
+    let mut stream = StreamInfo {
         method,
         subtitle_files: subtitle_files.iter().map(|(stream, _)| stream.index).collect(),
         burned_subtitle: (method == PlayMethod::Transcode)
@@ -1795,6 +1898,16 @@ async fn run_session(
             Some(command) = channels.commands.recv() => {
                 tracing::debug!(?command, "player command");
                 let send_now = reporting.on_command(&command);
+                if let UiCommand::AddSubtitle(added) = &command {
+                    match player.add_subtitle(added.url.as_str(), &added.title, added.language.as_deref(), true).await {
+                        Ok(()) => {
+                            source = added.source.clone();
+                            stream.subtitle_files = added.files.clone();
+                            report.subtitle_stream_index = Some(added.index);
+                        }
+                        Err(err) => tracing::warn!("couldn't add the downloaded subtitle: {err}"),
+                    }
+                }
                 if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
@@ -1944,7 +2057,8 @@ impl Reporting {
             | UiCommand::SeekBy(_)
             | UiCommand::SeekTo(_)
             | UiCommand::Audio(_)
-            | UiCommand::Subtitle(_) => self.progress(),
+            | UiCommand::Subtitle(_)
+            | UiCommand::AddSubtitle(_) => self.progress(),
             _ => Outgoing::Nothing,
         }
     }
@@ -2031,7 +2145,9 @@ async fn apply_command(
                     .iter()
                     .position(|&i| i == index)
                     .map(|i| json!(i + 1)),
-                SubtitleChoice::Stream(index) => mpv_subtitle_id(source, index).map(|id| json!(id)),
+                SubtitleChoice::Stream(index) => {
+                    mpv_subtitle_id(source, &stream.subtitle_files, index).map(|id| json!(id))
+                }
                 SubtitleChoice::Off => Some(json!("no")),
                 SubtitleChoice::Auto => Some(json!("auto")),
             };
@@ -2041,6 +2157,8 @@ async fn apply_command(
             }
             Ok(())
         }
+        // The session takes it in itself, since it renumbers its tracks.
+        UiCommand::AddSubtitle(_) => Ok(()),
         UiCommand::Stop => player.quit().await,
     }
 }
@@ -2103,8 +2221,8 @@ mod tests {
     use player::PlayerEvent;
 
     use super::{
-        Adjustments, Outgoing, Reporting, UiCommand, VOLUME_REPORT_AFTER, adjacent, mpv_subtitle_id, mpv_track_id,
-        volume_level,
+        Adjustments, Outgoing, Reporting, UiCommand, VOLUME_REPORT_AFTER, added_subtitle, adjacent, mpv_subtitle_id,
+        mpv_track_id, volume_level,
     };
 
     #[test]
@@ -2199,10 +2317,43 @@ mod tests {
     #[test]
     fn external_subtitles_follow_embedded_ones() {
         let source = source();
-        assert_eq!(mpv_subtitle_id(&source, 4), Some(1));
-        assert_eq!(mpv_subtitle_id(&source, 0), Some(2));
-        assert_eq!(mpv_subtitle_id(&source, 5), Some(3));
-        assert_eq!(mpv_subtitle_id(&source, 9), None);
+        let files = [0, 5];
+        assert_eq!(mpv_subtitle_id(&source, &files, 4), Some(1));
+        assert_eq!(mpv_subtitle_id(&source, &files, 0), Some(2));
+        assert_eq!(mpv_subtitle_id(&source, &files, 5), Some(3));
+        assert_eq!(mpv_subtitle_id(&source, &files, 9), None);
+        // mpv's order is the order they were added in, not the streams' order.
+        assert_eq!(mpv_subtitle_id(&source, &[5, 0], 5), Some(2));
+    }
+
+    fn external(index: i32, path: &str) -> MediaStream {
+        let mut stream = stream(index, MediaStreamType::Subtitle, true);
+        stream.path = Some(path.into());
+        stream
+    }
+
+    #[test]
+    fn a_downloaded_subtitle_is_found_among_moved_indexes() {
+        let with = |streams: Vec<MediaStream>| MediaSourceInfo {
+            media_streams: streams,
+            ..source()
+        };
+        let old = with(vec![
+            stream(0, MediaStreamType::Video, false),
+            external(1, "m.en.srt"),
+            external(2, "m.pt.srt"),
+        ]);
+        // `m.es.srt` sorts between the two, so the Portuguese one moves up.
+        let new = with(vec![
+            stream(0, MediaStreamType::Video, false),
+            external(1, "m.en.srt"),
+            external(2, "m.es.srt"),
+            external(3, "m.pt.srt"),
+        ]);
+        let (added, files) = added_subtitle(&old, &[1, 2], &new).expect("a new subtitle");
+        assert_eq!((added.index, files), (2, vec![1, 3, 2]));
+        // Nothing new: the same list again.
+        assert!(added_subtitle(&old, &[1, 2], &old).is_none());
     }
 
     #[test]

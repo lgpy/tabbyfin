@@ -332,6 +332,7 @@ pub(super) fn action_look(action: ItemAction, item: &BaseItemDto, episode: Optio
         | ItemAction::ToggleFavorite
         | ItemAction::Download
         | ItemAction::AddToPlaylist
+        | ItemAction::SearchSubtitles
         | ItemAction::EditPlaylist
         | ItemAction::DeletePlaylist => ActionLook {
             icon: ICON_MORE_HORIZ,

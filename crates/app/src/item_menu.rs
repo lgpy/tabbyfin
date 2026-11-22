@@ -108,6 +108,11 @@ pub fn can_add_to_playlist(item: &BaseItemDto) -> bool {
     is_playable(item) || matches!(item.kind, BaseItemKind::Series | BaseItemKind::Season)
 }
 
+/// Movies and episodes are what the server's subtitle providers have subtitles for.
+pub fn can_search_subtitles(item: &BaseItemDto) -> bool {
+    matches!(item.kind, BaseItemKind::Movie | BaseItemKind::Episode)
+}
+
 /// What has watched and favorite state worth setting from a card.
 pub fn can_mark(item: &BaseItemDto) -> bool {
     can_add_to_playlist(item) || item.kind == BaseItemKind::BoxSet

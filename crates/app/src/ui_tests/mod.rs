@@ -51,6 +51,7 @@ pub mod settings;
 pub mod shelf;
 pub mod shell;
 pub mod states;
+pub mod subtitle_search;
 pub mod theme;
 pub mod toasts;
 pub mod touch;
@@ -171,6 +172,42 @@ impl FixtureServer {
             route,
             ResponseTemplate::new(200).set_body_string(body.to_string()),
         )
+    }
+
+    /// Answers `route` with `body` after `delay`: a state that shows while the answer is on its
+    /// way.
+    pub fn json_delayed(
+        &self,
+        http_method: &'static str,
+        route: &'static str,
+        body: &serde_json::Value,
+        delay: Duration,
+    ) {
+        self.respond(
+            http_method,
+            route,
+            ResponseTemplate::new(200)
+                .set_body_string(body.to_string())
+                .set_delay(delay),
+        )
+    }
+
+    /// Answers the first request to `route` with `body`, and the ones after it by whatever else
+    /// is mounted there: an item before and after the server's refresh adds a stream to it.
+    /// Mount this before the answer for the rest.
+    pub fn json_once(&self, http_method: &'static str, route: &'static str, body: &serde_json::Value) {
+        let template = ResponseTemplate::new(200)
+            .set_body_string(body.to_string())
+            .insert_header("content-type", "application/json");
+        let mock = self.mock.clone();
+        block_on(async move {
+            Mock::given(method(http_method))
+                .and(path(route))
+                .respond_with(template)
+                .up_to_n_times(1)
+                .mount(&mock)
+                .await;
+        });
     }
 
     /// Answers `route` with fixture `name`, only for a request whose JSON body has `body`'s

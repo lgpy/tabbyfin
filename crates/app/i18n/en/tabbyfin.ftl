@@ -615,3 +615,21 @@ syncplay-user-joined = { $user } joined
 syncplay-user-left = { $user } left
 syncplay-error = SyncPlay: { $message }
 syncplay-load-failed = Couldn't load the group's item: { $message }
+
+item-search-subtitles = Search for subtitles…
+player-search-subtitles = Search for subtitles…
+subtitle-search-title = Search for subtitles
+subtitle-search-language = Language
+subtitle-search-searching = Searching…
+subtitle-search-none = No subtitles found in { $language }. If a search never finds any, the server may have no subtitle provider set up; an administrator can add one, such as Open Subtitles, under the dashboard's plugins.
+subtitle-search-forbidden = Your account isn't allowed to search for subtitles.
+subtitle-search-downloading = Downloading…
+subtitle-search-added = Subtitle added
+subtitle-search-not-downloaded = The server couldn't download that subtitle. Try another one.
+subtitle-search-exact = Exact match
+subtitle-search-downloads = { $count ->
+    [one] { $digits } download
+   *[other] { $digits } downloads
+  }
+subtitle-search-rating = Rated { $rating }
+subtitle-search-row-label = { $name }, { $detail }

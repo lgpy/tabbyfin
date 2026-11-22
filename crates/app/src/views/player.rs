@@ -49,13 +49,14 @@ use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_FAST_FORWARD,
     ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT,
-    ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_SEARCH, ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
 
 use crate::cast::Casting;
 use crate::i18n::{self, tr};
+use crate::item_menu;
 use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::motion;
@@ -66,6 +67,7 @@ use crate::theme::{self, over_video};
 use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
+use crate::views::subtitle_search::{Finished, SubtitleSearch};
 use crate::widgets::badge;
 use crate::widgets::button::Focus;
 use crate::widgets::countdown_pill;
@@ -199,6 +201,8 @@ pub struct PlayerPage {
     sheet: Option<phone::Sheet>,
     /// The subtitle track the phone's subtitles button last turned off, which it turns back on.
     last_subtitle: Option<i32>,
+    /// The *Search for subtitles* dialog, while it's open.
+    subtitle_search: Option<SubtitleSearch>,
 }
 
 impl PlayerPage {
@@ -230,6 +234,7 @@ impl PlayerPage {
             touch: touch::Touch::default(),
             sheet: None,
             last_subtitle: None,
+            subtitle_search: None,
         };
         this.show_controls();
         this
@@ -250,6 +255,7 @@ impl PlayerPage {
             self.show_casting(ui, cx);
             return;
         }
+        self.subtitle_search(cx);
         self.sync_video(cx);
         if let Some(session) = cx.services.playback.now_playing().map(|state| state.session) {
             self.follow_session(ui.ctx(), session);
@@ -263,11 +269,17 @@ impl PlayerPage {
             chapters: egui::Popup::is_id_open(ui.ctx(), chapters_id()) || self.sheet == Some(phone::Sheet::Chapters),
             settings: egui::Popup::is_id_open(ui.ctx(), settings_id()) || self.sheet == Some(phone::Sheet::Settings),
         };
+        let can_search = cx.services.session.user.can_manage_subtitles()
+            && cx
+                .services
+                .playback
+                .now_playing()
+                .is_some_and(|state| item_menu::can_search_subtitles(&state.item));
         let view = cx
             .services
             .playback
             .now_playing()
-            .map(|state| View::read(state, menus, self.show_remaining));
+            .map(|state| View::read(state, menus, self.show_remaining, can_search));
 
         let now = ui.input(|input| input.time);
         if std::mem::take(&mut self.controls_appeared) || self.controls_since.is_none() {
@@ -914,7 +926,7 @@ impl PlayerPage {
                     settings_button = Some(settings);
                 }
                 let subtitles = SettingsTab::Subtitles;
-                if view.subtitles_button {
+                if view.subtitles_button || view.can_search_subtitles {
                     let tip = tr!("player-subtitles");
                     let button = menu_button(ui, ICON_CLOSED_CAPTION, &tip, is_lit(subtitles));
                     if button.clicked() {
@@ -1335,6 +1347,30 @@ impl PlayerPage {
             cx.services.adjust(adjustments);
             self.show_controls();
         }
+        if choice.search
+            && let Some(item) = cx.services.playback.now_playing().map(|state| state.item.clone())
+        {
+            egui::Popup::close_id(cx.ctx, settings_id());
+            self.sheet = None;
+            self.subtitle_search = Some(SubtitleSearch::new(cx, &item));
+        }
+    }
+
+    /// The subtitle search while it's open. A subtitle it added to what still plays is loaded
+    /// into the player and selected.
+    fn subtitle_search(&mut self, cx: &mut PageCx) {
+        let Some(dialog) = &mut self.subtitle_search else {
+            return;
+        };
+        let item_id = dialog.item_id().to_owned();
+        match dialog.show(cx) {
+            Finished::Open => {}
+            Finished::Closed => self.subtitle_search = None,
+            Finished::Added(sources) => {
+                self.subtitle_search = None;
+                cx.services.add_downloaded_subtitle(&item_id, &sources);
+            }
+        }
     }
 
     /// The cast button's menu while playing here: the TVs found, the one cast to last first.
@@ -1460,6 +1496,9 @@ struct View {
     audio_button: bool,
     /// Any subtitles to choose from.
     subtitles_button: bool,
+    /// The user may search for more (the Subtitles tab ends with *Search for subtitles…*, so it
+    /// is there even with no subtitles to choose).
+    can_search_subtitles: bool,
     /// The subtitle track showing, if one is.
     subtitle_shown: Option<i32>,
     /// The track turning subtitles on would show without one remembered: the source's default,
@@ -1507,6 +1546,8 @@ struct SettingsMenu {
     subtitle_choices: Vec<Choice>,
     default_audio: Option<i32>,
     default_subtitle: Option<i32>,
+    /// Offers *Search for subtitles…* at the end of the Subtitles tab.
+    can_search: bool,
 }
 
 impl SettingsMenu {
@@ -1519,7 +1560,7 @@ impl SettingsMenu {
                 &[SettingsTab::Audio, SettingsTab::Subtitles]
             };
         }
-        if self.subtitle_choices.is_empty() {
+        if self.subtitle_choices.is_empty() && !self.can_search {
             &[SettingsTab::Audio, SettingsTab::General]
         } else {
             &SettingsTab::ALL
@@ -1547,7 +1588,7 @@ struct Menus {
 }
 
 impl View {
-    fn read(state: &NowPlaying, menus: Menus, show_remaining: bool) -> Self {
+    fn read(state: &NowPlaying, menus: Menus, show_remaining: bool, can_search: bool) -> Self {
         let title = state.item.name.clone();
         let title_aside = (state.item.kind == BaseItemKind::Episode).then(|| {
             let (series, _) = card_text(&state.item);
@@ -1643,10 +1684,12 @@ impl View {
                     subtitle_choices,
                     default_audio: state.source.default_audio_stream_index,
                     default_subtitle: state.source.default_subtitle_stream_index,
+                    can_search,
                 }
             }),
             audio_button: tracks::count(&state.source, MediaStreamType::Audio) > 1,
             subtitles_button: tracks::count(&state.source, MediaStreamType::Subtitle) > 0,
+            can_search_subtitles: can_search,
             subtitle_shown: match state.subtitle {
                 SubtitleChoice::Stream(index) => Some(index),
                 SubtitleChoice::Off => None,
@@ -1778,9 +1821,11 @@ impl View {
                 subtitle_choices,
                 default_audio,
                 default_subtitle,
+                can_search: false,
             }),
             audio_button: count(MediaStreamType::Audio) > 1,
             subtitles_button: count(MediaStreamType::Subtitle) > 0,
+            can_search_subtitles: false,
             subtitle_shown,
             subtitle_default: default_subtitle,
             cast: Some(CastView {
@@ -1799,7 +1844,11 @@ impl View {
     /// Which button stays lit while the menu shows `tab`: the tab's own, or the gear for a tab
     /// whose button this item doesn't have.
     fn lit_button(&self, tab: SettingsTab) -> SettingsTab {
-        lit_button(tab, self.audio_button, self.subtitles_button)
+        lit_button(
+            tab,
+            self.audio_button,
+            self.subtitles_button || self.can_search_subtitles,
+        )
     }
 
     /// The labels at the end of the top bar, in order.
@@ -2034,6 +2083,8 @@ struct SettingsChoice {
     audio: Option<i32>,
     subtitle: Option<SubtitleChoice>,
     adjustments: Option<Adjustments>,
+    /// *Search for subtitles…* was picked.
+    search: bool,
 }
 
 /// The settings menu's tabs and the open one's rows: the tracks with their delay, the subtitle
@@ -2091,7 +2142,12 @@ fn settings_body(
                 SUBTITLES_OFF => SubtitleChoice::Off,
                 index => SubtitleChoice::Stream(index),
             });
-            if !menu.casting {
+            if menu.can_search {
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                let entry = Entry::new(tr!("player-search-subtitles")).icon(ICON_SEARCH);
+                choice.search = popup::row(ui, &entry, true, false, over_video::ROW_HOVER).clicked();
+            }
+            if !menu.casting && !menu.subtitle_choices.is_empty() {
                 popup::separator_in(ui, over_video::MENU_BORDER);
                 let delay = adjustments.subtitle_delay;
                 if let Some(step) = delay_stepper(ui, keys.then_some("z  x"), delay) {

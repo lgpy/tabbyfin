@@ -612,3 +612,21 @@ syncplay-user-joined = { $user } se ha unido
 syncplay-user-left = { $user } se ha ido
 syncplay-error = SyncPlay: { $message }
 syncplay-load-failed = No se ha podido cargar el elemento del grupo: { $message }
+
+item-search-subtitles = Buscar subtítulos…
+player-search-subtitles = Buscar subtítulos…
+subtitle-search-title = Buscar subtítulos
+subtitle-search-language = Idioma
+subtitle-search-searching = Buscando…
+subtitle-search-none = No se han encontrado subtítulos en { $language }. Si una búsqueda nunca encuentra ninguno, puede que el servidor no tenga configurado un proveedor de subtítulos; un administrador puede añadir uno, como Open Subtitles, en los complementos del panel de control.
+subtitle-search-forbidden = Tu cuenta no tiene permiso para buscar subtítulos.
+subtitle-search-downloading = Descargando…
+subtitle-search-added = Subtítulo añadido
+subtitle-search-not-downloaded = El servidor no ha podido descargar ese subtítulo. Prueba con otro.
+subtitle-search-exact = Coincidencia exacta
+subtitle-search-downloads = { $count ->
+    [one] { $digits } descarga
+   *[other] { $digits } descargas
+  }
+subtitle-search-rating = Valoración { $rating }
+subtitle-search-row-label = { $name }, { $detail }

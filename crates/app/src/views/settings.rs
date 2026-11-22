@@ -1660,7 +1660,7 @@ impl ServerSettings {
 }
 
 /// The server's cultures as (code, name), sorted by name, one per code.
-fn language_list(cultures: Vec<Culture>) -> Vec<(String, String)> {
+pub(crate) fn language_list(cultures: Vec<Culture>) -> Vec<(String, String)> {
     let mut languages: Vec<(String, String)> = cultures
         .into_iter()
         .filter_map(|culture| {

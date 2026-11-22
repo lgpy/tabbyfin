@@ -482,6 +482,9 @@ pub struct MediaStream {
     pub delivery_method: Option<String>,
     /// Server-relative URL for subtitles delivered as files.
     pub delivery_url: Option<String>,
+    /// Where the file is on the server, which identifies an external subtitle across refreshes
+    /// (its `index` can move when another is added beside it).
+    pub path: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub channels: Option<u32>,
