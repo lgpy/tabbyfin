@@ -81,6 +81,8 @@ pub enum Action {
     SpeedDown,
     SubtitleDelayUp,
     SubtitleDelayDown,
+    /// Fit, fill, stretch, 16:9, 4:3.
+    CycleAspect,
 }
 
 pub struct Binding {
@@ -146,6 +148,7 @@ pub const BINDINGS: &[Binding] = {
         bind(Player, NONE, Key::OpenBracket, SpeedDown),
         bind(Player, NONE, Key::X, SubtitleDelayUp),
         bind(Player, NONE, Key::Z, SubtitleDelayDown),
+        bind(Player, NONE, Key::A, CycleAspect),
     ]
 };
 

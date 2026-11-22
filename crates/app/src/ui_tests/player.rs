@@ -355,3 +355,49 @@ fn the_seek_step_setting_sets_how_far_the_arrows_jump() {
     playback.set_seek_step(None);
     assert_eq!(playback.seek_step(), 10.);
 }
+
+/// A cycles the aspect modes, fit, fill, stretch, 16:9, 4:3 and round to fit, each a command to
+/// the session; each mode sets every property it uses, so the last one's leftovers don't stay.
+#[test]
+fn a_cycles_the_aspect_modes() {
+    use crate::playback::Aspect;
+
+    let _config = ConfigDir::new("player-aspect");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    harness.state_mut().commands();
+
+    for expected in [
+        Aspect::Fill,
+        Aspect::Stretch,
+        Aspect::Widescreen,
+        Aspect::Standard,
+        Aspect::Fit,
+    ] {
+        plain(&mut harness, egui::Key::A);
+        let sent = harness.state_mut().commands();
+        assert!(
+            matches!(sent.as_slice(), [UiCommand::SetAspect(a)] if *a == expected),
+            "{sent:?}"
+        );
+        assert_eq!(harness.state().now_playing().unwrap().aspect, expected);
+    }
+
+    // Not on a player that can't (Media3).
+    harness.state_mut().now_playing_mut().unwrap().mpv = false;
+    plain(&mut harness, egui::Key::A);
+    assert!(harness.state_mut().commands().is_empty());
+
+    let names = |aspect: Aspect| aspect.mpv_properties().map(|(name, _)| name);
+    assert!(Aspect::ALL.iter().all(|&aspect| names(aspect) == names(Aspect::Fit)));
+    let props: Vec<_> = Aspect::Fill.mpv_properties().into_iter().collect();
+    assert_eq!(props[0], ("panscan", serde_json::json!(1.)));
+    assert_eq!(
+        Aspect::Stretch.mpv_properties()[1],
+        ("keepaspect", serde_json::json!(false))
+    );
+    assert_eq!(
+        Aspect::Widescreen.mpv_properties()[2],
+        ("video-aspect-override", serde_json::json!("16:9"))
+    );
+}

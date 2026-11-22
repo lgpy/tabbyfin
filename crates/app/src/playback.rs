@@ -141,6 +141,51 @@ impl Adjustments {
     }
 }
 
+/// How the picture fills the window. Not kept between items.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Aspect {
+    /// The whole picture, in its own aspect, with bars where it doesn't fill the window.
+    #[default]
+    Fit,
+    /// Fills the window, cropping what overflows.
+    Fill,
+    /// Fills the window, distorting the picture.
+    Stretch,
+    /// The picture taken as 16:9 whatever the file says.
+    Widescreen,
+    /// The picture taken as 4:3.
+    Standard,
+}
+
+impl Aspect {
+    pub const ALL: [Self; 5] = [Self::Fit, Self::Fill, Self::Stretch, Self::Widescreen, Self::Standard];
+
+    /// The next mode, after the last the first: what the key cycles through.
+    pub fn next(self) -> Self {
+        let index = Self::ALL.iter().position(|&aspect| aspect == self).unwrap_or(0);
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    /// The mpv properties that make this mode, all of them, so one mode's leftovers don't stay:
+    /// `panscan` crops to fill, `keepaspect` off stretches, `video-aspect-override` retakes the
+    /// aspect.
+    pub fn mpv_properties(self) -> [(&'static str, serde_json::Value); 3] {
+        use serde_json::json;
+        let (panscan, keep, ratio) = match self {
+            Self::Fit => (0., true, "no"),
+            Self::Fill => (1., true, "no"),
+            Self::Stretch => (0., false, "no"),
+            Self::Widescreen => (0., true, "16:9"),
+            Self::Standard => (0., true, "4:3"),
+        };
+        [
+            ("panscan", json!(panscan)),
+            ("keepaspect", json!(keep)),
+            ("video-aspect-override", json!(ratio)),
+        ]
+    }
+}
+
 /// Requests from the player UI to the running session.
 #[derive(Debug, Clone)]
 pub enum UiCommand {
@@ -163,6 +208,7 @@ pub enum UiCommand {
     Subtitle(SubtitleChoice),
     /// A second text track shown with the first (a stream index), or none.
     SetSecondarySubtitle(Option<i32>),
+    SetAspect(Aspect),
     Stop,
 }
 
@@ -245,6 +291,8 @@ pub struct NowPlaying {
     /// libmpv plays this session; Media3 (Android) has no second subtitle, aspect modes and the
     /// like, so the player hides those.
     pub mpv: bool,
+    /// How the picture fills the window. Belongs to this item.
+    pub aspect: Aspect,
     pub volume: f64,
     pub muted: bool,
     pub adjustments: Adjustments,
@@ -579,6 +627,7 @@ impl PlaybackManager {
             subtitle: SubtitleChoice::Auto,
             secondary_subtitle: None,
             mpv: true,
+            aspect: Aspect::Fit,
             volume: self.volume,
             muted: false,
             adjustments: self.adjustments,
@@ -1040,6 +1089,22 @@ impl Services {
         state.send(UiCommand::SetSecondarySubtitle(index));
     }
 
+    /// Sets how the picture fills the window (the player's menu and key). mpv only, and not on
+    /// a TV.
+    pub fn set_aspect(&mut self, aspect: Aspect) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.aspect == aspect {
+            return;
+        }
+        state.aspect = aspect;
+        state.send(UiCommand::SetAspect(aspect));
+    }
+
     /// Applies changes from the settings menu. Speed stays at normal in a SyncPlay group,
     /// whose drift correction uses it.
     pub fn adjust(&mut self, adjustments: Adjustments) {
@@ -1160,6 +1225,7 @@ impl Services {
                     subtitle,
                     secondary_subtitle: None,
                     mpv: running.mpv,
+                    aspect: Aspect::Fit,
                     volume: running.volume,
                     muted: running.muted,
                     adjustments: running.adjustments,
@@ -2131,6 +2197,12 @@ async fn apply_command(
                 Some(sid) => player.set_property("secondary-sid", sid).await,
                 None => Ok(()),
             }
+        }
+        UiCommand::SetAspect(aspect) => {
+            for (name, value) in aspect.mpv_properties() {
+                player.set_property(name, value).await?;
+            }
+            Ok(())
         }
         UiCommand::Stop => player.quit().await,
     }

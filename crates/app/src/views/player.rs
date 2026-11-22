@@ -60,7 +60,7 @@ use crate::i18n::{self, tr};
 use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::motion;
-use crate::playback::{Adjustments, NowPlaying, PlayOptions, SubtitleChoice, UiCommand, Version};
+use crate::playback::{Adjustments, Aspect, NowPlaying, PlayOptions, SubtitleChoice, UiCommand, Version};
 use crate::services::AppEvent;
 use crate::task;
 use crate::theme::{self, over_video};
@@ -711,6 +711,10 @@ impl PlayerPage {
             Action::SubtitleDelayDown => {
                 self.adjust(cx, |a| a.subtitle_delay -= Adjustments::DELAY_STEP);
             }
+            Action::CycleAspect if state.mpv => {
+                cx.services.set_aspect(state.aspect.next());
+                self.show_controls();
+            }
             _ => return false,
         }
         true
@@ -875,6 +879,9 @@ impl PlayerPage {
                 }
                 if (view.speed - 1.).abs() > 1e-6 {
                     label_badge(ui, &speed_text(view.speed));
+                }
+                if view.aspect != Aspect::Fit {
+                    label_badge(ui, &aspect_text(view.aspect));
                 }
             },
         );
@@ -1340,6 +1347,10 @@ impl PlayerPage {
             cx.services
                 .change_secondary_subtitle((index != SUBTITLES_OFF).then_some(index));
         }
+        if let Some(aspect) = choice.aspect {
+            cx.services.set_aspect(aspect);
+            self.show_controls();
+        }
         if let Some(adjustments) = choice.adjustments {
             cx.services.adjust(adjustments);
             self.show_controls();
@@ -1399,6 +1410,9 @@ struct Keys {
     resume: Option<Duration>,
     next_chapter: Option<Duration>,
     prev_chapter: Option<Duration>,
+    /// libmpv plays, and how the picture fills the window.
+    mpv: bool,
+    aspect: Aspect,
 }
 
 impl Keys {
@@ -1415,6 +1429,8 @@ impl Keys {
             resume: None,
             next_chapter: markers::next_chapter(&chapters, position),
             prev_chapter: markers::prev_chapter(&chapters, position),
+            mpv: false,
+            aspect: Aspect::Fit,
         }
     }
 
@@ -1425,6 +1441,8 @@ impl Keys {
             resume: state.resume_prompt(),
             next_chapter: markers::next_chapter(&state.chapters, state.position),
             prev_chapter: markers::prev_chapter(&state.chapters, state.position),
+            mpv: state.mpv,
+            aspect: state.aspect,
         }
     }
 }
@@ -1443,6 +1461,8 @@ struct View {
     duration: Option<Duration>,
     volume: f64,
     speed: f64,
+    /// How the picture fills the window; the bar names a mode other than the default.
+    aspect: Aspect,
     /// Seconds the skip buttons and keys jump (a setting).
     seek_step: f64,
     /// A SyncPlay group controls playback for this session.
@@ -1521,6 +1541,8 @@ struct SettingsMenu {
     /// The second subtitle shown, and what can be picked for it (empty: no second subtitle here).
     secondary: Option<i32>,
     secondary_choices: Vec<Choice>,
+    /// How the picture fills the window, when libmpv plays (Media3 can't change it).
+    aspect: Option<Aspect>,
 }
 
 impl SettingsMenu {
@@ -1619,6 +1641,7 @@ impl View {
             duration: state.duration,
             volume: state.volume,
             speed: state.adjustments.speed,
+            aspect: state.aspect,
             seek_step,
             group: state.group_item.is_some(),
             transcoding: state.is_transcoding(),
@@ -1664,6 +1687,7 @@ impl View {
                     default_audio: state.source.default_audio_stream_index,
                     default_subtitle: state.source.default_subtitle_stream_index,
                     secondary: state.secondary_subtitle,
+                    aspect: state.mpv.then_some(state.aspect),
                     secondary_choices: if state.mpv {
                         let files = state.is_transcoding().then_some(state.stream.subtitle_files.as_slice());
                         tracks::secondary_choices(&state.source, files, subtitle_shown)
@@ -1771,6 +1795,7 @@ impl View {
             duration: casting.duration,
             volume: casting.volume,
             speed: 1.,
+            aspect: Aspect::Fit,
             seek_step,
             group: false,
             transcoding: false,
@@ -1808,6 +1833,7 @@ impl View {
                 default_subtitle,
                 secondary: None,
                 secondary_choices: Vec::new(),
+                aspect: None,
             }),
             audio_button: count(MediaStreamType::Audio) > 1,
             subtitles_button: count(MediaStreamType::Subtitle) > 0,
@@ -2076,6 +2102,7 @@ struct SettingsChoice {
     subtitle: Option<SubtitleChoice>,
     /// The second subtitle: a stream index, or `SUBTITLES_OFF`.
     secondary: Option<i32>,
+    aspect: Option<Aspect>,
     adjustments: Option<Adjustments>,
 }
 
@@ -2198,6 +2225,29 @@ fn settings_body(
                 adjustments.speed = speed;
                 adjusted = true;
             }
+            if let Some(aspect) = menu.aspect {
+                ui.add_space(8.);
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                ui.add_space(8.);
+                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
+                let name = ui.painter().text(
+                    pos2(rect.left() + 8., rect.center().y),
+                    Align2::LEFT_CENTER,
+                    tr!("player-aspect"),
+                    theme::text::font(ui, "sm"),
+                    over_video::MENU_INK,
+                );
+                if keys {
+                    ui.painter().text(
+                        pos2(name.right() + 8., rect.center().y),
+                        Align2::LEFT_CENTER,
+                        "a",
+                        theme::text::font(ui, "xs"),
+                        over_video::MUTED_FOREGROUND,
+                    );
+                }
+                choice.aspect = aspect_group(ui, aspect);
+            }
         }
     }
     if adjusted {
@@ -2228,20 +2278,41 @@ fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab)
     tabs::bar(ui, &shown, current, colours)
 }
 
+/// How an aspect mode is named in the menu and the bar.
+fn aspect_text(aspect: Aspect) -> String {
+    match aspect {
+        Aspect::Fit => tr!("player-aspect-fit"),
+        Aspect::Fill => tr!("player-aspect-fill"),
+        Aspect::Stretch => tr!("player-aspect-stretch"),
+        Aspect::Widescreen => "16:9".into(),
+        Aspect::Standard => "4:3".into(),
+    }
+}
+
+/// The aspect modes, the chosen one in the player's lilac. Returns the mode clicked.
+fn aspect_group(ui: &mut egui::Ui, current: Aspect) -> Option<Aspect> {
+    let labels = Aspect::ALL.map(aspect_text);
+    let chosen = Aspect::ALL.iter().position(|&aspect| aspect == current);
+    segmented::show(ui, &labels, chosen, segmented_colours()).map(|index| Aspect::ALL[index])
+}
+
 /// The speed choices, the chosen one in the player's lilac. Returns the speed clicked.
 fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
     let labels = Adjustments::SPEEDS.map(speed_text);
     let chosen = Adjustments::SPEEDS
         .iter()
         .position(|speed| (speed - current).abs() < 1e-6);
-    let colours = segmented::Colours {
+    segmented::show(ui, &labels, chosen, segmented_colours()).map(|index| Adjustments::SPEEDS[index])
+}
+
+fn segmented_colours() -> segmented::Colours {
+    segmented::Colours {
         track: over_video::MENU_INSET,
         hover: over_video::MENU_INSET_HOVER,
         ink: over_video::MENU_INK,
         chosen: over_video::BRAND,
         chosen_ink: over_video::BRAND_FOREGROUND,
-    };
-    segmented::show(ui, &labels, chosen, colours).map(|index| Adjustments::SPEEDS[index])
+    }
 }
 
 fn stepper_colours() -> stepper::Colours {

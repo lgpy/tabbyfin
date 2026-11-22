@@ -705,6 +705,7 @@ fn outgoing_for(command: &UiCommand, casting: &Casting) -> Option<Outgoing> {
         UiCommand::Audio(_)
         | UiCommand::Subtitle(_)
         | UiCommand::SetSecondarySubtitle(_)
+        | UiCommand::SetAspect(_)
         | UiCommand::SetSpeed(_)
         | UiCommand::SetSubtitleDelay(_)
         | UiCommand::SetAudioDelay(_)
@@ -1699,6 +1700,7 @@ mod tests {
             UiCommand::Audio(2),
             UiCommand::Subtitle(SubtitleChoice::Off),
             UiCommand::SetSecondarySubtitle(Some(3)),
+            UiCommand::SetAspect(crate::playback::Aspect::Fill),
             UiCommand::SetSpeed(1.5),
             UiCommand::SetSubtitleDelay(1.),
             UiCommand::SetAudioDelay(1.),
