@@ -202,32 +202,91 @@ mod tests {
         String::from_utf8(file.data.into_owned()).unwrap()
     }
 
-    /// Every message of a Fluent file, with the variables its text names (`$count`).
-    fn messages(source: &str) -> BTreeMap<String, BTreeSet<String>> {
-        let mut messages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        let mut current: Option<String> = None;
-        for line in source.lines() {
-            if line.starts_with('#') || line.trim().is_empty() {
-                continue;
+    /// What a message uses of its arguments.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Message {
+        /// Every variable its text names (`$count`).
+        variables: BTreeSet<String>,
+        /// The variables it selects on (`{ $count -> … }`).
+        selectors: BTreeSet<String>,
+    }
+
+    /// Every message of a Fluent file, read with Fluent's own parser: a syntax error panics, and
+    /// so does a select with no `*[other]` default (plural and gender ones alike).
+    fn messages(source: &str) -> BTreeMap<String, Message> {
+        use fluent_syntax::ast::{Entry, Expression, InlineExpression, Pattern, PatternElement, VariantKey};
+
+        fn inline(expression: &InlineExpression<&str>, found: &mut Message) {
+            match expression {
+                InlineExpression::VariableReference { id } => {
+                    found.variables.insert(id.name.to_owned());
+                }
+                InlineExpression::FunctionReference { arguments, .. }
+                | InlineExpression::TermReference {
+                    arguments: Some(arguments),
+                    ..
+                } => {
+                    for argument in &arguments.positional {
+                        inline(argument, found);
+                    }
+                    for argument in &arguments.named {
+                        inline(&argument.value, found);
+                    }
+                }
+                InlineExpression::Placeable { expression } => expression_of(expression, found),
+                _ => {}
             }
-            let text = if line.starts_with([' ', '\t']) {
-                line
-            } else {
-                let (id, text) = line.split_once('=').unwrap_or_else(|| panic!("not a message: {line}"));
-                let id = id.trim().to_owned();
-                messages.entry(id.clone()).or_default();
-                current = Some(id);
-                text
+        }
+
+        fn expression_of(expression: &Expression<&str>, found: &mut Message) {
+            match expression {
+                Expression::Inline(expression) => inline(expression, found),
+                Expression::Select { selector, variants } => {
+                    inline(selector, found);
+                    if let InlineExpression::VariableReference { id } = selector {
+                        found.selectors.insert(id.name.to_owned());
+                    }
+                    let default = variants
+                        .iter()
+                        .find(|variant| variant.default)
+                        .expect("the parser needs one");
+                    assert!(
+                        matches!(&default.key, VariantKey::Identifier { name } if *name == "other"),
+                        "a select's default is `*[other]`, not {:?}",
+                        default.key
+                    );
+                    for variant in variants {
+                        pattern(&variant.value, found);
+                    }
+                }
+            }
+        }
+
+        fn pattern(pattern: &Pattern<&str>, found: &mut Message) {
+            for element in &pattern.elements {
+                if let PatternElement::Placeable { expression } = element {
+                    expression_of(expression, found);
+                }
+            }
+        }
+
+        let resource = fluent_syntax::parser::parse(source).unwrap_or_else(|(_, errors)| panic!("{errors:?}"));
+        let mut messages = BTreeMap::new();
+        for entry in &resource.body {
+            let Entry::Message(message) = entry else { continue };
+            let mut found = Message {
+                variables: BTreeSet::new(),
+                selectors: BTreeSet::new(),
             };
-            let id = current.as_ref().expect("a message before its continuation lines");
-            let variables = messages.get_mut(id).unwrap();
-            for piece in text.split('$').skip(1) {
-                let name: String = piece
-                    .chars()
-                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-                    .collect();
-                variables.insert(name);
+            for text in message
+                .value
+                .iter()
+                .chain(message.attributes.iter().map(|attribute| &attribute.value))
+            {
+                pattern(text, &mut found);
             }
+            let id = message.id.name.to_owned();
+            assert!(messages.insert(id.clone(), found).is_none(), "{id} is defined twice");
         }
         messages
     }
@@ -248,15 +307,49 @@ mod tests {
                 "{} has messages English doesn't: {stale:?}",
                 language.id()
             );
-            for (id, variables) in &english {
+            for (id, message) in &english {
                 assert_eq!(
-                    &translated[id],
-                    variables,
+                    translated[id].variables,
+                    message.variables,
                     "{}'s {id} names other arguments",
                     language.id()
                 );
+                // A translation may select where English needn't (a plural for English's "6 ch"),
+                // but never drop a choice English makes.
+                assert!(
+                    translated[id].selectors.is_superset(&message.selectors),
+                    "{}'s {id} doesn't select on {:?}",
+                    language.id(),
+                    message.selectors
+                );
             }
         }
+    }
+
+    /// A select closed with a brace at the left margin is a valid file, and a select without
+    /// `*[other]` is not read as one.
+    #[test]
+    fn the_parser_reads_what_fluent_reads() {
+        let found = messages(
+            "a = { $n ->
+    [one] { $n } x
+   *[other] { $n } xs
+}
+b = { $name }
+",
+        );
+        assert_eq!(found.keys().collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(found["a"].selectors, BTreeSet::from(["n".to_owned()]));
+        assert!(found["b"].selectors.is_empty() && found["b"].variables.contains("name"));
+        let result = std::panic::catch_unwind(|| {
+            messages(
+                "a = { $n ->
+   *[few] x
+}
+",
+            )
+        });
+        assert!(result.is_err(), "a default other than `other`");
     }
 
     #[test]
@@ -289,15 +382,20 @@ mod tests {
         );
     }
 
+    /// Every shipped language parses and answers: a syntax error in a file would only warn at
+    /// run time and leave English showing.
     #[test]
     fn reads_a_translation() {
         // The tests share the app's loader, so this one has its own.
         let loader = i18n_embed::fluent::fluent_language_loader!();
-        super::select(&loader, Language::PortuguesePortugal);
-        let args = std::collections::HashMap::from([("language", "English")]);
-        assert_eq!(
-            loader.get_args("settings-language-system", args),
-            "Seguir o sistema (English)"
-        );
+        let args = || std::collections::HashMap::from([("language", "English")]);
+        for (language, expected) in [
+            (Language::English, "Follow the system (English)"),
+            (Language::PortuguesePortugal, "Seguir o sistema (English)"),
+            (Language::Spanish, "Seguir el sistema (English)"),
+        ] {
+            super::select(&loader, language);
+            assert_eq!(loader.get_args("settings-language-system", args()), expected);
+        }
     }
 }

@@ -28,6 +28,9 @@ pub struct EmbeddedPlayer {
     render_thread: Option<RenderThread>,
     stop: Arc<AtomicBool>,
     events: Option<JoinHandle<()>>,
+    /// Which player the video surface was shown for, so this one's drop hides only its own.
+    #[cfg(target_os = "android")]
+    surface: u64,
 }
 
 impl EmbeddedPlayer {
@@ -110,9 +113,10 @@ impl EmbeddedPlayer {
 
         // The render context must exist before a file with video starts.
         #[cfg(target_os = "android")]
+        let surface = show_on_surface(&core)?;
+        #[cfg(target_os = "android")]
         let (video, render_thread) = {
             let _ = import;
-            show_on_surface(&core)?;
             (VideoOutput::external(), None)
         };
         #[cfg(not(target_os = "android"))]
@@ -138,6 +142,8 @@ impl EmbeddedPlayer {
                 render_thread,
                 stop,
                 events: Some(events),
+                #[cfg(target_os = "android")]
+                surface,
             },
             events_rx,
         ))
@@ -198,14 +204,14 @@ impl Drop for EmbeddedPlayer {
         // before the core (see `Renderer::drop`).
         self.render_thread.take();
         #[cfg(target_os = "android")]
-        crate::android::hide_surface();
+        crate::android::hide_surface(self.surface);
     }
 }
 
 /// Points mpv at the video surface whenever it exists: the surface as `wid` and `vo=gpu-next`,
 /// then `vo=null` before it goes (mpv must stop drawing into it before the callback returns).
 #[cfg(target_os = "android")]
-fn show_on_surface(core: &Arc<Core>) -> Result<()> {
+fn show_on_surface(core: &Arc<Core>) -> Result<u64> {
     let core = Arc::downgrade(core);
     crate::android::show_surface(move |surface| {
         let Some(core) = core.upgrade() else { return };

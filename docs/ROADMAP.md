@@ -73,6 +73,7 @@ Done: an integration job in CI against 12.2 and 10.11, error messages for the co
 | 6.2 | **Screen readers** | P3 | L | Keyboard reach, contrast (WCAG AA) and text size are done, and every widget names itself to AccessKit, but no screen reader has been tried. |
 | 6.4 | **Performance on real hardware** | P3 | M | Profiled only in WSL debug builds (10,000-item fake library: about 640 MB, posters in view 0.5 s after a fast scroll). Check a release build on real hardware. |
 | 6.5 | **Expired token while browsing** | P3 | S | The error wording exists but hasn't been rechecked. |
+| 6.6 | **Keep mpv's token to the server** | P3 | M | mpv sends the `Authorization` header with every request for a file, so a server's HLS playlist or redirect can point it at another host, which then receives the token (the server's own, so the gain is small). ffmpeg has no per-host rule: the fix is a loopback proxy in the app that adds the header for the server's origin only and refuses the rest. |
 
 ## Suggested order
 

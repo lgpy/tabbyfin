@@ -10,6 +10,9 @@ repository.workspace = true
 [dependencies]
 reqwest.workspace = true
 reqwest-websocket.workspace = true
+# Only to recognise a refused certificate in a request's error (`Error::is_certificate`): the
+# version reqwest's `rustls-tls` uses, or the downcast finds nothing.
+rustls = { version = "0.23", default-features = false, features = ["std"] }
 futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -22,3 +25,9 @@ url.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 wiremock = "0.6.5"
+# A local TLS server with a self-signed certificate, for `Error::is_certificate`. The versions
+# and features `crates/cast` uses, so nothing new enters `Cargo.lock`.
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { workspace = true, features = ["io-util", "net"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

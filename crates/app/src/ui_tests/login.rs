@@ -114,7 +114,8 @@ fn sign_in_steps_from_the_address_to_a_session() {
     });
     // What the server said about itself, above the fields; the address step is gone.
     assert!(ui.query_by_label("Sign in to tabbyfin dev").is_some());
-    assert!(ui.query_by_label("Jellyfin 12.2.0 at 127.0.0.1").is_some());
+    // The mock speaks plain HTTP, so the line says so.
+    assert!(ui.query_by_label("Jellyfin 12.2.0 at http://127.0.0.1").is_some());
     assert!(ui.query_by_label("Connect").is_none());
 
     // The username field takes the keyboard next; the password is one step on from it.
@@ -421,7 +422,7 @@ fn a_saved_account_is_offered_and_chosen() {
     let mut ui = login_harness(move |ctx| Login::new(ctx, "ui-test-device".into(), vec![listed], false, None));
 
     assert!(ui.query_by_label("Welcome back").is_some());
-    ui.get_by_label(&account.label()).click();
+    ui.get_by_label("dev on tabbyfin dev").click();
     ui.step();
     match ui.state().event.as_ref() {
         Some(LoginEvent::UseAccount(chosen)) => assert_eq!(chosen, &account),
@@ -491,4 +492,53 @@ fn a_server_found_on_the_network_fills_the_address() {
         "the address box holds the server's address"
     );
     assert!(ui.query_by_label("Username").is_none(), "choosing only fills the box");
+}
+
+/// An address typed without a scheme that only plain HTTP answers stops on a step of its own:
+/// the warning, and the way on to the credentials or back to the address.
+#[test]
+fn a_server_that_only_answers_http_asks_before_the_credentials() {
+    let server = FixtureServer::start();
+    server.json("GET", "/System/Info/Public", "public_info");
+    let mut ui = login_harness(|ctx| Login::new(ctx, "ui-test-device".into(), Vec::new(), false, None));
+    let address = server.uri();
+
+    ui.get_by_role(Role::TextInput)
+        .type_text(address.trim_start_matches("http://"));
+    ui.step();
+    // Connects, and waits for the step; then a frame more, since a step of another height
+    // recentres the form and a click goes where the button is drawn.
+    let connect = |ui: &mut egui_kittest::Harness<'static, LoginRun>| {
+        ui.get_by_label("Connect").click();
+        ui.step();
+        step_until(ui, "the unencrypted step", |harness| {
+            harness.query_by_label("Connect anyway").is_some()
+        });
+        ui.step();
+        ui.step();
+    };
+    connect(&mut ui);
+    assert!(ui.query_by_label("Connect without encryption?").is_some());
+    assert!(ui.query_by_label("Jellyfin 12.2.0 at http://127.0.0.1").is_some());
+    assert!(ui.query_by_label("Warning").is_some());
+    assert!(ui.query_by_label("Username").is_none());
+    assert!(ui.state_mut().login_mut().watch().puzzled);
+
+    // Back is the address step again, with what was typed still in the field.
+    ui.get_by_label("Back").click();
+    step_until(&mut ui, "the address step", |harness| {
+        harness.query_by_label("Connect").is_some()
+    });
+    assert!(ui.query_by_label("Connect anyway").is_none());
+    ui.step();
+    ui.step();
+
+    // The same address again, and on this time.
+    connect(&mut ui);
+    ui.get_by_label("Connect anyway").click();
+    step_until(&mut ui, "the credentials step", |harness| {
+        harness.query_by_label("Username").is_some()
+    });
+    assert!(ui.query_by_label("Sign in to tabbyfin dev").is_some());
+    assert!(ui.query_by_label("Connect anyway").is_none());
 }

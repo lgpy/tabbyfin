@@ -199,7 +199,13 @@ impl Services {
             }
             return;
         };
-        let (position, previous) = (state.position, state.previous.is_some());
+        // In a group "before this one" is an entry of the group's queue, not the previous episode.
+        let position = state.position;
+        let previous = if self.in_group() {
+            self.group_can_skip(false)
+        } else {
+            state.previous.is_some()
+        };
         let command = match request.command {
             PlaystateCommand::Stop => UiCommand::Stop,
             PlaystateCommand::Pause => UiCommand::SetPause(true),

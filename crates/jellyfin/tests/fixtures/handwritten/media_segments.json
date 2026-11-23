@@ -1,0 +1,20 @@
+{
+  "Items": [
+    {
+      "Id": "00000000000000000000000000000001",
+      "ItemId": "14401f7e4f9a2da047069ad4a3124f9c",
+      "Type": "Intro",
+      "StartTicks": 0,
+      "EndTicks": 100000000
+    },
+    {
+      "Id": "00000000000000000000000000000002",
+      "ItemId": "14401f7e4f9a2da047069ad4a3124f9c",
+      "Type": "Outro",
+      "StartTicks": 450000000,
+      "EndTicks": 600000000
+    }
+  ],
+  "TotalRecordCount": 2,
+  "StartIndex": 0
+}

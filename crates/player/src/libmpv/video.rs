@@ -435,6 +435,25 @@ pub(crate) fn fit(core: &Core, control: &RenderControl) -> Option<(u32, u32)> {
     Some(((w * scale).round().max(2.) as u32, (h * scale).round().max(2.) as u32))
 }
 
+/// Frees mpv's render context when `run` ends, by returning or by a panic unwinding, so a panic
+/// in the render loop doesn't leave a context behind that the core's destruction would then
+/// wait on. It runs on the render thread (where `run` is), before the renderer's backend drops.
+pub(crate) struct FreeContext<'a> {
+    pub core: &'a Core,
+    pub context: *mut c_void,
+}
+
+impl Drop for FreeContext<'_> {
+    fn drop(&mut self) {
+        // SAFETY: the context is the renderer's own and is freed only here, once. The callback
+        // is cleared first, since it points into `RenderControl`.
+        unsafe {
+            (self.core.api.render_set_update_callback)(self.context, None, ptr::null_mut());
+            (self.core.api.render_free)(self.context);
+        }
+    }
+}
+
 /// libmpv's software renderer into a 64-byte aligned buffer (as it prefers).
 struct SoftwareRenderer {
     context: *mut c_void,
@@ -477,6 +496,10 @@ impl SoftwareRenderer {
     }
 
     fn run(&mut self, core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>) {
+        let _free = FreeContext {
+            core,
+            context: self.context,
+        };
         let mut last_size = None;
         while control.wait() {
             // SAFETY: render context calls happen only on this thread.
@@ -490,11 +513,6 @@ impl SoftwareRenderer {
             if let Some(frame) = self.render(core, size) {
                 frames.send_replace(Some(Frame::Pixels(Arc::new(frame))));
             }
-        }
-        // SAFETY: stop the callback, then free the context on its own thread, before the core.
-        unsafe {
-            (core.api.render_set_update_callback)(self.context, None, ptr::null_mut());
-            (core.api.render_free)(self.context);
         }
     }
 

@@ -502,3 +502,32 @@ fn typing_filters_a_long_select() {
         "the menu closed"
     );
 }
+
+/// Two stepper rows in one `ui`, as the player's Subtitles tab draws them: a click on one row's
+/// + changes that row's value and not the other's.
+#[test]
+fn stepper_rows_in_one_ui_do_not_share_their_buttons() {
+    use crate::widgets::stepper::{self, Colours, Step};
+
+    let mut ui = build_harness(egui::vec2(400., 200.), (0, 0), |ui, (delay, size)| {
+        let colours = Colours {
+            fill: egui::Color32::DARK_GRAY,
+            hover: egui::Color32::GRAY,
+            ink: egui::Color32::WHITE,
+            ink_muted: egui::Color32::LIGHT_GRAY,
+        };
+        if stepper::row(ui, "Delay", None, &delay.to_string(), false, colours) == Some(Step::Up) {
+            *delay += 1;
+        }
+        if stepper::row(ui, "Size", None, &size.to_string(), false, colours) == Some(Step::Up) {
+            *size += 1;
+        }
+    });
+    ui.run();
+    ui.get_by_label("Increase size").click();
+    ui.run();
+    assert_eq!(*ui.state(), (0, 1), "only the second row changed");
+    ui.get_by_label("Increase delay").click();
+    ui.run();
+    assert_eq!(*ui.state(), (1, 1), "and only the first, now");
+}

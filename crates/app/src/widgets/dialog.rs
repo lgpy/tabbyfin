@@ -120,11 +120,27 @@ pub fn quiet(ui: &mut Ui, label: &str, state: State) -> Response {
     button::quiet(ui, label, width, state, Focus::Skip)
 }
 
+/// Whether a dialog stays on screen: until Cancel, Esc or a click on the backdrop closes it, or
+/// not at all while `busy` with a request out, which closing would drop unreported. Esc is read
+/// either way, so it doesn't reach the page under the dialog.
+pub fn keep_open<R>(modal: &ModalResponse<R>, busy: bool) -> bool {
+    let closing = modal.should_close();
+    busy || !closing
+}
+
 /// *Cancel*: closes the dialog, as Esc and a click on the backdrop do.
 pub fn cancel(ui: &mut Ui) {
+    cancel_unless(ui, false);
+}
+
+/// [`cancel`] for a dialog whose request is out: the button is disabled while `busy`. The dialog
+/// ignores Esc and the backdrop then too (`ModalResponse::should_close`), since closing it would
+/// drop the request and nobody would report how it went.
+pub fn cancel_unless(ui: &mut Ui, busy: bool) {
     let cancel = tr!("widget-cancel");
     let width = button_width(ui, &cancel);
-    if button::quiet(ui, &cancel, width, State::Ready, Focus::Skip).clicked() {
+    let state = if busy { State::Disabled } else { State::Ready };
+    if button::quiet(ui, &cancel, width, state, Focus::Skip).clicked() {
         ui.close();
     }
 }

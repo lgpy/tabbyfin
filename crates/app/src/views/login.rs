@@ -136,6 +136,11 @@ pub struct Login {
 
     /// Set once the server address has been verified.
     server: Option<(Client, PublicSystemInfo)>,
+    /// A server that answered over plain HTTP only, for an address typed without a scheme: it
+    /// waits here for the user's say, since whoever is on the network can make HTTPS fail.
+    unencrypted: Option<(Client, PublicSystemInfo)>,
+    /// The address being connected to named no scheme, so plain HTTP wasn't the user's choice.
+    asks_before_http: bool,
     quick_connect_code: Option<String>,
     /// The request in flight, so its button shows it loading while the rest of the form waits.
     busy: Option<Busy>,
@@ -195,6 +200,8 @@ impl Login {
             last_focus: None,
             watch: Watch::default(),
             server: None,
+            unencrypted: None,
+            asks_before_http: false,
             quick_connect_code: None,
             busy: None,
             status: None,
@@ -354,7 +361,7 @@ impl Login {
             tokens,
         );
         self.watch = Watch {
-            puzzled: self.error.is_some(),
+            puzzled: self.error.is_some() || self.unencrypted.is_some(),
             ..Watch::default()
         };
         surface::frame(ui).show(ui, |ui| {
@@ -373,7 +380,7 @@ impl Login {
                 if button::subtle(ui, &tr!("login-use-another-server")).clicked() {
                     self.change_server(ctx);
                 }
-            } else {
+            } else if self.unencrypted.is_none() {
                 ui.label(label::muted(
                     ui,
                     tr!("login-min-version", version = MIN_SUPPORTED_VERSION.to_string()),
@@ -393,17 +400,22 @@ impl Login {
     fn panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let (title, subtitle) = if self.quick_connect_code.is_some() {
             (tr!("login-quick-connect-title"), tr!("login-quick-connect-subtitle"))
-        } else if let Some((client, info)) = &self.server {
-            let host = client.base_url().host_str().unwrap_or_default();
-            (
+        } else if let Some((client, info)) = self.unencrypted.as_ref().or(self.server.as_ref()) {
+            let host = server_host(client.base_url());
+            let title = if self.unencrypted.is_some() {
+                tr!("login-unencrypted-title")
+            } else {
                 tr!(
                     "login-to-server",
                     server = info.server_name.as_deref().unwrap_or("Jellyfin")
-                ),
+                )
+            };
+            (
+                title,
                 tr!(
                     "login-server-line",
                     version = info.version.as_deref().unwrap_or("?"),
-                    host = host
+                    host = host.as_str()
                 ),
             )
         } else if !self.accounts.is_empty() {
@@ -423,6 +435,8 @@ impl Login {
         }
         if let Some(code) = self.quick_connect_code.clone() {
             self.quick_connect_step(ui, &code);
+        } else if self.unencrypted.is_some() {
+            self.unencrypted_step(ui);
         } else if self.server.is_some() {
             self.credentials_step(ui, ctx);
         } else {
@@ -453,6 +467,8 @@ impl Login {
             return;
         }
         let candidates = candidates(&input);
+        self.asks_before_http = candidates.len() > 1;
+        self.unencrypted = None;
         let info = session::client_info(&self.device_id);
         self.busy = Some(Busy::Connecting);
         let progress = self.begin_request(ctx);
@@ -545,6 +561,10 @@ impl Login {
                     if self.resume_saved_session {
                         self.resume_saved_session = false;
                         self.event = Some(LoginEvent::ServerReachable);
+                    } else if self.asks_before_http && client.base_url().scheme() == "http" {
+                        // HTTPS was tried first and failed: the user decides whether plain HTTP
+                        // will do, before anything secret is typed.
+                        self.unencrypted = Some((client, info));
                     } else {
                         // Keep any error passed in via `Prefill` (e.g. "session expired");
                         // user-triggered connects clear it in `on_connect`.
@@ -608,17 +628,46 @@ impl Login {
         self.retry.cancel();
         self.resume_saved_session = false;
         self.server = None;
+        self.unencrypted = None;
         self.error = None;
         self.focus = Some(Field::Server);
         self.discover(ctx);
     }
 
+    /// The user's say for a server that only answered over plain HTTP: on to its credentials.
+    fn connect_unencrypted(&mut self) {
+        if let Some(server) = self.unencrypted.take() {
+            self.server = Some(server);
+            self.focus = Some(if self.username.trim().is_empty() {
+                Field::Username
+            } else {
+                Field::Password
+            });
+        }
+    }
+
+    /// The step between the address and the credentials when only plain HTTP answered: what
+    /// that means, and the way on or back to the address.
+    fn unencrypted_step(&mut self, ui: &mut egui::Ui) {
+        surface::notice(ui, surface::Kind::Warning, &tr!("login-unencrypted-notice"));
+        ui.add_space(surface::GAP_GROUP);
+        let width = ui.available_width();
+        let (ready, tab) = (button::State::Ready, button::Focus::Tab);
+        if button::brand(ui, &tr!("login-connect-anyway"), width, ready, tab).clicked() {
+            self.connect_unencrypted();
+        }
+        ui.add_space(surface::GAP_ITEM);
+        if button::quiet(ui, &tr!("widget-back"), width, ready, tab).clicked() {
+            self.change_server(&ui.ctx().clone());
+        }
+    }
+
     fn server_step(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         for account in self.accounts.clone() {
-            let label = account.label();
+            let server = account.server_name.as_deref().unwrap_or(&account.url);
+            let label = tr!("shell-account-on", name = account.username.as_str(), server = server);
             let names = [account.username.as_str()];
-            let subtitle = account.server_name.as_deref().unwrap_or(&account.url);
-            let row = AvatarRow::new(&names, &account.username, subtitle, &label)
+            let row = AvatarRow::new(&names, &account.username, server, &label)
                 .remove(&tr!("login-remove-account"))
                 .show(ui, self.busy.is_none());
             if row.row.clicked() {
@@ -812,8 +861,21 @@ fn candidates(input: &str) -> Vec<String> {
     }
 }
 
+/// The host the server line shows. A server reached over plain HTTP carries its scheme, so an
+/// unencrypted connection is visible before the password is typed; HTTPS shows the bare host.
+fn server_host(url: &url::Url) -> String {
+    let host = url.host_str().unwrap_or_default();
+    if url.scheme() == "http" {
+        format!("http://{host}")
+    } else {
+        host.to_owned()
+    }
+}
+
 /// Tries each candidate URL in turn and returns the first supported Jellyfin server.
-/// Waits (and reports status) while a server is still starting up.
+/// Waits (and reports status) while a server is still starting up. A refused certificate stops
+/// the search: something answers TLS there, and falling back to plain HTTP would let whoever
+/// presented the bad certificate read the password.
 async fn probe(
     candidates: Vec<String>,
     info: ClientInfo,
@@ -849,6 +911,10 @@ async fn probe(
                     let _ = progress.send(Progress::Status(tr!("login-server-starting")));
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
+                Err(err) if err.is_certificate() => {
+                    tracing::debug!(%url, "probe stopped on a refused certificate: {err}");
+                    return Err(tr!("login-error-certificate"));
+                }
                 Err(err) => {
                     tracing::debug!(%url, "probe failed: {err}");
                     last_error = Some(err);
@@ -871,7 +937,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use super::{Field, Login, LoginEvent, Outcome, Progress, candidates};
+    use super::{Field, Login, LoginEvent, Outcome, Progress, candidates, probe, server_host};
     use crate::session::{Session, client_info};
 
     fn client() -> Client {
@@ -924,6 +990,129 @@ mod tests {
         assert_eq!(
             candidates("https://host/jellyfin"),
             ["https://host/jellyfin".to_owned()]
+        );
+    }
+
+    /// A TLS server on loopback with a self-signed certificate, which the client refuses. It
+    /// accepts connections and lets the handshake fail.
+    async fn self_signed_server() -> u16 {
+        use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+        use tokio_rustls::{TlsAcceptor, rustls};
+
+        let certified = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).expect("a certificate");
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der()));
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        let config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("protocol versions")
+            .with_no_client_auth()
+            .with_single_cert(vec![certified.cert.der().clone()], key)
+            .expect("a certificate and its key");
+        let acceptor = TlsAcceptor::from(std::sync::Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("a free port");
+        let port = listener.local_addr().expect("an address").port();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let _ = acceptor.accept(stream).await;
+                });
+            }
+        });
+        port
+    }
+
+    /// A Jellyfin 12.2 answering `GET /System/Info/Public`.
+    async fn public_info_server() -> wiremock::MockServer {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/System/Info/Public"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(include_str!("../../../jellyfin/tests/fixtures/12.2/public_info.json")),
+            )
+            .mount(&mock)
+            .await;
+        mock
+    }
+
+    fn probe_sender() -> super::Sender<Progress> {
+        crate::task::channel(&egui::Context::default()).0
+    }
+
+    #[tokio::test]
+    async fn a_refused_certificate_stops_the_fallback_to_http() {
+        let tls = self_signed_server().await;
+        let mock = public_info_server().await;
+        let candidates = vec![format!("https://127.0.0.1:{tls}"), mock.uri()];
+        assert!(candidates[1].starts_with("http://"));
+
+        let result = probe(candidates, client_info("s1-test"), probe_sender()).await;
+
+        assert_eq!(result.err(), Some(crate::i18n::tr!("login-error-certificate")));
+        assert!(
+            mock.received_requests()
+                .await
+                .expect("requests are recorded")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_port_that_only_speaks_http_still_falls_back_from_https() {
+        let mock = public_info_server().await;
+        let port = mock.address().port();
+        let candidates = vec![format!("https://127.0.0.1:{port}"), format!("http://127.0.0.1:{port}")];
+
+        let (client, _) = probe(candidates, client_info("s1-test"), probe_sender())
+            .await
+            .expect("the HTTP candidate connects");
+
+        assert_eq!(client.base_url().scheme(), "http");
+    }
+
+    /// Plain HTTP reached by falling back from HTTPS waits for the user's say; typed as
+    /// `http://`, it was their choice already.
+    #[test]
+    fn a_fallback_to_http_asks_before_the_credentials() {
+        let mut login = new_login();
+        login.asks_before_http = true;
+        login.finish(Outcome::Connected(Box::new(Ok((client(), server())))));
+        assert!(login.server.is_none());
+        assert!(login.unencrypted.is_some());
+
+        login.connect_unencrypted();
+        assert!(login.unencrypted.is_none());
+        assert!(login.server.is_some());
+        assert_eq!(login.focus, Some(Field::Username));
+
+        // Back from the question is back to the address.
+        login.server = None;
+        login.finish(Outcome::Connected(Box::new(Ok((client(), server())))));
+        login.change_server(&egui::Context::default());
+        assert!(login.unencrypted.is_none() && login.server.is_none());
+        assert_eq!(login.focus, Some(Field::Server));
+
+        // An HTTPS server, or `http://` typed out, goes straight on.
+        let https = Client::new("https://localhost:8920", client_info("s1-test")).expect("the URL parses");
+        login.finish(Outcome::Connected(Box::new(Ok((https, server())))));
+        assert!(login.unencrypted.is_none() && login.server.is_some());
+        login.server = None;
+        login.asks_before_http = false;
+        login.finish(Outcome::Connected(Box::new(Ok((client(), server())))));
+        assert!(login.unencrypted.is_none() && login.server.is_some());
+    }
+
+    #[test]
+    fn the_server_line_shows_the_scheme_only_for_plain_http() {
+        let url = |text: &str| url::Url::parse(text).expect("the URL parses");
+        assert_eq!(server_host(&url("http://192.168.1.10:8096")), "http://192.168.1.10");
+        assert_eq!(
+            server_host(&url("https://jellyfin.example.com/jellyfin")),
+            "jellyfin.example.com"
         );
     }
 

@@ -2,9 +2,9 @@
 
 <h1 align="center">Tabbyfin</h1>
 
-A native desktop client for [Jellyfin](https://jellyfin.org), built with [egui](https://github.com/emilk/egui) through [eframe](https://github.com/emilk/egui/tree/main/crates/eframe) and drawn with [wgpu](https://wgpu.rs). Video plays inside the app with [mpv](https://mpv.io) (libmpv); on Linux and Windows the app draws its frames straight from the GPU, without copying them through the CPU.
+A native client for [Jellyfin](https://jellyfin.org), built with [egui](https://github.com/emilk/egui) through [eframe](https://github.com/emilk/egui/tree/main/crates/eframe) and drawn with [wgpu](https://wgpu.rs). Video plays inside the app with [mpv](https://mpv.io) (libmpv); on Linux and Windows the app draws its frames straight from the GPU, without copying them through the CPU.
 
-Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**; developed against 12.x.
+Runs on **Linux**, **Windows** and **macOS**, and on **Android** phones and tablets (see [`docs/android.md`](docs/android.md)). Needs Jellyfin **10.11 or newer**; developed against 12.x.
 
 > Early days: version 0.3. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's missing.
 
@@ -42,6 +42,10 @@ Films: Blender Studio's [open movies](https://studio.blender.org/films/) (CC BY)
   - Resume points and watched state stay in sync with the server, including changes made on other devices.
 - **Remote control** from the Jellyfin web dashboard or a phone app: play items here, pause, seek, skip to the next item, change the volume and tracks, or send a message.
 - **Watch together** with Jellyfin's SyncPlay: create or join a group from the top bar, and play, pause and seek in sync with the other members.
+- **Downloads and offline mode:** download an item, a season or a series from its menu or page and play it without the server; resume points and watched state are sent when you're back online. If the server can't be reached at launch, the app opens on your downloads and signs in again by itself once it can.
+- **Casting** to a Chromecast or Google TV running Jellyfin's receiver app: the TV plays and reports to the server, and the app is its remote.
+- **Android:** the same app with a touch layout (bottom bar, bottom sheets, a player with gestures), Media3 or mpv for playback, and downloads that carry on in the background.
+- **Languages:** the interface is in English, European Portuguese and Spanish, following the system's language unless Settings picks one.
 - **Isolation:** your own mpv configuration, scripts and key bindings are never loaded, so they can't change how the embedded player looks.
 
 **Keys:** in the browsing pages, the arrow keys move a highlight over the cards, Tab and Shift+Tab jump between rows, and Enter opens. Esc or Backspace goes back, and Ctrl+F (⌘F on macOS) searches. In a library sorted by name, typing a letter jumps to it (or use the letter bar). In search, Enter in the box jumps to the results.
@@ -76,7 +80,7 @@ Download the package for your system from the [releases](https://github.com/lgpy
 | Linux, tarball | `tabbyfin-<version>-linux-x86_64.tar.gz` | Needs libmpv (`libmpv.so.2`), a Vulkan driver and the desktop's usual windowing libraries (xkbcommon, Wayland or X11) installed. For a menu entry, copy `tabbyfin` to `~/.local/bin/`, `tabbyfin.desktop` to `~/.local/share/applications/` and `tabbyfin.png` to `~/.local/share/icons/hicolor/512x512/apps/`. |
 | macOS 12+ (Apple silicon, Intel) | `tabbyfin-<version>-macos-<arch>.zip` | Needs `brew install mpv` for playback. The app is ad-hoc signed, not notarised: right-click it and choose Open the first time. |
 
-**Logs** are written to a daily file. *Settings → Logs → Open log folder* opens it; attach the log to bug reports.
+**Logs** are written to a daily file. *Settings → Storage → Logs → Open folder* opens it; attach the log to bug reports.
 
 ## Build from source
 

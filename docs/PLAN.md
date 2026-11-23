@@ -25,7 +25,7 @@ A native, cross-platform desktop Jellyfin client: the UI is built with [egui](ht
 - Multiple servers at once, and admin features.
 - Remote-controlling other sessions (other clients can control this one).
 
-SyncPlay and casting to a Chromecast, first left out, have since been built (§5.4, §5.5).
+SyncPlay (§5.4) and casting to a Chromecast (§5.5) are part of the app, as are downloads and offline mode (§5.6).
 
 ---
 
@@ -62,7 +62,14 @@ tabbyfin/
 │   │   ├── playback.rs       #   PlaybackInfo, stream/subtitle URLs, session reporting
 │   │   ├── images.rs         #   image URL builder
 │   │   ├── ticks.rs          #   Ticks newtype (1 tick = 100 ns) <-> Duration
-│   │   └── models.rs         #   hand-written DTOs, only the fields we use
+│   │   ├── models.rs         #   hand-written DTOs, only the fields we use
+│   │   ├── error.rs          #   Error, the one error type of the crate
+│   │   ├── system.rs         #   probing the server, ServerVersion and the minimum supported one
+│   │   ├── download.rs       #   an item's original file: URL, range requests, the body stream
+│   │   ├── socket.rs         #   the session websocket: keep-alive, reconnect, typed pushes
+│   │   ├── remote.rs         #   remote-control messages and the session's capabilities
+│   │   ├── syncplay.rs       #   SyncPlay requests, group updates and commands
+│   │   └── time.rs           #   ServerClock (/GetUtcTime), UTC timestamp parsing and formatting
 │   ├── cast/                 # CASTV2 (Chromecast) sender and the Jellyfin receiver's contract: no UI (§5.5)
 │   │   ├── codec.rs          #   CastMessage protobuf by hand, length-prefixed frames
 │   │   ├── channel.rs        #   TLS to the device, heartbeat, requestId matching
@@ -73,9 +80,16 @@ tabbyfin/
 │   ├── player/               # mpv via libmpv: no UI
 │   │   ├── lib.rs            #   Player: load, set_property, command, add_subtitle, quit
 │   │   ├── events.rs         #   PlayerEvent enum and event translation
+│   │   ├── host.rs           #   the player host process (`tabbyfin --player-host`): libmpv and its video output
+│   │   ├── remote.rs         #   the app's side of the host: spawns it, relays commands, events and frames
+│   │   ├── wire.rs           #   the messages between the two, over the host's stdin and stdout
 │   │   ├── android.rs        #   Android: JNI context and the video surface under the app's
 │   │   ├── media3.rs         #   Android: Media3 (ExoPlayer) behind the same API
 │   │   └── libmpv/           #   runtime-loaded libmpv: core, event thread, video output
+│   │       ├── embedded.rs   #     libmpv in the calling process (what the host runs; `TABBYFIN_PLAYER=embedded` in the app)
+│   │       ├── video.rs      #     the render thread and what it publishes to the UI
+│   │       ├── opengl.rs     #     what the GPU outputs share: render context, texture ring, render loop
+│   │       └── angle.rs, wgl.rs, d3d11.rs, egl.rs   #  the Windows (ANGLE, WGL, shared D3D11 textures) and Linux (EGL, Vulkan memory) outputs
 │   └── app/                  # the eframe binary, `tabbyfin` (§3.1)
 └── docs/
 ```
@@ -93,6 +107,8 @@ crates/app/src/
 ├── task.rs          Task<T>: a tokio future whose result the UI polls; channel: repaint-on-send; Deadline: a timer
 ├── runtime.rs       the tokio runtime, plus `start` returning the JoinHandle
 ├── keys.rs          every key binding, and who gets a key: egui or the app
+├── keyboard.rs      what a text field holds, for the soft keyboard, and revealing a field the keyboard covers
+├── android.rs       what winit drops on Android, passed on to egui (insets, soft keyboard, Back), and calls into the activity (metered network, the downloads service, the multicast lock)
 ├── toasts.rs        notifications
 ├── nav.rs           Route, NavRequest
 ├── debug.rs         TABBYFIN_KEYS replay, TABBYFIN_ROUTE parsing (compiled in debug builds only)
@@ -100,7 +116,8 @@ crates/app/src/
 ├── smooth_scroll.rs the shelves' glide, touch flings (a row's, and a page's coast), and the wheel's instant step with animations off
 ├── layout.rs        touch and the layout size (compact, medium, expanded) by the window's width; touch targets
 ├── motion.rs        animations: page entry, the shelves' stagger, image fades, toggle pops, the player's prompt and controls
-├── config.rs, credentials.rs, session.rs, update.rs, markers.rs
+├── config.rs, credentials.rs, session.rs, markers.rs
+├── update.rs        the update notice (§6, Update check)
 ├── item_menu.rs, tracks.rs   pure logic (marks, episode lookup, track choices) and the playlist edit queue
 ├── playback.rs, syncplay.rs, remote.rs, live.rs, cast.rs, downloads.rs   services
 ├── images.rs, trickplay.rs   textures
@@ -135,6 +152,8 @@ Jellyfin 12.0 **disables legacy authorization by default**, and existing install
 - The `Emby` scheme.
 
 We generate `DeviceId` once and save it to the config. Jellyfin uses it to identify the session.
+
+The client follows a redirect only within the server: the same host, on the same scheme and port or up from HTTP to HTTPS. Anything else fails the request, because a redirect carries the header along on the same host and a 307 or 308 carries the body, which at sign-in is the password.
 
 The `/emby/*` and `/mediabrowser/*` route prefixes were also **removed** in 12.0. We only use bare paths.
 
@@ -228,7 +247,7 @@ Video plays **inside the app** through libmpv; there's no separate mpv window. `
   - A render thread draws frames for the UI.
 - **Isolation from the user's mpv setup:** the embedded mpv never loads `mpv.conf`, scripts or key bindings (`config=no`, `load-scripts=no`, `osc=no`, `input-default-bindings=no`). The app draws its own controls, and user scripts such as uosc would otherwise draw theirs into the video.
 - **Loading a file:** every option is set as a property, because the argument list of `loadfile` changed in mpv 0.38.
-  1. `http-header-fields` carries the `Authorization` header, so the stream URL contains no token.
+  1. `http-header-fields` carries the `Authorization` header, so the stream URL contains no token. The URL itself is kept to the server (`Client::transcode_url` refuses one that leaves its origin or path), but mpv sends the header with every request it makes for the file, so a playlist or redirect the server writes can still send it to another host (`ROADMAP.md` 6.6).
   2. Then `force-media-title` and `start`, followed by `loadfile`.
   3. After `file-loaded`, `sub-add` for each external subtitle. These requests are authenticated by the same header.
 - **Observed properties:** `time-pos` (throttled to about once a second), `duration`, `pause`, `volume` and `mute`.
@@ -330,13 +349,13 @@ A tag also creates a draft GitHub release with these files. Locally, `mise run p
 The flow here:
 
 1. **Joining:** the SyncPlay panel in the top bar lists groups (`/SyncPlay/List`), creates one or joins one. The server confirms with a `GroupJoined` update on the websocket. While in a group, the server clock is sampled (4 samples, then one a minute) and the ping is reported. Requests go out one at a time, in the order they're made, so a `Ready` never overtakes its `Buffering`.
-2. **Starting something** while in a group (Play on an item page, next episode…) doesn't play locally: `Services::play` hands it to SyncPlay, which sends `SetNewQueue` (the item, plus the next episode for episodes).
-3. **Queue updates:** when the queue's current entry changes, every member (this one too) loads it paused at the group's position (`PlayOptions::start_paused`, `group_item`), reports `Buffering`, then `Ready` after mpv's first `playback-restart`.
+2. **Starting something** while in a group (Play on an item page, next episode…) doesn't play locally: `Services::play` hands it to SyncPlay, which sends `SetNewQueue` (the item, plus the next episode for episodes). Next and previous, from the player or a remote, are requests on the group's own queue, and the player's buttons show only when that queue has an entry there (`Services::can_skip`), counted from the entry the group is on when nothing is loaded here (after a stop, or this member's item ended) so an entry queued since has a Next. On repeat one the server doesn't move, it announces the same entry again, and that's what Next does. A member whose item fails to load or play leaves the group, so it doesn't keep the others waiting.
+3. **Queue updates:** when the queue's current entry changes, every member (this one too) loads it paused at the group's position (`PlayOptions::start_paused`, `group_item`), reports `Buffering`, then `Ready` after mpv's first `playback-restart`. An update that plays the current entry now (`NextItem`, `PreviousItem`, `SetCurrentItem`, `NewPlaylist`) does so even when that entry is already loaded (repeat one): a started player seeks back, paused, and reports `Ready`. Queue edits (`Queue`, `MoveItem`, `RepeatMode`…) never reload it.
 4. **Commands** arrive with a `When` in server time. The app waits for it on tokio, not on the UI's frames (which can be 16 ms apart, more on a slow renderer), and sends the command straight to the player from there:
    - `Unpause`: seek to the group's position if more than 0.4 s off, wait until `When`, then unpause. If it arrived late, seek ahead by the lateness and unpause now.
    - `Pause`: at `When`, pause and seek to the group's position.
    - `Seek`: pause, seek, report `Buffering`, and `Ready` after the restart; the server then unpauses everyone.
-   - `Stop`: stop playback.
+   - `Stop`: stop playback. A later `Seek` or `Unpause` for that entry loads it again here; not after this member's own copy ended, which others' pauses and seeks leave alone.
 5. **Local controls** in a group session (`Services::control`): pause, seek and stop become `/SyncPlay/Pause`, `Unpause`, `Seek` and `Stop` requests, so they apply to everyone. Esc stops playback for the group, as in the web client. Volume and tracks stay local.
 6. **End of an item:** each member sends `NextItem`; the server advances the queue once, and the next item arrives as a queue update. Local autoplay is off in a group.
 7. **Drift correction:** after an Unpause, the group's timeline is "position P at local instant T". Once a second, the local position (mpv's last report plus the time since, at the current speed) is compared with it:
@@ -366,8 +385,8 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 
 `downloads.rs` keeps an account's downloads: original files only, from `GET /Items/{id}/Download`, which the server allows per user (*Allow media downloading*, sent as each item's `CanDownload`, which list queries must ask for with `Fields=CanDownload`).
 
-- **On disk:** `config::downloads_dir()` (the platform's local data dir, not the cache; on Android the app's external files dir, `getExternalFilesDir`, through `TABBYFIN_DOWNLOADS_DIR`), one folder per account and one per item: `item.json` (the item with its chapters, the media source from a `PlaybackInfo` at download time, the segments), `media.<container>` (`.part` until it's complete), the external subtitles, and the poster and backdrop. A finished media file is what makes a download done, whatever `index.json` (the account's queue, with queued, paused and failed states) says, and a finished item is read from its `item.json` rather than the queue's copy (one that finished with no frame to save the queue after it is still listed there as it was asked for).
-- **Transfers:** `Services.downloads`, two workers on tokio, aborted when the services are dropped. Each worker takes the next waiting item from the queue it shares with `Downloads` itself, so the queue moves on with no frame drawn (an Android app in the background draws none). A `.part` resumes with a `Range` request (a 200 instead of a 206 starts it over), a transfer with no bytes for 30 s fails (`Error::Stalled`) rather than hanging, and free space is checked first. Progress comes back over a `task::channel`, at most four times a second; finished and failed ones become toasts. Signing out or switching accounts leaves the unfinished ones queued for that account's next sign-in.
+- **On disk:** `config::downloads_dir()` (the platform's local data dir, not the cache; on Android the app's external files dir, `getExternalFilesDir`, through `TABBYFIN_DOWNLOADS_DIR`), one folder per account and one per item: `item.json` (the item with its chapters, the media source from a `PlaybackInfo` at download time, the segments), `media.<container>` (`.part` until it's complete), the external subtitles, and the poster and backdrop. A finished media file is what makes a download done: one this version finished is checked against the length `item.json` records as the transfer counted it (`verified_size`, written before the file takes its name), and one cut short is queued again at launch; a download from before that was recorded is done when its file exists and isn't empty, since its `size` was only what `PlaybackInfo` said. Whatever `index.json` (the account's queue, with queued, paused and failed states) says, and a finished item is read from its `item.json` rather than the queue's copy (one that finished with no frame to save the queue after it is still listed there as it was asked for).
+- **Transfers:** `Services.downloads`, two workers on tokio, aborted when the services are dropped. Each worker takes the next waiting item from the queue it shares with `Downloads` itself, so the queue moves on with no frame drawn (an Android app in the background draws none). A `.part` of N bytes resumes with `Range: bytes=N-` and, as `If-Range`, the `ETag` or `Last-Modified` its first response gave (kept beside it in `.part.validator`): a 206 carries on, and a 200 (a file replaced on the server, or one that ignores ranges) or a 416 starts over. The server's answer decides that, not the size `PlaybackInfo` gave, which only feeds the free-space check and the bar (a total the bytes pass is dropped rather than shown past full), and the transfer ends when the bytes reach the server's own length. A transfer with no bytes for 30 s, the wait for the response's headers included, stalls (`Error::Stalled`) rather than hanging; the worker tries a stall again twice, 5 s apart and each time from the `.part` (cancelling or pausing ends the wait), and only then fails the item, and no other error is retried. The file is synced to disk before it takes its final name. `index.json` is written on a blocking thread, each snapshot numbered so that an older one never replaces a newer one, and a session's end (`pause`, from `Services::end` and from drop) writes the last one directly. Progress comes back over a `task::channel`, at most four times a second; finished and failed ones become toasts. Signing out or switching accounts leaves the unfinished ones queued for that account's next sign-in.
 - **Android:** while any worker runs, a foreground service (`DownloadService.java`, type `dataSync`, with a partial wake lock) keeps the process alive in the background, its notification showing the first transfer's progress and how many are to come; the workers start and stop it (`android::downloads_notice`). Swiping the app away ends the process (`MainActivity.onDestroy`), and the next launch resumes from the `.part`. *Download over Wi-Fi only* (Settings › Downloads, on by default) holds the workers while `MainActivity`'s network callback reports no unmetered network; a transfer under way when the phone leaves Wi-Fi stops and goes back to the front of the queue, and the notification and the Downloads page say "Waiting for Wi-Fi".
 - **Asking:** the item menu (*Download*, *Cancel download*, *Remove download*, *Retry download*) and the item page's Download button, which shows a bar (a ring on a phone) while the file comes. A series or season queues each of its episodes the account may download. The Downloads page (account menu) lists them all, with their progress, size or error.
 - **Playing:** `run_session` looks for a finished copy first (`downloads::find_local`), and when the version asked for is the one downloaded, it skips `PlaybackInfo` and plays the file (a `file://` URL, no auth header; Media3 reads it through a `DefaultDataSource`) with its stored media source, so the track mapping is the same as streaming it. Its external subtitles come from their files. It still reports to the server, as direct play with no play session. The downloaded copy's chapters and segments stand in for the server's when it can't be asked.
@@ -381,7 +400,7 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 
 - `App` (`app.rs`) is the `eframe::App`. It owns the screens (`Restoring`, `SignIn(Box<Login>)`, `SignedIn(Box<SignedIn>)`), the toasts, the window's `Placement`, the zoom, and the keys `raw_input_hook` took from egui for the app.
 - While signed in, `SignedIn` holds the session's `Services` and the `Shell`. Pages get a `&mut PageCx` each frame: `ctx`, `services`, a `nav: Vec<NavRequest>` to push into, and `render_state` (the player's video needs the wgpu device; `None` in tests). There are no globals and no `Rc<RefCell<…>>`.
-- `Services` (`services.rs`) is everything per signed-in session: the session (client, user, server), `user_data`, `events: Vec<AppEvent>`, `images`, `playback`, `syncplay`, `live`, `remote`, `cast`, the item page's playlist edit queue, and the marks and fetches that outlive a frame (a watched change, a series' next episode, a shuffle). `Services::new(session, ctx)` takes the `egui::Context`, which the services keep to wake the UI. `Services::tick(ctx)` runs each part's background work: images, the item menu's finished requests, playlist edits, then playback's, the websocket's, remote control's, SyncPlay's and the cast's.
+- `Services` (`services.rs`) is everything per signed-in session: the session (client, user, server), `user_data`, `events: Vec<AppEvent>`, `images`, `playback`, `syncplay`, `live`, `remote`, `cast`, `downloads`, the item page's playlist edit queue, Settings' queue of server-side saves (`config_saves`, so a change is saved though the page was left), and the marks and fetches that outlive a frame (a watched change, a series' next episode, a shuffle). `Services::new(session, ctx)` takes the `egui::Context`, which the services keep to wake the UI. `Services::tick(ctx)` runs each part's background work: images, the item menu's finished requests, playlist edits, the downloads', then playback's, the websocket's, remote control's, SyncPlay's and the cast's.
 - Cross-service calls that would otherwise be globals are methods on `Services` (`control(UiCommand)`, `play(&item, options)`, `play_all_with`, `enqueue`, `reload`, `mark`, `play_up_next`); each part's module adds its own `impl Services` block, so `services.rs` stays small.
 - `AppEvent`s are what the app or the shell must act on: `Toast`, `AppearanceChanged`, `SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `PlaybackStarted`, `PlaybackEnded`, `ToggleFullscreen`, `LeavePlayer` (Back from the player while casting). The app drains them after the shell has drawn.
 - Adding an account parks the signed-in screen in `App::parked`: it keeps ticking (playback, the websocket), its toasts still show, and its screen-changing events (`SessionExpired`, `SignOut`, `SwitchAccount`, `AddAccount`, `ToggleFullscreen`) are dropped, while anything else waits in its queue for the shell after *Back to your account*.
@@ -395,7 +414,7 @@ Casting goes to Jellyfin's own receiver app on a Chromecast or Google TV (jellyf
 - `views::open(route, cx)` makes the page for a route. Pages navigate by pushing `NavRequest::Push(route)` / `Back` into `cx.nav`; the shell applies them after drawing and requests a repaint, so the new page shows at once.
 - Loading (see `views/home.rs`): a page keeps a `Load<T>` (`widgets/text.rs`), an `Option<Task<…>>` and `loaded_at: Option<u64>`. `show` starts a load when `loaded_at != Some(services.user_data)` — the first load, Retry (`None`) and watch data changing elsewhere — then polls the task; what's on screen stays until new data arrives. A page under others doesn't reload in the background: it catches up when it's back on top. The item page's first load may already be running: `services.prefetch` (`views/item/prefetch.rs`) starts it once the pointer has rested on the item's card, and the page takes that `Task` over. Owners keep a generation counter (library pages, playback sessions) and drop results for an older one.
 - While a page loads it shows the mascot (`widgets/mascot.rs`), the jellycat: every outline tessellated once with `lyon_tessellation` into an `egui::Mesh` and posed per frame (egui fills convex paths only, and these are concave).
-- The sign-in form (`views/login.rs`) is one panel under the mascot (`mascot::watching`), which reacts to the form through a `Watch` filled in as the fields draw: it looks toward the focused field's caret (its eyes move, its mouth and cheeks half as far), shuts its eyes while a hidden password has the keyboard, and wears the confused face while an error shows. Its place is allocated before the panel and it's painted after, so it follows this frame's caret; it floats a little above the panel with no shadow.
+- The sign-in form (`views/login.rs`) is one panel under the mascot (`mascot::watching`), which reacts to the form through a `Watch` filled in as the fields draw: it looks toward the focused field's caret (its eyes move, its mouth and cheeks half as far), shuts its eyes while a hidden password has the keyboard, and wears the confused face while an error shows. Its place is allocated before the panel and it's painted after, so it follows this frame's caret; it floats a little above the panel with no shadow. An address typed without a scheme is tried over HTTPS, then plain HTTP; a refused certificate stops there with its own error instead of falling back, and any other HTTPS failure (a port that only speaks HTTP) moves on. A server that answered only that fallback gets a step of its own before the credentials: a warning notice that the connection isn't encrypted, *Connect anyway* and *Back*, since whoever sits on the network can make HTTPS fail. An address typed with `http://` skips it, and a server reached over HTTP shows `http://` before its host in the panel's server line.
 - **The look** is `docs/DESIGN.md`'s. Its colours are `theme::Tokens` (the backdrop's gradient and glow, `surface`, `inset`, `ink`, `brand`, the avatar pastels, the status colours), one set per theme; `theme::visuals` builds egui's colours from them, so egui's own widgets match, and the shell sits on the backdrop's gradient (`widgets/backdrop.rs`). Its pieces are shared widgets in `widgets/` (the panel, fields, buttons, rows, pills, popups, toasts, page states, …), each drawn in every state in both themes by the component gallery (`ui_tests/gallery.rs`); `docs/DESIGN.md` lists them. The form checks focus by the focused widget's id, since `Response::has_focus` is false while the window lacks the OS's focus.
 - Scrolling (`smooth_scroll.rs`): egui already eases a wheel step over frames and leaves trackpad deltas alone; with the animations setting off, `App::raw_input_hook` splits a wheel step into the deltas egui applies at once. A shelf's arrows glide a page over (`smooth_scroll::Glide`) and its drag follows the pointer 1:1 and stops with it, taking no wheel.
 
@@ -461,6 +480,10 @@ While a video plays, `desktop::Desktop` (owned by `App`, updated every frame fro
 
 `window.rs` saves the window's bounds half a second after a move or resize and reopens it there. Eframe lists no displays before the window opens and afterwards names only the monitor the window is on, as a size without a position, so the question is settled before the window exists, where the OS can be asked: on Windows the process is made DPI-aware first (winit would only do it when its event loop starts, and until then Windows reports monitors scaled to 96 DPI), then the saved rectangle's centre is looked up among the monitors (`EnumDisplayMonitors`), and a spot on none of them opens the window centred on the primary. Everywhere else the window manager (or AppKit) keeps a window on screen, and Wayland doesn't let an app place its window at all, so the saved spot is used as saved and the app neither guesses nor moves the window after it's up. The placement is stored as physical pixels for the frame's top-left plus the scale factor they were measured at, with the content size in OS points — what eframe's own window storage keeps — so the UI zoom and a monitor of another scale both reopen right. On Windows winit converts the launch position with the scale factor of the monitor the window is created on, so when the window doesn't open on its saved spot (a mixed-DPI setup) the physical position is set again after the first frame, and a maximized window maximized again after that; otherwise nothing is sent. Configs from before the scale factor (`window_bounds` without `scale`) keep their position in points and are saved anew on the next move.
 
+### Update check
+
+`update.rs` asks GitHub's latest-release API on launch, at most once a day (`update_checked_at` in the config), and a newer tag becomes a toast whose action opens the release page. A failed check is only logged and counts as no check, so the next launch tries again. *Settings → About*'s *Tell me when a new version is out* (`check_for_updates`) turns it off, and Android never checks, since the store updates the app. Debug builds take `TABBYFIN_UPDATE_URL` instead of GitHub's URL and check on every launch.
+
 ### Toasts
 
 `toasts.rs` draws info, success and error notices in the window's bottom-right corner: 5 s (errors 8 s), longer while the pointer is on them, at most four at once, with a close button and optionally one action (`ToastAction::OpenUrl` for the update notice). The app owns `Toasts` and draws them over everything, on every screen; signed-in code raises them through `services.toast(…)`, and API errors through `services.handle_error`. Each toast is logged.
@@ -475,7 +498,7 @@ While a video plays, `desktop::Desktop` (owned by `App`, updated every frame fro
 
 ## 7. Dev environment
 
-**Tools and tasks:** `mise install` installs the pinned Rust toolchain (with clippy and rustfmt), Python and `gh`, and `cargo-deb` on Linux. `mise tasks` lists the shortcuts: `run`, `ci`, `smoke`, `dev:setup`, `package`, and so on. The rest comes from the OS:
+**Tools and tasks:** `mise install` installs the pinned Rust toolchain (with clippy, rustfmt and the two Android targets), Python and `gh`, `cargo-deb` on Linux, and for the Android build `cargo-ndk`, Gradle and a Temurin JDK 21 (the SDK and NDK come from `ANDROID_HOME`, `docs/android.md`). `mise tasks` lists the shortcuts: `run`, `ci`, `smoke`, `dev:setup`, `package`, and so on. The rest comes from the OS:
 
 **Windows (current machine):**
 - Rust on the MSVC toolchain, which needs Visual Studio 2022's *Desktop development with C++* workload (`winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools"`). Build from the *x64 Native Tools Command Prompt*, or from a shell whose `PATH` doesn't put another `link.exe` first: Git for Windows (`usr\bin`) and coreutils both ship one, and the build then fails at link time with `link: extra operand`.
@@ -486,7 +509,7 @@ While a video plays, `desktop::Desktop` (owned by `App`, updated every frame fro
 - `TABBYFIN_VIDEO=software` forces software video and `=gpu` forces the GPU path, even on software rendering, to compare the two.
 - `TABBYFIN_ROUTE=play:<id>:::<media source id>` plays a specific version, e.g. the 4K HEVC 10-bit one that `dev/make-media.sh` adds to Test Movie.
 - `TABBYFIN_CONFIG_DIR=C:\Temp\jelly-dev\config` gives test runs their own config folder, so your real sign-in isn't touched; an empty string uses the normal one.
-- `TABBYFIN_KEYS="down right enter wait escape"` (debug builds) presses keys inside the app 3 s after sign-in, 250 ms apart; `wait` pauses for a second. Together with a screen capture of the window (Snipping Tool, or PowerShell reading the screen), it tests keyboard navigation without touching the desktop's real keyboard or mouse.
+- `TABBYFIN_KEYS="down right enter wait escape"` (debug builds) presses keys inside the app 3 s after launch, on any screen, 250 ms apart; `wait` pauses for a second. Together with a screen capture of the window (Snipping Tool, or PowerShell reading the screen), it tests keyboard navigation without touching the desktop's real keyboard or mouse.
 
 **Linux:**
 ```sh

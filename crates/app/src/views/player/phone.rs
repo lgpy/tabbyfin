@@ -272,13 +272,6 @@ impl PlayerPage {
         self.seek_bar(ui, view, cx, seek);
     }
 
-    /// Opens the settings sheet, for a mockup to show it.
-    #[cfg(all(test, feature = "mockup"))]
-    pub(crate) fn open_settings_sheet(&mut self) {
-        self.sheet = Some(Sheet::Settings);
-        self.settings_tab = SettingsTab::Audio;
-    }
-
     /// Opens `sheet`, or closes it when it's the one open.
     fn toggle_sheet(&mut self, sheet: Sheet) {
         self.sheet = if self.sheet == Some(sheet) { None } else { Some(sheet) };

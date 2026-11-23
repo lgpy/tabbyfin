@@ -157,6 +157,34 @@ item-cancel-download = Cancel download
 item-remove-download = Remove download
 item-retry-download = Retry download
 item-left = { $time } left
+item-runtime-hours-minutes = { $hours }h { $minutes }m
+item-runtime-hours = { $hours }h
+item-runtime-minutes = { $minutes }m
+item-episode-label = S{ $season }:E{ $episode }
+item-episode-label-short = E{ $episode }
+person-director = Director
+person-writer = Writer
+person-producer = Producer
+person-guest-star = Guest star
+person-composer = Composer
+person-conductor = Conductor
+person-lyricist = Lyricist
+person-arranger = Arranger
+person-engineer = Engineer
+person-mixer = Mixer
+person-remixer = Remixer
+person-creator = Creator
+person-artist = Artist
+person-album-artist = Album artist
+person-author = Author
+person-illustrator = Illustrator
+person-penciller = Penciller
+person-inker = Inker
+person-colorist = Colorist
+person-letterer = Letterer
+person-cover-artist = Cover artist
+person-editor = Editor
+person-translator = Translator
 item-less = Less
 item-show-less = Show less
 item-show-more = Show more
@@ -177,6 +205,7 @@ widget-copy-code = Copy code
 widget-copied = Copied
 widget-error = Error
 widget-information = Information
+widget-warning = Warning
 widget-success = Success
 widget-decrease = Decrease { $label }
 widget-increase = Increase { $label }
@@ -208,8 +237,6 @@ player-seek = Seek
 player-volume = Volume
 player-cast = Cast to a TV
 player-cast-to-device = Casting to { $device }
-player-playing-on = Playing on { $device }
-player-reconnecting-to = Reconnecting to { $device }…
 player-resumed-from = Resumed from { $time }
 player-start-over = Start over
 player-up-next = Up next
@@ -522,6 +549,7 @@ settings-image-cache-cleared = Image cache cleared.
 settings-image-cache-failed = Couldn't clear the image cache. Close anything using its folder and try again.
 settings-logs-folder-failed = Couldn't open the logs folder ({ $path }).
 settings-save-failed = Couldn't save your settings to the server. They're back as the server has them.
+settings-config-save-failed = Couldn't save this setting on this device. Check that the settings folder can be written to and has room left.
 settings-load-failed = Couldn't load your settings from the server.
 settings-loading = Loading your settings from the server…
 settings-retry = Retry
@@ -639,6 +667,10 @@ login-no-version = The server didn't report its version.
 login-version-too-old = This server runs Jellyfin { $version }. Tabbyfin needs { $needed } or newer.
 login-server-starting = The server is starting up. Waiting…
 login-not-jellyfin = That address doesn't look like a Jellyfin server.
+login-error-certificate = The server's certificate isn't trusted. Check the address, or the certificate on the server.
+login-unencrypted-title = Connect without encryption?
+login-unencrypted-notice = This server didn't answer over HTTPS, so your password and what you watch would travel unencrypted. That's usual for a server on your own network, and a risk anywhere else.
+login-connect-anyway = Connect anyway
 login-unreachable = Couldn't reach the server.
 
 dialog-sharing = Everyone on this server can see it
@@ -682,9 +714,6 @@ dialog-item-count = { $count ->
 dialog-playlist-forbidden = This playlist belongs to someone else; it can't be changed.
 
 ## downloads-and-casting
-
-# A select's closing brace is indented: `i18n::tests` reads a line that starts at the left margin
-# as a new message.
 
 # The downloads page, and the platform's notice of the transfers (Android's notification).
 downloads-title = Downloads

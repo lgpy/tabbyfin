@@ -30,7 +30,7 @@ use crate::config::Config;
 use crate::keys::{self, Action, Press, Scope};
 use crate::nav::NavRequest;
 use crate::runtime;
-use crate::services::Services;
+use crate::services::{AppEvent, Services};
 use crate::session::{self, Session};
 use crate::views::{Page, PageCx};
 
@@ -119,6 +119,12 @@ pub struct ConfigDir {
 
 static CONFIG_DIR: Mutex<()> = Mutex::new(());
 
+thread_local! {
+    /// Whether this thread holds the [`ConfigDir`]. The environment variable is the process's,
+    /// so it can't tell a test that holds one from one running beside the holder.
+    static HOLDS_CONFIG_DIR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 impl ConfigDir {
     pub fn new(name: &str) -> Self {
         let serial = CONFIG_DIR.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -128,12 +134,25 @@ impl ConfigDir {
         // SAFETY: every test that reads the config holds this guard for as long as the variable
         // is set, and no background thread reads it in between.
         unsafe { std::env::set_var("TABBYFIN_CONFIG_DIR", &dir) };
+        HOLDS_CONFIG_DIR.with(|holds| holds.set(true));
         Self { _serial: serial, dir }
     }
 }
 
+/// Fails a test that is about to build services without a [`ConfigDir`]: they load and save the
+/// config, which would otherwise be the developer's own. It asks the calling thread, which is the
+/// test's own: the variable would be set whenever any other test holds a directory.
+#[track_caller]
+pub fn assert_config_dir() {
+    assert!(
+        HOLDS_CONFIG_DIR.with(std::cell::Cell::get),
+        "this test builds Services without a ConfigDir: declare `let _config = ConfigDir::new(..)` first"
+    );
+}
+
 impl Drop for ConfigDir {
     fn drop(&mut self) {
+        HOLDS_CONFIG_DIR.with(|holds| holds.set(false));
         // SAFETY: see `new`; the guard is still held here.
         unsafe { std::env::remove_var("TABBYFIN_CONFIG_DIR") };
         let _ = std::fs::remove_dir_all(&self.dir);
@@ -275,6 +294,29 @@ impl FixtureServer {
         });
     }
 
+    /// [`FixtureServer::json_value`], answering `delay` after the request arrives.
+    pub fn json_value_after(
+        &self,
+        http_method: &'static str,
+        route: &'static str,
+        body: &serde_json::Value,
+        delay: Duration,
+    ) {
+        self.respond(
+            http_method,
+            route,
+            ResponseTemplate::new(200)
+                .set_body_string(body.to_string())
+                .set_delay(delay),
+        )
+    }
+
+    /// [`FixtureServer::status`], answering `delay` after the request arrives: a request still
+    /// out while the test does something else.
+    pub fn status_after(&self, http_method: &'static str, route: &'static str, status: u16, delay: Duration) {
+        self.respond(http_method, route, ResponseTemplate::new(status).set_delay(delay))
+    }
+
     fn respond(&self, http_method: &'static str, route: &'static str, template: ResponseTemplate) {
         let mock = self.mock.clone();
         block_on(async move {
@@ -294,6 +336,17 @@ impl FixtureServer {
             .iter()
             .filter(|request| request.method.as_str() == http_method && request.url.path() == route)
             .map(|request| serde_json::from_slice(&request.body).expect("a JSON body"))
+            .collect()
+    }
+
+    /// The query string of every `http_method` request to `route` served, in order.
+    pub fn queries(&self, http_method: &str, route: &str) -> Vec<String> {
+        let mock = self.mock.clone();
+        let requests = block_on(async move { mock.received_requests().await.unwrap_or_default() });
+        requests
+            .iter()
+            .filter(|request| request.method.as_str() == http_method && request.url.path() == route)
+            .map(|request| request.url.query().unwrap_or_default().to_owned())
             .collect()
     }
 
@@ -422,12 +475,27 @@ impl PageRun {
         self.services.as_mut().expect("the services are made")
     }
 
+    /// The toasts the services raised so far, as their debug text (a toast's fields are the
+    /// toasts' own).
+    pub fn toasts(&self) -> Vec<String> {
+        let services = self.services.as_ref().expect("the services are made");
+        services
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                AppEvent::Toast(toast) => Some(format!("{toast:?}")),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// One frame: the app's logic (the services' work), then the keys the shell routes, then
     /// the page.
     fn show(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            assert_config_dir();
             self.services = Some(Services::new(session, &ctx));
             let open = self.open.take().expect("the page is opened once");
             let page = {
@@ -542,6 +610,11 @@ impl PageHarness {
 
     pub fn step(&mut self) {
         self.harness.step();
+    }
+
+    /// The toasts the services raised so far, as [`PageRun::toasts`].
+    pub fn toasts(&self) -> Vec<String> {
+        self.state().toasts()
     }
 
     /// Types `text` into the top bar's search box over a page that searches itself

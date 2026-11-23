@@ -54,22 +54,27 @@ impl ServerClock {
         self.samples.iter().min_by_key(|s| s.round_trip).copied()
     }
 
-    /// A server timestamp as a local one. Unchanged until there's a sample.
+    /// A server timestamp as a local one. Unchanged until there's a sample, and when the
+    /// server's clock is so far off that the result isn't a time this system can hold.
     pub fn to_local(&self, server: SystemTime) -> SystemTime {
-        shift(server, -self.best().map_or(0, |s| s.offset_us))
+        let offset = self.best().map_or(0, |s| s.offset_us);
+        offset.checked_neg().and_then(|by| shift(server, by)).unwrap_or(server)
     }
 
-    /// The server's clock now.
+    /// The server's clock now (this system's, when the server's is out of its range).
     pub fn server_now(&self) -> SystemTime {
-        shift(SystemTime::now(), self.best().map_or(0, |s| s.offset_us))
+        let now = SystemTime::now();
+        shift(now, self.best().map_or(0, |s| s.offset_us)).unwrap_or(now)
     }
 }
 
-fn shift(time: SystemTime, by_us: i64) -> SystemTime {
+/// `None` outside what a `SystemTime` holds (Windows stops at the year 30828), where `+` and
+/// `-` would panic: the offset is the server's.
+fn shift(time: SystemTime, by_us: i64) -> Option<SystemTime> {
     if by_us >= 0 {
-        time + Duration::from_micros(by_us as u64)
+        time.checked_add(Duration::from_micros(by_us as u64))
     } else {
-        time - Duration::from_micros(by_us.unsigned_abs())
+        time.checked_sub(Duration::from_micros(by_us.unsigned_abs()))
     }
 }
 
@@ -93,7 +98,15 @@ pub fn parse_utc(text: &str) -> Option<SystemTime> {
     let (hms, fraction) = time.split_once('.').unwrap_or((time, ""));
     let mut hms = hms.splitn(3, ':').map(|p| p.parse::<i64>().ok());
     let (hour, minute, second) = (hms.next()??, hms.next()??, hms.next()??);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+    // Years as the server's own dates have them (.NET's run from 1 to 9999): past that the
+    // arithmetic below overflows, and no clock is there.
+    if !(1..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=60).contains(&second)
+    {
         return None;
     }
     // Fractional seconds, to the microsecond.
@@ -107,7 +120,7 @@ pub fn parse_utc(text: &str) -> Option<SystemTime> {
         digits.parse::<i64>().ok()? * 10_i64.pow(6 - digits.len() as u32)
     };
     let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second;
-    Some(shift(UNIX_EPOCH, seconds * 1_000_000 + fraction_us))
+    shift(UNIX_EPOCH, seconds * 1_000_000 + fraction_us)
 }
 
 /// Formats a time the way the server expects, e.g. `2026-10-14T19:00:00.123456Z`.
@@ -197,6 +210,27 @@ mod tests {
         assert_eq!(at("2026-10-14T19:00:00"), Some(1_792_004_400_000_000));
         assert_eq!(at("2026-13-14T19:00:00Z"), None);
         assert_eq!(at("yesterday"), None);
+    }
+
+    /// A timestamp is the server's to write, and a `SystemTime` panics when pushed out of its
+    /// range: a year no clock has is no time at all, and an absurd offset leaves a time as it is.
+    #[test]
+    fn times_out_of_range_dont_panic() {
+        assert_eq!(parse_utc("30829-01-01T00:00:00Z"), None);
+        assert_eq!(parse_utc("999999999999999-01-01T00:00:00Z"), None);
+        assert_eq!(parse_utc("0000-01-01T00:00:00Z"), None);
+        assert_eq!(parse_utc("2026-10-14T-1:00:00Z"), None);
+        assert!(parse_utc("9999-12-31T23:59:59.9999999Z").is_some());
+
+        for offset_us in [i64::MAX, i64::MIN] {
+            let mut clock = ServerClock::default();
+            clock.add(ClockSample {
+                offset_us,
+                round_trip: Duration::ZERO,
+            });
+            assert_eq!(clock.to_local(UNIX_EPOCH), UNIX_EPOCH);
+            clock.server_now();
+        }
     }
 
     #[test]

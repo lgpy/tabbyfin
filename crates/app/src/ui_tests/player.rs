@@ -1130,3 +1130,55 @@ fn a_syncplay_group_has_no_frame_step_or_ab_loop() {
         crate::playback::AbLoop::Off
     );
 }
+
+/// A queue of `entries`, the first playing, as the group's server sends it.
+fn group_queue(entries: &[&str]) -> jellyfin::PlayQueue {
+    let playlist: Vec<_> = entries
+        .iter()
+        .map(|id| serde_json::json!({ "ItemId": format!("item-{id}"), "PlaylistItemId": id }))
+        .collect();
+    serde_json::from_value(serde_json::json!({
+        "Reason": "NewPlaylist",
+        "Playlist": playlist,
+        "PlayingItemIndex": 0,
+        "IsPlaying": true,
+    }))
+    .expect("a queue")
+}
+
+/// In a group the Next button follows the group's queue, not the item's neighbouring episodes:
+/// there with an entry queued after the one playing (named for the direction, not an episode),
+/// gone when the queue ends there, however many episodes the series has after it. Previous
+/// likewise, at the first entry.
+#[test]
+fn in_a_group_next_and_previous_follow_the_groups_queue() {
+    let _config = ConfigDir::new("player-group-skip");
+    let server = FixtureServer::start();
+    let mut harness = desktop_player(&server);
+    // Outside a group the series' neighbours decide.
+    assert!(harness.query_by_label("Next episode").is_some());
+    assert!(harness.query_by_label("Previous episode").is_some());
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.syncplay.join_for_test(group_queue(&["a", "b"]), "a");
+    assert!(services.can_skip(true) && !services.can_skip(false));
+    harness.step();
+    assert!(
+        harness.query_by_label("Next").is_some(),
+        "an entry is queued after this one"
+    );
+    assert!(harness.query_by_label("Next episode").is_none());
+    assert!(
+        harness.query_by_label("Previous").is_none(),
+        "nothing is queued before it"
+    );
+
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.syncplay.join_for_test(group_queue(&["a"]), "a");
+    harness.step();
+    assert!(harness.query_by_label("Next").is_none(), "the queue ends here");
+    assert!(
+        harness.query_by_label("Next episode").is_none(),
+        "the series' next episode isn't the group's"
+    );
+}

@@ -18,21 +18,36 @@
     <uses-feature android:glEsVersion="0x00030000" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- Backups: the access tokens are plain files in the app's private storage (Android has no
+         keychain the app can use; crates/app/src/credentials.rs), and the config names the
+         server and the user, so none of it may leave the phone. At targetSdk 36 that takes two
+         settings: allowBackup="false" ends Auto Backup and `adb backup` (Android 6 to 11 too, as
+         minSdk is 26), but from Android 12 device-to-device transfer follows
+         dataExtractionRules instead, which excludes everything from both. -->
     <application
         android:label="Tabbyfin"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.AppCompat.NoActionBar"
         android:usesCleartextTraffic="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:extractNativeLibs="false">
 
         <!-- configChanges: the app redraws itself on rotation and resizes, so the activity (and
-             with it the Rust app) isn't recreated. -->
+             with it the Rust app) isn't recreated: a recreated activity would end the process
+             (MainActivity.onDestroy) or, if it lived, never draw (the Rust app runs once per
+             process). That includes the font size, the language and the text direction. Rust
+             doesn't hear of them: the app has its own text size setting and takes the system's
+             language only when it applies its appearance (at launch and when Settings changes
+             it), so a change of either shows the next launch, and the layout direction follows
+             the app's language. The last four (touchscreen, colour mode, mobile codes, grammatical
+             gender) change rarely and need nothing either. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|fontScale|locale|layoutDirection|touchscreen|colorMode|mcc|mnc|grammaticalGender|fontWeightAdjustment"
             android:windowSoftInputMode="adjustResize">
             <meta-data android:name="android.app.lib_name" android:value="tabbyfin" />
             <intent-filter>

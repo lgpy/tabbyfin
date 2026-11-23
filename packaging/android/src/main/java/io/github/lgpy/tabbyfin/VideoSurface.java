@@ -43,15 +43,27 @@ final class VideoSurface implements SurfaceHolder.Callback {
         activity.addContentView(view, layout());
     }
 
-    /** Shows the surface. Called by Rust, on any thread. */
+    /**
+     * Shows the surface. Called by Rust, on any thread. When it's already up (the previous
+     * player hasn't hidden it yet, as one skipped to the next item is dropped after its
+     * successor starts), the new player is handed the surface that exists, since no
+     * `surfaceCreated` is coming for it.
+     */
     static void show(Activity activity) {
         VideoSurface.activity = activity;
         activity.runOnUiThread(() -> {
-            if (shown == null) shown = new VideoSurface();
+            if (shown == null) {
+                shown = new VideoSurface();
+                return;
+            }
+            aspect = 0;
+            relayout();
+            Surface surface = shown.view.getHolder().getSurface();
+            if (surface.isValid()) nativeSurface(surface);
         });
     }
 
-    /** Takes it away; the player is told the surface is gone first. Called by Rust. */
+    /** Takes it away; the player is told the surface is gone first. Called by Rust, for the player the surface is shown for. */
     static void hide() {
         if (activity == null) return;
         activity.runOnUiThread(() -> {

@@ -4,14 +4,19 @@
 use std::path::{Path, PathBuf};
 
 use jellyfin::models::{
-    AuthenticationResult, BaseItemDto, BaseItemKind, Culture, ItemFilterValues, MediaSegmentDto, PublicSystemInfo,
-    QueryResult, SubtitleMode,
+    AuthenticationResult, BaseItemDto, BaseItemKind, Culture, ItemFilterValues, MediaSegmentDto, MediaSegmentType,
+    PublicSystemInfo, QueryResult, SubtitleMode,
 };
-use jellyfin::{GroupInfo, PlaybackInfoResponse};
+use jellyfin::{GroupInfo, GroupState, PlaybackInfoResponse, Ticks};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 const VERSIONS: [&str; 2] = ["12.2", "10.11"];
+
+/// The folder of fixtures written by hand, for responses the dev servers can't produce (no
+/// SyncPlay group, no segment provider plugin, nothing watched yet to be "next up"). They follow
+/// the models and the field names of the captured files, and are loaded like a version.
+const HANDWRITTEN: &str = "handwritten";
 
 fn dir(version: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -51,12 +56,17 @@ fn every_fixture_parses() {
         for name in ["item_movie", "item_series"] {
             let _: BaseItemDto = load(version, name);
         }
+        // `latest` is empty on 12.2, `resume` on 10.11 and `next_up` on both (the dev media has
+        // nothing in progress to continue): those parse as empty lists, and the handwritten
+        // fixtures below cover the types that no captured file fills.
         let _: Vec<BaseItemDto> = load(version, "latest");
         let filters: ItemFilterValues = load(version, "item_filters");
         assert!(filters.genres.contains(&"Science Fiction".to_owned()), "{version}");
         assert!(filters.years.contains(&2024), "{version}");
         assert!(filters.tags.contains(&"multi-version".to_owned()), "{version}");
         assert!(filters.official_ratings.contains(&"PG-13".to_owned()), "{version}");
+        // Both are empty when captured (`media_segments` needs a plugin, `syncplay_list` a group):
+        // `handwritten_fixtures_carry_what_the_app_reads` checks the filled shapes.
         let _: QueryResult<MediaSegmentDto> = load(version, "media_segments");
         let _: Vec<GroupInfo> = load(version, "syncplay_list");
         let _: PlaybackInfoResponse = load(version, "playback_info_direct");
@@ -98,8 +108,13 @@ fn the_downloaded_models_round_trip_through_json() {
                 "playback_info_direct.MediaSources",
             );
         }
-        let segments: QueryResult<MediaSegmentDto> = load(version, "media_segments");
-        let original = fixture_value(version, "media_segments");
+        // The captured segments are empty, so this runs on the handwritten ones.
+        let segments: QueryResult<MediaSegmentDto> = load(HANDWRITTEN, "media_segments");
+        let original = fixture_value(HANDWRITTEN, "media_segments");
+        assert!(
+            !segments.items.is_empty(),
+            "the handwritten media_segments.json has no segments"
+        );
         for (index, segment) in segments.items.iter().enumerate() {
             round_trips(segment, &original["Items"][index], version, "media_segments.Items");
         }
@@ -160,6 +175,44 @@ where
             assert!(empty || sent.is_some(), "{version}/{name}: the server sends no `{key}`");
         }
     }
+}
+
+/// The three responses no captured file fills, written by hand (`tests/fixtures/handwritten/`):
+/// what the app reads from each must come out of them set, which an empty list can't show.
+#[test]
+fn handwritten_fixtures_carry_what_the_app_reads() {
+    // A SyncPlay group list: the join dialog shows the name, state and members.
+    let groups: Vec<GroupInfo> = load(HANDWRITTEN, "syncplay_list");
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].group_name, "Movie night");
+    assert!(!groups[0].group_id.is_empty());
+    assert_eq!(groups[0].state, GroupState::Playing);
+    assert_eq!(groups[0].participants, ["dev", "guest"]);
+    assert_eq!(groups[1].state, GroupState::Idle);
+    assert!(groups[1].participants.is_empty());
+
+    // Media segments: the skip button reads the kind and the span.
+    let segments: QueryResult<MediaSegmentDto> = load(HANDWRITTEN, "media_segments");
+    assert_eq!(segments.items.len(), 2);
+    assert_eq!(segments.items[0].kind, MediaSegmentType::Intro);
+    assert_eq!(segments.items[0].start_ticks, Ticks(0));
+    assert_eq!(segments.items[0].end_ticks, Ticks(100_000_000));
+    assert_eq!(segments.items[1].kind, MediaSegmentType::Outro);
+    assert!(segments.items[1].start_ticks < segments.items[1].end_ticks);
+
+    // Next up: an episode with the fields the home page's card and the player's next-episode
+    // autoplay use.
+    let next_up: QueryResult<BaseItemDto> = load(HANDWRITTEN, "next_up");
+    assert_eq!(next_up.items.len(), 1);
+    let episode = &next_up.items[0];
+    assert_eq!(episode.kind, BaseItemKind::Episode);
+    assert!(!episode.id.is_empty() && !episode.name.is_empty());
+    assert_eq!(episode.series_name.as_deref(), Some("Test Show"));
+    assert!(episode.series_id.is_some() && episode.season_id.is_some());
+    assert_eq!(episode.parent_index_number, Some(1));
+    assert_eq!(episode.index_number, Some(2));
+    assert!(episode.run_time_ticks.is_some());
+    assert!(episode.user_data.is_some());
 }
 
 #[test]

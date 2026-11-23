@@ -42,6 +42,7 @@ impl ShellRun {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             self.services = Some(if self.offline {
                 Services::offline(session, &ctx)
             } else {
