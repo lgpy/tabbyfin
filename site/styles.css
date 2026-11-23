@@ -225,7 +225,6 @@ footer a:hover { color: var(--ink); }
   .hero-text { max-width: 640px; }
   .stage { --m: 112px; }
   .mascot { left: 8px; top: calc(var(--m) * -1 + 6px); }
-  .speech-hero { left: calc(var(--m) + 16px); top: calc(var(--m) * -.72); max-width: calc(100% - var(--m) - 20px); }
   .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .oses { columns: 1; }
   /* Room for the mascot, which comes up in the middle of the page's last line. */
@@ -245,14 +244,16 @@ footer a:hover { color: var(--ink); }
   .mascot-by-button .hero-text { position: relative; z-index: 3; display: flex; flex-direction: column; align-items: flex-start; }
   .mascot-by-button .lead { margin-bottom: 6px; }
   .mascot-by-button .needs { margin: 0 0 18px; }
-  .mascot-by-button .cta { order: 1; align-self: stretch; }
+  /* Only as wide as the button and the mascot, so the bubble, held to its right edge, comes from the mascot. */
+  .mascot-by-button .cta { order: 1; max-width: 100%; }
   /* The glow in the corner is the mascot's, and the mascot isn't there on a phone. */
   .mascot-by-button .stage::before { inset: -6% 0; background: radial-gradient(closest-side at 50% 55%, var(--glow), transparent 100%); }
   .mascot-by-button .cta { position: relative; flex-wrap: nowrap; gap: 8px; }
   .mascot-by-button .btn-brand { min-width: 0; flex: 0 1 auto; white-space: nowrap; }
   .mascot-by-button .mascot { position: relative; left: auto; top: auto; flex: none; width: 84px; margin: -16px 0 -20px; }
-  .mascot-by-button .speech-hero { left: auto; right: 0; top: calc(100% + 8px); max-width: min(250px, 100%); transform-origin: right top; }
-  .mascot-by-button .speech-hero::after { left: auto; right: 34px; top: -11px; transform: rotate(180deg); }
+  .mascot-by-button .speech-hero { left: auto; right: -36px; top: calc(100% + 8px); max-width: min(250px, 100%); transform-origin: right top; }
+  /* Flipped upright, its tip leaning left, toward the mascot. */
+  .mascot-by-button .speech-hero::after { left: auto; right: 22px; top: -11px; transform: scaleY(-1); }
   .surface { padding: 22px 18px; }
   footer .cols { flex-direction: column; align-items: flex-start; }
 }
@@ -273,6 +274,10 @@ footer a:hover { color: var(--ink); }
   .features { padding-top: 32px; }
   .mascot-by-button .btn-brand { padding: 0 16px; font-size: 16px; }
   .mascot-by-button .mascot { width: 68px; }
+}
+/* Too narrow for the bubble to sit right of the mascot: it comes in and down a little, under the tentacles. */
+@media (max-width: 350px) {
+  .mascot-by-button .speech-hero { right: -22px; top: calc(100% + 18px); }
 }
 
 /* A phone on its side: the first screen is short, so the hero's text closes up to keep the button in it. */
@@ -336,8 +341,12 @@ footer a:hover { color: var(--ink); }
   clip-path: path('M0 0H18C16 5 12 10 3 12C6 8 5 4 0 0Z');
 }
 .speech.on { opacity: 1; visibility: visible; transform: none; }
-.speech-hero { left: calc(var(--m) * .5); top: calc(var(--m) * -.56); transform-origin: left center; }
+.speech-hero { left: calc(var(--m) * .48); top: calc(var(--m) * -.36); transform-origin: left center; }
 .speech-hero::after { left: -14px; top: calc(50% - 6px); transform: rotate(90deg); }
+/* Here, after the rule above, so it wins: with the mascot in the corner, the bubble sits clear of its head. */
+@media (max-width: 1080px) {
+  .speech-hero { left: calc(var(--m) + 16px); top: calc(var(--m) * -.72); max-width: calc(100% - var(--m) - 20px); }
+}
 .speech-lurk { position: fixed; right: 14px; bottom: calc(clamp(88px, 9vw, 128px) * .58); transform-origin: right bottom; }
 .speech-lurk::after { right: 24px; top: calc(100% - 1px); }
 .speech-lurk.left { right: auto; left: 14px; transform-origin: left bottom; }
