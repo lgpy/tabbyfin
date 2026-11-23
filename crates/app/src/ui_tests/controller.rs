@@ -46,6 +46,7 @@ impl Run {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             let mut services = Services::new(session, &ctx);
             let addr = self.device.addr();
             services.cast.add_device(Device {

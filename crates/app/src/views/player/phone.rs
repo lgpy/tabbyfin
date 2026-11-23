@@ -16,15 +16,15 @@ use egui::{
     Align, Align2, CornerRadius, Id, Layout, Rect, RichText, ScrollArea, Sense, Stroke, UiBuilder, Vec2, pos2, vec2,
 };
 use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_CLOSE, ICON_CLOSED_CAPTION, ICON_FORWARD_10, ICON_PAUSE, ICON_PLAY_ARROW, ICON_REPLAY_10,
-    ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_TUNE, ICON_VIEW_LIST,
+    ICON_ARROW_BACK, ICON_CLOSE, ICON_CLOSED_CAPTION, ICON_PAUSE, ICON_PLAY_ARROW, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS,
+    ICON_TUNE, ICON_VIEW_LIST,
 };
 use jellyfin::ImageRequest;
 use jellyfin::models::ImageType;
 
 use super::{
-    PlayerPage, SEEK_STEP, SettingsChoice, SettingsTab, View, chapter_colours, control, gradient, label_badge,
-    settings_body, speed_text,
+    PlayerPage, SettingsChoice, SettingsTab, View, chapter_colours, control, gradient, label_badge, settings_body,
+    speed_text,
 };
 use crate::i18n::tr;
 use crate::playback::{PlayOptions, SubtitleChoice, UiCommand};
@@ -197,20 +197,22 @@ impl PlayerPage {
             cx.services.control(UiCommand::TogglePause);
             self.show_controls();
         }
+        let seconds = view.seek_step;
+        let (back_icon, forward_icon) = super::seek_icons(seconds);
         let skips = [
             (
                 -1.,
-                ICON_REPLAY_10,
-                tr!("player-back-10s"),
+                back_icon,
+                tr!("player-back-seconds", seconds = seconds),
                 "player_back_10",
-                -SEEK_STEP,
+                -seconds,
             ),
             (
                 1.,
-                ICON_FORWARD_10,
-                tr!("player-forward-10s"),
+                forward_icon,
+                tr!("player-forward-seconds", seconds = seconds),
                 "player_forward_10",
-                SEEK_STEP,
+                seconds,
             ),
         ];
         for (side, icon, tip, id, by) in skips {
@@ -268,13 +270,6 @@ impl PlayerPage {
             },
         );
         self.seek_bar(ui, view, cx, seek);
-    }
-
-    /// Opens the settings sheet, for a mockup to show it.
-    #[cfg(all(test, feature = "mockup"))]
-    pub(crate) fn open_settings_sheet(&mut self) {
-        self.sheet = Some(Sheet::Settings);
-        self.settings_tab = SettingsTab::Audio;
     }
 
     /// Opens `sheet`, or closes it when it's the one open.

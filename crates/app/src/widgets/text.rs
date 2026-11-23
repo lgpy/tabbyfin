@@ -87,11 +87,11 @@ pub fn card_text(item: &BaseItemDto) -> (String, String) {
     }
 }
 
-/// `S1:E2`, or an empty string when numbering is unknown.
+/// `S1:E2` (`T1:E2` in Portuguese), or an empty string when numbering is unknown.
 pub fn episode_label(item: &BaseItemDto) -> String {
     match (item.parent_index_number, item.index_number) {
-        (Some(s), Some(e)) => format!("S{s}:E{e}"),
-        (None, Some(e)) => format!("E{e}"),
+        (Some(s), Some(e)) => tr!("item-episode-label", season = s, episode = e),
+        (None, Some(e)) => tr!("item-episode-label-short", episode = e),
         _ => String::new(),
     }
 }
@@ -111,24 +111,41 @@ pub fn timestamp(time: Duration) -> String {
 pub fn runtime_text(ticks: Ticks) -> String {
     let minutes = (ticks.as_secs_f64() / 60.).round() as u64;
     match (minutes / 60, minutes % 60) {
-        (0, m) => format!("{m}m"),
-        (h, 0) => format!("{h}h"),
-        (h, m) => format!("{h}h {m}m"),
+        (0, m) => tr!("item-runtime-minutes", minutes = m),
+        (h, 0) => tr!("item-runtime-hours", hours = h),
+        (h, m) => tr!("item-runtime-hours-minutes", hours = h, minutes = m),
     }
 }
 
-/// `GuestStar` -> `Guest star`.
+/// A person's role as the server names it (`GuestStar`), in the interface's language. `Actor`,
+/// `Unknown` and any kind this has no message for show the server's own text.
 pub fn kind_label(kind: &str) -> String {
-    let mut label = String::new();
-    for (i, c) in kind.chars().enumerate() {
-        if c.is_uppercase() && i > 0 {
-            label.push(' ');
-            label.extend(c.to_lowercase());
-        } else {
-            label.push(c);
-        }
+    match kind {
+        "Director" => tr!("person-director"),
+        "Writer" => tr!("person-writer"),
+        "Producer" => tr!("person-producer"),
+        "GuestStar" => tr!("person-guest-star"),
+        "Composer" => tr!("person-composer"),
+        "Conductor" => tr!("person-conductor"),
+        "Lyricist" => tr!("person-lyricist"),
+        "Arranger" => tr!("person-arranger"),
+        "Engineer" => tr!("person-engineer"),
+        "Mixer" => tr!("person-mixer"),
+        "Remixer" => tr!("person-remixer"),
+        "Creator" => tr!("person-creator"),
+        "Artist" => tr!("person-artist"),
+        "AlbumArtist" => tr!("person-album-artist"),
+        "Author" => tr!("person-author"),
+        "Illustrator" => tr!("person-illustrator"),
+        "Penciller" => tr!("person-penciller"),
+        "Inker" => tr!("person-inker"),
+        "Colorist" => tr!("person-colorist"),
+        "Letterer" => tr!("person-letterer"),
+        "CoverArtist" => tr!("person-cover-artist"),
+        "Editor" => tr!("person-editor"),
+        "Translator" => tr!("person-translator"),
+        other => other.to_owned(),
     }
-    label
 }
 
 /// "Episode 3", "episode 03": the name Jellyfin gives an episode without a title.
@@ -140,7 +157,42 @@ pub fn is_placeholder_episode_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_placeholder_episode_name;
+    use super::{is_placeholder_episode_name, kind_label};
+
+    /// Every kind Jellyfin's `PersonKind` has, bar `Actor` and `Unknown`, reads as a message.
+    #[test]
+    fn the_credit_kinds_of_a_cast_row_have_messages() {
+        for kind in [
+            "Director",
+            "Writer",
+            "Producer",
+            "GuestStar",
+            "Composer",
+            "Conductor",
+            "Lyricist",
+            "Arranger",
+            "Engineer",
+            "Mixer",
+            "Remixer",
+            "Creator",
+            "Artist",
+            "AlbumArtist",
+            "Author",
+            "Illustrator",
+            "Penciller",
+            "Inker",
+            "Colorist",
+            "Letterer",
+            "CoverArtist",
+            "Editor",
+            "Translator",
+        ] {
+            let label = kind_label(kind);
+            assert!(!label.starts_with("person-") && !label.is_empty(), "{kind}: {label}");
+        }
+        assert_eq!(kind_label("Actor"), "Actor");
+        assert_eq!(kind_label("CoverArtist"), "Cover artist");
+    }
 
     #[test]
     fn jellyfins_names_for_untitled_episodes() {

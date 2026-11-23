@@ -11,14 +11,18 @@ mod config;
 mod credentials;
 #[cfg(debug_assertions)]
 mod debug;
+#[cfg(not(target_os = "android"))]
+mod desktop;
 mod downloads;
 mod i18n;
 mod images;
+mod info;
 mod item_menu;
 mod keyboard;
 mod keys;
 mod layout;
 mod live;
+mod local_queue;
 mod markers;
 mod motion;
 mod nav;
@@ -28,6 +32,7 @@ mod runtime;
 mod services;
 mod session;
 mod smooth_scroll;
+mod spoilers;
 mod syncplay;
 mod task;
 mod theme;

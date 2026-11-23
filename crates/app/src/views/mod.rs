@@ -7,6 +7,7 @@
 pub mod casting;
 pub mod dialogs;
 pub mod downloads;
+pub mod history;
 pub mod home;
 pub mod item;
 pub mod libraries;
@@ -16,6 +17,7 @@ pub mod player;
 pub mod search;
 pub mod settings;
 pub mod shell;
+pub mod subtitle_search;
 pub mod value_filters;
 
 use crate::keys::{Action, Scope};
@@ -155,6 +157,7 @@ pub fn open(route: Route, cx: &mut PageCx) -> Box<dyn Page> {
         Route::Person { id, name } => Box::new(library::LibraryPage::new(cx, library::Source::Person { id }, name)),
         Route::Libraries => Box::new(libraries::LibrariesPage::default()),
         Route::Search => Box::new(search::SearchPage::default()),
+        Route::History => Box::new(history::HistoryPage::new()),
         Route::Downloads => Box::new(downloads::DownloadsPage),
         Route::Settings => Box::new(settings::SettingsPage::new()),
         Route::SettingsSection(section) => Box::new(settings::SettingsPage::for_section(section)),

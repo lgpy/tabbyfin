@@ -460,9 +460,10 @@ extern "system" fn Java_io_github_lgpy_tabbyfin_MainActivity_nativeUnmetered(
     _class: *mut std::ffi::c_void,
     unmetered: u8,
 ) {
-    tracing::info!(unmetered = unmetered != 0, "network");
-    crate::downloads::set_unmetered(unmetered != 0);
-    repaint();
+    if crate::downloads::set_unmetered(unmetered != 0) {
+        tracing::info!(unmetered = unmetered != 0, "network");
+        repaint();
+    }
 }
 
 #[unsafe(no_mangle)]

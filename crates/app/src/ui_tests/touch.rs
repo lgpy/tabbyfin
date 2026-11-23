@@ -44,6 +44,7 @@ impl ShellRun {
         let mut nav = Vec::new();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             self.services = Some(Services::new(session, &ctx));
         }
         let services = self.services.as_mut().expect("the services are made");
@@ -540,14 +541,50 @@ impl PlayerRun {
         }
     }
 
+    /// The signed-in user may manage subtitles, which is what offers the subtitle search.
+    pub fn with_subtitle_management(mut self) -> Self {
+        if let Some(session) = &mut self.session {
+            session.user.policy = Some(jellyfin::models::UserPolicy {
+                enable_subtitle_management: true,
+            });
+        }
+        self
+    }
+
+    /// Applies the settings menu's adjustments, as the page does when one is changed.
+    pub fn adjust(&mut self, adjustments: crate::playback::Adjustments) {
+        self.services
+            .as_mut()
+            .expect("the services are made")
+            .adjust(adjustments);
+    }
+
+    /// Hands the services a subtitle the server downloaded, as the search dialog does.
+    pub fn add_downloaded_subtitle(&mut self, item_id: &str, sources: &[jellyfin::models::MediaSourceInfo]) -> bool {
+        self.services
+            .as_mut()
+            .expect("the services are made")
+            .add_downloaded_subtitle(item_id, sources)
+    }
+
     /// Queues the presses `keys::take` gave the shell for the next frame.
     pub fn presses(&mut self, presses: impl IntoIterator<Item = crate::keys::Press>) {
         self.keys.extend(presses);
     }
 
+    /// The services the player draws with.
+    pub fn services(&mut self) -> &mut Services {
+        self.services.as_mut().expect("the services are made")
+    }
+
     /// The running session's state, as the page reads it.
     pub fn now_playing(&self) -> Option<&crate::playback::NowPlaying> {
         self.services.as_ref()?.playback.now_playing()
+    }
+
+    /// The services, for a test that moves what the page only reads (the sleep timer's clock).
+    pub fn services_mut(&mut self) -> Option<&mut Services> {
+        self.services.as_mut()
     }
 
     /// The running session's state, to move it as a test needs (near the end, say).
@@ -563,6 +600,7 @@ impl PlayerRun {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             let mut services = Services::new(session, &ctx);
             let episodes: serde_json::Value = crate::ui_tests::fixture_json("episodes");
             let item = |index: usize| -> jellyfin::models::BaseItemDto {
@@ -615,14 +653,6 @@ impl PlayerRun {
     pub fn commands(&mut self) -> Vec<crate::playback::UiCommand> {
         let sent = self.sent.as_mut().expect("the session started");
         std::iter::from_fn(|| sent.try_recv().ok()).collect()
-    }
-}
-
-/// Opens `run`'s settings sheet once its player is up, for a mockup.
-#[cfg(feature = "mockup")]
-pub fn open_sheet(run: &mut PlayerRun) {
-    if let Some(player) = &mut run.player {
-        player.open_settings_sheet();
     }
 }
 
@@ -796,6 +826,99 @@ fn a_phones_player_settings_open_as_a_side_sheet() {
         !sent.iter().any(|command| matches!(command, UiCommand::Stop)),
         "{sent:?}"
     );
+}
+
+/// The sheet's General tab steps the sleep timer from its plus, and puts it back from reset, and
+/// shows the playback info from its switch.
+#[test]
+fn a_phones_settings_sheet_sets_the_sleep_timer_and_the_info() {
+    use crate::playback::SleepTimer;
+
+    let _config = ConfigDir::new("touch-player-sleep");
+    let server = FixtureServer::start();
+    let mut harness = phone_player(&server);
+    // A phone plays through Media3, which has no aspect or deinterlace rows: with them the sheet
+    // (which doesn't scroll) is taller than this test's screen and pushes the timer off it.
+    harness.state_mut().now_playing_mut().expect("the session").mpv = false;
+    harness.get_by_label("Settings").click();
+    for _ in 0..3 {
+        harness.step();
+    }
+    harness.get_by_role_and_label(Role::Tab, "General").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    harness.get_by_label("Increase sleep timer").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    let sleep = harness
+        .state_mut()
+        .services_mut()
+        .expect("the services")
+        .playback
+        .sleep();
+    assert!(matches!(sleep, Some(SleepTimer::In(_))), "{sleep:?}");
+    harness.get_by_label("Reset sleep timer").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    let sleep = harness
+        .state_mut()
+        .services_mut()
+        .expect("the services")
+        .playback
+        .sleep();
+    assert_eq!(sleep, None);
+
+    assert!(harness.query_by_label("Because").is_none());
+    harness.get_by_label("On").click();
+    for _ in 0..4 {
+        harness.step();
+    }
+    harness.get_by_label("Direct play");
+}
+
+/// A SyncPlay group has no sleep timer in its settings.
+#[test]
+fn a_phones_settings_sheet_has_no_sleep_timer_in_a_syncplay_group() {
+    let _config = ConfigDir::new("touch-player-sleep-group");
+    let server = FixtureServer::start();
+    let mut harness = phone_player(&server);
+    let state = harness.state_mut().now_playing_mut().expect("the session");
+    state.mpv = false;
+    state.group_item = Some("queue-item".into());
+    harness.get_by_label("Settings").click();
+    for _ in 0..3 {
+        harness.step();
+    }
+    harness.get_by_role_and_label(Role::Tab, "General").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    assert!(harness.query_by_label("Increase sleep timer").is_none());
+}
+
+/// With a group joined the settings have no sleep timer even while this session is a solo one:
+/// the page's `set_sleep` refuses it either way, so the row would do nothing.
+#[test]
+fn a_phones_settings_sheet_has_no_sleep_timer_while_a_group_is_joined() {
+    let _config = ConfigDir::new("touch-player-sleep-joined");
+    let server = FixtureServer::start();
+    let mut harness = phone_player(&server);
+    harness.state_mut().now_playing_mut().expect("the session").mpv = false;
+    let services = harness.state_mut().services_mut().expect("the services");
+    services.syncplay.group =
+        Some(serde_json::from_value(serde_json::json!({"GroupId": "g", "GroupName": "Movie night"})).expect("a group"));
+    harness.get_by_label("Settings").click();
+    for _ in 0..3 {
+        harness.step();
+    }
+    harness.get_by_role_and_label(Role::Tab, "General").click();
+    for _ in 0..2 {
+        harness.step();
+    }
+    assert!(harness.query_by_label("Increase sleep timer").is_none());
 }
 
 /// Chapters opens its sheet, and a chapter picked there seeks to it and closes the sheet.

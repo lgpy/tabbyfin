@@ -17,15 +17,17 @@ use jellyfin::models::{
     BaseItemDto, BaseItemKind, ChapterInfo, ItemField, MediaSegmentDto, MediaSourceInfo, MediaStream, MediaStreamType,
     TrickplayInfo,
 };
-use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
+use jellyfin::{Client, PlayMethod, PlaybackInfoRequest, PlaybackOrder, PlaybackReport, RepeatMode, Ticks};
 use player::libmpv::{VideoImport, VideoOutput};
 use player::{Cues, EndReason, LoadRequest, Player, PlayerEvent};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 use url::Url;
 
-use crate::config::{Config, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
+use crate::config::{Config, SkipAction, SkipActions, SubtitleColor, SubtitleStyle, UnfinishedPlayback};
 use crate::i18n::tr;
+use crate::info::{self, Stats};
+use crate::local_queue::{AfterEnd, LocalQueue};
 use crate::markers::{self, Chapter, Segment, SegmentKind};
 use crate::runtime;
 use crate::services::{AppEvent, Services};
@@ -33,15 +35,33 @@ use crate::session::describe_error;
 use crate::syncplay::GroupRequest;
 use crate::task::{self, Deadline};
 use crate::toasts::Toast;
+use crate::tracks;
 
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 /// How long after a volume or mute change its progress report goes out. A wheel spin or held
 /// key changes the volume many times a second; one report covers them all.
 const VOLUME_REPORT_AFTER: Duration = Duration::from_secs(1);
 const DEFAULT_VOLUME: f64 = 100.;
+
+/// The most the volume reaches, in percent: mpv's boost on the desktop (`volume-max`), 100 on
+/// Android, whose players have no boost. What's reported to the server and what remote control
+/// sets stay within 0 to 100 either way.
+pub const fn volume_max() -> f64 {
+    if cfg!(target_os = "android") {
+        100.
+    } else {
+        player::MAX_VOLUME
+    }
+}
+
+/// The seconds a seek key or skip button jumps, as Settings offers them.
+pub const SEEK_STEPS: [u32; 4] = [5, 10, 15, 30];
+pub const DEFAULT_SEEK_STEP: u32 = 10;
 /// How long quitting the app waits for a running session to report its stop. The next launch
 /// reports it instead if this runs out (`report_unfinished`).
 const EXIT_WAIT: Duration = Duration::from_secs(3);
+/// How long after a frame step the pause and seek it causes go unreported.
+const FRAME_STEP_QUIET: Duration = Duration::from_millis(600);
 
 /// What to play. Stream indexes are Jellyfin's `MediaStream.Index`; `None` leaves the choice
 /// to mpv (and the user's mpv config).
@@ -58,6 +78,79 @@ pub struct PlayOptions {
     /// `start` is the item's resume point, taken without asking (next episode, autoplay), so
     /// the player offers to start over.
     pub resumed: bool,
+    /// The picture choices of the playback this restarts (the same item again, in another
+    /// version or with other tracks, or after a lost stream); `None` starts as a new item does.
+    pub picture: Option<Picture>,
+    /// This continues the playthrough that's running (a lost stream, another version or track,
+    /// the GPU fallback) rather than starting the item over (played again, repeat), so what
+    /// belongs to the playthrough (the segments skipped, an end-of-item sleep timer) stays.
+    pub continues: bool,
+}
+
+/// What a restart of the same item keeps of the picture choices, which belong to the item and
+/// are applied to the new player again.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Picture {
+    /// The media source (version) these choices were made on.
+    pub source_id: String,
+    pub aspect: Aspect,
+    pub deinterlace: bool,
+    /// The user turned deinterlacing on or off, rather than it being what the stream asks for.
+    pub deinterlace_chosen: bool,
+    /// A stream index of the second subtitle.
+    pub secondary_subtitle: Option<i32>,
+    pub ab_loop: AbLoop,
+}
+
+impl Picture {
+    /// The choices a new session of `source` starts with. Those `carried` over from the same
+    /// version stay (the second subtitle only if that track is still there and still a text
+    /// track other than the first; the tracks of a transcode are the ones sent as files), and
+    /// deinterlacing is worked out again unless the user set it. Another version of the item
+    /// keeps only the aspect: its tracks, length and interlacing are its own. Without anything
+    /// carried, the defaults of a new item.
+    fn starting(
+        carried: Option<&Picture>,
+        source: &MediaSourceInfo,
+        stream: &StreamInfo,
+        subtitle: SubtitleChoice,
+    ) -> Self {
+        let by_default = deinterlaces_by_default(source, stream.method);
+        let fresh = Self {
+            source_id: source.id.clone(),
+            deinterlace: by_default,
+            ..Self::default()
+        };
+        let Some(carried) = carried else {
+            return fresh;
+        };
+        if carried.source_id != source.id {
+            return Self {
+                aspect: carried.aspect,
+                ..fresh
+            };
+        }
+        let primary = match subtitle {
+            SubtitleChoice::Stream(index) => Some(index),
+            SubtitleChoice::Off => None,
+            SubtitleChoice::Auto => source.default_subtitle_stream_index.filter(|&index| index >= 0),
+        };
+        let files = (stream.method == PlayMethod::Transcode).then_some(stream.subtitle_files.as_slice());
+        let secondary_subtitle = carried.secondary_subtitle.filter(|&wanted| {
+            tracks::secondary_choices(source, files, primary)
+                .iter()
+                .any(|choice| choice.value == wanted)
+        });
+        Self {
+            deinterlace: if carried.deinterlace_chosen {
+                carried.deinterlace
+            } else {
+                by_default
+            },
+            secondary_subtitle,
+            ..carried.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -80,6 +173,10 @@ pub struct Adjustments {
     pub audio_delay: f64,
     /// 1.0 is the subtitles' own size.
     pub subtitle_scale: f64,
+    /// mpv's `sub-pos`: 100 is the bottom, and less is higher up the picture.
+    pub subtitle_position: u8,
+    /// Night mode: compressed dynamic range. Carries to the next item; Settings has its default.
+    pub night_mode: bool,
 }
 
 impl Default for Adjustments {
@@ -89,6 +186,8 @@ impl Default for Adjustments {
             subtitle_delay: 0.,
             audio_delay: 0.,
             subtitle_scale: 1.,
+            subtitle_position: Self::BOTTOM,
+            night_mode: false,
         }
     }
 }
@@ -99,6 +198,11 @@ impl Adjustments {
     pub const SCALE_STEP: f64 = 0.1;
     const MAX_DELAY: f64 = 30.;
     const SCALE_RANGE: (f64, f64) = (0.5, 3.);
+    /// `sub-pos` at the bottom, where subtitles start. Lower is higher up; mpv cuts text
+    /// subtitles off below it (above 100), so the menu doesn't offer that.
+    pub const BOTTOM: u8 = 100;
+    pub const POSITION_STEP: u8 = 5;
+    const POSITION_RANGE: (u8, u8) = (0, Self::BOTTOM);
 
     /// The next speed in [`Self::SPEEDS`] above (`up`) or below the current one.
     pub fn step_speed(self, up: bool) -> f64 {
@@ -125,15 +229,98 @@ impl Adjustments {
             subtitle_delay: tenths(self.subtitle_delay.clamp(-Self::MAX_DELAY, Self::MAX_DELAY)),
             audio_delay: tenths(self.audio_delay.clamp(-Self::MAX_DELAY, Self::MAX_DELAY)),
             subtitle_scale: tenths(self.subtitle_scale.clamp(Self::SCALE_RANGE.0, Self::SCALE_RANGE.1)),
+            subtitle_position: self
+                .subtitle_position
+                .clamp(Self::POSITION_RANGE.0, Self::POSITION_RANGE.1),
+            night_mode: self.night_mode,
         }
     }
 
-    /// For the next item: the same speed and subtitle size, no delays.
+    /// For the next item: the same speed, subtitle size and position and night mode, no delays.
     fn for_next_item(self) -> Self {
         Self {
             speed: self.speed,
             subtitle_scale: self.subtitle_scale,
+            subtitle_position: self.subtitle_position,
+            night_mode: self.night_mode,
             ..Self::default()
+        }
+    }
+}
+
+/// How the picture fills the window. Not kept between items.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Aspect {
+    /// The whole picture, in its own aspect, with bars where it doesn't fill the window.
+    #[default]
+    Fit,
+    /// Fills the window, cropping what overflows.
+    Fill,
+    /// Fills the window, distorting the picture.
+    Stretch,
+    /// The picture taken as 16:9 whatever the file says.
+    Widescreen,
+    /// The picture taken as 4:3.
+    Standard,
+}
+
+impl Aspect {
+    pub const ALL: [Self; 5] = [Self::Fit, Self::Fill, Self::Stretch, Self::Widescreen, Self::Standard];
+
+    /// The next mode, after the last the first: what the key cycles through.
+    pub fn next(self) -> Self {
+        let index = Self::ALL.iter().position(|&aspect| aspect == self).unwrap_or(0);
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    /// The mpv properties that make this mode, all of them, so one mode's leftovers don't stay:
+    /// `panscan` crops to fill, `keepaspect` off stretches, `video-aspect-override` retakes the
+    /// aspect.
+    pub fn mpv_properties(self) -> [(&'static str, serde_json::Value); 3] {
+        use serde_json::json;
+        let (panscan, keep, ratio) = match self {
+            Self::Fit => (0., true, "no"),
+            Self::Fill => (1., true, "no"),
+            Self::Stretch => (0., false, "no"),
+            Self::Widescreen => (0., true, "16:9"),
+            Self::Standard => (0., true, "4:3"),
+        };
+        [
+            ("panscan", json!(panscan)),
+            ("keepaspect", json!(keep)),
+            ("video-aspect-override", json!(ratio)),
+        ]
+    }
+}
+
+/// The A–B loop's state: the next press of its key sets the point after the one it has.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AbLoop {
+    #[default]
+    Off,
+    /// The start is set, the end isn't.
+    A(Duration),
+    /// Playing from the start to the end and back.
+    Loop(Duration, Duration),
+}
+
+impl AbLoop {
+    /// What a press at `position` makes of this: sets A, then B, then clears both, as mpv's own
+    /// `ab-loop` command does.
+    pub fn next(self, position: Duration) -> Self {
+        match self {
+            Self::Off => Self::A(position),
+            Self::A(a) => Self::Loop(a, position),
+            Self::Loop(..) => Self::Off,
+        }
+    }
+
+    /// The two points, earliest first, for drawing: the end is `None` until it's set.
+    pub fn points(self) -> Option<(Duration, Option<Duration>)> {
+        match self {
+            Self::Off => None,
+            Self::A(a) => Some((a, None)),
+            Self::Loop(a, b) => Some((a.min(b), Some(a.max(b)))),
         }
     }
 }
@@ -155,10 +342,45 @@ pub enum UiCommand {
     /// Seconds.
     SetAudioDelay(f64),
     SetSubtitleScale(f64),
+    /// mpv's `sub-pos`, 100 at the bottom ([`Adjustments::subtitle_position`]).
+    SetSubtitlePosition(u8),
+    /// Night mode on or off, applied as an audio filter (not with passthrough on).
+    SetNightMode(bool),
     ToggleMute,
+    /// Asks the player for the numbers behind the info overlay; the answer comes back as
+    /// [`NowPlaying::player_stats`]. Only the local player has them, so it never goes to a group.
+    PollInfo,
     Audio(i32),
     Subtitle(SubtitleChoice),
+    /// The queue's repeat and shuffle, which the progress reports carry to the server.
+    SetQueueModes(RepeatMode, PlaybackOrder),
+    /// A subtitle the server downloaded while this plays: loaded into mpv and selected.
+    AddSubtitle(Box<AddedSubtitle>),
+    /// A second text track shown with the first (a stream index), or none.
+    SetSecondarySubtitle(Option<i32>),
+    SetAspect(Aspect),
+    SetDeinterlace(bool),
+    /// One frame forward (`true`) or back, while paused.
+    FrameStep(bool),
+    /// mpv's `ab-loop`: sets A, then B, then clears both.
+    CycleAbLoop,
     Stop,
+}
+
+/// A subtitle added to the item while it plays (the search's download), with what the session
+/// needs to number mpv's tracks again.
+#[derive(Debug, Clone)]
+pub struct AddedSubtitle {
+    /// The new stream's index in `source`.
+    pub index: i32,
+    pub url: Url,
+    pub title: String,
+    pub language: Option<String>,
+    /// The item's streams after the server's refresh.
+    pub source: MediaSourceInfo,
+    /// The external subtitles in the order mpv has them: the ones it had, then the new one
+    /// (their indexes may have moved with the refresh).
+    pub files: Vec<i32>,
 }
 
 /// Session to UI messages.
@@ -169,9 +391,12 @@ enum SessionUpdate {
         audio: Option<i32>,
         subtitle: SubtitleChoice,
         stream: StreamInfo,
+        picture: Box<Picture>,
     },
     /// Fetched after playback starts.
     Details(Box<Details>),
+    /// The player's answer to [`UiCommand::PollInfo`].
+    Stats(Box<Stats>),
     Player(PlayerEvent),
     /// `run_session` returned: the last message of a session. A panic in it is raised again on
     /// the UI thread, as a [`crate::task::Task`]'s is.
@@ -187,6 +412,11 @@ pub struct StreamInfo {
     pub subtitle_files: Vec<i32>,
     /// A subtitle the transcoder burns into the video.
     pub burned_subtitle: Option<i32>,
+    /// Why the server transcodes (`TranscodeReasons` of its URL, e.g. `VideoCodecNotSupported`).
+    pub transcode_reasons: Vec<String>,
+    /// The codecs the transcode produces (`VideoCodec` and `AudioCodec` of its URL).
+    pub transcode_video_codec: Option<String>,
+    pub transcode_audio_codec: Option<String>,
 }
 
 /// Another version (media source) of the playing item.
@@ -217,26 +447,61 @@ const RESUME_PROMPT_FOR: Duration = Duration::from_secs(10);
 /// When the up-next card shows without an Outro segment: this long before the end.
 const UP_NEXT_BEFORE_END: Duration = Duration::from_secs(20);
 
+/// Pauses playback after a while, or holds autoplay when the item ends. Not saved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SleepTimer {
+    /// Pauses at this time.
+    In(Instant),
+    /// Nothing plays after the end of the item with this id, however many sessions it takes to
+    /// get there (a reconnect, another audio track on a transcode).
+    EndOfItem(String),
+}
+
+/// The sleep timer's minutes choices.
+pub const SLEEP_MINUTES: [u64; 4] = [15, 30, 45, 60];
+
 /// State of the embedded player, for the player page.
 pub struct NowPlaying {
     /// The session this is the state of (the manager's generation when it started), so SyncPlay
     /// can tell a new session from the one it watches.
     pub session: u64,
+    /// The playthrough of the item this session belongs to: a restart that continues it keeps the
+    /// number, playing the item over again takes the next.
+    pub playthrough: u64,
     pub item: BaseItemDto,
     pub source: MediaSourceInfo,
     pub video: VideoOutput,
     pub position: Duration,
     /// When `position` was reported, to extrapolate between mpv's (once a second) updates.
     pub position_at: Instant,
+    /// The player has reported a position: until then `position` is the zero a session starts
+    /// with, not where it resumes.
+    pub position_known: bool,
     pub duration: Option<Duration>,
     pub paused: bool,
     /// Until the file has loaded.
     pub loading: bool,
     pub audio: Option<i32>,
     pub subtitle: SubtitleChoice,
+    /// A second text track shown at the top of the picture with the first, if one is picked.
+    /// Belongs to this item: the next starts without.
+    pub secondary_subtitle: Option<i32>,
+    /// libmpv plays this session; Media3 (Android) has no second subtitle, aspect modes and the
+    /// like, so the player hides those.
+    pub mpv: bool,
+    /// How the picture fills the window. Belongs to this item.
+    pub aspect: Aspect,
+    /// mpv deinterlaces the picture: on from the start when the video stream is interlaced.
+    pub deinterlace: bool,
+    /// The user set `deinterlace`, so a restart keeps it instead of working it out again.
+    pub deinterlace_chosen: bool,
+    /// The loop between two points this item plays.
+    pub ab_loop: AbLoop,
     pub volume: f64,
     pub muted: bool,
     pub adjustments: Adjustments,
+    /// Whether night mode can act on this session: not with a format passed through.
+    pub night_available: bool,
     /// All versions of the item, once known; empty or one entry means there's nothing to
     /// switch to.
     pub versions: Vec<Version>,
@@ -245,9 +510,18 @@ pub struct NowPlaying {
     /// The item before this one: the previous episode, or the previous movie of its
     /// collection.
     pub previous: Option<BaseItemDto>,
+    /// The previous episode or movie of its collection, which `previous` falls back to when the
+    /// queue has nothing played before this item.
+    neighbour_previous: Option<BaseItemDto>,
     /// What plays next: the queue's next item, the following episode, or the following movie
     /// of the item's collection.
     pub next: Option<BaseItemDto>,
+    /// `next` is the queue's front, not the following episode or movie.
+    next_queued: bool,
+    /// The following episode or movie, which `next` falls back to when the queue runs dry, and
+    /// whether it's the next movie of a collection, which is offered but not autoplayed.
+    following: Option<BaseItemDto>,
+    following_in_collection: bool,
     /// The user dismissed the up-next card: don't play the next episode at the end.
     pub next_cancelled: bool,
     /// Play the next episode at the end (the setting, at session start).
@@ -255,7 +529,11 @@ pub struct NowPlaying {
     pub chapters: Vec<Chapter>,
     /// Intro, credits and similar, once known.
     pub segments: Vec<Segment>,
+    /// What to do at each kind of segment (the setting, at session start).
+    pub skip_actions: SkipActions,
     pub stream: StreamInfo,
+    /// What the player reported at the last poll, while the info overlay asks.
+    pub player_stats: Option<Stats>,
     /// The SyncPlay queue entry, while a group controls playback.
     pub group_item: Option<String>,
     /// Where playback resumed without asking, while the player may still offer to start over.
@@ -283,9 +561,30 @@ impl NowPlaying {
         self.commands.clone()
     }
 
-    /// The segment the skip button would skip, if one is playing.
+    /// Where playback is now: the last position mpv reported, carried on for the time since while
+    /// it plays.
+    pub fn position_now(&self) -> Duration {
+        if self.paused || self.loading {
+            return self.position;
+        }
+        self.position + self.position_at.elapsed().mul_f64(self.adjustments.speed.max(0.))
+    }
+
+    /// The segment the skip button would skip, if one is playing. Credits are the up-next
+    /// card's while it shows.
     pub fn skippable(&self) -> Option<Segment> {
-        markers::skippable(&self.segments, self.position)
+        markers::at(&self.segments, self.position, &self.skip_actions, SkipAction::Ask)
+            .filter(|s| s.kind != SegmentKind::Outro || !self.show_up_next())
+    }
+
+    /// The segment to skip by itself right now, if the kind's action is Skip. Not before the
+    /// player has said where playback is: a session resuming at 40:00 starts at zero, inside an
+    /// intro that begins there, and skipping that would seek away from the resume point.
+    pub fn auto_skippable(&self) -> Option<Segment> {
+        if self.loading || !self.position_known {
+            return None;
+        }
+        markers::at(&self.segments, self.position, &self.skip_actions, SkipAction::Skip)
     }
 
     /// Whether to show the up-next card: from the credits (or near the end) of an episode
@@ -315,9 +614,47 @@ impl NowPlaying {
         window.contains(&self.position).then_some(from)
     }
 
+    /// Whether the next item starts by itself at the end: the setting allows it, and it isn't a
+    /// collection's next movie (a sequel isn't started without asking; the card offers it).
+    pub fn autoplays(&self) -> bool {
+        self.autoplay && (self.next_queued || !self.following_in_collection)
+    }
+
     /// What plays after this item ends by itself.
     fn autoplay_next(&self) -> Option<BaseItemDto> {
-        self.next.clone().filter(|_| self.autoplay && !self.next_cancelled)
+        self.next.clone().filter(|_| self.autoplays() && !self.next_cancelled)
+    }
+
+    /// What plays next now that the queue's front is `front`: that, or the following episode
+    /// when the queue is empty.
+    ///
+    /// The item before this one is what the queue played before it, or the previous episode.
+    fn follow_queue(&mut self, front: Option<&BaseItemDto>, played: Option<&BaseItemDto>) {
+        self.next_queued = front.is_some();
+        self.next = front.cloned().or_else(|| self.following.clone());
+        self.previous = played.cloned().or_else(|| self.neighbour_previous.clone());
+    }
+
+    /// The picture choices a restart of this item keeps.
+    fn picture(&self) -> Picture {
+        Picture {
+            source_id: self.source.id.clone(),
+            aspect: self.aspect,
+            deinterlace: self.deinterlace,
+            deinterlace_chosen: self.deinterlace_chosen,
+            secondary_subtitle: self.secondary_subtitle,
+            ab_loop: self.ab_loop,
+        }
+    }
+
+    /// What plays this item again as it plays now: the same version, audio and subtitle.
+    fn track_options(&self) -> PlayOptions {
+        PlayOptions {
+            media_source_id: Some(self.source.id.clone()),
+            audio_stream_index: self.audio,
+            subtitle: self.subtitle,
+            ..Default::default()
+        }
     }
 
     pub fn is_transcoding(&self) -> bool {
@@ -345,6 +682,7 @@ impl NowPlaying {
             PlayerEvent::FileLoaded => self.loading = false,
             PlayerEvent::Position(position) => {
                 self.position = *position;
+                self.position_known = true;
                 self.position_at = Instant::now();
             }
             PlayerEvent::Duration(duration) => self.duration = Some(*duration),
@@ -361,15 +699,17 @@ impl NowPlaying {
     }
 
     /// Takes the details fetched after the start. `queued`: the play queue has items, which take
-    /// the place of the next episode.
-    fn apply_details(&mut self, details: Details, queued: bool) {
+    /// the place of the next episode; `played`: what it played right before this item, which is
+    /// the previous one.
+    fn apply_details(&mut self, details: Details, queued: bool, played: Option<&BaseItemDto>) {
         self.versions = details.versions;
         self.trickplay = details.trickplay;
-        self.previous = details.previous;
+        self.neighbour_previous = details.previous;
+        self.previous = played.cloned().or_else(|| self.neighbour_previous.clone());
+        self.following = details.next;
+        self.following_in_collection = details.next_in_collection;
         if !queued {
-            self.next = details.next;
-            // A sequel isn't started without asking; the card offers it.
-            self.autoplay &= !details.next_in_collection;
+            self.next = self.following.clone();
         }
         self.chapters = details.chapters;
         self.segments = details.segments;
@@ -390,6 +730,12 @@ pub struct PlaybackManager {
     online: bool,
     /// Stops the running session when sent or dropped.
     stop: Option<oneshot::Sender<()>>,
+    /// The session the user last stopped. A session's loop is over once it has quit, but it still
+    /// reports its stop to the server (up to 30 s when the network is what failed), so the stop
+    /// is remembered here for `Services::session_ended`: a stopped session doesn't reconnect or
+    /// autoplay when its end arrives. Sessions are numbered, so it never applies to the one a
+    /// later start creates.
+    stopped: Option<u64>,
     /// Counts sessions, so the end of a replaced session doesn't close its successor's player.
     generation: u64,
     /// A session is running (from `play` until its end is handled).
@@ -401,18 +747,26 @@ pub struct PlaybackManager {
     reconnect: Option<Reconnect>,
     /// What plays after the current item ("Play all" on a playlist or collection). Takes the
     /// place of the next episode for the up-next card and autoplay.
-    queue: VecDeque<BaseItemDto>,
+    queue: LocalQueue,
+    /// The item the last session was started for, which is the one before what starts next.
+    started: Option<BaseItemDto>,
+    /// Counts playthroughs: a session that doesn't continue the running one (`PlayOptions::
+    /// continues`) starts the next.
+    playthrough: u64,
     /// The running session's state, once it has started. A replaced session's stays until its
     /// successor starts, so the player has something to show meanwhile.
     now_playing: Option<NowPlaying>,
     volume: f64,
     muted: bool,
     adjustments: Adjustments,
+    /// Seconds per seek key press, skip button and remote fast-forward (a setting).
+    seek_step: f64,
     /// The item `adjustments` were made for; another one starts without the delays.
     adjusted_item: Option<String>,
     /// What the window's renderer can draw, which picks the player's video output. Pixels until
     /// the app sets it ([`PlaybackManager::set_video_import`]).
     video_import: VideoImport,
+    sleep: Option<SleepTimer>,
 }
 
 /// A session from its start until its end is handled.
@@ -429,8 +783,12 @@ struct Running {
     volume: f64,
     muted: bool,
     adjustments: Adjustments,
+    night_available: bool,
     autoplay: bool,
+    skip_actions: SkipActions,
     resumed_from: Option<Duration>,
+    /// Plays through libmpv (see [`NowPlaying::mpv`]).
+    mpv: bool,
 }
 
 /// A session to start again after its stream was lost, once `due` fires.
@@ -448,6 +806,9 @@ impl PlaybackManager {
         let volume = config.volume.unwrap_or(DEFAULT_VOLUME);
         let adjustments = Adjustments {
             subtitle_scale: config.subtitle_scale.unwrap_or(1.),
+            subtitle_position: config.subtitle_position.unwrap_or(Adjustments::BOTTOM),
+            night_mode: config.night_mode.unwrap_or(false),
+            speed: config.default_speed.unwrap_or(1.),
             ..Adjustments::default()
         }
         .clamped();
@@ -457,17 +818,22 @@ impl PlaybackManager {
             account,
             online: true,
             stop: None,
+            stopped: None,
             generation: 0,
             active: false,
             sessions: Vec::new(),
             reconnect: None,
-            queue: VecDeque::new(),
+            queue: LocalQueue::default(),
+            started: None,
+            playthrough: 0,
             now_playing: None,
             volume,
             muted: false,
             adjustments,
+            seek_step: Self::seek_step_of(config.seek_step),
             adjusted_item: None,
             video_import: VideoImport::Pixels,
+            sleep: None,
         }
     }
 
@@ -486,6 +852,12 @@ impl PlaybackManager {
         self.active
     }
 
+    /// Sets night mode for the next items (the settings page; the player's menu goes through
+    /// [`Services::adjust`]).
+    pub fn set_night_mode(&mut self, on: bool) {
+        self.adjustments.night_mode = on;
+    }
+
     /// Sets the subtitle size for the next items (the settings page; the player's menu goes
     /// through [`Services::adjust`]).
     pub fn set_subtitle_scale(&mut self, scale: f64) {
@@ -496,9 +868,38 @@ impl PlaybackManager {
         .clamped();
     }
 
+    /// Sets the subtitle position for the next items, as [`Self::set_subtitle_scale`] sets the
+    /// size.
+    pub fn set_subtitle_position(&mut self, position: u8) {
+        self.adjustments = Adjustments {
+            subtitle_position: position,
+            ..self.adjustments
+        }
+        .clamped();
+    }
+
+    /// Sets the speed the next items start at (the settings page).
+    pub fn set_default_speed(&mut self, speed: f64) {
+        self.adjustments = Adjustments {
+            speed,
+            ..self.adjustments
+        }
+        .clamped();
+    }
+
+    /// Seconds per seek key press, skip button and remote fast-forward.
+    pub fn seek_step(&self) -> f64 {
+        self.seek_step
+    }
+
+    /// Sets the seek step, in seconds (the settings page).
+    pub fn set_seek_step(&mut self, seconds: Option<u32>) {
+        self.seek_step = Self::seek_step_of(seconds);
+    }
+
     /// What plays after the current item, in order.
-    pub(crate) fn queued(&self) -> impl Iterator<Item = &BaseItemDto> {
-        self.queue.iter()
+    pub(crate) fn queued(&self) -> impl ExactSizeIterator<Item = &BaseItemDto> {
+        self.queue.upcoming()
     }
 
     /// Forgets the queue (it went to the TV with a cast).
@@ -522,37 +923,100 @@ impl PlaybackManager {
         self.now_playing.as_mut()
     }
 
+    /// Whether the sleep timer holds what comes after the end of the item `item_id`: nothing
+    /// plays after it, neither the queue, nor autoplay, nor a repeat. Takes the timer, which
+    /// this spends.
+    fn hold_after_end(&mut self, item_id: &str) -> bool {
+        let held = matches!(&self.sleep, Some(SleepTimer::EndOfItem(id)) if id == item_id);
+        if held {
+            self.sleep = None;
+        }
+        held
+    }
+
+    /// Drops the end-of-item sleep timer, which a playthrough's end or a stop takes with it.
+    fn drop_end_timer(&mut self) {
+        if matches!(self.sleep, Some(SleepTimer::EndOfItem(_))) {
+            self.sleep = None;
+        }
+    }
+
+    pub fn sleep(&self) -> Option<&SleepTimer> {
+        self.sleep.as_ref()
+    }
+
+    /// Sets the sleep timer, or clears it with `None`.
+    pub fn set_sleep(&mut self, sleep: Option<SleepTimer>) {
+        self.sleep = sleep;
+        self.ctx.request_repaint();
+    }
+
+    /// Time left on a timed sleep timer.
+    pub fn sleep_left(&self) -> Option<Duration> {
+        match self.sleep {
+            Some(SleepTimer::In(due)) => Some(due.saturating_duration_since(Instant::now())),
+            _ => None,
+        }
+    }
+
     /// A session as if `item` had started playing `source`, with no player behind it, for the
     /// player page's tests: 12 minutes into 48, playing. Returns what the page sends it.
     #[cfg(test)]
     pub fn start_for_test(&mut self, item: BaseItemDto, source: MediaSourceInfo) -> mpsc::UnboundedReceiver<UiCommand> {
+        self.playthrough += 1;
+        self.start_continuing_for_test(item, source)
+    }
+
+    /// As [`PlaybackManager::start_for_test`], for a restart that continues the playthrough.
+    #[cfg(test)]
+    pub fn start_continuing_for_test(
+        &mut self,
+        item: BaseItemDto,
+        source: MediaSourceInfo,
+    ) -> mpsc::UnboundedReceiver<UiCommand> {
         let (commands, received) = mpsc::unbounded_channel();
         self.generation += 1;
         self.active = true;
+        self.started = Some(item.clone());
         self.now_playing = Some(NowPlaying {
             session: self.generation,
+            playthrough: self.playthrough,
             item,
             source,
             video: VideoOutput::external(),
             position: Duration::from_secs(12 * 60),
             position_at: Instant::now(),
+            position_known: true,
             duration: Some(Duration::from_secs(48 * 60)),
             paused: false,
             loading: false,
             audio: None,
             subtitle: SubtitleChoice::Auto,
+            secondary_subtitle: None,
+            mpv: true,
+            aspect: Aspect::Fit,
+            deinterlace: false,
+            deinterlace_chosen: false,
+            ab_loop: AbLoop::Off,
             volume: self.volume,
             muted: false,
             adjustments: self.adjustments,
+            night_available: true,
             versions: Vec::new(),
             trickplay: TrickplayTiles::new(),
             previous: None,
+            neighbour_previous: None,
             next: None,
+            next_queued: false,
+            following: None,
+            following_in_collection: false,
             next_cancelled: false,
             autoplay: false,
             chapters: Vec::new(),
             segments: Vec::new(),
+            skip_actions: SkipActions::default(),
             stream: StreamInfo::default(),
+            player_stats: None,
             group_item: None,
             resumed_from: None,
             restarts: 0,
@@ -580,28 +1044,114 @@ impl PlaybackManager {
     /// which closes the player (a running session closes it when it ends).
     fn stop(&mut self) -> bool {
         self.stop = None;
+        self.drop_end_timer();
+        self.note_stop();
         self.reconnect.take().is_some()
     }
 
-    /// Takes the queue's front when `item` is it, moving the queue on; playing anything else
-    /// drops the queue, unless a SyncPlay group plays it.
+    /// Remembers that the user stopped the current session, for when its end arrives.
+    fn note_stop(&mut self) {
+        self.stopped = Some(self.generation);
+    }
+
+    /// The user stopped the session numbered `generation`.
+    fn was_stopped(&self, generation: u64) -> bool {
+        self.stopped == Some(generation)
+    }
+
+    /// Whether the current session's stop was noted, for the cast tests.
+    #[cfg(test)]
+    pub fn stop_noted_for_test(&self) -> bool {
+        self.was_stopped(self.generation)
+    }
+
+    /// The running half of a session, with nothing behind it, for the cast tests: it ends when
+    /// [`Services::end_loading_for_test`] says so. After [`Self::start_for_test`] it belongs to
+    /// that session; alone it's a new one, still loading.
+    #[cfg(test)]
+    pub fn start_loading_for_test(&mut self, item: BaseItemDto) {
+        let (_updates_tx, updates) = task::channel(&self.ctx);
+        let (commands, _received) = mpsc::unbounded_channel();
+        if self.now_playing.is_none() {
+            self.generation += 1;
+        }
+        self.active = true;
+        self.sessions.push(Running {
+            generation: self.generation,
+            item,
+            attempt: 0,
+            options: PlayOptions::default(),
+            updates,
+            commands,
+            volume: self.volume,
+            muted: false,
+            adjustments: self.adjustments,
+            night_available: true,
+            mpv: true,
+            autoplay: false,
+            skip_actions: SkipActions::default(),
+            resumed_from: None,
+        });
+    }
+
+    /// Takes the queue's front when `item` is it, moving the queue on; playing the same item
+    /// again from elsewhere leaves it be, and playing anything else drops it, unless a SyncPlay
+    /// group plays it. Loading the playing item again (another version, other tracks, software
+    /// frames: `Services::reload`) and repeat one don't come through here, so they keep the
+    /// queue even when it holds the same item next: Next must move past the first of two.
     fn advance_queue(&mut self, item: &BaseItemDto, options: &PlayOptions) {
-        if self.queue.front().is_some_and(|next| next.id == item.id) {
-            self.queue.pop_front();
-        } else if options.group_item.is_none() {
+        if self.queue.advance(item, self.started.as_ref()) {
+            return;
+        }
+        let again = self.started.as_ref().is_some_and(|started| started.id == item.id);
+        if !again && options.group_item.is_none() {
             self.queue.clear();
+        }
+    }
+
+    /// Repeat, and whether the queue is shuffled.
+    pub(crate) fn modes(&self) -> (RepeatMode, bool) {
+        (self.queue.repeat, self.queue.is_shuffled())
+    }
+
+    /// What plays next, as the up-next card shows it: the item, and whether it's the queue's (the
+    /// queue holding the item the series would play next anyway is still a new choice).
+    fn next_id(&self) -> Option<(String, bool)> {
+        let state = self.now_playing.as_ref()?;
+        state.next.as_ref().map(|next| (next.id.clone(), state.next_queued))
+    }
+
+    /// Shows the playing item's `next` as the queue's front, or the following episode once the
+    /// queue is empty. `solo`: the local queue's history is Previous (see
+    /// [`Services::solo_playback`]), which a group's session never takes from it.
+    fn refresh_next(&mut self, solo: bool) {
+        let front = self.queue.front().cloned();
+        let played = self.queue.last_played().cloned();
+        if let Some(state) = &mut self.now_playing {
+            let played = played.filter(|_| solo && state.group_item.is_none());
+            state.follow_queue(front.as_ref(), played.as_ref());
         }
     }
 
     /// Starts a session; `attempt` counts reconnects after a lost stream.
     fn start_session(&mut self, item: &BaseItemDto, options: PlayOptions, attempt: usize) {
         self.reconnect = None;
+        // An end-of-item timer belongs to the playthrough it was set in: a restart that continues
+        // it keeps it, the item played again or another item takes it away.
+        if !options.continues {
+            self.drop_end_timer();
+        }
+        if !options.continues {
+            self.playthrough += 1;
+        }
+        self.started = Some(item.clone());
         // Dropping the previous sender stops that session; it still reports its final position.
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
         self.generation += 1;
         self.active = true;
         let (volume, muted, import, online) = (self.volume, self.muted, self.video_import, self.online);
+        let modes = self.queue.modes();
         if self.adjusted_item.as_ref() != Some(&item.id) {
             self.adjustments = self.adjustments.for_next_item();
             self.adjusted_item = Some(item.id.clone());
@@ -610,7 +1160,11 @@ impl PlaybackManager {
         if options.group_item.is_some() {
             adjustments.speed = 1.;
         }
-        let autoplay = Config::load().autoplay_next_episode.unwrap_or(true);
+        let config = Config::load();
+        let autoplay = config.autoplay_next_episode.unwrap_or(true);
+        let skip_actions = config.skip_actions;
+        let mpv =
+            !cfg!(target_os = "android") || config.android_player.unwrap_or_default().engine() == player::Engine::Mpv;
         let resumed_from = options.start.filter(|_| options.resumed).map(Duration::from);
         let (updates_tx, updates) = task::channel(&self.ctx);
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
@@ -634,6 +1188,7 @@ impl PlaybackManager {
                     adjustments,
                     (account, online),
                     import,
+                    modes,
                     channels,
                 );
                 let result = AssertUnwindSafe(session).catch_unwind().await;
@@ -651,8 +1206,11 @@ impl PlaybackManager {
             volume,
             muted,
             adjustments,
+            night_available: !Config::load().audio_settings().passthrough.any(),
             autoplay,
+            skip_actions,
             resumed_from,
+            mpv,
         });
     }
 
@@ -673,6 +1231,15 @@ impl PlaybackManager {
         } else {
             None
         }
+    }
+
+    /// The configured seek step in seconds: one of [`SEEK_STEPS`], else the default.
+    fn seek_step_of(configured: Option<u32>) -> f64 {
+        f64::from(
+            configured
+                .filter(|seconds| SEEK_STEPS.contains(seconds))
+                .unwrap_or(DEFAULT_SEEK_STEP),
+        )
     }
 
     /// Remembers the volume and subtitle size for the next launch.
@@ -751,9 +1318,11 @@ impl Drop for PlaybackManager {
 fn save_preferences(volume: f64, adjustments: Adjustments) {
     let mut config = Config::load();
     let scale = Some(adjustments.subtitle_scale).filter(|&scale| scale != 1.);
-    if config.volume != Some(volume) || config.subtitle_scale != scale {
+    let position = Some(adjustments.subtitle_position).filter(|&position| position != Adjustments::BOTTOM);
+    if config.volume != Some(volume) || config.subtitle_scale != scale || config.subtitle_position != position {
         config.volume = Some(volume);
         config.subtitle_scale = scale;
+        config.subtitle_position = position;
         if let Err(err) = config.save() {
             tracing::warn!("failed to save config: {err:#}");
         }
@@ -768,6 +1337,9 @@ impl Services {
     /// to the TV. Stop with no session to send it to (waiting to reconnect, or the next one
     /// still loading) stops that instead.
     pub fn control(&mut self, command: UiCommand) {
+        if matches!(command, UiCommand::Stop) {
+            self.playback.drop_end_timer();
+        }
         if self.is_casting() {
             self.cast_control(command);
             return;
@@ -784,7 +1356,11 @@ impl Services {
             self.group_request(request);
             return;
         }
+        let stop = matches!(command, UiCommand::Stop);
         state.send(command);
+        if stop {
+            self.playback.note_stop();
+        }
     }
 
     /// Stops the current session, if any, or a pending reconnect (closing the player).
@@ -806,24 +1382,20 @@ impl Services {
 
     /// Plays an item from its resume point, with default tracks (e.g. the next episode).
     pub fn play_from_resume(&mut self, item: &BaseItemDto) {
-        let start = item
-            .user_data
-            .as_ref()
-            .map(|d| d.playback_position_ticks)
-            .filter(|t| t.0 > 0);
-        self.play(
-            item,
-            PlayOptions {
-                start,
-                resumed: start.is_some(),
-                ..Default::default()
-            },
-        );
+        self.play(item, resume_options(item));
     }
 
     /// Plays `items` in order: the first now, the rest as a queue.
     pub fn play_all(&mut self, items: Vec<BaseItemDto>) {
         self.play_all_with(items, PlayOptions::default());
+    }
+
+    /// Plays the first of `items` from its resume point and the rest after it, as *Play from
+    /// here* on an episode of a season or an entry of a playlist.
+    pub fn play_from_here(&mut self, items: Vec<BaseItemDto>) {
+        let Some(first) = items.first() else { return };
+        let options = resume_options(first);
+        self.play_all_with(items, options);
     }
 
     /// Plays `items` in order, the first with `options`. A SyncPlay group gets them as its
@@ -841,7 +1413,7 @@ impl Services {
             self.group_start_items(&all);
             return;
         }
-        self.playback.queue = items;
+        self.playback.queue.start(items);
         self.play_now(&first, options);
     }
 
@@ -857,24 +1429,204 @@ impl Services {
             return;
         }
         let playback = &mut self.playback;
-        if !playback.active {
+        // A reconnect that waits is the playback going on: its queue is the one to add to.
+        if !playback.active && playback.reconnect.is_none() {
             self.play_all(items);
             return;
         }
+        let was_next = playback.next_id();
         if next {
-            for item in items.into_iter().rev() {
-                playback.queue.push_front(item);
-            }
+            playback.queue.push_next(items);
         } else {
-            playback.queue.extend(items);
+            playback.queue.push_last(items);
         }
-        // The queue takes the place of the next episode for the up-next card and autoplay.
-        if let (Some(state), Some(front)) = (&mut playback.now_playing, playback.queue.front()) {
-            state.next = Some(front.clone());
+        // The queue takes the place of the next episode for the up-next card and autoplay, and
+        // a new next item undoes dismissing the card: the dismissal was for the one before.
+        playback.refresh_next(true);
+        if playback.next_id() != was_next
+            && let Some(state) = &mut playback.now_playing
+        {
+            state.next_cancelled = false;
         }
     }
 
-    fn play_now(&mut self, item: &BaseItemDto, options: PlayOptions) {
+    /// Whether the local queue is what plays: not a SyncPlay group's queue and not a TV's. Only
+    /// then is what it played before the playing item the one Previous goes back to.
+    fn solo_playback(&self) -> bool {
+        !self.in_group() && !self.is_casting()
+    }
+
+    /// [`PlaybackManager::refresh_next`] for the state of the group and the cast now.
+    pub(crate) fn refresh_next(&mut self) {
+        let solo = self.solo_playback();
+        self.playback.refresh_next(solo);
+    }
+
+    /// Sets what the queue does at the end of an item (the panel's repeat button, or remote
+    /// control). In a SyncPlay group it's the group's, set on the server; while casting it's the
+    /// TV's, which has no such control.
+    pub fn set_repeat(&mut self, mode: RepeatMode) {
+        if self.is_casting() {
+            return;
+        }
+        if self.in_group() {
+            self.syncplay.set_repeat(mode);
+            return;
+        }
+        self.playback.queue.repeat = mode;
+        self.queue_modes_changed();
+    }
+
+    /// Off, all, one.
+    pub fn cycle_repeat(&mut self) {
+        let next = if self.in_group() {
+            self.syncplay.repeat_mode().next()
+        } else {
+            self.playback.queue.repeat.next()
+        };
+        self.set_repeat(next);
+    }
+
+    /// Shuffles what's queued, or puts it back in order (the panel's shuffle button, or remote
+    /// control). A group's and a cast's, as [`Services::set_repeat`].
+    pub fn set_shuffle(&mut self, on: bool) {
+        if self.is_casting() {
+            return;
+        }
+        if self.in_group() {
+            self.syncplay.set_shuffle(on);
+            return;
+        }
+        self.playback.queue.set_shuffle(on);
+        self.queue_modes_changed();
+    }
+
+    pub fn toggle_shuffle(&mut self) {
+        let on = !self.playback.queue.is_shuffled();
+        self.set_shuffle(on);
+    }
+
+    /// The modes changed: the session reports them, and the up-next card follows the new order.
+    fn queue_modes_changed(&mut self) {
+        let (repeat, order) = self.playback.queue.modes();
+        if let Some(state) = self.playback.current() {
+            state.send(UiCommand::SetQueueModes(repeat, order));
+        }
+        self.refresh_next();
+    }
+
+    /// Takes the queue's entry at `index` out, from the player's queue panel.
+    pub fn queue_remove(&mut self, index: usize) {
+        if self.playback.queue.remove(index).is_some() {
+            self.refresh_next();
+        }
+    }
+
+    /// Moves the queue's entry at `index` up (`-1`) or down (`1`). Returns where it went.
+    pub fn queue_move(&mut self, index: usize, by: isize) -> Option<usize> {
+        let to = self.playback.queue.move_entry(index, by)?;
+        self.refresh_next();
+        Some(to)
+    }
+
+    /// The running session playing to its end, as the session reports it, for tests of what
+    /// follows. Returns the item a new session was started for, if one was.
+    #[cfg(test)]
+    pub fn end_for_test(&mut self) -> Option<String> {
+        self.end_with_for_test(PlayOptions::default())
+    }
+
+    /// As [`Services::end_for_test`], for a session that was started with `options`.
+    #[cfg(test)]
+    pub fn end_with_for_test(&mut self, options: PlayOptions) -> Option<String> {
+        self.end_session_for_test(Ok(Ended::Finished), options)
+    }
+
+    #[cfg(test)]
+    fn end_session_for_test(&mut self, result: Result<Ended, String>, options: PlayOptions) -> Option<String> {
+        let state = self.playback.now_playing()?;
+        let generation = self.playback.generation;
+        let (commands, _) = mpsc::unbounded_channel();
+        let (_, updates) = task::channel(&self.playback.ctx);
+        let running = Running {
+            generation,
+            item: state.item.clone(),
+            attempt: 0,
+            options,
+            updates,
+            commands,
+            volume: self.playback.volume,
+            muted: false,
+            adjustments: Adjustments::default(),
+            night_available: true,
+            mpv: true,
+            autoplay: true,
+            skip_actions: SkipActions::default(),
+            resumed_from: None,
+        };
+        self.session_ended(running, result);
+        (self.playback.generation != generation)
+            .then(|| self.playback.started.as_ref().map(|item| item.id.clone()))
+            .flatten()
+    }
+
+    /// The running session's stream dropping, which waits to reconnect.
+    #[cfg(test)]
+    pub fn lose_for_test(&mut self) {
+        let lost = Ended::Lost {
+            position: Ticks::from(Duration::from_secs(60)),
+            message: "the test dropped it".into(),
+            crashed: false,
+        };
+        self.end_session_for_test(Ok(lost), PlayOptions::default());
+    }
+
+    /// An event from the running session's player, as the session forwards it.
+    #[cfg(test)]
+    pub fn player_event_for_test(&mut self, event: PlayerEvent) {
+        let generation = self.playback.generation;
+        self.on_session_update(generation, SessionUpdate::Player(event));
+    }
+
+    /// A reconnect is waiting to start.
+    #[cfg(test)]
+    pub fn reconnect_pending_for_test(&self) -> bool {
+        self.playback.reconnect.is_some()
+    }
+
+    /// What the waiting reconnect starts with.
+    #[cfg(test)]
+    pub fn reconnect_options_for_test(&self) -> Option<PlayOptions> {
+        self.playback
+            .reconnect
+            .as_ref()
+            .map(|reconnect| reconnect.options.clone())
+    }
+
+    /// The item the last session was started for, and what it was started with.
+    #[cfg(test)]
+    pub fn last_started_for_test(&self) -> (Option<String>, Option<PlayOptions>) {
+        (
+            self.playback.started.as_ref().map(|item| item.id.clone()),
+            self.playback.sessions.last().map(|session| session.options.clone()),
+        )
+    }
+
+    /// Plays the queue's entry at `index` now. What's before it counts as played.
+    pub fn queue_jump(&mut self, index: usize) {
+        if self.is_casting() || self.in_group() {
+            return;
+        }
+        let previous = self.playback.started.clone();
+        let Some(item) = self.playback.queue.jump(index, previous.as_ref()) else {
+            return;
+        };
+        self.play_now(&item, resume_options(&item));
+    }
+
+    /// Starts a session for `item` without touching the local queue (`play` moves that first).
+    /// What loads the playing item again comes through here.
+    pub(crate) fn play_now(&mut self, item: &BaseItemDto, options: PlayOptions) {
         if self.is_casting() {
             self.cast_play(std::slice::from_ref(item), &options);
             return;
@@ -889,10 +1641,16 @@ impl Services {
         self.playback.start_session(item, options, 0);
     }
 
-    /// Plays the next episode (or queued item, or movie of the collection) now.
+    /// Plays the next episode (or queued item, or movie of the collection) now; in a SyncPlay
+    /// group, moves the group to the next entry of its queue.
     pub fn play_next(&mut self) {
         if self.is_casting() {
             self.cast_skip(true);
+            return;
+        }
+        // The group's queue moves on, for everyone; the series' next episode would replace it.
+        if self.in_group() {
+            self.group_skip(true);
             return;
         }
         if let Some(next) = self.playback.now_playing().and_then(|state| state.next.clone()) {
@@ -900,15 +1658,45 @@ impl Services {
         }
     }
 
-    /// Plays the previous episode (or movie of the collection) from its resume point.
+    /// Plays the previous item from its resume point: what the queue played before this one,
+    /// keeping the queue (this item is next again), or else the previous episode (or movie of
+    /// the collection). In a SyncPlay group, moves the group to the previous entry of its queue.
     pub fn play_previous(&mut self) {
         if self.is_casting() {
             self.cast_skip(false);
             return;
         }
+        if self.in_group() {
+            self.group_skip(false);
+            return;
+        }
+        if let Some(current) = self.playback.started.clone()
+            && let Some(previous) = self.playback.queue.step_back(&current)
+        {
+            self.refresh_next();
+            self.play_now(&previous, resume_options(&previous));
+            return;
+        }
         if let Some(previous) = self.playback.now_playing().and_then(|state| state.previous.clone()) {
             self.play_from_resume(&previous);
         }
+    }
+
+    /// Whether [`Self::play_next`] (`forward`) or [`Self::play_previous`] has somewhere to go, which
+    /// is what the player's Next and Previous buttons show on. In a SyncPlay group that is an entry
+    /// of the group's queue, as those two move it; otherwise the series' neighbouring episode (or
+    /// collection movie, or queued item) of the item playing.
+    pub fn can_skip(&self, forward: bool) -> bool {
+        if self.in_group() {
+            return self.group_can_skip(forward);
+        }
+        self.playback.now_playing().is_some_and(|state| {
+            if forward {
+                state.next.is_some()
+            } else {
+                state.previous.is_some()
+            }
+        })
     }
 
     /// Plays from the beginning instead of the resume point.
@@ -955,6 +1743,13 @@ impl Services {
             return;
         }
         state.subtitle = choice;
+        // The same track can't be both.
+        if let SubtitleChoice::Stream(index) = choice
+            && state.secondary_subtitle == Some(index)
+        {
+            state.secondary_subtitle = None;
+            state.send(UiCommand::SetSecondarySubtitle(None));
+        }
         let as_file = match choice {
             SubtitleChoice::Stream(index) => state.stream.subtitle_files.contains(&index),
             SubtitleChoice::Off | SubtitleChoice::Auto => true,
@@ -964,6 +1759,130 @@ impl Services {
         } else {
             state.send(UiCommand::Subtitle(choice));
         }
+    }
+
+    /// Takes in a subtitle the server downloaded for `item_id`, if that still plays: `sources`
+    /// are the item's versions as the server lists them now. Direct play loads it into mpv
+    /// and selects it with no restart; a transcode restarts with it chosen, as any switch to a
+    /// subtitle the stream doesn't carry does. Returns whether it was taken in.
+    pub fn add_downloaded_subtitle(&mut self, item_id: &str, sources: &[MediaSourceInfo]) -> bool {
+        if self.is_casting() {
+            return false;
+        }
+        let client = self.session.client.clone();
+        let Some(state) = self
+            .playback
+            .now_playing
+            .as_mut()
+            .filter(|state| state.item.id == item_id)
+        else {
+            return false;
+        };
+        let Some(new) = sources.iter().find(|source| source.id == state.source.id) else {
+            return false;
+        };
+        let Some((added, files)) = added_subtitle(&state.source, &state.stream.subtitle_files, new) else {
+            return false;
+        };
+        let index = added.index;
+        if state.is_transcoding() {
+            state.source = new.clone();
+            state.subtitle = SubtitleChoice::Stream(index);
+            self.restart();
+            return true;
+        }
+        let command = UiCommand::AddSubtitle(Box::new(AddedSubtitle {
+            index,
+            url: client.subtitle_url(item_id, &new.id, added),
+            title: added.display_title.clone().unwrap_or_else(|| "External".into()),
+            language: added.language.clone(),
+            source: new.clone(),
+            files: files.clone(),
+        }));
+        state.source = new.clone();
+        state.stream.subtitle_files = files;
+        state.subtitle = SubtitleChoice::Stream(index);
+        state.send(command);
+        true
+    }
+
+    /// Shows a second text track (a stream index) with the first, or none. mpv draws it at the
+    /// top; a transcode only has the tracks the server sends as files.
+    pub fn change_secondary_subtitle(&mut self, index: Option<i32>) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.secondary_subtitle == index {
+            return;
+        }
+        state.secondary_subtitle = index;
+        state.send(UiCommand::SetSecondarySubtitle(index));
+    }
+
+    /// Sets how the picture fills the window (the player's menu and key). mpv only, and not on
+    /// a TV.
+    pub fn set_aspect(&mut self, aspect: Aspect) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.aspect == aspect {
+            return;
+        }
+        state.aspect = aspect;
+        state.send(UiCommand::SetAspect(aspect));
+    }
+
+    /// Steps one frame forward or back, while paused (the keys `.` and `,`). Not in a SyncPlay
+    /// group, where the position is the group's, nor on a TV or without mpv.
+    pub fn frame_step(&mut self, forward: bool) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.current() else {
+            return;
+        };
+        if state.mpv && state.paused && state.group_item.is_none() {
+            state.send(UiCommand::FrameStep(forward));
+        }
+    }
+
+    /// Sets the loop's start, then its end, then clears it (the key `L`). The same limits as
+    /// [`Services::frame_step`]: a loop jumps back on its own, which the group wouldn't follow.
+    pub fn cycle_ab_loop(&mut self) {
+        if self.is_casting() {
+            return;
+        }
+        let generation = self.playback.generation;
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.group_item.is_some() || state.session != generation {
+            return;
+        }
+        state.ab_loop = state.ab_loop.next(state.position_now());
+        state.send(UiCommand::CycleAbLoop);
+    }
+
+    /// Turns mpv's deinterlacing on or off (the player's menu). mpv only, and not on a TV.
+    pub fn set_deinterlace(&mut self, on: bool) {
+        if self.is_casting() {
+            return;
+        }
+        let Some(state) = self.playback.now_playing.as_mut() else {
+            return;
+        };
+        if !state.mpv || state.deinterlace == on {
+            return;
+        }
+        state.deinterlace = on;
+        state.deinterlace_chosen = true;
+        state.send(UiCommand::SetDeinterlace(on));
     }
 
     /// Applies changes from the settings menu. Speed stays at normal in a SyncPlay group,
@@ -986,6 +1905,9 @@ impl Services {
             (new.subtitle_delay != old.subtitle_delay).then_some(UiCommand::SetSubtitleDelay(new.subtitle_delay)),
             (new.audio_delay != old.audio_delay).then_some(UiCommand::SetAudioDelay(new.audio_delay)),
             (new.subtitle_scale != old.subtitle_scale).then_some(UiCommand::SetSubtitleScale(new.subtitle_scale)),
+            (new.subtitle_position != old.subtitle_position)
+                .then_some(UiCommand::SetSubtitlePosition(new.subtitle_position)),
+            (new.night_mode != old.night_mode).then_some(UiCommand::SetNightMode(new.night_mode)),
         ];
         for command in changes.into_iter().flatten() {
             state.send(command);
@@ -1012,10 +1934,8 @@ impl Services {
         };
         let options = PlayOptions {
             start: Some(Ticks::from(state.position)),
-            media_source_id: Some(state.source.id.clone()),
-            audio_stream_index: state.audio,
-            subtitle: state.subtitle,
-            ..Default::default()
+            picture: Some(state.picture()),
+            ..state.track_options()
         };
         self.reload(options);
     }
@@ -1033,11 +1953,16 @@ impl Services {
             return;
         };
         options.start = options.start.or(Some(Ticks::from(state.position)));
+        options.continues = true;
+        if options.picture.is_none() {
+            options.picture = Some(state.picture());
+        }
         let item = state.item.clone();
         if state.group_item.is_some() {
             self.group_reload(&item, options);
         } else {
-            self.play(&item, options);
+            // Not `play`: the queue stays as it is, whatever it holds.
+            self.play_now(&item, options);
         }
     }
 
@@ -1047,6 +1972,7 @@ impl Services {
         for (generation, update) in self.playback.drain() {
             self.on_session_update(generation, update);
         }
+        self.tick_sleep();
         if let Some(reconnect) = self.playback.reconnect_due() {
             let Reconnect {
                 item, options, attempt, ..
@@ -1055,7 +1981,52 @@ impl Services {
         }
     }
 
+    /// Whether the player offers a sleep timer: not in a SyncPlay group, where the pause it
+    /// makes would be every member's, and the end of an item is the server's to follow.
+    pub fn sleep_timer_offered(&self) -> bool {
+        !self.in_group()
+            && !self
+                .playback
+                .now_playing()
+                .is_some_and(|state| state.group_item.is_some())
+    }
+
+    /// Fires the sleep timer when it's due: pauses (so the position is reported and kept) and holds
+    /// autoplay of what comes after this item. A timer with nothing playing or on its way is
+    /// dropped, and so is one in a SyncPlay group, where a pause is every member's. One that
+    /// comes due between sessions (a reconnect waits, the next item loads) waits for the next.
+    fn tick_sleep(&mut self) {
+        if self.playback.sleep.is_none() {
+            return;
+        }
+        if !self.sleep_timer_offered()
+            || (!self.playback.active && self.playback.reconnect.is_none() && self.playback.now_playing.is_none())
+        {
+            self.playback.sleep = None;
+            return;
+        }
+        let Some(SleepTimer::In(due)) = self.playback.sleep else {
+            return;
+        };
+        let now = Instant::now();
+        if now < due {
+            self.playback.ctx.request_repaint_after(due - now);
+            return;
+        }
+        // The pause goes to a live session, or to the TV; with neither it would be dropped.
+        if !self.is_casting() && self.playback.current().is_none() {
+            return;
+        }
+        self.playback.sleep = None;
+        if let Some(state) = self.playback.now_playing_mut() {
+            state.autoplay = false;
+        }
+        self.control(UiCommand::SetPause(true));
+        self.toast(Toast::info(tr!("player-sleep-paused")));
+    }
+
     fn on_session_update(&mut self, generation: u64, update: SessionUpdate) {
+        let solo = self.solo_playback();
         let playback = &mut self.playback;
         match update {
             SessionUpdate::Started {
@@ -1064,6 +2035,7 @@ impl Services {
                 audio,
                 subtitle,
                 stream,
+                picture,
             } => {
                 // A replaced session that got this far is stopping; its player never shows.
                 if generation != playback.generation {
@@ -1074,30 +2046,50 @@ impl Services {
                 };
                 playback.now_playing = Some(NowPlaying {
                     session: generation,
+                    playthrough: playback.playthrough,
                     item: running.item.clone(),
                     source: *source,
                     video,
                     position: Duration::ZERO,
                     position_at: Instant::now(),
+                    position_known: false,
                     duration: None,
                     paused: false,
                     loading: true,
                     audio,
                     subtitle,
+                    secondary_subtitle: picture.secondary_subtitle,
+                    mpv: running.mpv,
+                    aspect: picture.aspect,
+                    deinterlace: picture.deinterlace,
+                    deinterlace_chosen: picture.deinterlace_chosen,
+                    ab_loop: picture.ab_loop,
                     volume: running.volume,
                     muted: running.muted,
                     adjustments: running.adjustments,
+                    night_available: running.night_available,
                     versions: Vec::new(),
                     trickplay: TrickplayTiles::new(),
-                    previous: None,
+                    // What the local queue played, for a solo session only.
+                    previous: playback
+                        .queue
+                        .last_played()
+                        .filter(|_| solo && running.options.group_item.is_none())
+                        .cloned(),
+                    neighbour_previous: None,
                     // Read when the session starts, not when it was asked for: a remote play
                     // next or last queued while it was loading counts too.
                     next: playback.queue.front().cloned(),
+                    next_queued: !playback.queue.is_empty(),
+                    following: None,
+                    following_in_collection: false,
                     next_cancelled: false,
                     autoplay: running.autoplay,
                     chapters: Vec::new(),
                     segments: Vec::new(),
+                    skip_actions: running.skip_actions,
                     stream,
+                    player_stats: None,
                     group_item: running.options.group_item.clone(),
                     resumed_from: running.resumed_from,
                     restarts: 0,
@@ -1111,8 +2103,15 @@ impl Services {
             SessionUpdate::Details(details) => {
                 // Items queued since the start (remote control) count too.
                 let queued = !playback.queue.is_empty();
+                let played = playback.queue.last_played().cloned();
                 if let Some(state) = playback.state_of(generation) {
-                    state.apply_details(*details, queued);
+                    let played = played.filter(|_| solo && state.group_item.is_none());
+                    state.apply_details(*details, queued, played.as_ref());
+                }
+            }
+            SessionUpdate::Stats(stats) => {
+                if let Some(state) = playback.state_of(generation) {
+                    state.player_stats = Some(*stats);
                 }
             }
             SessionUpdate::Player(event) => {
@@ -1138,6 +2137,16 @@ impl Services {
         }
     }
 
+    /// The end of the session [`PlaybackManager::start_loading_for_test`] started, as a stop.
+    #[cfg(test)]
+    pub fn end_loading_for_test(&mut self) {
+        let current = self.playback.generation;
+        if let Some(index) = self.playback.sessions.iter().position(|s| s.generation == current) {
+            let running = self.playback.sessions.remove(index);
+            self.session_ended(running, Ok(Ended::Stopped));
+        }
+    }
+
     fn session_ended(&mut self, running: Running, result: Result<Ended, String>) {
         self.playback.save_preferences();
         // A downloaded file's playback writes its new watch state to the item's `item.json` on
@@ -1150,14 +2159,45 @@ impl Services {
         if running.generation != self.playback.generation {
             return;
         }
+        let stopped = self.playback.was_stopped(running.generation);
         let playback = &mut self.playback;
         playback.active = false;
-        let next = playback
+        let result = settle(result, stopped);
+        // The sleep timer's end of the item: nothing plays after it, whatever the queue and the
+        // repeat mode would do. The queue stays as it was.
+        let held = matches!(result, Ok(Ended::Finished)) && playback.hold_after_end(&running.item.id);
+        // Whatever ends the playthrough ends the timer with it; a reconnect goes on with it.
+        let reconnecting = matches!(result, Ok(Ended::Lost { .. }))
+            && running.options.group_item.is_none()
+            && running.attempt < RECONNECT_DELAYS.len();
+        if !reconnecting {
+            playback.drop_end_timer();
+        }
+        // What a reconnect keeps of the picture choices.
+        let picture = playback.current().map(NowPlaying::picture);
+        // Repeat one plays it again as it played, from its start.
+        let replay = playback
+            .current()
+            .map(NowPlaying::track_options)
+            .unwrap_or_else(|| PlayOptions {
+                media_source_id: running.options.media_source_id.clone(),
+                audio_stream_index: running.options.audio_stream_index,
+                subtitle: running.options.subtitle,
+                ..Default::default()
+            });
+        // The session's last state: what plays next, and the tracks a reconnect keeps.
+        let last = playback
             .now_playing
             .take()
-            .filter(|state| state.session == running.generation)
-            .and_then(|state| state.autoplay_next());
+            .filter(|state| state.session == running.generation);
+        let next = last.as_ref().and_then(|state| state.autoplay_next());
         let group_item = running.options.group_item.clone();
+        // What the queue's modes make of an item that played to its end; a group's queue is the
+        // server's, so its modes are too.
+        let after = match result {
+            Ok(Ended::Finished) if group_item.is_none() && !held => self.playback.queue.after_end(&running.item, next),
+            _ => AfterEnd::Stop,
+        };
         match result {
             // In a group, every member reports the end and the server moves the queue on
             // (once); the next item then comes as a queue update.
@@ -1165,10 +2205,24 @@ impl Services {
                 self.group_item_ended(group_item);
                 self.events.push(AppEvent::PlaybackEnded);
             }
-            Ok(Ended::Finished) if let Some(next) = next => {
-                tracing::info!(next = %next.name, "playing the next episode");
-                self.play_from_resume(&next);
-            }
+            Ok(Ended::Finished) if !matches!(after, AfterEnd::Stop) => match after {
+                AfterEnd::Replay => {
+                    tracing::info!(item = %running.item.name, "repeating the item");
+                    // Not `play`: the queue stays, even holding this item next.
+                    self.play_now(&running.item, replay);
+                }
+                AfterEnd::Next(next) => {
+                    tracing::info!(next = %next.name, "playing the next episode");
+                    self.play_from_resume(&next);
+                }
+                // The queue is made again from what played, so the first of it plays without
+                // asking the queue to move on.
+                AfterEnd::Restart(first) => {
+                    tracing::info!(first = %first.name, "repeating the queue");
+                    self.play_now(&first, PlayOptions::default());
+                }
+                AfterEnd::Stop => self.events.push(AppEvent::PlaybackEnded),
+            },
             // Keep the player up and try again from where it stopped.
             Ok(Ended::Lost {
                 position,
@@ -1189,9 +2243,9 @@ impl Services {
                     due,
                     item: running.item,
                     options: PlayOptions {
-                        start: Some(position),
-                        resumed: false,
-                        ..running.options
+                        continues: true,
+                        picture: picture.or_else(|| running.options.picture.clone()),
+                        ..reconnect_options(running.options, position, last.as_ref())
                     },
                     attempt: running.attempt + 1,
                 });
@@ -1205,16 +2259,40 @@ impl Services {
                 };
                 self.toast(Toast::error(error));
                 self.events.push(AppEvent::PlaybackEnded);
+                // A group's item isn't reconnected (the group is waiting on this member); the
+                // member can't keep up, so it leaves rather than hold the others.
+                if let Some(group_item) = &group_item {
+                    self.group_item_failed(group_item);
+                }
             }
-            // Handed over to a TV: the player stays up, showing the cast.
-            Ok(_) if self.cast.is_handing_over() => {}
+            // The TV has the player: a handover, or a cast playing or starting (the stopped local
+            // session's end can come after the user played something on the TV). Its page stays up.
+            Ok(_) if self.cast.owns_player() => {}
             Ok(_) => self.events.push(AppEvent::PlaybackEnded),
             Err(message) => {
                 tracing::warn!("playback failed: {message}");
                 self.toast(Toast::error(message));
                 self.events.push(AppEvent::PlaybackEnded);
+                // The group's item never started: this member would stay "buffering".
+                if let Some(group_item) = &group_item {
+                    self.group_item_failed(group_item);
+                }
             }
         }
+    }
+}
+
+/// Plays `item` from its resume point, with the player offering to start over.
+fn resume_options(item: &BaseItemDto) -> PlayOptions {
+    let start = item
+        .user_data
+        .as_ref()
+        .map(|d| d.playback_position_ticks)
+        .filter(|t| t.0 > 0);
+    PlayOptions {
+        start,
+        resumed: start.is_some(),
+        ..Default::default()
     }
 }
 
@@ -1231,6 +2309,33 @@ enum Ended {
         /// The player process crashed, rather than the stream failing.
         crashed: bool,
     },
+}
+
+/// How a session's end counts: one the user stopped is a stop, whatever the stream was doing
+/// when it quit. Without it a lost stream would reconnect, and the end of a file would play the
+/// next episode, after the user had left.
+fn settle(result: Result<Ended, String>, stopped: bool) -> Result<Ended, String> {
+    match result {
+        Ok(Ended::Finished | Ended::Lost { .. }) if stopped => Ok(Ended::Stopped),
+        result => result,
+    }
+}
+
+/// What a reconnect after a lost stream plays: from `position`, on the version and tracks the
+/// dying session `last` had. A track switched during playback (direct play only sends a
+/// command) isn't in the options the session started with.
+fn reconnect_options(options: PlayOptions, position: Ticks, last: Option<&NowPlaying>) -> PlayOptions {
+    let mut options = PlayOptions {
+        start: Some(position),
+        resumed: false,
+        ..options
+    };
+    if let Some(state) = last {
+        options.media_source_id = Some(state.source.id.clone());
+        options.audio_stream_index = state.audio.or(options.audio_stream_index);
+        options.subtitle = state.subtitle;
+    }
+    options
 }
 
 /// Waits before each reconnect attempt after a lost stream.
@@ -1269,18 +2374,79 @@ fn mpv_track_id(source: &MediaSourceInfo, kind: MediaStreamType, index: i32) -> 
 
 /// mpv's id for a subtitle once the file is loaded and the external ones were added (after
 /// the embedded tracks, in `media_streams` order).
-fn mpv_subtitle_id(source: &MediaSourceInfo, index: i32) -> Option<usize> {
+fn mpv_subtitle_id(source: &MediaSourceInfo, files: &[i32], index: i32) -> Option<usize> {
     if let Some(id) = mpv_track_id(source, MediaStreamType::Subtitle, index) {
         return Some(id);
     }
-    let subtitles = |external| {
-        source
+    let embedded = source
+        .media_streams
+        .iter()
+        .filter(|s| s.kind == MediaStreamType::Subtitle && !s.is_external)
+        .count();
+    let position = files.iter().position(|&file| file == index)?;
+    Some(embedded + position + 1)
+}
+
+/// How an external subtitle is told from the others when the server's list of streams is read
+/// again: by its file, or by its labels when it has none (a downloaded copy's).
+fn subtitle_key(stream: &MediaStream) -> (Option<&str>, Option<&str>, Option<&str>, Option<&str>) {
+    match stream.path.as_deref() {
+        Some(path) => (Some(path), None, None, None),
+        None => (
+            None,
+            stream.display_title.as_deref(),
+            stream.language.as_deref(),
+            stream.codec.as_deref(),
+        ),
+    }
+}
+
+/// The external subtitle `new` has that `old` didn't, and `files` (the externals in mpv's
+/// order) renumbered for `new`, with the new one last. Adding a subtitle file can move the
+/// others' indexes, so they're matched by [`subtitle_key`] rather than by index. `None` when
+/// nothing was added.
+fn added_subtitle<'a>(
+    old: &MediaSourceInfo,
+    old_files: &[i32],
+    new: &'a MediaSourceInfo,
+) -> Option<(&'a MediaStream, Vec<i32>)> {
+    let mut unmatched: Vec<&MediaStream> = new
+        .media_streams
+        .iter()
+        .filter(|s| s.kind == MediaStreamType::Subtitle && s.is_external)
+        .collect();
+    let mut files = Vec::with_capacity(old_files.len() + 1);
+    for stream in old_files
+        .iter()
+        .filter_map(|&index| old.media_streams.iter().find(|s| s.index == index))
+    {
+        let at = unmatched.iter().position(|s| subtitle_key(s) == subtitle_key(stream))?;
+        files.push(unmatched.remove(at).index);
+    }
+    let added = *unmatched.first()?;
+    files.push(added.index);
+    Some((added, files))
+}
+
+/// Whether a session starts with deinterlacing on: when the server says the video stream is
+/// interlaced, and mpv gets the stream as it is. A transcode comes out of the server's encoder
+/// already progressive.
+fn deinterlaces_by_default(source: &MediaSourceInfo, method: PlayMethod) -> bool {
+    method == PlayMethod::DirectPlay
+        && source
             .media_streams
             .iter()
-            .filter(move |s| s.kind == MediaStreamType::Subtitle && s.is_external == external)
-    };
-    let position = subtitles(true).position(|s| s.index == index)?;
-    Some(subtitles(false).count() + position + 1)
+            .any(|stream| stream.kind == MediaStreamType::Video && stream.is_interlaced)
+}
+
+/// mpv's id for the subtitle with Jellyfin stream `index`. A transcode has only the tracks sent as
+/// files, in the order they were added.
+fn subtitle_track(source: &MediaSourceInfo, stream: &StreamInfo, index: i32) -> Option<usize> {
+    if stream.method == PlayMethod::Transcode {
+        stream.subtitle_files.iter().position(|&i| i == index).map(|i| i + 1)
+    } else {
+        mpv_subtitle_id(source, &stream.subtitle_files, index)
+    }
 }
 
 /// The downloaded copy of `item`, when the account has one and the version asked for is the
@@ -1320,10 +2486,22 @@ fn stream_url(
         .transcoding_url
         .as_deref()
         .ok_or_else(|| tr!("player-not-streamable"))?;
-    let url = client.transcode_url(relative);
+    let url = client.transcode_url(relative).map_err(|err| {
+        tracing::warn!("the server's transcode can't be played: {err}");
+        tr!("player-not-streamable")
+    })?;
     let reasons = query_param(&url, "TranscodeReasons").unwrap_or_default();
     tracing::info!(%reasons, "the server is transcoding");
     Ok((url, PlayMethod::Transcode))
+}
+
+/// The first of a transcoding URL's comma-separated codecs (`VideoCodec=h264`).
+fn first_codec(url: &Url, name: &str) -> Option<String> {
+    query_param(url, name)?
+        .split(',')
+        .next()
+        .filter(|codec| !codec.is_empty())
+        .map(str::to_owned)
 }
 
 fn query_param(url: &Url, name: &str) -> Option<String> {
@@ -1348,7 +2526,13 @@ fn subtitle_files(
             let url = match method {
                 PlayMethod::DirectPlay if stream.is_external => client.subtitle_url(item_id, &source.id, stream),
                 PlayMethod::Transcode if stream.delivery_method.as_deref() == Some("External") => {
-                    client.transcode_url(stream.delivery_url.as_deref()?)
+                    match client.transcode_url(stream.delivery_url.as_deref()?) {
+                        Ok(url) => url,
+                        Err(err) => {
+                            tracing::warn!(index = stream.index, "leaving out a subtitle: {err}");
+                            return None;
+                        }
+                    }
                 }
                 _ => return None,
             };
@@ -1363,6 +2547,35 @@ fn subtitle_index(choice: SubtitleChoice) -> Option<i32> {
         SubtitleChoice::Off => Some(-1),
         SubtitleChoice::Auto => None,
     }
+}
+
+/// Sets the audio output's mpv options from the settings, which only the desktop's mpv has
+/// (Android's mpv is `ao=aaudio` and its own default player is Media3). A device that's no
+/// longer there is left out, so playback goes to the automatic one; a rejected option is logged
+/// and skipped rather than failing the playback. Returns what was applied.
+async fn apply_audio(player: &Player, mut settings: player::AudioSettings) -> player::AudioSettings {
+    if cfg!(target_os = "android") {
+        return settings;
+    }
+    if let Some(device) = settings.device.clone() {
+        let present = match player.audio_devices().await {
+            Ok(devices) => devices.iter().any(|d| d.name == device),
+            Err(err) => {
+                tracing::debug!("couldn't list the audio devices: {err}");
+                false
+            }
+        };
+        if !present {
+            tracing::warn!(%device, "the chosen audio device isn't there; using the automatic one");
+            settings.device = None;
+        }
+    }
+    for (name, value) in settings.properties() {
+        if let Err(err) = player.set_property(name, value.as_str()).await {
+            tracing::warn!("mpv didn't take {name}={value}: {err}");
+        }
+    }
+    settings
 }
 
 async fn start_player(
@@ -1553,6 +2766,7 @@ async fn run_session(
     adjustments: Adjustments,
     (account, online): (String, bool),
     import: VideoImport,
+    (repeat_mode, playback_order): (RepeatMode, PlaybackOrder),
     mut channels: Channels,
 ) -> Result<Ended, String> {
     // Offline, nothing goes to the server: each call would only wait to fail.
@@ -1570,7 +2784,7 @@ async fn run_session(
     let local_markers = local
         .as_ref()
         .map(|local| (local.chapters.clone(), local.segments.clone()));
-    let (source, url, method, subtitle_files, play_session_id) = match local {
+    let (mut source, url, method, subtitle_files, play_session_id) = match local {
         Some(local) => {
             tracing::info!(item = %item.name, path = %local.path.display(), "playing a downloaded file");
             let url = Url::from_file_path(&local.path)
@@ -1594,6 +2808,7 @@ async fn run_session(
                         subtitle_stream_index: subtitle_index(options.subtitle),
                         max_streaming_bitrate: max_bitrate(&client).await,
                         prefer_hevc: Config::load().prefer_hevc.unwrap_or(false),
+                        passthrough_eac3: Config::load().passthrough_eac3.unwrap_or(false),
                     },
                 )
                 .await
@@ -1623,7 +2838,7 @@ async fn run_session(
         (SubtitleChoice::Auto, Some(index)) => SubtitleChoice::Stream(index),
         (choice, _) => choice,
     };
-    let stream = StreamInfo {
+    let mut stream = StreamInfo {
         method,
         subtitle_files: subtitle_files.iter().map(|(stream, _)| stream.index).collect(),
         burned_subtitle: (method == PlayMethod::Transcode)
@@ -1635,8 +2850,26 @@ async fn run_session(
             })
             .flatten()
             .map(|s| s.index),
+        transcode_reasons: (method == PlayMethod::Transcode)
+            .then(|| query_param(&url, "TranscodeReasons"))
+            .flatten()
+            .map(|reasons| {
+                reasons
+                    .split(',')
+                    .filter(|r| !r.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        transcode_video_codec: (method == PlayMethod::Transcode)
+            .then(|| first_codec(&url, "VideoCodec"))
+            .flatten(),
+        transcode_audio_codec: (method == PlayMethod::Transcode)
+            .then(|| first_codec(&url, "AudioCodec"))
+            .flatten(),
     };
 
+    let picture = Picture::starting(options.picture.as_ref(), &source, &stream, subtitle);
     let (player, mut events, video) = start_player(import).await?;
 
     // Track choices are options, so they're set before loading the file. A transcode has
@@ -1677,8 +2910,18 @@ async fn run_session(
             .await
             .map_err(|err| err.to_string())?;
     }
+    // The audio output before the volume: `volume-max` sets how far the volume goes.
+    let config = Config::load();
+    let audio_output = apply_audio(
+        &player,
+        player::AudioSettings {
+            night_mode: adjustments.night_mode,
+            ..config.audio_settings()
+        },
+    )
+    .await;
     player
-        .set_property("volume", volume)
+        .set_property("volume", volume.clamp(0., volume_max()))
         .await
         .map_err(|err| err.to_string())?;
     player
@@ -1687,13 +2930,32 @@ async fn run_session(
         .map_err(|err| err.to_string())?;
     // Cosmetic, so a property this mpv doesn't have is skipped: before 0.38 there's no
     // `sub-border-style`, and a visible `sub-back-color` draws the box on its own.
-    let config = Config::load();
     for (name, value) in subtitle_look(
         config.subtitle_color.unwrap_or_default(),
         config.subtitle_style.unwrap_or_default(),
     ) {
         if let Err(err) = player.set_property(name, value).await {
             tracing::debug!("mpv didn't take {name}={value}: {err}");
+        }
+    }
+    // Cosmetic too: a setting that fails leaves subtitles where mpv puts them.
+    if let Err(err) = player
+        .set_property("sub-pos", i64::from(adjustments.subtitle_position))
+        .await
+    {
+        tracing::debug!("mpv didn't take sub-pos: {err}");
+    }
+    // Before the file loads, like the rest, so the first frame is already deinterlaced.
+    player
+        .set_property("deinterlace", picture.deinterlace)
+        .await
+        .map_err(|err| err.to_string())?;
+    // A restart of the item keeps how its picture fills the window; a new item has mpv's own.
+    if picture.aspect != Aspect::Fit {
+        for (name, value) in picture.aspect.mpv_properties() {
+            if let Err(err) = player.set_property(name, value).await {
+                tracing::debug!("mpv didn't take {name}: {err}");
+            }
         }
     }
     for (name, value) in [
@@ -1726,6 +2988,7 @@ async fn run_session(
         audio,
         subtitle,
         stream: stream.clone(),
+        picture: Box::new(picture.clone()),
     });
     let details_task = {
         let (client, item, updates) = (client.clone(), item.clone(), channels.updates.clone());
@@ -1745,10 +3008,15 @@ async fn run_session(
         play_method: method,
         volume_level: volume_level(volume),
         is_muted: muted,
+        repeat_mode,
+        playback_order,
         ..Default::default()
     };
     let mut reporting = Reporting::default();
     let mut stopping = false;
+    // Stepping frames pauses and resumes mpv each time; the server hears of it from the next
+    // progress report instead of a pair for every frame.
+    let mut step_quiet = StepQuiet::default();
     let mut finished = false;
     let mut error = None;
     let mut duration = None;
@@ -1771,6 +3039,26 @@ async fn run_session(
                                 tracing::warn!("couldn't add subtitle: {err}");
                             }
                         }
+                        // What a restart of the item keeps, once there are tracks to pick from.
+                        if let Some(sid) = picture
+                            .secondary_subtitle
+                            .and_then(|index| subtitle_track(&source, &stream, index))
+                            && let Err(err) = player.set_property("secondary-sid", sid).await
+                        {
+                            tracing::warn!("couldn't show the second subtitle again: {err}");
+                        }
+                        let (a, b) = match picture.ab_loop {
+                            AbLoop::Off => (None, None),
+                            AbLoop::A(a) => (Some(a), None),
+                            AbLoop::Loop(a, b) => (Some(a), Some(b)),
+                        };
+                        for (name, point) in [("ab-loop-a", a), ("ab-loop-b", b)] {
+                            if let Some(point) = point
+                                && let Err(err) = player.set_property(name, point.as_secs_f64()).await
+                            {
+                                tracing::warn!("couldn't set the loop again: {err}");
+                            }
+                        }
                     }
                     PlayerEvent::Duration(length) => duration = Some(*length),
                     PlayerEvent::EndFile(EndReason::Eof) if !stopping => finished = true,
@@ -1780,6 +3068,7 @@ async fn run_session(
                     PlayerEvent::Exited => break,
                     _ => {}
                 }
+                let quiet = step_quiet.hushes(&event, tokio::time::Instant::now());
                 match reporting.on_event(&event, &mut report, tokio::time::Instant::now()) {
                     Outgoing::Start => {
                         if online {
@@ -1787,15 +3076,31 @@ async fn run_session(
                         }
                         save_unfinished(Some(&report), &account);
                     }
-                    Outgoing::Progress if online => send(client.report_playback_progress(&report).await),
+                    Outgoing::Progress if online && !quiet => send(client.report_playback_progress(&report).await),
                     Outgoing::Progress => {}
                     Outgoing::Nothing => {}
                 }
             }
             Some(command) = channels.commands.recv() => {
+                if matches!(command, UiCommand::PollInfo) {
+                    let values = player.properties(&info::PROPERTIES).await;
+                    let _ = channels.updates.send(SessionUpdate::Stats(Box::new(Stats::parse(&values))));
+                    continue;
+                }
                 tracing::debug!(?command, "player command");
+                step_quiet.on_command(&command, tokio::time::Instant::now());
                 let send_now = reporting.on_command(&command);
-                if let Err(err) = apply_command(&player, &source, &stream, &mut report, command).await {
+                if let UiCommand::AddSubtitle(added) = &command {
+                    match player.add_subtitle(added.url.as_str(), &added.title, added.language.as_deref(), true).await {
+                        Ok(()) => {
+                            source = added.source.clone();
+                            stream.subtitle_files = added.files.clone();
+                            report.subtitle_stream_index = Some(added.index);
+                        }
+                        Err(err) => tracing::warn!("couldn't add the downloaded subtitle: {err}"),
+                    }
+                }
+                if let Err(err) = apply_command(&player, &source, &stream, &mut report, audio_output.passthrough, command).await {
                     tracing::warn!("player command failed: {err}");
                 }
                 if online && send_now == Outgoing::Progress {
@@ -1888,6 +3193,32 @@ async fn run_session(
     }
 }
 
+/// The short while after a frame step in which the pause and seek it causes go unreported.
+#[derive(Debug, Default)]
+struct StepQuiet {
+    until: Option<tokio::time::Instant>,
+}
+
+impl StepQuiet {
+    /// A frame step starts the quiet. A pause, unpause or seek the user asks for ends it, since
+    /// what follows is theirs and the server should hear of it (a Space right after a `.` would
+    /// otherwise leave it showing "paused" until the next periodic report).
+    fn on_command(&mut self, command: &UiCommand, now: tokio::time::Instant) {
+        match command {
+            UiCommand::FrameStep(_) => self.until = Some(now + FRAME_STEP_QUIET),
+            UiCommand::TogglePause | UiCommand::SetPause(_) | UiCommand::SeekBy(_) | UiCommand::SeekTo(_) => {
+                self.until = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether `event` is the echo of a frame step, which isn't reported.
+    fn hushes(&self, event: &PlayerEvent, now: tokio::time::Instant) -> bool {
+        self.until.is_some_and(|until| now < until) && matches!(event, PlayerEvent::Paused(_) | PlayerEvent::Seeked)
+    }
+}
+
 /// A report to send to the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Outgoing {
@@ -1944,7 +3275,9 @@ impl Reporting {
             | UiCommand::SeekBy(_)
             | UiCommand::SeekTo(_)
             | UiCommand::Audio(_)
-            | UiCommand::Subtitle(_) => self.progress(),
+            | UiCommand::Subtitle(_)
+            | UiCommand::SetQueueModes(..)
+            | UiCommand::AddSubtitle(_) => self.progress(),
             _ => Outgoing::Nothing,
         }
     }
@@ -1997,6 +3330,7 @@ async fn apply_command(
     source: &MediaSourceInfo,
     stream: &StreamInfo,
     report: &mut PlaybackReport,
+    passthrough: player::Passthrough,
     command: UiCommand,
 ) -> player::Result<()> {
     match command {
@@ -2009,11 +3343,13 @@ async fn apply_command(
                 .command(json!(["seek", position.as_secs_f64(), "absolute"]))
                 .await
         }
-        UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., 100.)).await,
+        UiCommand::SetVolume(volume) => player.set_property("volume", volume.clamp(0., volume_max())).await,
         UiCommand::SetMute(muted) => player.set_property("mute", muted).await,
         UiCommand::SetSubtitleDelay(seconds) => player.set_property("sub-delay", seconds).await,
         UiCommand::SetAudioDelay(seconds) => player.set_property("audio-delay", seconds).await,
         UiCommand::SetSubtitleScale(scale) => player.set_property("sub-scale", scale).await,
+        UiCommand::SetSubtitlePosition(position) => player.set_property("sub-pos", i64::from(position)).await,
+        UiCommand::SetNightMode(on) => player.set_property("af", player::night_filter(on, passthrough)).await,
         UiCommand::ToggleMute => player.command(json!(["cycle", "mute"])).await,
         // A transcode restarts for a new audio track instead (`NowPlaying::change_audio`).
         UiCommand::Audio(_) if stream.method == PlayMethod::Transcode => Ok(()),
@@ -2026,12 +3362,7 @@ async fn apply_command(
         }
         UiCommand::Subtitle(choice) => {
             let sid = match choice {
-                SubtitleChoice::Stream(index) if stream.method == PlayMethod::Transcode => stream
-                    .subtitle_files
-                    .iter()
-                    .position(|&i| i == index)
-                    .map(|i| json!(i + 1)),
-                SubtitleChoice::Stream(index) => mpv_subtitle_id(source, index).map(|id| json!(id)),
+                SubtitleChoice::Stream(index) => subtitle_track(source, stream, index).map(|id| json!(id)),
                 SubtitleChoice::Off => Some(json!("no")),
                 SubtitleChoice::Auto => Some(json!("auto")),
             };
@@ -2041,7 +3372,35 @@ async fn apply_command(
             }
             Ok(())
         }
+        UiCommand::SetQueueModes(repeat_mode, playback_order) => {
+            report.repeat_mode = repeat_mode;
+            report.playback_order = playback_order;
+            Ok(())
+        }
+        // The session takes it in itself, since it renumbers its tracks.
+        UiCommand::AddSubtitle(_) => Ok(()),
+        UiCommand::SetSecondarySubtitle(index) => {
+            let sid = match index {
+                Some(index) => subtitle_track(source, stream, index).map(|id| json!(id)),
+                None => Some(json!("no")),
+            };
+            match sid {
+                Some(sid) => player.set_property("secondary-sid", sid).await,
+                None => Ok(()),
+            }
+        }
+        UiCommand::SetAspect(aspect) => {
+            for (name, value) in aspect.mpv_properties() {
+                player.set_property(name, value).await?;
+            }
+            Ok(())
+        }
+        UiCommand::SetDeinterlace(on) => player.set_property("deinterlace", on).await,
+        UiCommand::FrameStep(true) => player.command(json!(["frame-step"])).await,
+        UiCommand::FrameStep(false) => player.command(json!(["frame-back-step"])).await,
+        UiCommand::CycleAbLoop => player.command(json!(["ab-loop"])).await,
         UiCommand::Stop => player.quit().await,
+        UiCommand::PollInfo => Ok(()),
     }
 }
 
@@ -2102,9 +3461,13 @@ mod tests {
     use jellyfin::PlaybackReport;
     use player::PlayerEvent;
 
+    use jellyfin::Ticks;
+    use jellyfin::models::BaseItemDto;
+
     use super::{
-        Adjustments, Outgoing, Reporting, UiCommand, VOLUME_REPORT_AFTER, adjacent, mpv_subtitle_id, mpv_track_id,
-        volume_level,
+        Adjustments, Ended, Outgoing, PlayOptions, PlaybackManager, Reporting, StepQuiet, SubtitleChoice, UiCommand,
+        VOLUME_REPORT_AFTER, added_subtitle, adjacent, mpv_subtitle_id, mpv_track_id, reconnect_options, settle,
+        volume_level, volume_max,
     };
 
     #[test]
@@ -2144,6 +3507,18 @@ mod tests {
         assert_eq!(reporting.on_command(&UiCommand::Audio(2)), Outgoing::Progress);
         assert_eq!(reporting.on_command(&UiCommand::SetSpeed(1.5)), Outgoing::Nothing);
         assert_eq!(reporting.on_command(&UiCommand::SetVolume(50.)), Outgoing::Nothing);
+    }
+
+    #[test]
+    fn the_queues_modes_are_reported_once_applied() {
+        use jellyfin::{PlaybackOrder, RepeatMode};
+
+        let (mut reporting, mut report) = (Reporting::default(), PlaybackReport::default());
+        let command = UiCommand::SetQueueModes(RepeatMode::RepeatAll, PlaybackOrder::Shuffle);
+        // Before the start report, which carries the modes itself.
+        assert_eq!(reporting.on_command(&command), Outgoing::Nothing);
+        reporting.on_event(&PlayerEvent::FileLoaded, &mut report, tokio::time::Instant::now());
+        assert_eq!(reporting.on_command(&command), Outgoing::Progress);
     }
 
     #[test]
@@ -2187,6 +3562,206 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_keeps_the_picture_choices_and_a_new_item_starts_fresh() {
+        use super::{AbLoop, Aspect, Picture, StreamInfo, SubtitleChoice};
+        use jellyfin::PlayMethod;
+
+        let text = |index: i32| -> MediaStream {
+            serde_json::from_value(serde_json::json!({
+                "Index": index,
+                "Type": "Subtitle",
+                "IsTextSubtitleStream": true,
+            }))
+            .unwrap()
+        };
+        let source = MediaSourceInfo {
+            media_streams: vec![text(7), text(8)],
+            ..source()
+        };
+        let direct = StreamInfo::default();
+        let at = Duration::from_secs;
+        let carried = Picture {
+            source_id: "s".into(),
+            aspect: Aspect::Fill,
+            deinterlace: false,
+            deinterlace_chosen: true,
+            secondary_subtitle: Some(8),
+            ab_loop: AbLoop::Loop(at(30), at(60)),
+        };
+
+        // Everything comes back, the second subtitle too while its track is there.
+        let again = Picture::starting(Some(&carried), &source, &direct, SubtitleChoice::Stream(7));
+        assert_eq!(again, carried);
+        // Not when it's the first subtitle now, or the track is gone.
+        let first = Picture::starting(Some(&carried), &source, &direct, SubtitleChoice::Stream(8));
+        assert_eq!(first.secondary_subtitle, None);
+        assert_eq!(first.aspect, Aspect::Fill);
+        let gone = MediaSourceInfo {
+            media_streams: vec![text(7)],
+            ..source.clone()
+        };
+        assert_eq!(
+            Picture::starting(Some(&carried), &gone, &direct, SubtitleChoice::Off).secondary_subtitle,
+            None
+        );
+        // A transcode only has the tracks it sends as files.
+        let transcode = StreamInfo {
+            method: PlayMethod::Transcode,
+            subtitle_files: vec![7],
+            ..StreamInfo::default()
+        };
+        let sent = Picture::starting(Some(&carried), &source, &transcode, SubtitleChoice::Off);
+        assert_eq!(sent.secondary_subtitle, None);
+        // The deinterlace choice is the user's, even when the video is interlaced.
+        let interlaced = interlaced_source("s");
+        assert!(!Picture::starting(Some(&carried), &interlaced, &direct, SubtitleChoice::Off).deinterlace);
+        // One the user never made is worked out again, and follows the stream.
+        let unchosen = Picture {
+            deinterlace_chosen: false,
+            ..carried.clone()
+        };
+        let worked_out = Picture::starting(Some(&unchosen), &interlaced, &direct, SubtitleChoice::Off);
+        assert!(worked_out.deinterlace && !worked_out.deinterlace_chosen);
+
+        // Without anything carried (another item), the defaults, and the stream's own deinterlacing.
+        let fresh = Picture::starting(None, &interlaced, &direct, SubtitleChoice::Off);
+        assert_eq!(
+            fresh,
+            Picture {
+                source_id: "s".into(),
+                deinterlace: true,
+                ..Picture::default()
+            }
+        );
+    }
+
+    fn interlaced_source(id: &str) -> MediaSourceInfo {
+        serde_json::from_value(serde_json::json!({
+            "Id": id,
+            "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": true }],
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_version_switch_carries_only_the_aspect() {
+        use super::{AbLoop, Aspect, Picture, StreamInfo, SubtitleChoice};
+
+        let direct = StreamInfo::default();
+        let at = Duration::from_secs;
+        // Version "s" was progressive, and the user never touched deinterlacing.
+        let carried = Picture {
+            source_id: "s".into(),
+            aspect: Aspect::Fill,
+            deinterlace: false,
+            deinterlace_chosen: false,
+            secondary_subtitle: Some(8),
+            ab_loop: AbLoop::Loop(at(30), at(60)),
+        };
+        // Version "t" is interlaced and has a text track under the same index.
+        let other: MediaSourceInfo = serde_json::from_value(serde_json::json!({
+            "Id": "t",
+            "MediaStreams": [
+                { "Index": 0, "Type": "Video", "IsInterlaced": true },
+                { "Index": 8, "Type": "Subtitle", "IsTextSubtitleStream": true },
+            ],
+        }))
+        .unwrap();
+        let started = Picture::starting(Some(&carried), &other, &direct, SubtitleChoice::Off);
+        assert_eq!(started.aspect, Aspect::Fill);
+        assert!(started.deinterlace, "worked out afresh for the new version");
+        assert_eq!(started.secondary_subtitle, None);
+        assert_eq!(started.ab_loop, AbLoop::Off);
+        assert_eq!(started.source_id, "t");
+
+        // Even a deinterlace choice the user made belongs to the old file.
+        let chosen = Picture {
+            deinterlace_chosen: true,
+            ..carried
+        };
+        let started = Picture::starting(Some(&chosen), &other, &direct, SubtitleChoice::Off);
+        assert!(started.deinterlace && !started.deinterlace_chosen);
+    }
+
+    #[test]
+    fn a_frame_steps_pause_and_seek_go_unreported_but_the_users_own_are_not() {
+        use tokio::time::Instant;
+
+        let now = Instant::now();
+        let later = |millis| now + Duration::from_millis(millis);
+        let (pause, seek) = (PlayerEvent::Paused(false), PlayerEvent::Seeked);
+        let mut quiet = StepQuiet::default();
+        assert!(!quiet.hushes(&pause, now), "no step, no quiet");
+
+        quiet.on_command(&UiCommand::FrameStep(true), now);
+        assert!(quiet.hushes(&pause, later(100)) && quiet.hushes(&seek, later(100)));
+        assert!(
+            !quiet.hushes(&PlayerEvent::Volume(50.), later(100)),
+            "only the pause and the seek"
+        );
+        assert!(!quiet.hushes(&pause, later(700)), "and not for long");
+
+        // A pause, unpause or seek the user asks for inside the window ends it: its echo is
+        // reported, as is the one after it.
+        for command in [
+            UiCommand::TogglePause,
+            UiCommand::SetPause(false),
+            UiCommand::SeekBy(10.),
+            UiCommand::SeekTo(Duration::from_secs(5)),
+        ] {
+            quiet.on_command(&UiCommand::FrameStep(true), now);
+            quiet.on_command(&command, later(50));
+            assert!(!quiet.hushes(&pause, later(100)), "{command:?}");
+            assert!(!quiet.hushes(&seek, later(100)), "{command:?}");
+        }
+        // Other commands leave it be.
+        quiet.on_command(&UiCommand::FrameStep(false), now);
+        quiet.on_command(&UiCommand::SetVolume(40.), later(50));
+        assert!(quiet.hushes(&seek, later(100)));
+    }
+
+    #[test]
+    fn the_ab_loop_sets_a_then_b_then_clears() {
+        use super::AbLoop;
+
+        let at = Duration::from_secs;
+        let a = AbLoop::Off.next(at(30));
+        assert_eq!(a, AbLoop::A(at(30)));
+        assert_eq!(a.points(), Some((at(30), None)));
+        let both = a.next(at(10));
+        assert_eq!(both, AbLoop::Loop(at(30), at(10)));
+        // Drawn earliest first, whichever was set first.
+        assert_eq!(both.points(), Some((at(10), Some(at(30)))));
+        assert_eq!(both.next(at(50)), AbLoop::Off);
+        assert_eq!(AbLoop::Off.points(), None);
+    }
+
+    #[test]
+    fn deinterlacing_starts_on_for_an_interlaced_stream_played_as_it_is() {
+        use super::deinterlaces_by_default;
+        use jellyfin::PlayMethod;
+
+        let source = |interlaced: bool| -> MediaSourceInfo {
+            serde_json::from_value(serde_json::json!({
+                "Id": "s",
+                "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": interlaced }],
+            }))
+            .unwrap()
+        };
+        assert!(deinterlaces_by_default(&source(true), PlayMethod::DirectPlay));
+        assert!(!deinterlaces_by_default(&source(false), PlayMethod::DirectPlay));
+        // A transcode is already progressive.
+        assert!(!deinterlaces_by_default(&source(true), PlayMethod::Transcode));
+        // The server leaves the field out of a stream it didn't probe.
+        let unknown: MediaSourceInfo = serde_json::from_value(serde_json::json!({
+            "Id": "s",
+            "MediaStreams": [{ "Index": 0, "Type": "Video", "IsInterlaced": null }],
+        }))
+        .unwrap();
+        assert!(!deinterlaces_by_default(&unknown, PlayMethod::DirectPlay));
+    }
+
+    #[test]
     fn maps_jellyfin_indexes_to_mpv_track_ids() {
         let source = source();
         assert_eq!(mpv_track_id(&source, MediaStreamType::Audio, 2), Some(1));
@@ -2199,10 +3774,49 @@ mod tests {
     #[test]
     fn external_subtitles_follow_embedded_ones() {
         let source = source();
-        assert_eq!(mpv_subtitle_id(&source, 4), Some(1));
-        assert_eq!(mpv_subtitle_id(&source, 0), Some(2));
-        assert_eq!(mpv_subtitle_id(&source, 5), Some(3));
-        assert_eq!(mpv_subtitle_id(&source, 9), None);
+        let files = [0, 5];
+        assert_eq!(mpv_subtitle_id(&source, &files, 4), Some(1));
+        assert_eq!(mpv_subtitle_id(&source, &files, 0), Some(2));
+        assert_eq!(mpv_subtitle_id(&source, &files, 5), Some(3));
+        assert_eq!(mpv_subtitle_id(&source, &files, 9), None);
+        // mpv's order is the order they were added in, not the streams' order.
+        assert_eq!(mpv_subtitle_id(&source, &[5, 0], 5), Some(2));
+    }
+
+    fn external(index: i32, path: &str) -> MediaStream {
+        let mut stream = stream(index, MediaStreamType::Subtitle, true);
+        stream.path = Some(path.into());
+        stream
+    }
+
+    #[test]
+    fn a_downloaded_subtitle_is_found_among_moved_indexes() {
+        let with = |streams: Vec<MediaStream>| MediaSourceInfo {
+            media_streams: streams,
+            ..source()
+        };
+        let old = with(vec![
+            stream(0, MediaStreamType::Video, false),
+            external(1, "m.en.srt"),
+            external(2, "m.pt.srt"),
+        ]);
+        // `m.es.srt` sorts between the two, so the Portuguese one moves up.
+        let new = with(vec![
+            stream(0, MediaStreamType::Video, false),
+            external(1, "m.en.srt"),
+            external(2, "m.es.srt"),
+            external(3, "m.pt.srt"),
+        ]);
+        let (added, files) = added_subtitle(&old, &[1, 2], &new).expect("a new subtitle");
+        assert_eq!((added.index, files), (2, vec![1, 3, 2]));
+        // Nothing new: the same list again.
+        assert!(added_subtitle(&old, &[1, 2], &old).is_none());
+    }
+
+    #[test]
+    fn a_boosted_volume_reports_as_full() {
+        assert_eq!(volume_level(volume_max()), 100);
+        assert_eq!(volume_level(125.), 100);
     }
 
     #[test]
@@ -2235,12 +3849,17 @@ mod tests {
             subtitle_delay: 0.1 + 0.2,
             audio_delay: -100.,
             subtitle_scale: 0.1,
+            subtitle_position: 250,
+            night_mode: true,
         }
         .clamped();
         assert_eq!(wild.speed, 2.);
         assert_eq!(wild.subtitle_delay, 0.3);
         assert_eq!(wild.audio_delay, -30.);
         assert_eq!(wild.subtitle_scale, 0.5);
+        // Nothing lower than the bottom, where mpv would cut text subtitles off.
+        assert_eq!(wild.subtitle_position, 100);
+        assert!(wild.night_mode);
     }
 
     #[test]
@@ -2250,9 +3869,12 @@ mod tests {
             subtitle_delay: 1.2,
             audio_delay: -0.3,
             subtitle_scale: 1.4,
+            subtitle_position: 85,
+            night_mode: true,
         }
         .for_next_item();
-        assert_eq!((next.speed, next.subtitle_scale), (1.5, 1.4));
+        assert_eq!((next.speed, next.subtitle_scale, next.night_mode), (1.5, 1.4, true));
+        assert_eq!(next.subtitle_position, 85);
         assert_eq!((next.subtitle_delay, next.audio_delay), (0., 0.));
     }
 
@@ -2270,5 +3892,139 @@ mod tests {
         assert_eq!(ids(adjacent(items(), "a")), (None, Some("b".into())));
         assert_eq!(ids(adjacent(items(), "c")), (Some("b".into()), None));
         assert_eq!(ids(adjacent(items(), "x")), (None, None));
+    }
+
+    fn item(id: &str) -> BaseItemDto {
+        serde_json::from_value(serde_json::json!({ "Id": id, "Name": id })).expect("item")
+    }
+
+    fn manager() -> PlaybackManager {
+        let client = jellyfin::Client::new("http://localhost:1/", crate::session::client_info("test")).expect("client");
+        PlaybackManager::new(&egui::Context::default(), client, "account".into())
+    }
+
+    fn queued(manager: &PlaybackManager) -> Vec<String> {
+        manager.queued().map(|item| item.id.clone()).collect()
+    }
+
+    /// Play all on a season: A plays, B, C and D wait.
+    fn playing_a_season() -> PlaybackManager {
+        let mut manager = manager();
+        manager.queue.push_last(["b", "c", "d"].map(item).into());
+        manager.start_for_test(item("a"), source());
+        manager
+    }
+
+    #[test]
+    fn loading_the_playing_item_again_keeps_the_queue() {
+        // A version switch, a transcode's audio change, a burned-in subtitle and the fall back
+        // to software frames all play the same item again, from `Services::reload`, which starts
+        // the session without asking the queue to advance.
+        let _config = crate::ui_tests::ConfigDir::new("playback-reload-keeps-queue");
+        let mut manager = playing_a_season();
+        manager.start_session(&item("a"), PlayOptions::default(), 0);
+        assert_eq!(queued(&manager), ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn next_moves_past_the_same_item_queued_twice_in_a_row() {
+        // Play all on [A, A, B]: A plays with [A, B] waiting.
+        let mut manager = manager();
+        manager.queue.push_last(["a", "b"].map(item).into());
+        manager.start_for_test(item("a"), source());
+        // Next plays the queue's front, the second A, whose own next is B.
+        manager.advance_queue(&item("a"), &PlayOptions::default());
+        assert_eq!(queued(&manager), ["b"]);
+        manager.start_for_test(item("a"), source());
+        // Next again reaches B.
+        manager.advance_queue(&item("b"), &PlayOptions::default());
+        assert!(queued(&manager).is_empty());
+    }
+
+    #[test]
+    fn playing_something_else_moves_or_drops_the_queue() {
+        let mut manager = playing_a_season();
+        manager.advance_queue(&item("b"), &PlayOptions::default());
+        assert_eq!(queued(&manager), ["c", "d"], "the queue's front moves it on");
+        manager.advance_queue(&item("x"), &PlayOptions::default());
+        assert!(queued(&manager).is_empty(), "anything else drops it");
+
+        // A SyncPlay group has its own queue; this one stays out of it.
+        let mut manager = playing_a_season();
+        let group = PlayOptions {
+            group_item: Some("entry".into()),
+            ..PlayOptions::default()
+        };
+        manager.advance_queue(&item("x"), &group);
+        assert_eq!(queued(&manager), ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn a_reconnect_keeps_the_tracks_switched_during_playback() {
+        let mut manager = manager();
+        manager.start_for_test(item("a"), source());
+        let started = PlayOptions {
+            start: Some(Ticks(0)),
+            resumed: true,
+            ..PlayOptions::default()
+        };
+        // The session started on its default tracks; the user then switched both (direct play
+        // only sends a command, so the options it started with don't know).
+        let state = manager.now_playing_mut().expect("the session");
+        state.audio = Some(3);
+        state.subtitle = SubtitleChoice::Stream(4);
+
+        let position = Ticks::from(Duration::from_secs(90));
+        let options = reconnect_options(started.clone(), position, manager.now_playing());
+        assert_eq!(options.start, Some(position));
+        assert!(!options.resumed);
+        assert_eq!(options.media_source_id.as_deref(), Some("s"));
+        assert_eq!(options.audio_stream_index, Some(3));
+        assert_eq!(options.subtitle, SubtitleChoice::Stream(4));
+
+        // Without the session's state (it never started), the options stand.
+        let kept = PlayOptions {
+            audio_stream_index: Some(2),
+            subtitle: SubtitleChoice::Off,
+            ..started
+        };
+        let options = reconnect_options(kept, position, None);
+        assert_eq!(options.audio_stream_index, Some(2));
+        assert_eq!(options.subtitle, SubtitleChoice::Off);
+    }
+
+    fn lost() -> Result<Ended, String> {
+        Ok(Ended::Lost {
+            position: Ticks(1),
+            message: "gone".into(),
+            crashed: false,
+        })
+    }
+
+    #[test]
+    fn a_stopped_session_neither_reconnects_nor_autoplays() {
+        assert!(matches!(settle(lost(), true), Ok(Ended::Stopped)));
+        assert!(matches!(settle(Ok(Ended::Finished), true), Ok(Ended::Stopped)));
+        // Not stopped: the end is what it was.
+        assert!(matches!(settle(lost(), false), Ok(Ended::Lost { .. })));
+        assert!(matches!(settle(Ok(Ended::Finished), false), Ok(Ended::Finished)));
+        // A failure is still shown.
+        assert!(settle(Err("no".into()), true).is_err());
+    }
+
+    #[test]
+    fn a_stop_is_remembered_for_its_session_only() {
+        let mut manager = manager();
+        manager.start_for_test(item("a"), source());
+        let first = manager.generation;
+        assert!(!manager.was_stopped(first));
+        // Esc after the loop quit: nothing is running to signal, but the end that arrives later
+        // still counts as a stop.
+        manager.stop();
+        assert!(manager.was_stopped(first));
+        // The next session is a deliberate start; the old stop isn't its own.
+        manager.start_for_test(item("b"), source());
+        assert!(!manager.was_stopped(manager.generation));
+        assert!(manager.was_stopped(first));
     }
 }

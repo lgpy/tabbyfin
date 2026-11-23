@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the Windows installer (packaging/tabbyfin.iss) with Inno Setup's ISCC.exe, from a
 # staged app folder. Works from Git Bash on Windows (CI) and from WSL. Without ISCC it says so
-# and does nothing, so the .zip alone still gets built.
+# and does nothing, so the .zip alone still gets built (on CI, where `CI` is set, it fails instead).
 #
 #   packaging/installer.sh <version> <staged app folder> <out-dir>
 set -euo pipefail
@@ -22,6 +22,11 @@ if [[ -z "$iscc" ]]; then
   done
 fi
 if [[ -z "$iscc" ]]; then
+  # On CI a missing compiler must stop the release, or it ships without its installer.
+  if [[ -n "${CI:-}" ]]; then
+    echo "Inno Setup's ISCC.exe not found (set ISCC)" >&2
+    exit 1
+  fi
   echo "Inno Setup's ISCC.exe not found (set ISCC); skipping the installer" >&2
   exit 0
 fi

@@ -10,6 +10,7 @@
 
 use std::ffi::{CStr, c_void};
 use std::ptr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use jni_sys::{JNI_OK, JNI_VERSION_1_6, JNIEnv, JavaVM, jclass, jint, jobject, jvalue};
@@ -235,17 +236,41 @@ type Sink = Box<dyn Fn(Option<SurfaceRef>) + Send + Sync>;
 /// The player the surface goes to (one at a time), and the reference it was last given.
 static SINK: Mutex<Option<Sink>> = Mutex::new(None);
 static CURRENT: Mutex<SurfaceRef> = Mutex::new(0);
+/// The token of the player that showed the surface last, 0 when none has or it was hidden. Held
+/// across the call into Java so a show and a hide reach the UI thread in the order they were checked.
+static OWNER: Mutex<u64> = Mutex::new(0);
+static TOKENS: AtomicU64 = AtomicU64::new(1);
 
 /// Shows the video surface (at the last place it was put) and hands it to `sink` whenever it
-/// exists. Replaces the previous player's sink.
-pub(crate) fn show_surface(sink: impl Fn(Option<SurfaceRef>) + Send + Sync + 'static) -> Result<()> {
-    *SINK.lock().unwrap() = Some(Box::new(sink));
+/// exists. Replaces the previous player's sink, which is told the surface is gone first (a player
+/// skipped to the next item is dropped only after its successor has started, and two can't draw
+/// into one surface). Returns the token [`hide_surface`] needs: only the player that showed the
+/// surface last may hide it.
+pub(crate) fn show_surface(sink: impl Fn(Option<SurfaceRef>) + Send + Sync + 'static) -> Result<u64> {
     let (_, activity) = context()?;
-    call_video_surface(c"show", c"(Landroid/app/Activity;)V", &[jvalue { l: activity }])
+    let mut owner = OWNER.lock().unwrap();
+    {
+        let mut slot = SINK.lock().unwrap();
+        if let Some(old) = slot.take() {
+            old(None);
+        }
+        *slot = Some(Box::new(sink));
+    }
+    let token = TOKENS.fetch_add(1, Ordering::Relaxed);
+    *owner = token;
+    // If the view is already up (the previous player's), `show` hands its surface to the new sink.
+    call_video_surface(c"show", c"(Landroid/app/Activity;)V", &[jvalue { l: activity }])?;
+    Ok(token)
 }
 
-/// Takes the video surface away; the sink is told first.
-pub(crate) fn hide_surface() {
+/// Takes the video surface away, if `owner` (what [`show_surface`] returned) is still the player
+/// it's shown for; the sink is told first. A player replaced by the next one hides nothing.
+pub(crate) fn hide_surface(owner: u64) {
+    let mut current = OWNER.lock().unwrap();
+    if *current != owner {
+        return;
+    }
+    *current = 0;
     if let Err(err) = call_video_surface(c"hide", c"()V", &[]) {
         tracing::warn!("couldn't hide the video surface: {err}");
     }

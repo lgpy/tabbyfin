@@ -222,12 +222,12 @@ impl<'a> MediaRow<'a> {
         let mut content = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
         let id = row.id;
         let image_rect = Rect::from_min_size(inner.min, vec2(size.image_w, size.image_h));
-        image::show(
+        image::show_item(
             &content,
             images,
             image_rect,
             self.image.as_ref(),
-            Some(self.item),
+            self.item,
             IMAGE_RADIUS,
         );
 
@@ -303,12 +303,12 @@ impl<'a> MediaRow<'a> {
         }
         let mut content = ui.new_child(UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)));
         let image_rect = Rect::from_min_size(rect.min, vec2(PHONE_IMAGE_W, PHONE_IMAGE_H));
-        image::show(
+        image::show_item(
             &content,
             images,
             image_rect,
             self.image.as_ref(),
-            Some(self.item),
+            self.item,
             IMAGE_RADIUS,
         );
         if let Some(fraction) = crate::widgets::card::progress(self.item) {

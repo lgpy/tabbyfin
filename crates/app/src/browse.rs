@@ -152,13 +152,19 @@ fn step(Position { section, index }: Position, mv: Move, sections: &[Section]) -
         // Otherwise into the neighbouring section, as close to the same column as it has.
         Move::Down => {
             let next = next_section()?;
-            at(next, column.min(sections[next].len - 1))
+            // The column is the current section's: a narrower one has fewer, and the index
+            // would otherwise land on a later row.
+            let target = sections[next];
+            at(next, column.min(target.columns - 1).min(target.len - 1))
         }
         Move::Up => {
             let prev = prev_section()?;
             let target = sections[prev];
             let last_row_start = target.last_row() * target.columns;
-            at(prev, (last_row_start + column).min(target.len - 1))
+            at(
+                prev,
+                (last_row_start + column.min(target.columns - 1)).min(target.len - 1),
+            )
         }
         Move::NextSection => at(next_section()?, 0),
         Move::PrevSection => at(prev_section()?, 0),
@@ -335,5 +341,25 @@ mod tests {
         cursor.apply(Move::Right, &[Section::row(3)]);
         assert!(cursor.take_reveal());
         assert!(!cursor.take_reveal());
+    }
+
+    #[test]
+    fn moving_between_sections_of_different_widths_keeps_to_the_row() {
+        // A toolbar of 8 controls above a grid of 4 columns: the last control goes down to the
+        // grid's first row, not the second.
+        let sections = [Section::row(8), Section::grid(12, 4)];
+        assert_eq!(run(&sections, pos(0, 7), &[Move::Down]), [Some(pos(1, 3))]);
+        // And a wide shelf above a narrower one the same way.
+        let sections = [Section::row(7), Section::grid(9, 4)];
+        assert_eq!(run(&sections, pos(0, 6), &[Move::Down]), [Some(pos(1, 3))]);
+        // Up from a narrow grid into the shelf above keeps the column it has.
+        assert_eq!(run(&sections, pos(1, 3), &[Move::Up]), [Some(pos(0, 3))]);
+    }
+
+    #[test]
+    fn moving_up_into_a_narrower_section_stays_on_its_last_row() {
+        // The grid's column 5 doesn't exist in a 3-column grid above it: the last row's end.
+        let sections = [Section::grid(7, 3), Section::grid(12, 6)];
+        assert_eq!(run(&sections, pos(1, 5), &[Move::Up]), [Some(pos(0, 6))]);
     }
 }

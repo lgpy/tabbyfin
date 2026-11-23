@@ -20,8 +20,8 @@ use std::collections::VecDeque;
 
 use egui::{Id, Response};
 use egui_material_icons::icons::{
-    ICON_CHECK, ICON_CHECK_CIRCLE, ICON_CLOSE, ICON_DELETE, ICON_DOWNLOAD, ICON_FAVORITE, ICON_PLAY_ARROW,
-    ICON_PLAYLIST_ADD, ICON_REFRESH, ICON_REPLAY,
+    ICON_ADD_TO_QUEUE, ICON_CHECK, ICON_CHECK_CIRCLE, ICON_CLOSE, ICON_DELETE, ICON_DOWNLOAD, ICON_FAVORITE,
+    ICON_PLAY_ARROW, ICON_PLAYLIST_ADD, ICON_PLAYLIST_PLAY, ICON_QUEUE_PLAY_NEXT, ICON_REFRESH, ICON_REPLAY,
 };
 
 use jellyfin::models::{BaseItemDto, BaseItemKind};
@@ -29,11 +29,13 @@ use jellyfin::models::{BaseItemDto, BaseItemKind};
 use crate::downloads::{Downloads, Offer};
 
 use crate::i18n::tr;
-use crate::item_menu::{self, Mark, can_add_to_playlist, can_mark, is_favorite, is_playable, is_played, resume_point};
+use crate::item_menu::{
+    self, Mark, can_add_to_playlist, can_mark, can_queue, is_favorite, is_playable, is_played, resume_point,
+};
 use crate::playback::PlayOptions;
-use crate::services::{Marked, Services, Shuffled, UpNext};
+use crate::services::{Marked, Queued, Resumed, Services, Shuffled, UpNext};
 use crate::theme;
-use crate::toasts::Toast;
+use crate::toasts::{Toast, ToastAction};
 use crate::views::item::shuffle;
 use crate::widgets::popup::{Entry, PopupMenu};
 use crate::widgets::text::timestamp;
@@ -47,8 +49,18 @@ pub enum MenuAction {
     UpNext,
     /// Set watched or favorite state.
     Mark(Mark),
+    /// Take the item out of Continue Watching: clear its resume point, keep its watched state.
+    RemoveFromContinue,
     /// Open the *Add to playlist* dialog.
     AddToPlaylist,
+    /// Put the item (or a series', season's, collection's or playlist's items, in order) right
+    /// after what's playing.
+    PlayNext,
+    /// Put it at the end of the play queue.
+    AddToQueue,
+    /// Play the item with the rest of the list it's in queued after it: a season's episodes or
+    /// a playlist's entries. The list's page carries it out, as it knows the list.
+    PlayFromHere,
     /// Start, stop, delete or retry its download.
     Download(Offer),
 }
@@ -56,9 +68,43 @@ pub enum MenuAction {
 /// The menu worn by `response`: right-click it to open it. `downloads` says which download
 /// entry it has. Kinds with none of the entries (libraries, people) get no menu.
 pub fn item_menu(response: &Response, item: &BaseItemDto, downloads: &Downloads) -> Option<MenuAction> {
-    if !can_mark(item) {
+    item_menu_in(response, item, downloads, false)
+}
+
+/// [`item_menu`] for a row of a list (a season's episodes, a playlist's entries): `in_list` adds
+/// *Play from here*.
+pub fn item_menu_in(
+    response: &Response,
+    item: &BaseItemDto,
+    downloads: &Downloads,
+    in_list: bool,
+) -> Option<MenuAction> {
+    let queue = queueing(&response.ctx) && can_queue(item);
+    if !can_mark(item) && !queue {
         return None;
     }
+    menu(response, item, downloads, queue, in_list && is_playable(item))
+}
+
+/// Whether the menus offer *Play next* and *Add to queue*: something is playing or queued.
+/// [`Services::tick`] keeps it current, since the cards that draw the menus only have their
+/// `Response`.
+pub fn set_queueing(ctx: &egui::Context, queueing: bool) {
+    ctx.data_mut(|data| data.insert_temp(Id::unique("item_menu_queueing"), queueing));
+}
+
+fn queueing(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(Id::unique("item_menu_queueing")))
+        .unwrap_or(false)
+}
+
+fn menu(
+    response: &Response,
+    item: &BaseItemDto,
+    downloads: &Downloads,
+    queue: bool,
+    from_here: bool,
+) -> Option<MenuAction> {
     let ctx = &response.ctx;
     let id = Id::unique("item_context_menu");
     let owner = id.with("owner");
@@ -91,6 +137,32 @@ pub fn item_menu(response: &Response, item: &BaseItemDto, downloads: &Downloads)
         // it, and this asks the page to play it.
         actions.push(MenuAction::UpNext);
         entries.push(Entry::new(tr!("item-play")).icon(ICON_PLAY_ARROW));
+    }
+    if from_here {
+        actions.push(MenuAction::PlayFromHere);
+        entries.push(Entry::new(tr!("item-play-from-here")).icon(ICON_PLAYLIST_PLAY));
+    }
+    if queue {
+        actions.push(MenuAction::PlayNext);
+        entries.push(Entry::new(tr!("item-play-next")).icon(ICON_QUEUE_PLAY_NEXT));
+        actions.push(MenuAction::AddToQueue);
+        entries.push(Entry::new(tr!("item-add-to-queue")).icon(ICON_ADD_TO_QUEUE));
+    }
+    if resume_point(item).is_some() {
+        actions.push(MenuAction::RemoveFromContinue);
+        entries.push(
+            Entry::new(tr!("item-remove-from-continue"))
+                .icon(ICON_CLOSE)
+                .separated(),
+        );
+    }
+    if !can_mark(item) {
+        let chosen = PopupMenu::new(id)
+            .title(&item.name)
+            .opening_at_pointer(opening)
+            .show(response, &entries)
+            .chosen;
+        return chosen.map(|index| actions[index]);
     }
     // Named and drawn like the item page's toggles: the icon shows whether it's on.
     let played = is_played(item);
@@ -217,7 +289,19 @@ impl Services {
                 self.mark(item.id.clone(), mark);
                 None
             }
-            MenuAction::AddToPlaylist => Some(action),
+            MenuAction::RemoveFromContinue => {
+                self.clear_resume(item);
+                None
+            }
+            MenuAction::AddToPlaylist | MenuAction::PlayFromHere => Some(action),
+            MenuAction::PlayNext => {
+                self.queue_item(item, true);
+                None
+            }
+            MenuAction::AddToQueue => {
+                self.queue_item(item, false);
+                None
+            }
             MenuAction::Download(offer) => {
                 self.download(offer, item);
                 None
@@ -237,6 +321,45 @@ impl Services {
             Offer::Remove => self.downloads.remove(&item.id),
             Offer::Retry => self.downloads.retry(&item.id),
         }
+    }
+
+    /// Whether *Play next* and *Add to queue* make sense: something plays (here, on a TV or in a
+    /// group) or is queued.
+    pub fn queueing(&self) -> bool {
+        self.playback.is_active() || self.is_casting() || self.playback.queued().next().is_some()
+    }
+
+    /// Puts `item` right after what's playing (`next`) or at the end of the queue. A series,
+    /// season, collection or playlist adds its items in order, which takes a request: it runs on
+    /// tokio and [`Services::apply_menu_requests`] queues them. A toast says what happened.
+    pub fn queue_item(&mut self, item: &BaseItemDto, next: bool) {
+        if item_menu::is_playable(item) {
+            self.queue_items(next, &item.name, vec![item.clone()]);
+            return;
+        }
+        let client = self.session.client.clone();
+        let item = item.clone();
+        let sender = self.queue_from.clone();
+        crate::runtime::detach(async move {
+            let result = item_menu::items_to_queue(&client, &item).await;
+            let _ = sender.send((next, item.name, result));
+        });
+    }
+
+    fn queue_items(&mut self, next: bool, name: &str, items: Vec<BaseItemDto>) {
+        let count = items.len();
+        if count == 0 {
+            self.toast(Toast::info(tr!("item-nothing-to-queue")));
+            return;
+        }
+        self.enqueue(items, next);
+        let message = match (next, count) {
+            (true, 1) => tr!("queue-played-next", name = name),
+            (false, 1) => tr!("queue-added", name = name),
+            (true, _) => tr!("queue-played-next-count", name = name, count = count),
+            (false, _) => tr!("queue-added-count", name = name, count = count),
+        };
+        self.toast(Toast::success(message));
     }
 
     /// Plays a series or season from its next episode, resuming it if it's partway there: which
@@ -269,6 +392,36 @@ impl Services {
         });
     }
 
+    /// Takes an item out of Continue Watching by clearing its resume point (its watched state
+    /// stays). It comes back as a toast with an undo that restores the position.
+    pub fn clear_resume(&mut self, item: &BaseItemDto) {
+        let Some(was) = resume_point(item) else {
+            return;
+        };
+        self.set_resume(item.id.clone(), item.name.clone(), was, false);
+    }
+
+    /// The undo of [`Services::clear_resume`].
+    pub fn restore_resume(&mut self, item_id: String, name: String, position: jellyfin::Ticks) {
+        self.set_resume(item_id, name, position, true);
+    }
+
+    fn set_resume(&mut self, item_id: String, name: String, was: jellyfin::Ticks, undone: bool) {
+        let client = self.session.client.clone();
+        let sender = self.resuming.clone();
+        crate::runtime::detach(async move {
+            let position = if undone { was } else { jellyfin::Ticks(0) };
+            let result = client.set_resume_position(&item_id, position).await;
+            let _ = sender.send(Resumed {
+                item_id,
+                name,
+                was,
+                undone,
+                result,
+            });
+        });
+    }
+
     /// The requests those actions started that have finished, as of this frame: a mark that
     /// makes the pages reload, or the episode to play next (or why there isn't one).
     /// `Services::tick` calls it, so it runs while the window is hidden too.
@@ -291,6 +444,37 @@ impl Services {
                 }
             }
         }
+        let resumed: Vec<Resumed> = self.resumed.drain().collect();
+        for Resumed {
+            item_id,
+            name,
+            was,
+            undone,
+            result,
+        } in resumed
+        {
+            match result {
+                Ok(()) => {
+                    self.user_data += 1;
+                    if !undone {
+                        self.toast(
+                            Toast::success(tr!("item-removed-from-continue", name = name.as_str())).action(
+                                tr!("toast-undo"),
+                                ToastAction::RestoreResume {
+                                    item_id,
+                                    name,
+                                    position: was,
+                                },
+                            ),
+                        );
+                    }
+                }
+                Err(err) => {
+                    let message = self.handle_error(&err);
+                    self.toast(Toast::error(message));
+                }
+            }
+        }
         let next: Vec<UpNext> = self.up_next.drain().collect();
         for result in next {
             match result {
@@ -302,6 +486,16 @@ impl Services {
                     },
                 ),
                 Ok(None) => self.toast(Toast::info(tr!("item-nothing-to-play"))),
+                Err(err) => {
+                    let message = self.handle_error(&err);
+                    self.toast(Toast::error(message));
+                }
+            }
+        }
+        let queued: Vec<Queued> = self.queued.drain().collect();
+        for (next, name, result) in queued {
+            match result {
+                Ok(items) => self.queue_items(next, &name, items),
                 Err(err) => {
                     let message = self.handle_error(&err);
                     self.toast(Toast::error(message));

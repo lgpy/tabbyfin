@@ -2,7 +2,7 @@
 //! device's namespaces and records what the receiver app is sent: the redirects of playing and
 //! the controls, the credentials every message carries, and what the receiver's reports become.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use cast::Device;
 use cast::fake::FakeDevice;
@@ -38,6 +38,7 @@ impl Casting {
     fn with_running_app(running_app: Option<&str>) -> Self {
         let server = FixtureServer::start();
         let ctx = egui::Context::default();
+        super::assert_config_dir();
         let mut services = Services::new(session(&server), &ctx);
         let device = block_on(FakeDevice::start()).expect("the fake device starts");
         services.cast.add_device(Device {
@@ -418,6 +419,273 @@ fn stopping_the_cast_stops_the_receiver_and_closes_the_player() {
     });
 }
 
+/// The receiver the connection launched is stopped, though the services that asked for it are
+/// gone before the launch finished: the `Stop` they queued is acted on when it's up.
+fn assert_stopped_while_connecting(name: &str, leave: impl FnOnce(&mut Services)) {
+    let _config = ConfigDir::new(name);
+    let mut casting = Casting::new();
+    // A slow launch, so there's time to leave while it's still connecting.
+    casting.device.set_launch_delay(Duration::from_millis(300));
+    casting.services.start_cast("fake-tv");
+    assert!(!casting.connected(), "still connecting");
+    leave(&mut casting.services);
+    assert!(!casting.services.is_casting());
+    casting.until("the receiver to be stopped", |this| {
+        this.device
+            .messages()
+            .iter()
+            .any(|message| message.payload["type"] == "STOP")
+    });
+    assert!(!casting.device.is_running(), "the TV is back on its idle screen");
+}
+
+#[test]
+fn stopping_while_connecting_stops_the_receiver() {
+    assert_stopped_while_connecting("cast-stop-connecting", Services::stop_cast);
+}
+
+#[test]
+fn signing_out_while_connecting_stops_the_receiver() {
+    assert_stopped_while_connecting("cast-signout-connecting", Services::end);
+}
+
+#[test]
+fn disconnecting_while_connecting_leaves_the_receiver_alone() {
+    let _config = ConfigDir::new("cast-disconnect-connecting");
+    let mut casting = Casting::new();
+    casting.device.set_launch_delay(Duration::from_millis(300));
+    casting.services.start_cast("fake-tv");
+    casting.services.disconnect_cast();
+    casting.until("the connection to close", |this| this.device.disconnects() > 0);
+    assert!(
+        !casting
+            .device
+            .messages()
+            .iter()
+            .any(|message| message.payload["type"] == "STOP"),
+        "only stopping stops the receiver"
+    );
+    assert!(casting.device.is_running());
+}
+
+/// A second item, for the tests that play one while another is going.
+fn other_movie() -> BaseItemDto {
+    BaseItemDto {
+        id: "other-item".into(),
+        name: "Another movie".into(),
+        ..movie()
+    }
+}
+
+/// The ids of the items the receiver was told to play, in order.
+fn played(casting: &Casting) -> Vec<String> {
+    casting
+        .device
+        .envelopes()
+        .iter()
+        .filter(|envelope| envelope["command"] == "PlayNow")
+        .filter_map(|envelope| envelope["options"]["items"][0]["Id"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn a_play_made_while_reconnecting_reaches_the_tv_once_its_back() {
+    let _config = ConfigDir::new("cast-play-reconnecting");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.play(&movie(), PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    casting.device.close();
+    casting.until("the reconnect", |this| this.reconnecting().is_some());
+    // The connection's task throws away commands while it waits to retry, so the play is
+    // kept here and goes out with the rejoin.
+    casting.services.play(&other_movie(), PlayOptions::default());
+    casting.until("the other item to reach the TV", |this| played(this).len() == 2);
+    assert_eq!(played(&casting)[1], "other-item");
+    casting.until("the TV's report of it", |this| {
+        this.item_id().as_deref() == Some("other-item")
+    });
+    // Once: the replay isn't repeated by later reconnects.
+    assert_eq!(played(&casting).len(), 2);
+}
+
+#[test]
+fn a_play_lost_to_a_dropped_connection_isnt_waited_for() {
+    let _config = ConfigDir::new("cast-play-lost");
+    let mut casting = Casting::new();
+    casting.connect();
+    let movie = movie();
+    casting.services.play(&movie, PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    // The play is made as the connection drops, before the app has heard of it: it never
+    // reaches the TV, which goes on with the first item.
+    casting.device.close();
+    casting.services.play(&other_movie(), PlayOptions::default());
+    let starting = |this: &Casting| {
+        this.services
+            .cast
+            .session
+            .as_ref()
+            .is_some_and(|session| session.starting)
+    };
+    assert!(starting(&casting), "the player waits for it");
+    casting.until("the reconnect", |this| this.reconnecting().is_some());
+    assert!(
+        !starting(&casting),
+        "nothing is starting once the connection is known to be down"
+    );
+    casting.until("the cast to be back", |this| {
+        this.connected() && this.reconnecting().is_none()
+    });
+    casting.until("the TV's own item", |this| {
+        this.item_id().as_deref() == Some(movie.id.as_str())
+    });
+    // So when it ends, the player closes rather than staying open on the item that never came.
+    casting.events();
+    casting.device.send_app_event(serde_json::json!({
+        "type": "playbackstop",
+        "data": {"ItemId": "", "NowPlayingItem": {"Id": ""}, "PlayState": {"PositionTicks": 0}}
+    }));
+    casting.until("the player to close", |this| {
+        this.services
+            .events
+            .iter()
+            .any(|event| matches!(event, AppEvent::PlaybackEnded))
+    });
+}
+
+/// What the cast session has queued to hand over, as the item's id and the id the request plays.
+fn handover(casting: &Casting) -> Option<(String, String, Option<i64>)> {
+    let session = casting.services.cast.session.as_ref()?;
+    let (item, request) = session.handover.as_ref()?;
+    Some((
+        item.id.clone(),
+        request.items[0].id.clone(),
+        request.start_position_ticks,
+    ))
+}
+
+/// Local playback of `item`, with no player behind it.
+fn play_here(casting: &mut Casting, item: &BaseItemDto) {
+    let source = item.media_sources[0].clone();
+    let _commands = casting.services.playback.start_for_test(item.clone(), source);
+}
+
+#[test]
+fn a_play_made_while_connecting_replaces_the_handover() {
+    let _config = ConfigDir::new("cast-handover-replaced");
+    let mut casting = Casting::new();
+    let first = movie();
+    play_here(&mut casting, &first);
+    casting.device.set_launch_delay(Duration::from_millis(300));
+    casting.services.start_cast("fake-tv");
+    assert_eq!(
+        handover(&casting).map(|(item, ..)| item),
+        Some(first.id.clone()),
+        "what plays here is on its way to the TV"
+    );
+    assert!(!casting.connected());
+    casting.events();
+
+    // The user plays another item before the TV is up.
+    casting.services.play(
+        &other_movie(),
+        PlayOptions {
+            start: Some(Ticks(600_000_000)),
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        handover(&casting),
+        Some(("other-item".into(), "other-item".into(), Some(600_000_000))),
+        "the handover is the new play, not what played here"
+    );
+    assert!(
+        casting
+            .events()
+            .iter()
+            .any(|event| matches!(event, AppEvent::PlaybackStarted)),
+        "the player stays up for it"
+    );
+    let name = |this: &Casting| this.services.cast.casting().map(|casting| casting.name.clone());
+    assert_eq!(name(&casting).as_deref(), Some("Another movie"));
+
+    // Connected, but the local session hasn't reported its stop: nothing goes to the TV, and
+    // in particular not the first item at its position, which would play over the new one.
+    casting.connect();
+    casting.tick_for(Duration::from_millis(200));
+    assert!(!played(&casting).contains(&first.id));
+    assert_eq!(handover(&casting).map(|(item, ..)| item).as_deref(), Some("other-item"));
+}
+
+/// Starting a cast while local playback is still loading has nothing to hand over; the cast
+/// still starts clean, and the loading session is stopped rather than left to start beside it.
+#[test]
+fn a_cast_started_while_local_playback_loads_hands_nothing_over() {
+    let _config = ConfigDir::new("cast-loading-local");
+    let mut casting = Casting::new();
+    casting.services.play(&movie(), PlayOptions::default());
+    assert!(casting.services.playback.is_active(), "loading");
+    assert!(casting.services.playback.now_playing().is_none());
+    assert!(!casting.services.playback.stop_noted_for_test());
+    casting.connect();
+    assert!(
+        casting.services.playback.stop_noted_for_test(),
+        "the loading session was stopped, handover or not"
+    );
+    assert_eq!(handover(&casting), None);
+    casting.tick_for(Duration::from_millis(200));
+    assert_eq!(played(&casting), Vec::<String>::new());
+}
+
+/// A local session loading (as far as the services know) when the cast starts, and the TV
+/// connected; the player isn't the cast's yet.
+fn cast_over_a_loading_session(casting: &mut Casting) {
+    casting.services.playback.start_loading_for_test(movie());
+    casting.connect();
+    assert!(casting.services.playback.stop_noted_for_test());
+    assert!(!casting.services.cast.owns_player(), "nothing is cast yet");
+    casting.events();
+}
+
+fn raised_player_ended(casting: &mut Casting) -> bool {
+    casting
+        .events()
+        .iter()
+        .any(|event| matches!(event, AppEvent::PlaybackEnded))
+}
+
+#[test]
+fn the_end_of_a_stopped_local_session_leaves_the_casting_player_open() {
+    let _config = ConfigDir::new("cast-local-end-after-play");
+    let mut casting = Casting::new();
+    cast_over_a_loading_session(&mut casting);
+    // The user plays something on the TV before the stopped local session has finished ending:
+    // the player page is the cast's by now.
+    casting.services.play(&other_movie(), PlayOptions::default());
+    casting.events();
+    assert!(casting.services.cast.owns_player());
+    casting.services.end_loading_for_test();
+    assert!(!raised_player_ended(&mut casting), "the cast's player stays");
+    // Nor does it after the TV has reported the item.
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    casting.services.playback.start_loading_for_test(movie());
+    casting.services.end_loading_for_test();
+    assert!(!raised_player_ended(&mut casting), "the cast's player stays");
+}
+
+#[test]
+fn the_end_of_a_stopped_local_session_closes_its_own_player_when_nothing_is_cast() {
+    let _config = ConfigDir::new("cast-local-end-alone");
+    let mut casting = Casting::new();
+    cast_over_a_loading_session(&mut casting);
+    casting.services.end_loading_for_test();
+    assert!(
+        raised_player_ended(&mut casting),
+        "a connected TV with nothing on it doesn't hold the local player open"
+    );
+}
+
 #[test]
 fn an_idle_tv_has_nothing_playing() {
     let _config = ConfigDir::new("cast-idle");
@@ -678,6 +946,200 @@ fn casting_is_off_in_a_syncplay_group() {
     assert!(!casting.services.is_casting());
 }
 
+fn starting(casting: &Casting) -> bool {
+    casting
+        .services
+        .cast
+        .session
+        .as_ref()
+        .is_some_and(|session| session.starting)
+}
+
+#[test]
+fn a_stop_while_reconnecting_cancels_the_kept_play() {
+    let _config = ConfigDir::new("cast-stop-keeps-nothing");
+    let mut casting = Casting::new();
+    casting.connect();
+    let first = movie();
+    casting.services.play(&first, PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    casting.device.close();
+    casting.until("the reconnect", |this| this.reconnecting().is_some());
+    // Kept for the rejoin, then not wanted any more.
+    casting.services.play(&other_movie(), PlayOptions::default());
+    assert!(starting(&casting));
+    casting.events();
+    casting.services.control(UiCommand::Stop);
+    assert!(!starting(&casting), "nothing is starting any more");
+    assert!(
+        casting
+            .events()
+            .iter()
+            .any(|event| matches!(event, AppEvent::PlaybackEnded)),
+        "the player closes as a stop closes it"
+    );
+    casting.until("the cast to be back", |this| {
+        this.connected() && this.reconnecting().is_none()
+    });
+    // The TV still plays what it played; the stop is what reaches it, after the rejoin.
+    casting.wait_for("Stop");
+    casting.tick_for(Duration::from_millis(300));
+    assert_eq!(
+        played(&casting),
+        std::slice::from_ref(&first.id),
+        "the kept play wasn't sent"
+    );
+    assert_eq!(casting.commands(), ["Identify", "PlayNow", "Identify", "Stop"]);
+}
+
+/// A pause isn't "not that any more": the kept play still goes out.
+#[test]
+fn a_pause_while_reconnecting_keeps_the_play() {
+    let _config = ConfigDir::new("cast-pause-keeps-play");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.play(&movie(), PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    casting.device.close();
+    casting.until("the reconnect", |this| this.reconnecting().is_some());
+    casting.services.play(&other_movie(), PlayOptions::default());
+    casting.services.control(UiCommand::SetPause(true));
+    casting.until("the other item to reach the TV", |this| played(this).len() == 2);
+    assert_eq!(played(&casting)[1], "other-item");
+}
+
+/// One go at a play made while the first connect is retried: the play reaches the TV whichever
+/// way the retry went. Returns whether the retry was the first connect's (a second launch,
+/// ending in `Update::Connected`).
+fn play_during_a_retried_first_connect() -> bool {
+    let mut casting = Casting::new();
+    // The launch works, but the connection is gone before the app can join the receiver.
+    casting.device.drop_after_next_launch();
+    casting.services.start_cast("fake-tv");
+    casting.until("the retry", |this| this.reconnecting().is_some());
+    casting.services.play(&other_movie(), PlayOptions::default());
+    assert!(starting(&casting));
+    casting.until("the item to reach the TV", |this| played(this) == ["other-item"]);
+    casting.until("the TV's report of it", |this| {
+        this.item_id().as_deref() == Some("other-item")
+    });
+    assert_eq!(played(&casting).len(), 1, "once");
+    let launches = casting
+        .device
+        .messages()
+        .iter()
+        .filter(|message| message.payload["type"] == "LAUNCH")
+        .count();
+    launches == 2
+}
+
+/// The device hangs up right behind the launch's answer, so the app usually finds the connection
+/// closed before it can join the receiver: the retry is a launch again and ends in
+/// `Update::Connected`. Sometimes the app wins that race, joins, and loses the connection after
+/// it (a rejoin, which `a_play_made_while_reconnecting_reaches_the_tv_once_its_back` covers); the
+/// test goes again until the first connect's retry has been seen.
+#[test]
+fn a_play_made_while_the_first_connect_is_retried_reaches_the_tv() {
+    let _config = ConfigDir::new("cast-first-connect-retried");
+    let seen = (0..10).any(|_| play_during_a_retried_first_connect());
+    assert!(seen, "the first connect was never the one retried");
+}
+
+/// A play made while the first connect is retried is newer than a handover waiting for the TV: it wins, as a play
+/// made while connecting does.
+#[test]
+fn a_play_made_while_the_first_connect_is_retried_replaces_the_handover() {
+    let _config = ConfigDir::new("cast-kept-over-handover");
+    let mut casting = Casting::new();
+    casting.device.drop_after_next_launch();
+    let first = movie();
+    play_here(&mut casting, &first);
+    casting.services.playback.start_loading_for_test(first.clone());
+    casting.services.start_cast("fake-tv");
+    assert!(handover(&casting).is_some());
+    casting.until("the retry", |this| this.reconnecting().is_some());
+    casting.services.play(&other_movie(), PlayOptions::default());
+    casting.services.end_loading_for_test();
+    casting.until("the item to reach the TV", |this| !played(this).is_empty());
+    casting.tick_for(Duration::from_millis(300));
+    assert_eq!(played(&casting), ["other-item"], "not what played here");
+    assert_eq!(handover(&casting), None);
+}
+
+#[test]
+fn an_enqueue_during_a_handover_follows_it() {
+    let _config = ConfigDir::new("cast-enqueue-handover");
+    let mut casting = Casting::new();
+    let first = movie();
+    play_here(&mut casting, &first);
+    casting.services.playback.start_loading_for_test(first.clone());
+    casting.device.set_launch_delay(Duration::from_millis(200));
+    casting.services.start_cast("fake-tv");
+    let at = Ticks::from(Duration::from_secs(12 * 60)).0;
+    let pending = Some((first.id.clone(), first.id.clone(), Some(at)));
+    assert_eq!(handover(&casting), pending);
+    casting.events();
+
+    casting.services.enqueue(vec![other_movie()], true);
+    assert_eq!(handover(&casting), pending, "the item being handed over isn't replaced");
+    assert!(
+        !casting
+            .events()
+            .iter()
+            .any(|event| matches!(event, AppEvent::PlaybackStarted)),
+        "nothing was played"
+    );
+    // Connected, but the local session hasn't reported its stop: nothing goes out yet.
+    casting.connect();
+    casting.tick_for(Duration::from_millis(200));
+    assert_eq!(casting.commands(), ["Identify"]);
+    assert_eq!(handover(&casting), pending);
+
+    casting.services.end_loading_for_test();
+    casting.wait_for("PlayNext");
+    assert_eq!(casting.commands(), ["Identify", "PlayNow", "PlayNext"]);
+    let envelopes = casting.device.envelopes();
+    assert_eq!(envelopes[1]["options"]["items"][0]["Id"], first.id.as_str());
+    assert_eq!(envelopes[1]["options"]["startPositionTicks"], at);
+    assert_eq!(envelopes[2]["options"]["items"][0]["Id"], "other-item");
+}
+
+#[test]
+fn an_enqueue_while_a_play_is_starting_doesnt_replace_it() {
+    let _config = ConfigDir::new("cast-enqueue-starting");
+    let mut casting = Casting::new();
+    casting.connect();
+    let first = movie();
+    casting.services.play(&first, PlayOptions::default());
+    assert!(
+        starting(&casting) && casting.item_id().is_none(),
+        "sent, not reported yet"
+    );
+    casting.services.enqueue(vec![other_movie()], false);
+    casting.wait_for("PlayLast");
+    assert_eq!(played(&casting), std::slice::from_ref(&first.id));
+    assert_eq!(casting.commands(), ["Identify", "PlayNow", "PlayLast"]);
+}
+
+/// The enqueue a reload made pending goes out after the reload's play, not between its stop and
+/// its play (where the receiver would put it in the queue of what's being stopped).
+#[test]
+fn an_enqueue_during_a_reload_follows_its_play() {
+    let _config = ConfigDir::new("cast-enqueue-reload");
+    let mut casting = Casting::new();
+    casting.connect();
+    casting.services.play(&movie(), PlayOptions::default());
+    casting.until("the receiver's progress", |this| this.item_id().is_some());
+    casting.services.change_audio(2);
+    casting.services.enqueue(vec![other_movie()], false);
+    casting.until("the reload's play", |this| played(this).len() == 2);
+    casting.wait_for("PlayLast");
+    assert_eq!(
+        casting.commands(),
+        ["Identify", "PlayNow", "Stop", "PlayNow", "PlayLast"]
+    );
+}
+
 /// The signed-in shell as the app runs it, with the fake device on the network, carrying out the
 /// player's events as `App` does.
 struct ShellRun {
@@ -726,6 +1188,7 @@ impl ShellRun {
         let ctx = ui.ctx().clone();
         if self.services.is_none() {
             let session = self.session.take().expect("the session is taken once");
+            super::assert_config_dir();
             let mut services = Services::new(session, &ctx);
             let addr = self.device().addr();
             services.cast.add_device(Device {

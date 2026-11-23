@@ -22,8 +22,9 @@
 //! query by label — sees each button's name, a tab's or row's selected state, and a slider's
 //! value, even though no keyboard focus ever lands on them.
 //!
-//! Auto-skip and the clock's "time left" are config settings read when the page opens; the clock
-//! saves its choice when clicked.
+//! What happens at each kind of segment (`config::SkipActions`) is read when a session starts, and
+//! the clock's "time left" when the page opens; the clock saves its choice when clicked. A segment
+//! skipped by itself is announced by a notice with Undo.
 //!
 //! **While casting** the page is a remote for the TV rather than a video player
 //! (`controller.rs`): there's no picture here, so it draws in the app's own theme, not over
@@ -37,6 +38,7 @@
 
 mod controller;
 mod phone;
+mod queue;
 mod touch;
 
 use std::time::Duration;
@@ -48,24 +50,32 @@ use egui::{
 use egui_material_icons::MaterialIcon;
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_AUDIOTRACK, ICON_CAST, ICON_CAST_CONNECTED, ICON_CLOSED_CAPTION, ICON_FAST_FORWARD,
-    ICON_FAST_REWIND, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT, ICON_PAUSE, ICON_PLAY_ARROW, ICON_RESTART_ALT,
-    ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_VIEW_LIST, ICON_VOLUME_OFF, ICON_VOLUME_UP,
+    ICON_FAST_REWIND, ICON_FORWARD_5, ICON_FORWARD_10, ICON_FORWARD_30, ICON_FULLSCREEN, ICON_FULLSCREEN_EXIT,
+    ICON_PAUSE, ICON_PLAY_ARROW, ICON_PLAYLIST_PLAY, ICON_REPLAY_5, ICON_REPLAY_10, ICON_REPLAY_30, ICON_RESTART_ALT,
+    ICON_SEARCH, ICON_SETTINGS, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_UNDO, ICON_VIEW_LIST, ICON_VOLUME_OFF,
+    ICON_VOLUME_UP,
 };
 use jellyfin::ImageRequest;
 use jellyfin::models::{BaseItemKind, ImageType, MediaStreamType};
 
 use crate::cast::Casting;
 use crate::i18n::{self, tr};
+use crate::info;
+use crate::item_menu;
 use crate::keys::Action;
 use crate::markers::{self, Segment, SegmentKind};
 use crate::motion;
-use crate::playback::{Adjustments, NowPlaying, PlayOptions, SubtitleChoice, UiCommand, Version};
-use crate::services::AppEvent;
+use crate::playback::{
+    Adjustments, Aspect, NowPlaying, PlayOptions, SLEEP_MINUTES, SleepTimer, SubtitleChoice, UiCommand, Version,
+    volume_max,
+};
+use crate::services::{AppEvent, Services};
 use crate::task;
 use crate::theme::{self, over_video};
 use crate::tracks::{self, Choice, SUBTITLES_OFF};
 use crate::trickplay::Trickplay;
 use crate::views::PageCx;
+use crate::views::subtitle_search::{Finished, SubtitleSearch};
 use crate::widgets::badge;
 use crate::widgets::button::Focus;
 use crate::widgets::countdown_pill;
@@ -83,8 +93,6 @@ use crate::widgets::tabs;
 use crate::widgets::text::{card_text, episode_label, timestamp};
 use crate::widgets::video::Video;
 
-/// Seconds per seek key press (and remote rewind or fast-forward).
-pub const SEEK_STEP: f64 = 10.;
 /// Volume percent per key press, wheel notch or remote volume step.
 pub const VOLUME_STEP: f64 = 5.;
 /// Trackpad points per wheel notch, for platforms that send pixel deltas (macOS): three lines of
@@ -148,9 +156,18 @@ const TRACK_ROWS: f32 = 5.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PromptKind {
     Skip,
+    /// A segment was just skipped by itself, with Undo.
+    Skipped,
     UpNext,
     Resume,
 }
+
+/// How often the info overlay asks the player for its numbers, and how wide its panel is.
+const INFO_EVERY: Duration = Duration::from_secs(1);
+const INFO_W: f32 = 360.;
+
+/// How long the notice about an automatic skip stays.
+const SKIPPED_NOTICE_FOR: Duration = Duration::from_secs(6);
 
 /// The player, while a playback session shows.
 pub struct PlayerPage {
@@ -171,10 +188,14 @@ pub struct PlayerPage {
     /// Whether playback was paused before the last single click on the video, which a double
     /// click restores.
     paused_before_click: bool,
-    /// Skip intros and recaps as they start (a setting).
-    auto_skip: bool,
-    /// The segment last skipped automatically, so seeking back into it doesn't skip again.
-    auto_skipped: Option<Duration>,
+    /// The start of each segment skipped automatically, so seeking back into one (Undo included)
+    /// doesn't skip it again, and the playthrough they belong to: a restart that continues it (a
+    /// reconnect, another track) keeps them, the item starting over (repeat, played again) doesn't.
+    auto_skipped: Vec<Duration>,
+    auto_skipped_playthrough: Option<u64>,
+    /// The segment just skipped by itself, while its notice shows.
+    skipped: Option<(SegmentKind, Duration)>,
+    skipped_notice: task::Deadline,
     /// Seek-bar previews, once the session knows the server has tiles for this version.
     trickplay: Option<Trickplay>,
     controls_visible: bool,
@@ -199,6 +220,16 @@ pub struct PlayerPage {
     sheet: Option<phone::Sheet>,
     /// The subtitle track the phone's subtitles button last turned off, which it turns back on.
     last_subtitle: Option<i32>,
+    /// The queue panel's keyboard highlight.
+    queue: queue::QueuePanel,
+    /// The *Search for subtitles* dialog, while it's open.
+    subtitle_search: Option<SubtitleSearch>,
+    /// The playback info overlay shows, and asks the player for its numbers once a second.
+    info_shown: bool,
+    info_poll: task::Deadline,
+    /// The minutes the sleep timer last counted, which a step from "off" or the end of the item
+    /// goes back to.
+    sleep_minutes: u64,
 }
 
 impl PlayerPage {
@@ -212,8 +243,10 @@ impl PlayerPage {
             volume: 0.,
             scroll_pending: 0.,
             paused_before_click: false,
-            auto_skip: config.auto_skip_intro.unwrap_or(false),
-            auto_skipped: None,
+            auto_skipped: Vec::new(),
+            auto_skipped_playthrough: None,
+            skipped: None,
+            skipped_notice: task::Deadline::default(),
             trickplay: None,
             controls_visible: false,
             controls_appeared: false,
@@ -230,6 +263,11 @@ impl PlayerPage {
             touch: touch::Touch::default(),
             sheet: None,
             last_subtitle: None,
+            queue: queue::QueuePanel::default(),
+            subtitle_search: None,
+            info_shown: false,
+            info_poll: task::Deadline::default(),
+            sleep_minutes: SLEEP_MINUTES[0],
         };
         this.show_controls();
         this
@@ -250,10 +288,19 @@ impl PlayerPage {
             self.show_casting(ui, cx);
             return;
         }
+        self.subtitle_search(cx);
         self.sync_video(cx);
-        if let Some(session) = cx.services.playback.now_playing().map(|state| state.session) {
-            self.follow_session(ui.ctx(), session);
+        self.queue_keys(cx);
+        self.queue_dialog(cx);
+        if let Some((session, playthrough)) = cx
+            .services
+            .playback
+            .now_playing()
+            .map(|state| (state.session, state.playthrough))
+        {
+            self.follow_session(ui.ctx(), session, playthrough);
             self.auto_skip(cx);
+            self.poll_info(cx);
             self.ensure_trickplay(cx);
             if let Some(trickplay) = &mut self.trickplay {
                 trickplay.poll();
@@ -263,11 +310,22 @@ impl PlayerPage {
             chapters: egui::Popup::is_id_open(ui.ctx(), chapters_id()) || self.sheet == Some(phone::Sheet::Chapters),
             settings: egui::Popup::is_id_open(ui.ctx(), settings_id()) || self.sheet == Some(phone::Sheet::Settings),
         };
-        let view = cx
+        let can_search = cx.services.session.user.can_manage_subtitles()
+            && cx
+                .services
+                .playback
+                .now_playing()
+                .is_some_and(|state| item_menu::can_search_subtitles(&state.item));
+        let seek_step = cx.services.playback.seek_step();
+        let skip = Skip::read(cx.services);
+        let mut view = cx
             .services
             .playback
             .now_playing()
-            .map(|state| View::read(state, menus, self.show_remaining));
+            .map(|state| View::read(state, menus, self.show_remaining, can_search, seek_step, skip));
+        if let Some(menu) = view.as_mut().and_then(|view| view.settings.as_mut()) {
+            self.fill_menu(menu, cx);
+        }
 
         let now = ui.input(|input| input.time);
         if std::mem::take(&mut self.controls_appeared) || self.controls_since.is_none() {
@@ -294,7 +352,9 @@ impl PlayerPage {
             && !state.cues.cues.is_empty()
         {
             let scale = state.adjustments.subtitle_scale as f32;
-            self.subtitles.show(ui, safe, &state.cues, state.cues_changed, scale);
+            let position = state.adjustments.subtitle_position;
+            self.subtitles
+                .show(ui, safe, &state.cues, state.cues_changed, scale, position);
         }
         let Some(view) = view else {
             // Between sessions (a reconnect, or the next item still loading): the last frame
@@ -323,6 +383,7 @@ impl PlayerPage {
         }
         self.touch_feedback(ui, safe, &view);
         self.prompt(ui, &view, cx, safe);
+        self.info_panel(ui, cx, safe);
         if touch {
             self.phone_sheet(ui, &view, cx);
         }
@@ -396,15 +457,21 @@ impl PlayerPage {
         );
     }
 
-    /// The session changed: what belongs to one item starts over, and the menus close.
-    fn follow_session(&mut self, ctx: &egui::Context, session: u64) {
+    /// The session changed: what belongs to one session starts over, and the menus close. What
+    /// belongs to the playthrough (the segments already skipped) does only for another one.
+    fn follow_session(&mut self, ctx: &egui::Context, session: u64, playthrough: u64) {
         if self.session == Some(session) {
             return;
         }
         self.session = Some(session);
         self.scrub = None;
         self.trickplay = None;
-        self.auto_skipped = None;
+        if self.auto_skipped_playthrough != Some(playthrough) {
+            self.auto_skipped.clear();
+            self.auto_skipped_playthrough = Some(playthrough);
+        }
+        self.skipped = None;
+        self.skipped_notice.cancel();
         self.adjusting_volume = false;
         self.paused_before_click = false;
         self.settings_tab = SettingsTab::General;
@@ -416,18 +483,17 @@ impl PlayerPage {
         // The settings belong to the player, not to one item: read them again for a new
         // session.
         let config = crate::config::Config::load();
-        self.auto_skip = config.auto_skip_intro.unwrap_or(false);
         self.show_remaining = config.show_remaining_time.unwrap_or(false);
         self.show_controls();
         // A new item's prompt slides in again.
         self.prompt_in = None;
     }
 
-    /// With the setting on, skips each intro or recap once when it starts. Not in a SyncPlay
-    /// group, where every member would ask the group to seek.
+    /// Skips each segment of a kind set to Skip once, as it starts, and announces it. Not in a
+    /// SyncPlay group, where every member would ask the group to seek.
     fn auto_skip(&mut self, cx: &mut PageCx) {
-        if !self.auto_skip {
-            return;
+        if self.skipped.is_some() && self.skipped_notice.fire(cx.ctx) {
+            self.skipped = None;
         }
         let segment = {
             let Some(state) = cx.services.playback.now_playing() else {
@@ -436,14 +502,149 @@ impl PlayerPage {
             if state.group_item.is_some() {
                 return;
             }
-            state.skippable()
+            state.auto_skippable()
         };
         if let Some(segment) = segment
-            && matches!(segment.kind, SegmentKind::Intro | SegmentKind::Recap)
-            && self.auto_skipped != Some(segment.start)
+            && !self.auto_skipped.contains(&segment.start)
         {
-            self.auto_skipped = Some(segment.start);
+            self.auto_skipped.push(segment.start);
+            self.skipped = Some((segment.kind, segment.start));
+            self.skipped_notice.set(SKIPPED_NOTICE_FOR);
             cx.services.control(UiCommand::SeekTo(segment.end));
+        }
+    }
+
+    /// While the info overlay shows, asks the player for its numbers once a second.
+    fn poll_info(&mut self, cx: &mut PageCx) {
+        if !self.info_shown {
+            return;
+        }
+        if self.info_poll.fire(cx.ctx) || !self.info_poll.is_set() {
+            if let Some(state) = cx.services.playback.now_playing() {
+                state.send(UiCommand::PollInfo);
+            }
+            self.info_poll.set(INFO_EVERY);
+        }
+    }
+
+    fn set_info(&mut self, shown: bool, ctx: &egui::Context) {
+        self.info_shown = shown;
+        self.info_poll.cancel();
+        ctx.request_repaint();
+    }
+
+    /// What the settings menu shows of the sleep timer and the overlay.
+    fn fill_menu(&self, menu: &mut SettingsMenu, cx: &PageCx) {
+        menu.info = self.info_shown;
+        menu.sleep_offered = cx.services.sleep_timer_offered();
+        let sleep = cx.services.playback.sleep();
+        menu.sleep = self.sleep_choice(sleep);
+        menu.sleep_text = match sleep {
+            None => tr!("player-sleep-off"),
+            Some(SleepTimer::EndOfItem(_)) => tr!("player-sleep-end"),
+            Some(SleepTimer::In(_)) => {
+                let left = cx.services.playback.sleep_left().unwrap_or_default();
+                tr!("player-sleep-left", minutes = left.as_secs().div_ceil(60).max(1))
+            }
+        };
+        if matches!(sleep, Some(SleepTimer::In(_))) {
+            cx.ctx.request_repaint_after(Duration::from_secs(1));
+        }
+    }
+
+    /// Where the sleep timer is among its choices.
+    fn sleep_choice(&self, sleep: Option<&SleepTimer>) -> SleepChoice {
+        match sleep {
+            None => SleepChoice::Off,
+            Some(SleepTimer::EndOfItem(_)) => SleepChoice::EndOfItem,
+            Some(SleepTimer::In(_)) => SleepChoice::Minutes(self.sleep_minutes),
+        }
+    }
+
+    fn set_sleep(&mut self, choice: SleepChoice, cx: &mut PageCx) {
+        // Not in a SyncPlay group: a pause there is every member's.
+        if !cx.services.sleep_timer_offered() {
+            return;
+        }
+        let item = cx.services.playback.now_playing().map(|state| state.item.id.clone());
+        let timer = match (choice, item) {
+            (SleepChoice::Off, _) | (_, None) => None,
+            (SleepChoice::Minutes(minutes), _) => {
+                self.sleep_minutes = minutes;
+                Some(SleepTimer::In(
+                    std::time::Instant::now() + Duration::from_secs(minutes * 60),
+                ))
+            }
+            (SleepChoice::EndOfItem, Some(item)) => Some(SleepTimer::EndOfItem(item)),
+        };
+        cx.services.playback.set_sleep(timer);
+    }
+
+    /// The playback info overlay: top left, under the top bar while the controls show. It lets
+    /// clicks through to the video.
+    fn info_panel(&mut self, ui: &mut egui::Ui, cx: &mut PageCx, safe: Rect) {
+        if !self.info_shown {
+            return;
+        }
+        let path = self.video.as_ref().and_then(|(_, video)| video.output_path());
+        let Some(rows) = cx.services.playback.now_playing().map(|state| info::rows(state, path)) else {
+            return;
+        };
+        let top = if self.controls_visible { TOP_BAR_H } else { 0. } + PADDING;
+        egui::Area::new(Id::unique("player_info"))
+            .anchor(Align2::LEFT_TOP, vec2(safe.left() + PADDING, safe.top() + top))
+            .order(egui::Order::Middle)
+            .interactable(false)
+            .show(ui.ctx(), |ui| {
+                ui.style_mut().visuals = egui::Visuals::dark();
+                ui.style_mut().visuals.override_text_color = Some(over_video::FOREGROUND);
+                popup::over_video_frame(12).show(ui, |ui| {
+                    // It takes no pointer, so it can't scroll: on a screen too short for one
+                    // column of rows (a phone on its side) they go side by side instead.
+                    let font = theme::text::font(ui, "sm");
+                    // A grid's rows are at least as tall as a control.
+                    let row_height = ui
+                        .fonts_mut(|fonts| fonts.row_height(&font))
+                        .max(ui.spacing().interact_size.y)
+                        + 2.;
+                    let room = (safe.bottom() - safe.top() - top - PADDING - 60.).max(row_height);
+                    let columns = ((rows.len() as f32 * row_height / room).ceil() as usize).clamp(1, 3);
+                    let per_column = rows.len().div_ceil(columns);
+                    ui.set_max_width(INFO_W * columns as f32);
+                    ui.label(label::overline(ui, &tr!("player-info-title")).color(over_video::MUTED_FOREGROUND));
+                    ui.add_space(4.);
+                    egui::Grid::new("player_info_rows")
+                        .num_columns(2 * columns)
+                        .spacing(vec2(16., 2.))
+                        .show(ui, |ui| {
+                            for line in 0..per_column {
+                                for column in 0..columns {
+                                    let Some(row) = rows.get(line + column * per_column) else {
+                                        continue;
+                                    };
+                                    ui.label(
+                                        RichText::new(&row.label)
+                                            .font(font.clone())
+                                            .color(over_video::MUTED_FOREGROUND),
+                                    );
+                                    ui.label(
+                                        RichText::new(&row.value)
+                                            .font(font.clone())
+                                            .color(over_video::FOREGROUND),
+                                    );
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+            });
+    }
+
+    /// Undo on the skip notice: back to where the segment started, which isn't skipped again.
+    fn undo_skip(&mut self, cx: &mut PageCx) {
+        if let Some((_, start)) = self.skipped.take() {
+            self.skipped_notice.cancel();
+            cx.services.control(UiCommand::SeekTo(start));
         }
     }
 
@@ -486,6 +687,7 @@ impl PlayerPage {
         let open = egui::Popup::is_id_open(ctx, settings_id())
             || egui::Popup::is_id_open(ctx, chapters_id())
             || egui::Popup::is_id_open(ctx, versions_id())
+            || egui::Popup::is_id_open(ctx, queue_id())
             || self.sheet.is_some();
         if open != self.menu_open {
             self.menu_open = open;
@@ -572,15 +774,18 @@ impl PlayerPage {
     }
 
     fn change_volume(&mut self, delta: f64, cx: &mut PageCx) {
-        let volume = match cx.services.cast.casting() {
-            Some(casting) => Some(casting.volume),
-            None => cx.services.playback.now_playing().map(|state| state.volume),
+        let (volume, max) = match cx.services.cast.casting() {
+            Some(casting) => (Some(casting.volume), 100.),
+            None => (
+                cx.services.playback.now_playing().map(|state| state.volume),
+                volume_max(),
+            ),
         };
         let Some(volume) = volume else {
             return;
         };
         cx.services
-            .control(UiCommand::SetVolume((volume + delta).clamp(0., 100.)));
+            .control(UiCommand::SetVolume((volume + delta).clamp(0., max)));
         self.show_controls();
     }
 
@@ -659,11 +864,12 @@ impl PlayerPage {
                 self.show_controls();
             }
             Action::SeekForward => {
-                cx.services.control(UiCommand::SeekBy(SEEK_STEP));
+                cx.services.control(UiCommand::SeekBy(cx.services.playback.seek_step()));
                 self.show_controls();
             }
             Action::SeekBackward => {
-                cx.services.control(UiCommand::SeekBy(-SEEK_STEP));
+                cx.services
+                    .control(UiCommand::SeekBy(-cx.services.playback.seek_step()));
                 self.show_controls();
             }
             Action::VolumeUp => self.change_volume(VOLUME_STEP, cx),
@@ -700,7 +906,11 @@ impl PlayerPage {
                 }
             }
             Action::ToggleFullscreen => toggle_fullscreen(cx.ctx),
+            Action::ToggleInfo => self.set_info(!self.info_shown, cx.ctx),
             Action::ExitPlayer => self.exit(cx),
+            // Q: the queue panel, for the solo player (a group's queue is in its own panel).
+            Action::ToggleQueue if cx.services.in_group() => return false,
+            Action::ToggleQueue => self.toggle_queue(cx, true),
             Action::SpeedUp | Action::SpeedDown => {
                 self.adjust(cx, |a| a.speed = a.step_speed(action == Action::SpeedUp));
             }
@@ -709,6 +919,18 @@ impl PlayerPage {
             }
             Action::SubtitleDelayDown => {
                 self.adjust(cx, |a| a.subtitle_delay -= Adjustments::DELAY_STEP);
+            }
+            Action::FrameForward | Action::FrameBack => {
+                cx.services.frame_step(action == Action::FrameForward);
+                self.show_controls();
+            }
+            Action::CycleAbLoop => {
+                cx.services.cycle_ab_loop();
+                self.show_controls();
+            }
+            Action::CycleAspect if state.mpv => {
+                cx.services.set_aspect(state.aspect.next());
+                self.show_controls();
             }
             _ => return false,
         }
@@ -719,8 +941,10 @@ impl PlayerPage {
     fn casting_key(&mut self, action: Action, keys: Keys, cx: &mut PageCx) -> bool {
         match action {
             Action::TogglePause => cx.services.control(UiCommand::TogglePause),
-            Action::SeekForward => cx.services.control(UiCommand::SeekBy(SEEK_STEP)),
-            Action::SeekBackward => cx.services.control(UiCommand::SeekBy(-SEEK_STEP)),
+            Action::SeekForward => cx.services.control(UiCommand::SeekBy(cx.services.playback.seek_step())),
+            Action::SeekBackward => cx
+                .services
+                .control(UiCommand::SeekBy(-cx.services.playback.seek_step())),
             Action::VolumeUp => self.change_volume(VOLUME_STEP, cx),
             Action::VolumeDown => self.change_volume(-VOLUME_STEP, cx),
             Action::ToggleMute => cx.services.control(UiCommand::ToggleMute),
@@ -836,14 +1060,16 @@ impl PlayerPage {
                     cx.services.control(UiCommand::TogglePause);
                     self.show_controls();
                 }
-                let back = tr!("player-back-10s");
+                let seconds = view.seek_step;
+                let back = tr!("player-back-seconds", seconds = seconds);
                 if control(ICON_FAST_REWIND, CONTROL, &back).show(ui).clicked() {
-                    cx.services.control(UiCommand::SeekBy(-SEEK_STEP));
+                    cx.services
+                        .control(UiCommand::SeekBy(-cx.services.playback.seek_step()));
                     self.show_controls();
                 }
-                let forward = tr!("player-forward-10s");
+                let forward = tr!("player-forward-seconds", seconds = seconds);
                 if control(ICON_FAST_FORWARD, CONTROL, &forward).show(ui).clicked() {
-                    cx.services.control(UiCommand::SeekBy(SEEK_STEP));
+                    cx.services.control(UiCommand::SeekBy(cx.services.playback.seek_step()));
                     self.show_controls();
                 }
                 let muted = view.muted || view.volume == 0.;
@@ -871,10 +1097,14 @@ impl PlayerPage {
                 if (view.speed - 1.).abs() > 1e-6 {
                     label_badge(ui, &speed_text(view.speed));
                 }
+                if view.aspect != Aspect::Fit {
+                    label_badge(ui, &aspect_text(view.aspect));
+                }
             },
         );
 
         let mut chapters_button = None;
+        let mut queue_button = None;
         let mut settings_button = None;
         let mut versions_button = None;
         let mut pressed = None;
@@ -914,7 +1144,7 @@ impl PlayerPage {
                     settings_button = Some(settings);
                 }
                 let subtitles = SettingsTab::Subtitles;
-                if view.subtitles_button {
+                if view.subtitles_button || view.can_search_subtitles {
                     let tip = tr!("player-subtitles");
                     let button = menu_button(ui, ICON_CLOSED_CAPTION, &tip, is_lit(subtitles));
                     if button.clicked() {
@@ -948,6 +1178,15 @@ impl PlayerPage {
                     }
                     chapters_button = Some(chapters);
                 }
+                if !casting && !view.group {
+                    let open = egui::Popup::is_id_open(ui.ctx(), queue_id());
+                    let tip = tr!("player-queue");
+                    let queue = menu_button(ui, ICON_PLAYLIST_PLAY, &tip, open);
+                    if queue.clicked() {
+                        self.toggle_queue(cx, false);
+                    }
+                    queue_button = Some(queue);
+                }
                 if let Some(name) = view.version_picker() {
                     let picker = version_picker(ui, &name);
                     if picker.clicked() {
@@ -970,6 +1209,9 @@ impl PlayerPage {
 
         if let Some(response) = &chapters_button {
             self.chapters_menu(response, view, cx);
+        }
+        if let Some(response) = &queue_button {
+            self.queue_menu(response, cx);
         }
         if let Some(response) = &settings_button {
             self.settings_menu(response, view, cx);
@@ -1002,6 +1244,24 @@ impl PlayerPage {
         painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
         painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::BRAND);
+        // The A–B loop: the stretch between its points lit, and a tick at each.
+        if let Some((a, b)) = view.ab_loop {
+            let x = |fraction: f32| track.left() + track.width() * fraction;
+            if let Some(b) = b {
+                let span = Rect::from_min_max(pos2(x(a), track.top()), pos2(x(b), track.bottom()));
+                painter.rect_filled(span, 0., over_video::FOREGROUND.gamma_multiply(0.45));
+            }
+            for fraction in std::iter::once(a).chain(b) {
+                let half = CHAPTER_MARK_H;
+                painter.line_segment(
+                    [
+                        pos2(x(fraction), track.center().y - half),
+                        pos2(x(fraction), track.center().y + half),
+                    ],
+                    Stroke::new(3., over_video::FOREGROUND),
+                );
+            }
+        }
         for mark in &view.chapter_marks {
             let x = track.left() + track.width() * mark;
             let half = CHAPTER_MARK_H / 2.;
@@ -1070,8 +1330,9 @@ impl PlayerPage {
         painter.galley(label.center() - galley.size() / 2., galley, over_video::FOREGROUND);
     }
 
-    /// The volume slider: a drag bar from 0 to 100. egui's `Slider` is focusable, which would
-    /// let Tab take the player's keys from it.
+    /// The volume slider: a drag bar from 0 to the most the volume reaches (150% on the
+    /// desktop's mpv, with a mark at 100%; a cast's TV stops at 100). egui's `Slider` is
+    /// focusable, which would let Tab take the player's keys from it.
     fn volume_slider(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx) {
         let (rect, response) = ui.allocate_exact_size(vec2(VOLUME_W, VOLUME_H), Sense::CLICK | Sense::DRAG);
         let volume = if self.adjusting_volume {
@@ -1082,12 +1343,23 @@ impl PlayerPage {
         // A slider to AccessKit, in percent.
         let name = tr!("player-volume");
         response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), volume, &name));
-        let fraction = (volume / 100.).clamp(0., 1.) as f32;
+        let max = if cx.services.cast.casting().is_some() {
+            100.
+        } else {
+            volume_max()
+        };
+        let fraction = (volume / max).clamp(0., 1.) as f32;
         let track = Rect::from_center_size(rect.center(), vec2(rect.width(), TRACK_H));
         let painter = ui.painter();
         painter.rect_filled(track, CornerRadius::same(TRACK_H as u8 / 2), over_video::SEEK_TRACK);
         let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * fraction, track.bottom()));
         painter.rect_filled(filled, CornerRadius::same(TRACK_H as u8 / 2), over_video::FOREGROUND);
+        // Where 100% is, when the slider goes past it.
+        if max > 100. {
+            let x = track.left() + track.width() * (100. / max) as f32;
+            let mark = Rect::from_center_size(pos2(x, track.center().y), vec2(2., TRACK_H + 4.));
+            painter.rect_filled(mark, CornerRadius::ZERO, over_video::MUTED_FOREGROUND);
+        }
         slider_thumb(painter, pos2(filled.right(), track.center().y));
 
         let pressed = response.is_pointer_button_down_on();
@@ -1100,7 +1372,7 @@ impl PlayerPage {
         if let Some(pos) = response.interact_pointer_pos()
             && (pressed || released)
         {
-            let value = (((pos.x - rect.left()) / rect.width()).clamp(0., 1.) * 100.).round() as f64;
+            let value = (((pos.x - rect.left()) / rect.width()).clamp(0., 1.) as f64 * max).round();
             if value != self.volume {
                 self.volume = value;
                 cx.services.control(UiCommand::SetVolume(value));
@@ -1119,7 +1391,9 @@ impl PlayerPage {
     /// Each kind slides in when it appears. On a touch screen it keeps to the controls' `safe`
     /// area.
     fn prompt(&mut self, ui: &mut egui::Ui, view: &View, cx: &mut PageCx, safe: Rect) {
-        let kind = if view.skippable.is_some() {
+        let kind = if self.skipped.is_some() {
+            PromptKind::Skipped
+        } else if view.skippable.is_some() {
             PromptKind::Skip
         } else if view.show_up_next {
             PromptKind::UpNext
@@ -1169,7 +1443,12 @@ impl PlayerPage {
                 if alpha < 1. {
                     ui.set_opacity(alpha);
                 }
-                if let Some(segment) = view.skippable {
+                if let Some((kind, _)) = self.skipped {
+                    let note = markers::skipped_label(kind);
+                    if prompt::note(ui, &note, ICON_UNDO, &tr!("player-undo"), note_colours()).clicked() {
+                        self.undo_skip(cx);
+                    }
+                } else if let Some(segment) = view.skippable {
                     let fraction = countdown_pill::progress(
                         view.position.as_secs_f64(),
                         segment.start.as_secs_f64(),
@@ -1331,9 +1610,50 @@ impl PlayerPage {
         if let Some(subtitle) = choice.subtitle {
             cx.services.change_subtitle(subtitle);
         }
+        if let Some(index) = choice.secondary {
+            cx.services
+                .change_secondary_subtitle((index != SUBTITLES_OFF).then_some(index));
+        }
+        if let Some(on) = choice.deinterlace {
+            cx.services.set_deinterlace(on);
+        }
+        if let Some(aspect) = choice.aspect {
+            cx.services.set_aspect(aspect);
+            self.show_controls();
+        }
         if let Some(adjustments) = choice.adjustments {
             cx.services.adjust(adjustments);
             self.show_controls();
+        }
+        if choice.search
+            && let Some(item) = cx.services.playback.now_playing().map(|state| state.item.clone())
+        {
+            egui::Popup::close_id(cx.ctx, settings_id());
+            self.sheet = None;
+            self.subtitle_search = Some(SubtitleSearch::new(cx, &item));
+        }
+        if let Some(sleep) = choice.sleep {
+            self.set_sleep(sleep, cx);
+        }
+        if let Some(shown) = choice.info {
+            self.set_info(shown, cx.ctx);
+        }
+    }
+
+    /// The subtitle search while it's open. A subtitle it added to what still plays is loaded
+    /// into the player and selected.
+    fn subtitle_search(&mut self, cx: &mut PageCx) {
+        let Some(dialog) = &mut self.subtitle_search else {
+            return;
+        };
+        let item_id = dialog.item_id().to_owned();
+        match dialog.show(cx) {
+            Finished::Open => {}
+            Finished::Closed => self.subtitle_search = None,
+            Finished::Added(sources) => {
+                self.subtitle_search = None;
+                cx.services.add_downloaded_subtitle(&item_id, &sources);
+            }
         }
     }
 
@@ -1390,6 +1710,9 @@ struct Keys {
     resume: Option<Duration>,
     next_chapter: Option<Duration>,
     prev_chapter: Option<Duration>,
+    /// libmpv plays, and how the picture fills the window.
+    mpv: bool,
+    aspect: Aspect,
 }
 
 impl Keys {
@@ -1406,6 +1729,8 @@ impl Keys {
             resume: None,
             next_chapter: markers::next_chapter(&chapters, position),
             prev_chapter: markers::prev_chapter(&chapters, position),
+            mpv: false,
+            aspect: Aspect::Fit,
         }
     }
 
@@ -1416,6 +1741,8 @@ impl Keys {
             resume: state.resume_prompt(),
             next_chapter: markers::next_chapter(&state.chapters, state.position),
             prev_chapter: markers::prev_chapter(&state.chapters, state.position),
+            mpv: state.mpv,
+            aspect: state.aspect,
         }
     }
 }
@@ -1434,6 +1761,12 @@ struct View {
     duration: Option<Duration>,
     volume: f64,
     speed: f64,
+    /// The A–B loop's points as fractions of the seek bar: the start, and the end once set.
+    ab_loop: Option<(f32, Option<f32>)>,
+    /// How the picture fills the window; the bar names a mode other than the default.
+    aspect: Aspect,
+    /// Seconds the skip buttons and keys jump (a setting).
+    seek_step: f64,
     /// A SyncPlay group controls playback for this session.
     group: bool,
     transcoding: bool,
@@ -1460,6 +1793,9 @@ struct View {
     audio_button: bool,
     /// Any subtitles to choose from.
     subtitles_button: bool,
+    /// The user may search for more (the Subtitles tab ends with *Search for subtitles…*, so it
+    /// is there even with no subtitles to choose).
+    can_search_subtitles: bool,
     /// The subtitle track showing, if one is.
     subtitle_shown: Option<i32>,
     /// The track turning subtitles on would show without one remembered: the source's default,
@@ -1507,6 +1843,49 @@ struct SettingsMenu {
     subtitle_choices: Vec<Choice>,
     default_audio: Option<i32>,
     default_subtitle: Option<i32>,
+    /// Offers *Search for subtitles…* at the end of the Subtitles tab.
+    can_search: bool,
+    /// The playback info overlay shows.
+    info: bool,
+    /// The menu has the sleep timer (`Services::sleep_timer_offered`, the page's own `set_sleep`
+    /// refuses it otherwise).
+    sleep_offered: bool,
+    /// Where the sleep timer is, and its words ("off", "12 min left").
+    sleep: SleepChoice,
+    sleep_text: String,
+    /// Whether night mode can act (no passthrough); the desktop's mpv only.
+    night_available: bool,
+    /// The second subtitle shown, and what can be picked for it (empty: no second subtitle here).
+    secondary: Option<i32>,
+    secondary_choices: Vec<Choice>,
+    /// How the picture fills the window, when libmpv plays (Media3 can't change it).
+    aspect: Option<Aspect>,
+    /// Deinterlacing on or off, when libmpv plays.
+    deinterlace: Option<bool>,
+}
+
+/// The sleep timer's choices, in the order its stepper goes through them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SleepChoice {
+    Off,
+    Minutes(u64),
+    EndOfItem,
+}
+
+impl SleepChoice {
+    /// The choice a step moves to: off, the minutes, then the end of the item. Reset is off.
+    fn stepped(self, step: Step) -> Self {
+        let order: Vec<SleepChoice> = std::iter::once(SleepChoice::Off)
+            .chain(SLEEP_MINUTES.map(SleepChoice::Minutes))
+            .chain(std::iter::once(SleepChoice::EndOfItem))
+            .collect();
+        let at = order.iter().position(|choice| *choice == self).unwrap_or(0);
+        match step {
+            Step::Reset => SleepChoice::Off,
+            Step::Down => order[at.saturating_sub(1)],
+            Step::Up => order[(at + 1).min(order.len() - 1)],
+        }
+    }
 }
 
 impl SettingsMenu {
@@ -1519,7 +1898,7 @@ impl SettingsMenu {
                 &[SettingsTab::Audio, SettingsTab::Subtitles]
             };
         }
-        if self.subtitle_choices.is_empty() {
+        if self.subtitle_choices.is_empty() && !self.can_search {
             &[SettingsTab::Audio, SettingsTab::General]
         } else {
             &SettingsTab::ALL
@@ -1540,6 +1919,27 @@ impl SettingsMenu {
     }
 }
 
+/// Whether Previous and Next have somewhere to go, as `Services::can_skip` answers it (the
+/// group's queue in a SyncPlay group, the neighbouring episodes otherwise), read once for all
+/// three layouts. In a group the buttons name no episode, since the queue's entry may be
+/// anything.
+#[derive(Clone, Copy)]
+struct Skip {
+    previous: bool,
+    next: bool,
+    in_group: bool,
+}
+
+impl Skip {
+    fn read(services: &Services) -> Self {
+        Self {
+            previous: services.can_skip(false),
+            next: services.can_skip(true),
+            in_group: services.in_group(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Menus {
     chapters: bool,
@@ -1547,7 +1947,14 @@ struct Menus {
 }
 
 impl View {
-    fn read(state: &NowPlaying, menus: Menus, show_remaining: bool) -> Self {
+    fn read(
+        state: &NowPlaying,
+        menus: Menus,
+        show_remaining: bool,
+        can_search: bool,
+        seek_step: f64,
+        skip: Skip,
+    ) -> Self {
         let title = state.item.name.clone();
         let title_aside = (state.item.kind == BaseItemKind::Episode).then(|| {
             let (series, _) = card_text(&state.item);
@@ -1605,13 +2012,26 @@ impl View {
             duration: state.duration,
             volume: state.volume,
             speed: state.adjustments.speed,
+            aspect: state.aspect,
+            ab_loop: state.duration.filter(|d| !d.is_zero()).and_then(|duration| {
+                let fraction = |at: Duration| (at.as_secs_f32() / duration.as_secs_f32()).clamp(0., 1.);
+                let (a, b) = state.ab_loop.points()?;
+                Some((fraction(a), b.map(fraction)))
+            }),
+            seek_step,
             group: state.group_item.is_some(),
             transcoding: state.is_transcoding(),
             time,
             chapter_marks,
             chapter_count: state.chapters.len(),
-            previous_tip: state.previous.as_ref().map(previous_tip),
-            next_tip: state.next.as_ref().map(next_tip),
+            previous_tip: skip.previous.then(|| match (skip.in_group, &state.previous) {
+                (false, Some(previous)) => previous_tip(previous),
+                _ => tr!("player-previous"),
+            }),
+            next_tip: skip.next.then(|| match (skip.in_group, &state.next) {
+                (false, Some(next)) => next_tip(next),
+                _ => tr!("player-next"),
+            }),
             versions: state.versions.clone(),
             source_id: state.source.id.clone(),
             version_name,
@@ -1619,7 +2039,7 @@ impl View {
             show_up_next: state.show_up_next(),
             next_label,
             autoplay_in: state
-                .autoplay
+                .autoplays()
                 .then(|| state.up_next_from().zip(state.duration))
                 .flatten()
                 .map(|(from, end)| {
@@ -1633,6 +2053,11 @@ impl View {
             }),
             settings: menus.settings.then(|| {
                 let (audio_choices, subtitle_choices) = tracks::track_choices(&state.source);
+                let subtitle_shown = match state.subtitle {
+                    SubtitleChoice::Stream(index) => Some(index),
+                    SubtitleChoice::Off => None,
+                    SubtitleChoice::Auto => state.source.default_subtitle_stream_index.filter(|&index| index >= 0),
+                };
                 SettingsMenu {
                     adjustments: state.adjustments,
                     in_group: state.group_item.is_some(),
@@ -1643,10 +2068,26 @@ impl View {
                     subtitle_choices,
                     default_audio: state.source.default_audio_stream_index,
                     default_subtitle: state.source.default_subtitle_stream_index,
+                    can_search,
+                    info: false,
+                    sleep_offered: true,
+                    sleep: SleepChoice::Off,
+                    sleep_text: String::new(),
+                    night_available: state.night_available,
+                    secondary: state.secondary_subtitle,
+                    aspect: state.mpv.then_some(state.aspect),
+                    deinterlace: state.mpv.then_some(state.deinterlace),
+                    secondary_choices: if state.mpv {
+                        let files = state.is_transcoding().then_some(state.stream.subtitle_files.as_slice());
+                        tracks::secondary_choices(&state.source, files, subtitle_shown)
+                    } else {
+                        Vec::new()
+                    },
                 }
             }),
             audio_button: tracks::count(&state.source, MediaStreamType::Audio) > 1,
             subtitles_button: tracks::count(&state.source, MediaStreamType::Subtitle) > 0,
+            can_search_subtitles: can_search,
             subtitle_shown: match state.subtitle {
                 SubtitleChoice::Stream(index) => Some(index),
                 SubtitleChoice::Off => None,
@@ -1670,7 +2111,7 @@ impl View {
 
     /// The view of a cast: what the TV reported, with the item's versions, tracks and chapters
     /// once it's fetched from the server.
-    fn read_cast(casting: &Casting, device: &cast::Device, reconnecting: bool, menus: Menus) -> Self {
+    fn read_cast(casting: &Casting, device: &cast::Device, reconnecting: bool, menus: Menus, seek_step: f64) -> Self {
         let item = casting.item.as_ref();
         let position = casting.position();
         let title = item.map_or_else(|| casting.name.clone(), |item| item.name.clone());
@@ -1744,6 +2185,9 @@ impl View {
             duration: casting.duration,
             volume: casting.volume,
             speed: 1.,
+            aspect: Aspect::Fit,
+            ab_loop: None,
+            seek_step,
             group: false,
             transcoding: false,
             // The controller draws its own seek bar's times, so the clock's text and the bar's
@@ -1778,9 +2222,20 @@ impl View {
                 subtitle_choices,
                 default_audio,
                 default_subtitle,
+                can_search: false,
+                info: false,
+                sleep_offered: true,
+                sleep: SleepChoice::Off,
+                sleep_text: String::new(),
+                night_available: false,
+                secondary: None,
+                secondary_choices: Vec::new(),
+                aspect: None,
+                deinterlace: None,
             }),
             audio_button: count(MediaStreamType::Audio) > 1,
             subtitles_button: count(MediaStreamType::Subtitle) > 0,
+            can_search_subtitles: false,
             subtitle_shown,
             subtitle_default: default_subtitle,
             cast: Some(CastView {
@@ -1799,7 +2254,11 @@ impl View {
     /// Which button stays lit while the menu shows `tab`: the tab's own, or the gear for a tab
     /// whose button this item doesn't have.
     fn lit_button(&self, tab: SettingsTab) -> SettingsTab {
-        lit_button(tab, self.audio_button, self.subtitles_button)
+        lit_button(
+            tab,
+            self.audio_button,
+            self.subtitles_button || self.can_search_subtitles,
+        )
     }
 
     /// The labels at the end of the top bar, in order.
@@ -1866,11 +2325,22 @@ fn next_tip(item: &jellyfin::models::BaseItemDto) -> String {
     }
 }
 
+/// The skip buttons' icons for a step in seconds: Material has them for 5, 10 and 30; a step
+/// without one (15) gets the plain arrows.
+fn seek_icons(step: f64) -> (MaterialIcon, MaterialIcon) {
+    match step.round() as u32 {
+        5 => (ICON_REPLAY_5, ICON_FORWARD_5),
+        10 => (ICON_REPLAY_10, ICON_FORWARD_10),
+        30 => (ICON_REPLAY_30, ICON_FORWARD_30),
+        _ => (ICON_FAST_REWIND, ICON_FAST_FORWARD),
+    }
+}
+
 /// Under this many seconds a delay reads as zero.
 const DELAY_ZERO: f64 = 0.05;
 
 /// A playback speed as the player writes it: "1.5×", "0.75×", with the language's decimal mark.
-fn speed_text(speed: f64) -> String {
+pub(crate) fn speed_text(speed: f64) -> String {
     format!("{}×", i18n::decimal(speed.to_string()))
 }
 
@@ -1903,6 +2373,11 @@ fn chapter_colours() -> media_row::ChapterColours {
         ink: over_video::FOREGROUND,
         ink_muted: over_video::MUTED_FOREGROUND,
     }
+}
+
+/// The queue panel, in egui's popup memory.
+fn queue_id() -> Id {
+    Id::unique("player_queue")
 }
 
 /// The version picker's menu.
@@ -2033,7 +2508,15 @@ fn label_badge(ui: &mut egui::Ui, text: &str) {
 struct SettingsChoice {
     audio: Option<i32>,
     subtitle: Option<SubtitleChoice>,
+    /// The second subtitle: a stream index, or `SUBTITLES_OFF`.
+    secondary: Option<i32>,
+    aspect: Option<Aspect>,
+    deinterlace: Option<bool>,
     adjustments: Option<Adjustments>,
+    /// *Search for subtitles…* was picked.
+    search: bool,
+    sleep: Option<SleepChoice>,
+    info: Option<bool>,
 }
 
 /// The settings menu's tabs and the open one's rows: the tracks with their delay, the subtitle
@@ -2072,6 +2555,12 @@ fn settings_body(
                     adjustments.audio_delay = stepped_delay(delay, step);
                     adjusted = true;
                 }
+                if !cfg!(target_os = "android")
+                    && let Some(on) = night_mode_row(ui, adjustments.night_mode, menu.night_available)
+                {
+                    adjustments.night_mode = on;
+                    adjusted = true;
+                }
             }
         }
         SettingsTab::Subtitles => {
@@ -2091,7 +2580,12 @@ fn settings_body(
                 SUBTITLES_OFF => SubtitleChoice::Off,
                 index => SubtitleChoice::Stream(index),
             });
-            if !menu.casting {
+            if menu.can_search {
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                let entry = Entry::new(tr!("player-search-subtitles")).icon(ICON_SEARCH);
+                choice.search = popup::row(ui, &entry, true, false, over_video::ROW_HOVER).clicked();
+            }
+            if !menu.casting && !menu.subtitle_choices.is_empty() {
                 popup::separator_in(ui, over_video::MENU_BORDER);
                 let delay = adjustments.subtitle_delay;
                 if let Some(step) = delay_stepper(ui, keys.then_some("z  x"), delay) {
@@ -2110,6 +2604,32 @@ fn settings_body(
                     }
                     adjusted = true;
                 }
+                // How far up from the bottom, in percent of the picture: Up lifts them, which
+                // is a smaller `sub-pos`.
+                let position = adjustments.subtitle_position;
+                let lifted = format!("{}%", Adjustments::BOTTOM.saturating_sub(position));
+                let label = tr!("player-position");
+                let moved = position != Adjustments::BOTTOM;
+                if let Some(step) = stepper::row(ui, &label, None, &lifted, moved, stepper_colours()) {
+                    adjustments.subtitle_position = match step {
+                        Step::Up => position.saturating_sub(Adjustments::POSITION_STEP),
+                        Step::Down => position.saturating_add(Adjustments::POSITION_STEP),
+                        Step::Reset => Adjustments::BOTTOM,
+                    };
+                    adjusted = true;
+                }
+            }
+            if !menu.casting && !menu.secondary_choices.is_empty() {
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                ui.add_space(8.);
+                ui.label(label::overline(ui, &tr!("player-second-subtitle")).color(over_video::MUTED_FOREGROUND));
+                choice.secondary = track_list(
+                    ui,
+                    "player-second-subtitle",
+                    "",
+                    &menu.secondary_choices,
+                    Some(menu.secondary.unwrap_or(SUBTITLES_OFF)),
+                );
             }
         }
         SettingsTab::General => {
@@ -2143,6 +2663,76 @@ fn settings_body(
                 adjustments.speed = speed;
                 adjusted = true;
             }
+            if let Some(aspect) = menu.aspect {
+                ui.add_space(8.);
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                ui.add_space(8.);
+                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
+                let name = ui.painter().text(
+                    pos2(rect.left() + 8., rect.center().y),
+                    Align2::LEFT_CENTER,
+                    tr!("player-aspect"),
+                    theme::text::font(ui, "sm"),
+                    over_video::MENU_INK,
+                );
+                if keys {
+                    ui.painter().text(
+                        pos2(name.right() + 8., rect.center().y),
+                        Align2::LEFT_CENTER,
+                        "a",
+                        theme::text::font(ui, "xs"),
+                        over_video::MUTED_FOREGROUND,
+                    );
+                }
+                choice.aspect = aspect_group(ui, aspect);
+            }
+            if let Some(on) = menu.deinterlace {
+                ui.add_space(8.);
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                let label = tr!("player-deinterlace");
+                let entry = Entry::new(label.as_str()).checked(on).tint(over_video::BRAND);
+                if popup::row(ui, &entry, true, false, over_video::ROW_HOVER).clicked() {
+                    choice.deinterlace = Some(!on);
+                }
+            }
+            // A group's pause is every member's, so its menu has no timer.
+            if menu.sleep_offered {
+                popup::separator_in(ui, over_video::MENU_BORDER);
+                let label = tr!("player-sleep");
+                let moved = menu.sleep != SleepChoice::Off;
+                if let Some(step) = stepper::row(ui, &label, None, &menu.sleep_text, moved, stepper_colours()) {
+                    choice.sleep = Some(menu.sleep.stepped(step));
+                }
+            }
+            popup::separator_in(ui, over_video::MENU_BORDER);
+            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
+            ui.painter().text(
+                pos2(rect.left() + 8., rect.center().y),
+                Align2::LEFT_CENTER,
+                tr!("player-info-title"),
+                theme::text::font(ui, "sm"),
+                over_video::MENU_INK,
+            );
+            if keys {
+                ui.painter().text(
+                    pos2(rect.right() - 8., rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    "i",
+                    theme::text::font(ui, "xs"),
+                    over_video::MUTED_FOREGROUND,
+                );
+            }
+            let (off, on) = (tr!("settings-off"), tr!("settings-on"));
+            let colours = segmented::Colours {
+                track: over_video::MENU_INSET,
+                hover: over_video::MENU_INSET_HOVER,
+                ink: over_video::MENU_INK,
+                chosen: over_video::BRAND,
+                chosen_ink: over_video::BRAND_FOREGROUND,
+            };
+            if let Some(index) = segmented::show(ui, &[off, on], Some(usize::from(menu.info)), colours) {
+                choice.info = Some(index == 1);
+            }
         }
     }
     if adjusted {
@@ -2173,12 +2763,29 @@ fn settings_tabs(ui: &mut egui::Ui, shown: &[SettingsTab], current: SettingsTab)
     tabs::bar(ui, &shown, current, colours)
 }
 
-/// The speed choices, the chosen one in the player's lilac. Returns the speed clicked.
-fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
-    let labels = Adjustments::SPEEDS.map(speed_text);
-    let chosen = Adjustments::SPEEDS
-        .iter()
-        .position(|speed| (speed - current).abs() < 1e-6);
+/// Night mode's row in the audio tab: Off and On, or the reason it can't act while a format is
+/// passed through. Returns the choice clicked.
+fn night_mode_row(ui: &mut egui::Ui, on: bool, available: bool) -> Option<bool> {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.), Sense::hover());
+    ui.painter().text(
+        pos2(rect.left() + 8., rect.center().y),
+        Align2::LEFT_CENTER,
+        tr!("player-night-mode"),
+        theme::text::font(ui, "sm"),
+        over_video::MENU_INK,
+    );
+    if !available {
+        ui.horizontal(|ui| {
+            ui.add_space(8.);
+            ui.label(
+                RichText::new(tr!("player-night-mode-passthrough"))
+                    .font(theme::text::font(ui, "sm"))
+                    .color(over_video::MUTED_FOREGROUND),
+            );
+        });
+        return None;
+    }
+    let labels = [tr!("settings-off"), tr!("settings-on")];
     let colours = segmented::Colours {
         track: over_video::MENU_INSET,
         hover: over_video::MENU_INSET_HOVER,
@@ -2186,7 +2793,44 @@ fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
         chosen: over_video::BRAND,
         chosen_ink: over_video::BRAND_FOREGROUND,
     };
-    segmented::show(ui, &labels, chosen, colours).map(|index| Adjustments::SPEEDS[index])
+    segmented::show(ui, &labels, Some(usize::from(on)), colours).map(|index| index == 1)
+}
+
+/// How an aspect mode is named in the menu and the bar.
+fn aspect_text(aspect: Aspect) -> String {
+    match aspect {
+        Aspect::Fit => tr!("player-aspect-fit"),
+        Aspect::Fill => tr!("player-aspect-fill"),
+        Aspect::Stretch => tr!("player-aspect-stretch"),
+        Aspect::Widescreen => "16:9".into(),
+        Aspect::Standard => "4:3".into(),
+    }
+}
+
+/// The aspect modes, the chosen one in the player's lilac. Returns the mode clicked.
+fn aspect_group(ui: &mut egui::Ui, current: Aspect) -> Option<Aspect> {
+    let labels = Aspect::ALL.map(aspect_text);
+    let chosen = Aspect::ALL.iter().position(|&aspect| aspect == current);
+    segmented::show(ui, &labels, chosen, segmented_colours()).map(|index| Aspect::ALL[index])
+}
+
+/// The speed choices, the chosen one in the player's lilac. Returns the speed clicked.
+fn speed_group(ui: &mut egui::Ui, current: f64) -> Option<f64> {
+    let labels = Adjustments::SPEEDS.map(speed_text);
+    let chosen = Adjustments::SPEEDS
+        .iter()
+        .position(|speed| (speed - current).abs() < 1e-6);
+    segmented::show(ui, &labels, chosen, segmented_colours()).map(|index| Adjustments::SPEEDS[index])
+}
+
+fn segmented_colours() -> segmented::Colours {
+    segmented::Colours {
+        track: over_video::MENU_INSET,
+        hover: over_video::MENU_INSET_HOVER,
+        ink: over_video::MENU_INK,
+        chosen: over_video::BRAND,
+        chosen_ink: over_video::BRAND_FOREGROUND,
+    }
 }
 
 fn stepper_colours() -> stepper::Colours {
@@ -2308,7 +2952,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SEEK_STEP, SETTINGS_W, SettingsTab,
+        CONTROL, ICON_SETTINGS, MAX_STEPS_PER_SCROLL, PIXELS_PER_NOTCH, PlayerPage, SETTINGS_W, SettingsTab,
         VOLUME_STEP, control, delay_stepper, delay_text, lit_button, menu_button, press_settings, scroll_steps,
         settings_id, settings_tabs, speed_group, stepped_delay, time_at, toggle_menu, wheel_notches,
     };
@@ -2545,6 +3189,21 @@ mod tests {
     }
 
     #[test]
+    fn the_sleep_timer_steps_from_off_through_the_minutes_to_the_end_of_the_item() {
+        use super::SleepChoice::{EndOfItem, Minutes, Off};
+        use crate::widgets::stepper::Step;
+
+        assert_eq!(Off.stepped(Step::Up), Minutes(15));
+        assert_eq!(Minutes(15).stepped(Step::Up), Minutes(30));
+        assert_eq!(Minutes(60).stepped(Step::Up), EndOfItem);
+        assert_eq!(EndOfItem.stepped(Step::Up), EndOfItem);
+        assert_eq!(EndOfItem.stepped(Step::Down), Minutes(60));
+        assert_eq!(Minutes(15).stepped(Step::Down), Off);
+        assert_eq!(Off.stepped(Step::Down), Off);
+        assert_eq!(Minutes(45).stepped(Step::Reset), Off);
+    }
+
+    #[test]
     fn the_speeds_are_one_choice() {
         use egui::accesskit::{Role, Toggled};
         use egui_kittest::Harness;
@@ -2671,7 +3330,7 @@ mod tests {
 
     #[test]
     fn the_seek_and_volume_steps_are_the_ones_remote_control_uses() {
-        assert_eq!(SEEK_STEP, 10.);
+        assert_eq!(crate::playback::DEFAULT_SEEK_STEP, 10);
         assert_eq!(VOLUME_STEP, 5.);
     }
 }

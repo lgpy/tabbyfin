@@ -36,6 +36,16 @@ impl Client {
             .await
     }
 
+    /// Approves another device's Quick Connect `code` for the signed-in user, which signs that
+    /// device in as them. The server answers `404` for a code it doesn't know (wrong, or
+    /// expired after a few minutes) and `401` ("Quick connect is disabled") when the feature is
+    /// off; that `401` is [`crate::Error::Unauthorized`], so a caller mustn't take it for a revoked
+    /// token.
+    pub async fn quick_connect_authorize(&self, code: &str) -> Result<()> {
+        self.post_no_content::<()>("/QuickConnect/Authorize", Query::new().push("code", code), None)
+            .await
+    }
+
     /// Exchanges an approved Quick Connect secret for a session.
     pub async fn authenticate_with_quick_connect(&self, secret: &str) -> Result<AuthenticationResult> {
         #[derive(Serialize)]

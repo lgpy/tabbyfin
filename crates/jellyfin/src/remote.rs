@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::client::Query;
-use crate::{Client, Result, Ticks};
+use crate::{Client, RepeatMode, Result, Ticks};
 
 /// "Play these items": `PlayNow` replaces what's playing, the others add to the queue. The
 /// server has already expanded folders (a series, a season) into their playable items.
@@ -81,6 +81,10 @@ pub enum GeneralCommand {
     /// A Jellyfin stream index, or `-1` for off.
     SetSubtitleStreamIndex(i32),
     ToggleFullscreen,
+    /// What the queue does at the end of an item.
+    SetRepeatMode(RepeatMode),
+    /// Shuffle the queue (`true`), or play it in its order.
+    SetShuffleQueue(bool),
     /// A message to show, e.g. sent from the dashboard's session view.
     DisplayMessage {
         header: Option<String>,
@@ -102,6 +106,8 @@ impl GeneralCommand {
         "SetAudioStreamIndex",
         "SetSubtitleStreamIndex",
         "ToggleFullscreen",
+        "SetRepeatMode",
+        "SetShuffleQueue",
         "DisplayMessage",
     ];
 
@@ -129,6 +135,15 @@ impl GeneralCommand {
             "SetAudioStreamIndex" => int("Index").map(Self::SetAudioStreamIndex),
             "SetSubtitleStreamIndex" => int("Index").map(Self::SetSubtitleStreamIndex),
             "ToggleFullscreen" => Some(Self::ToggleFullscreen),
+            "SetRepeatMode" => raw
+                .arguments
+                .get("RepeatMode")
+                .and_then(|mode| serde_json::from_value(serde_json::Value::String(mode.clone())).ok())
+                .map(Self::SetRepeatMode),
+            "SetShuffleQueue" => raw
+                .arguments
+                .get("ShuffleMode")
+                .map(|mode| Self::SetShuffleQueue(mode == "Shuffle")),
             "DisplayMessage" => raw.arguments.get("Text").map(|text| Self::DisplayMessage {
                 header: raw.arguments.get("Header").filter(|h| !h.is_empty()).cloned(),
                 text: text.clone(),
@@ -167,6 +182,7 @@ mod tests {
     use serde_json::json;
 
     use super::{GeneralCommand, PlayCommand, PlayRequest, PlaystateCommand, PlaystateRequest};
+    use crate::RepeatMode;
     use crate::Ticks;
 
     // The payloads below are what a 12.2 server sent for the matching `/Sessions/{id}/...`
@@ -234,6 +250,23 @@ mod tests {
         assert_eq!(
             parse(json!({ "Name": "GoHome", "Arguments": {} })),
             GeneralCommand::Other("GoHome".into())
+        );
+        assert_eq!(
+            parse(json!({ "Name": "SetRepeatMode", "Arguments": { "RepeatMode": "RepeatAll" } })),
+            GeneralCommand::SetRepeatMode(RepeatMode::RepeatAll)
+        );
+        assert_eq!(
+            parse(json!({ "Name": "SetShuffleQueue", "Arguments": { "ShuffleMode": "Shuffle" } })),
+            GeneralCommand::SetShuffleQueue(true)
+        );
+        assert_eq!(
+            parse(json!({ "Name": "SetShuffleQueue", "Arguments": { "ShuffleMode": "Sorted" } })),
+            GeneralCommand::SetShuffleQueue(false)
+        );
+        // A mode this client doesn't know can't be carried out either.
+        assert_eq!(
+            parse(json!({ "Name": "SetRepeatMode", "Arguments": { "RepeatMode": "Sometimes" } })),
+            GeneralCommand::Other("SetRepeatMode".into())
         );
         // A known command without its argument can't be carried out.
         assert_eq!(

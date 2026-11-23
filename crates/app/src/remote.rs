@@ -15,12 +15,12 @@ use std::time::Duration;
 use jellyfin::models::BaseItemDto;
 use jellyfin::{Client, GeneralCommand, ItemsQuery, PlayCommand, PlayRequest, PlaystateCommand, PlaystateRequest};
 
-use crate::playback::{PlayOptions, SubtitleChoice, UiCommand};
+use crate::playback::{PlayOptions, SubtitleChoice, UiCommand, volume_max};
 use crate::services::{AppEvent, Services};
 use crate::task::Task;
 use crate::toasts::Toast;
 use crate::views::item::shuffle;
-use crate::views::player::{SEEK_STEP, VOLUME_STEP};
+use crate::views::player::VOLUME_STEP;
 
 /// A remote "previous" goes back to the start of the item unless it's this close to it.
 const RESTART_WITHIN: Duration = Duration::from_secs(5);
@@ -180,8 +180,8 @@ impl Services {
                     Some(position) => UiCommand::SeekTo(position.into()),
                     None => return,
                 },
-                PlaystateCommand::Rewind => UiCommand::SeekBy(-SEEK_STEP),
-                PlaystateCommand::FastForward => UiCommand::SeekBy(SEEK_STEP),
+                PlaystateCommand::Rewind => UiCommand::SeekBy(-self.playback.seek_step()),
+                PlaystateCommand::FastForward => UiCommand::SeekBy(self.playback.seek_step()),
                 PlaystateCommand::NextTrack => return self.play_next(),
                 PlaystateCommand::PreviousTrack if casting.position() <= RESTART_WITHIN => {
                     return self.play_previous();
@@ -199,7 +199,13 @@ impl Services {
             }
             return;
         };
-        let (position, previous) = (state.position, state.previous.is_some());
+        // In a group "before this one" is an entry of the group's queue, not the previous episode.
+        let position = state.position;
+        let previous = if self.in_group() {
+            self.group_can_skip(false)
+        } else {
+            state.previous.is_some()
+        };
         let command = match request.command {
             PlaystateCommand::Stop => UiCommand::Stop,
             PlaystateCommand::Pause => UiCommand::SetPause(true),
@@ -209,8 +215,8 @@ impl Services {
                 Some(position) => UiCommand::SeekTo(position.into()),
                 None => return,
             },
-            PlaystateCommand::Rewind => UiCommand::SeekBy(-SEEK_STEP),
-            PlaystateCommand::FastForward => UiCommand::SeekBy(SEEK_STEP),
+            PlaystateCommand::Rewind => UiCommand::SeekBy(-self.playback.seek_step()),
+            PlaystateCommand::FastForward => UiCommand::SeekBy(self.playback.seek_step()),
             PlaystateCommand::NextTrack => {
                 self.play_next();
                 return;
@@ -239,6 +245,12 @@ impl Services {
             self.toast(Toast::info(message));
             return;
         }
+        // The queue's modes are the player's own, set whatever plays (a cast ignores them).
+        match command {
+            GeneralCommand::SetRepeatMode(mode) => return self.set_repeat(mode),
+            GeneralCommand::SetShuffleQueue(on) => return self.set_shuffle(on),
+            _ => {}
+        }
         // The rest act on what's playing: the TV while casting.
         let volume = match (self.cast.casting(), self.playback.now_playing()) {
             (Some(casting), _) => casting.volume,
@@ -246,11 +258,11 @@ impl Services {
             (None, Some(state)) => state.volume,
             (None, None) => return,
         };
-        let set_volume = |volume: f64| UiCommand::SetVolume(volume.clamp(0., 100.));
+        let casting = self.cast.casting().is_some();
         let command = match command {
-            GeneralCommand::VolumeUp => set_volume(volume + VOLUME_STEP),
-            GeneralCommand::VolumeDown => set_volume(volume - VOLUME_STEP),
-            GeneralCommand::SetVolume(volume) => set_volume(f64::from(volume)),
+            GeneralCommand::VolumeUp => UiCommand::SetVolume(stepped_volume(volume, VOLUME_STEP, casting)),
+            GeneralCommand::VolumeDown => UiCommand::SetVolume(stepped_volume(volume, -VOLUME_STEP, casting)),
+            GeneralCommand::SetVolume(volume) => UiCommand::SetVolume(f64::from(volume).clamp(0., 100.)),
             GeneralCommand::Mute => UiCommand::SetMute(true),
             GeneralCommand::Unmute => UiCommand::SetMute(false),
             GeneralCommand::ToggleMute => UiCommand::ToggleMute,
@@ -272,10 +284,20 @@ impl Services {
                 self.events.push(AppEvent::ToggleFullscreen);
                 return;
             }
-            GeneralCommand::DisplayMessage { .. } | GeneralCommand::Other(_) => return,
+            GeneralCommand::DisplayMessage { .. }
+            | GeneralCommand::SetRepeatMode(_)
+            | GeneralCommand::SetShuffleQueue(_)
+            | GeneralCommand::Other(_) => return,
         };
         self.control(command);
     }
+}
+
+/// The volume a remote step command asks for: up to the player's boost for local playback,
+/// 100 on a cast (a TV has none). `SetVolume` from the server stays within 0 to 100.
+fn stepped_volume(volume: f64, step: f64, casting: bool) -> f64 {
+    let max = if casting { 100. } else { volume_max() };
+    (volume + step).clamp(0., max)
 }
 
 #[cfg(test)]
@@ -283,7 +305,17 @@ mod tests {
     use jellyfin::PlayCommand;
     use jellyfin::models::BaseItemDto;
 
-    use super::{Placement, in_order, placement};
+    use super::{Placement, in_order, placement, stepped_volume};
+    use crate::playback::volume_max;
+
+    #[test]
+    fn volume_steps_reach_the_boost_locally_and_stop_at_100_casting() {
+        let step = crate::views::player::VOLUME_STEP;
+        assert_eq!(stepped_volume(120., step, false), (120. + step).min(volume_max()));
+        assert_eq!(stepped_volume(volume_max(), -step, false), volume_max() - step);
+        assert_eq!(stepped_volume(100., step, true), 100.);
+        assert_eq!(stepped_volume(0., -step, false), 0.);
+    }
 
     fn item(id: &str) -> BaseItemDto {
         serde_json::from_value(serde_json::json!({ "Id": id, "Name": id })).expect("item")

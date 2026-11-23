@@ -37,6 +37,37 @@ pub fn show(
         .extend(shapes(ui, cache, rect, request, blurhash_from, radius, None, 0.5));
 }
 
+/// [`show`] for an item's own picture in a list: its blurhash placeholder alone, without
+/// fetching the image, while spoiler protection hides it (`spoilers`).
+pub fn show_item(
+    ui: &Ui,
+    cache: &mut ImageCache,
+    rect: Rect,
+    request: Option<&ImageRequest>,
+    item: &BaseItemDto,
+    radius: u8,
+) {
+    if !crate::spoilers::hides(ui.ctx(), item) {
+        return show(ui, cache, rect, request, Some(item), radius);
+    }
+    let mut shapes = vec![Shape::from(RectShape::filled(
+        rect,
+        CornerRadius::same(radius),
+        theme::tokens_of(ui).inset_hover,
+    ))];
+    let preview = request.and_then(|request| {
+        let tag = request.tag.as_deref()?;
+        cache.placeholder(item.blur_hash(request.image_type, tag)?)
+    });
+    if let Some(texture) = preview {
+        let uv = cover_uv(texture.size_vec2(), rect.size(), 0.5);
+        shapes.push(Shape::from(
+            RectShape::filled(rect, CornerRadius::same(radius), Color32::WHITE).with_texture(texture.id(), uv),
+        ));
+    }
+    ui.painter().extend(shapes);
+}
+
 /// How far down a banner taller than its band is cut, as a share of what doesn't fit: 0 keeps
 /// its top edge, 0.5 cuts evenly. Backdrops mostly have their subject in the top third, and on a
 /// wide window a 16:9 one is about twice the band's height, so an even cut loses the faces;

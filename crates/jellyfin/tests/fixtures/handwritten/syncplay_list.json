@@ -1,0 +1,19 @@
+[
+  {
+    "GroupId": "b9f0c1a2000040008000000000000001",
+    "GroupName": "Movie night",
+    "State": "Playing",
+    "Participants": [
+      "dev",
+      "guest"
+    ],
+    "LastUpdatedAt": "2026-01-01T20:00:00.0000000Z"
+  },
+  {
+    "GroupId": "b9f0c1a2000040008000000000000002",
+    "GroupName": "Empty room",
+    "State": "Idle",
+    "Participants": [],
+    "LastUpdatedAt": "2026-01-01T20:05:00.0000000Z"
+  }
+]

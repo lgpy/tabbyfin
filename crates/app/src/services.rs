@@ -7,9 +7,12 @@
 //! block (playback's controls are in `playback.rs`, SyncPlay's in `syncplay.rs`, remote
 //! control's in `remote.rs`).
 
+use jellyfin::models::UserConfigurationChanges;
+
 use crate::cast::Cast;
 use crate::config::SavedServer;
 use crate::downloads::{self, Downloads};
+use crate::i18n::tr;
 use crate::images::ImageCache;
 use crate::item_menu::{Mark, PlaylistEdits};
 use crate::live::Live;
@@ -21,6 +24,50 @@ use crate::task;
 use crate::toasts::Toast;
 use crate::views::item::prefetch::Prefetch;
 use crate::widgets::menu::RefusedMarks;
+
+/// One server-side settings save's outcome: what it carried, and how it went.
+type SaveDone = (UserConfigurationChanges, jellyfin::Result<()>);
+
+/// The user's configuration changes on their way to the server: queued in `Services`, which
+/// outlives the Settings page, so a change made just before leaving it still goes, and a failure
+/// still reaches the user.
+pub struct ConfigSaves {
+    /// Changes waiting for the save that's out, merged into one.
+    pending: UserConfigurationChanges,
+    /// Whether a save is out.
+    sending: bool,
+    /// What finished saves reported, for [`Services::tick`] to drain.
+    done: task::Receiver<SaveDone>,
+    done_from: task::Sender<SaveDone>,
+    /// How many saves worked and how many failed since the sign-in: a Settings page remembers
+    /// the counts it opened at and notices the difference.
+    saved: u32,
+    failed: u32,
+}
+
+impl ConfigSaves {
+    fn new(ctx: &egui::Context) -> Self {
+        let (done_from, done) = task::channel(ctx);
+        Self {
+            pending: UserConfigurationChanges::default(),
+            sending: false,
+            done,
+            done_from,
+            saved: 0,
+            failed: 0,
+        }
+    }
+
+    /// Whether a save is out or waiting; the server's configuration isn't final until not.
+    pub fn busy(&self) -> bool {
+        self.sending || !self.pending.is_empty()
+    }
+
+    /// How many saves have worked and how many failed, in that order.
+    pub fn outcomes(&self) -> (u32, u32) {
+        (self.saved, self.failed)
+    }
+}
 
 pub struct Services {
     pub session: Session,
@@ -46,6 +93,10 @@ pub struct Services {
     /// back what they showed ahead of the server. A page remembers the last sequence it applied
     /// and takes the newer ones as it draws (`widgets/menu.rs` starts the marks).
     pub(crate) refused_marks: RefusedMarks,
+    /// Resume positions cleared or put back on the server, for `apply_menu_requests`
+    /// (*Remove from Continue Watching* and its undo, `widgets/menu.rs`).
+    pub(crate) resumed: task::Receiver<Resumed>,
+    pub(crate) resuming: task::Sender<Resumed>,
     /// A series' or season's next episode, fetched for the item menu's *Play*: `widgets/menu.rs`
     /// plays it (or says there's nothing to play) when it arrives.
     pub(crate) up_next: task::Receiver<UpNext>,
@@ -54,6 +105,10 @@ pub struct Services {
     /// so it outlives the page, and played by `apply_menu_requests` when it arrives.
     pub(crate) shuffles: task::Receiver<Shuffled>,
     pub(crate) shuffle_from: task::Sender<Shuffled>,
+    /// The items *Play next* and *Add to queue* of a series, season, collection or playlist
+    /// fetched: `apply_menu_requests` queues them when they arrive.
+    pub(crate) queued: task::Receiver<Queued>,
+    pub(crate) queue_from: task::Sender<Queued>,
     /// Playback sessions, the play queue and what carries over between items. Playing and the
     /// player's controls are methods on `Services` (`playback.rs`), since SyncPlay may take
     /// them over.
@@ -68,6 +123,9 @@ pub struct Services {
     /// they were made (`item_menu.rs`). Queued behind the services so they carry on whatever
     /// page is on top.
     pub playlist_edits: PlaylistEdits,
+    /// Changes to the user's configuration on the server (Settings' server-side sections), on
+    /// their way one request at a time, so leaving Settings doesn't cancel them.
+    pub config_saves: ConfigSaves,
     /// Remote control from other clients: the fetched items of a `Play` request, until
     /// `tick_remote` places them (playing and the controls are methods on `Services`,
     /// `remote.rs`).
@@ -84,11 +142,26 @@ pub struct Services {
 /// and how it went.
 pub(crate) type Marked = (Mark, String, jellyfin::Result<()>);
 
+/// A resume position cleared or restored, as its request finishes.
+pub(crate) struct Resumed {
+    pub(crate) item_id: String,
+    pub(crate) name: String,
+    /// The position the item had before it was cleared: what undo restores.
+    pub(crate) was: jellyfin::Ticks,
+    /// Whether this was the undo.
+    pub(crate) undone: bool,
+    pub(crate) result: jellyfin::Result<()>,
+}
+
 /// The episode a series or season plays next, once it's fetched.
 pub(crate) type UpNext = jellyfin::Result<Option<jellyfin::models::BaseItemDto>>;
 
 /// All of a series' or season's episodes, once they're fetched for *Shuffle*.
 pub(crate) type Shuffled = jellyfin::Result<Vec<jellyfin::models::BaseItemDto>>;
+
+/// The items a menu queues, once they're fetched: whether they go next (rather than last), the
+/// name of what they came from, and the items.
+pub(crate) type Queued = (bool, String, jellyfin::Result<Vec<jellyfin::models::BaseItemDto>>);
 
 /// Something signed-in code can't handle itself, for the app or the shell.
 #[derive(Debug)]
@@ -151,10 +224,14 @@ impl Services {
 
     fn build(session: Session, ctx: &egui::Context, online: bool) -> Self {
         let (marking, marked) = task::channel(ctx);
+        let (resuming, resumed) = task::channel(ctx);
         let (up_next_from, up_next) = task::channel(ctx);
         let (shuffle_from, shuffles) = task::channel(ctx);
+        let (queue_from, queued) = task::channel(ctx);
         let account = session.account_key();
-        let wifi_only = crate::config::Config::load().download_wifi_only();
+        let config = crate::config::Config::load();
+        crate::spoilers::set(ctx, config.hide_spoilers.unwrap_or(false));
+        let wifi_only = config.download_wifi_only();
         let mut downloads = Downloads::new(session.client.clone(), &account, ctx, wifi_only);
         let mut playback = PlaybackManager::new(ctx, session.client.clone(), account);
         if !online {
@@ -174,6 +251,7 @@ impl Services {
             remote: Remote::new(session.client.clone(), ctx),
             cast: Cast::new(&session, ctx, online),
             playlist_edits: PlaylistEdits::new(ctx),
+            config_saves: ConfigSaves::new(ctx),
             downloads,
             session,
             user_data: 0,
@@ -182,10 +260,14 @@ impl Services {
             marked,
             marking,
             refused_marks: RefusedMarks::default(),
+            resumed,
+            resuming,
             up_next,
             up_next_from,
             shuffles,
             shuffle_from,
+            queued,
+            queue_from,
         }
     }
 
@@ -196,8 +278,10 @@ impl Services {
     pub fn tick(&mut self, ctx: &egui::Context) {
         self.images.tick();
         self.prefetch.tick(ctx, &self.session.client, self.user_data);
+        crate::widgets::menu::set_queueing(ctx, self.queueing());
         self.apply_menu_requests();
         self.tick_playlist_edits();
+        self.tick_config_saves();
         self.tick_downloads();
         self.tick_playback();
         self.tick_live();
@@ -232,8 +316,59 @@ impl Services {
             stopping.extend(services.playback.stop_for_exit());
             stopping.extend(services.syncplay.leave_for_exit());
             stopping.extend(services.cast.disconnect_for_exit());
+            // The queue's last change is written here, not left to a write on another thread.
+            services.downloads.pause();
         }
         playback::wait_for_exit(stopping);
+    }
+
+    /// Queues `changes` to the user's configuration on the server, which Settings has shown
+    /// already. They go as soon as the save before them is back, whatever page is on top by
+    /// then.
+    pub fn save_user_configuration(&mut self, changes: UserConfigurationChanges) {
+        self.config_saves.pending.merge(changes);
+        self.send_next_config_save();
+    }
+
+    /// Sends what's queued, unless a save is out. Each save reads the whole configuration and
+    /// writes it back (`Client::update_user_configuration`), so two at once could undo each
+    /// other; what was queued meanwhile goes as one.
+    fn send_next_config_save(&mut self) {
+        if self.config_saves.sending || self.config_saves.pending.is_empty() {
+            return;
+        }
+        self.config_saves.sending = true;
+        let changes = std::mem::take(&mut self.config_saves.pending);
+        let client = self.session.client.clone();
+        let sender = self.config_saves.done_from.clone();
+        crate::runtime::detach(async move {
+            let result = client.update_user_configuration(&changes).await;
+            let _ = sender.send((changes, result));
+        });
+    }
+
+    /// A finished save: a failure is a toast, whether or not Settings is still open to show it,
+    /// and what was queued meanwhile goes next.
+    fn tick_config_saves(&mut self) {
+        let done: Vec<SaveDone> = self.config_saves.done.drain().collect();
+        for (changes, result) in done {
+            self.config_saves.sending = false;
+            match result {
+                Ok(()) => {
+                    self.config_saves.saved += 1;
+                    // Home's Latest rows change with it.
+                    if changes.hide_played_in_latest.is_some() {
+                        self.user_data += 1;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!("couldn't save the user's settings: {err}");
+                    self.config_saves.failed += 1;
+                    self.toast(Toast::error(tr!("settings-save-failed")));
+                }
+            }
+            self.send_next_config_save();
+        }
     }
 
     pub fn toast(&mut self, toast: Toast) {

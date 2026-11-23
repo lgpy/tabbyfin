@@ -26,7 +26,9 @@ pub struct Colours {
 pub fn show<S: AsRef<str>>(ui: &mut Ui, labels: &[S], current: Option<usize>, colours: Colours) -> Option<usize> {
     let font = text::font(ui, "sm");
     let height = MIN_HEIGHT.max(font.size + 12.);
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    // The track's own id is the segments' parent: two groups in one `Ui` (the player's speed and
+    // playback info rows) would otherwise share their ids.
+    let (rect, track) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let radius = (height / 2.) as u8;
     ui.painter().rect_filled(rect, radius, colours.track);
     let galleys: Vec<_> = labels
@@ -52,7 +54,7 @@ pub fn show<S: AsRef<str>>(ui: &mut Ui, labels: &[S], current: Option<usize>, co
     for (index, (galley, color)) in galleys.into_iter().enumerate() {
         let cell = Rect::from_min_size(pos2(left, rect.top()), vec2(galley.size().x + share, height));
         left = cell.right();
-        let response = ui.interact(cell, ui.scope_id().with(("segment", index)), Sense::CLICK);
+        let response = ui.interact(cell, track.id.with(("segment", index)), Sense::CLICK);
         let response = crate::layout::grow(ui, response, Sense::CLICK);
         let selected = current == Some(index);
         let name = labels[index].as_ref();

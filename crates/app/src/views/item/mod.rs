@@ -30,15 +30,15 @@ pub mod prefetch;
 mod shelves;
 
 use egui::{Align, Id, Margin, RectAlign, Response, Ui};
-use egui_material_icons::icons::{ICON_DELETE, ICON_EDIT, ICON_PLAYLIST_ADD};
+use egui_material_icons::icons::{ICON_DELETE, ICON_EDIT, ICON_PLAYLIST_ADD, ICON_SUBTITLES};
 use jellyfin::models::{BaseItemDto, BaseItemKind, ChapterInfo, ItemField, ItemSortBy};
 use jellyfin::{Client, ItemsQuery, Ticks};
 
 use crate::browse::{self, Browse, Cursor, Position, Section};
 use crate::i18n::{self, tr};
 use crate::item_menu::{
-    Mark, PlaylistEdit, can_add_to_playlist, episodes_of, first_unwatched, is_favorite, is_playable, is_played,
-    resume_point,
+    Mark, PlaylistEdit, can_add_to_playlist, can_search_subtitles, episodes_of, first_unwatched, is_favorite,
+    is_playable, is_played, resume_point,
 };
 use crate::keys::{Action, Scope};
 use crate::nav::{NavRequest, Route};
@@ -46,6 +46,7 @@ use crate::playback::PlayOptions;
 use crate::task::Task;
 use crate::toasts::Toast;
 use crate::views::dialogs::{AddToPlaylist, DeletePlaylist, EditPlaylist};
+use crate::views::subtitle_search::{Finished, SubtitleSearch};
 use crate::views::{Page, PageCx};
 use crate::widgets::menu::{MenuAction, RefusedMarks};
 use crate::widgets::popup::{Entry, Opened, PopupMenu};
@@ -132,6 +133,9 @@ pub enum ItemAction {
     PlayAll,
     Shuffle,
     AddToPlaylist,
+    /// Opens the subtitle search ([`SubtitleSearch`]): movies and episodes, for users who may
+    /// manage subtitles.
+    SearchSubtitles,
     /// Rename or share. Offered on every playlist; the server refuses other users' ones.
     EditPlaylist,
     /// Only offered when the server says the user may delete it.
@@ -144,7 +148,7 @@ pub enum ItemAction {
 
 /// The buttons under an item's title, in order. A series or season plays `up_next`, its next
 /// episode.
-pub fn item_actions(item: &BaseItemDto, up_next: Option<&BaseItemDto>) -> Vec<ItemAction> {
+pub fn item_actions(item: &BaseItemDto, up_next: Option<&BaseItemDto>, subtitles: bool) -> Vec<ItemAction> {
     let (playable, resume_at) = match up_next {
         Some(episode) => (true, resume_point(episode)),
         None => (is_playable(item), resume_point(item)),
@@ -175,17 +179,20 @@ pub fn item_actions(item: &BaseItemDto, up_next: Option<&BaseItemDto>) -> Vec<It
     if downloadable {
         actions.push(ItemAction::Download);
     }
-    if !more_actions(item).is_empty() {
+    if !more_actions(item, subtitles).is_empty() {
         actions.push(ItemAction::More);
     }
     actions
 }
 
-/// What the More menu offers, in order.
-pub fn more_actions(item: &BaseItemDto) -> Vec<ItemAction> {
+/// What the More menu offers, in order. `subtitles`: the user may manage subtitles.
+pub fn more_actions(item: &BaseItemDto, subtitles: bool) -> Vec<ItemAction> {
     let mut actions = Vec::new();
     if can_add_to_playlist(item) {
         actions.push(ItemAction::AddToPlaylist);
+    }
+    if subtitles && can_search_subtitles(item) {
+        actions.push(ItemAction::SearchSubtitles);
     }
     if item.kind == BaseItemKind::Playlist {
         actions.push(ItemAction::EditPlaylist);
@@ -396,6 +403,9 @@ pub struct ItemPage {
     /// refusal starts at the current sequence.
     marks_seen: u64,
     add_to_playlist: Option<AddToPlaylist>,
+    subtitle_search: Option<SubtitleSearch>,
+    /// The signed-in user may search for subtitles; read from the services as the page draws.
+    can_search_subtitles: bool,
     edit_playlist: Option<EditPlaylist>,
     delete_playlist: Option<DeletePlaylist>,
 }
@@ -425,6 +435,8 @@ impl ItemPage {
             more_requested: None,
             marks_seen,
             add_to_playlist: None,
+            subtitle_search: None,
+            can_search_subtitles: false,
             edit_playlist: None,
             delete_playlist: None,
         }
@@ -773,6 +785,9 @@ impl ItemPage {
             ItemAction::AddToPlaylist => {
                 self.add_to_playlist = Some(AddToPlaylist::new(cx, &data.item));
             }
+            ItemAction::SearchSubtitles => {
+                self.subtitle_search = Some(SubtitleSearch::new(cx, &data.item));
+            }
             ItemAction::EditPlaylist => {
                 self.edit_playlist = Some(EditPlaylist::new(cx, &data.item));
             }
@@ -790,7 +805,7 @@ impl ItemPage {
         let Load::Loaded(data) = &self.data else {
             return None;
         };
-        let actions = more_actions(&data.item);
+        let actions = more_actions(&data.item, self.can_search_subtitles);
         let entries: Vec<Entry> = actions.iter().map(|&action| more_entry(action)).collect();
         let shown = PopupMenu::new(id)
             .title(&data.item.name)
@@ -850,7 +865,7 @@ impl ItemPage {
         self.columns = columns;
         let episode_columns = media_row::episode_columns(width);
         self.episode_columns = episode_columns;
-        let actions = item_actions(&data.item, data.up_next.as_ref());
+        let actions = item_actions(&data.item, data.up_next.as_ref(), self.can_search_subtitles);
         let version = self.version;
         let open = self.open_season.as_ref().map(|season| season.id.clone());
         // A playlist's rows are the only children one per line.
@@ -1100,6 +1115,9 @@ impl ItemPage {
         {
             self.add_to_playlist = Some(AddToPlaylist::new(cx, &item));
         }
+        if let Some(items) = asked.play_from_here {
+            cx.services.play_from_here(items);
+        }
         if let Some(route) = asked.hovered {
             cx.services.prefetch.hover(route);
         }
@@ -1168,6 +1186,8 @@ struct Asked {
     hovered: Option<Route>,
     /// A card's context menu was used.
     menu: Option<(MenuAction, BaseItemDto)>,
+    /// *Play from here* on a row: it and the rows after it, to play in order.
+    play_from_here: Option<Vec<BaseItemDto>>,
     /// A season card was clicked: its episodes open under the seasons, or close.
     season: Option<BaseItemDto>,
     /// A playlist entry's buttons were used: move or remove the entry at the index.
@@ -1186,6 +1206,7 @@ struct Asked {
 fn more_entry(action: ItemAction) -> Entry<'static> {
     match action {
         ItemAction::AddToPlaylist => Entry::new(tr!("item-add-to-playlist")).icon(ICON_PLAYLIST_ADD),
+        ItemAction::SearchSubtitles => Entry::new(tr!("item-search-subtitles")).icon(ICON_SUBTITLES),
         ItemAction::EditPlaylist => Entry::new(tr!("item-edit")).icon(ICON_EDIT),
         _ => Entry::new(tr!("item-delete-playlist"))
             .icon(ICON_DELETE)
@@ -1227,6 +1248,7 @@ impl Page for ItemPage {
 
     fn show(&mut self, ui: &mut egui::Ui, cx: &mut PageCx) {
         let now = ui.input(|input| input.time);
+        self.can_search_subtitles = cx.services.session.user.can_manage_subtitles();
         if self.loaded_at != Some(cx.services.user_data) {
             self.reload(cx);
         }
@@ -1306,6 +1328,17 @@ impl Page for ItemPage {
         {
             self.add_to_playlist = None;
         }
+        if let Some(dialog) = &mut self.subtitle_search {
+            match dialog.show(cx) {
+                Finished::Open => {}
+                Finished::Closed => self.subtitle_search = None,
+                // The page loads again with the new stream in its tracks.
+                Finished::Added(_) => {
+                    self.subtitle_search = None;
+                    cx.services.user_data += 1;
+                }
+            }
+        }
         if let Some(dialog) = &mut self.edit_playlist
             && !dialog.show(cx)
         {
@@ -1330,7 +1363,7 @@ impl Browse for ItemPage {
         let Load::Loaded(data) = &self.data else {
             return Vec::new();
         };
-        let actions = item_actions(&data.item, data.up_next.as_ref()).len();
+        let actions = item_actions(&data.item, data.up_next.as_ref(), self.can_search_subtitles).len();
         let pickers = usize::from(data.item.media_sources.len() > 1);
         vec![
             Section::row(actions),
@@ -1350,7 +1383,7 @@ impl Browse for ItemPage {
         };
         match position.section {
             ACTIONS => {
-                let actions = item_actions(&data.item, data.up_next.as_ref());
+                let actions = item_actions(&data.item, data.up_next.as_ref(), self.can_search_subtitles);
                 if let Some(&action) = actions.get(position.index) {
                     // Opened from the keyboard, the menu highlights its first entry.
                     if action == ItemAction::More {
@@ -1589,7 +1622,7 @@ mod tests {
 
     #[test]
     fn the_actions_follow_the_item_state() {
-        let fresh = item_actions(&movie(false, 0), None);
+        let fresh = item_actions(&movie(false, 0), None, false);
         assert_eq!(
             fresh,
             [
@@ -1600,7 +1633,7 @@ mod tests {
                 ItemAction::More,
             ]
         );
-        let partway = item_actions(&movie(true, 1), None);
+        let partway = item_actions(&movie(true, 1), None, false);
         assert_eq!(
             partway,
             [

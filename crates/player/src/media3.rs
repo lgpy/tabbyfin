@@ -71,6 +71,8 @@ impl Drop for Bridge {
 pub(crate) struct Media3Player {
     bridge: Arc<Bridge>,
     shared: &'static Shared,
+    /// Which player the video surface was shown for, so this one's drop hides only its own.
+    surface: u64,
     /// `http-header-fields` and `start`, which mpv takes as properties before `loadfile`.
     pending: Mutex<(Vec<String>, f64)>,
 }
@@ -87,7 +89,7 @@ impl Media3Player {
         // ExoPlayer draws into the video surface whenever it exists, and lets go of it before
         // the surface goes.
         let sink = bridge.clone();
-        android::show_surface(move |surface: Option<SurfaceRef>| {
+        let surface = android::show_surface(move |surface: Option<SurfaceRef>| {
             let surface = surface.map_or(ptr::null_mut(), |s| s as jobject);
             if let Err(err) = sink.call(c"surface", c"(Landroid/view/Surface;)V", &[jvalue { l: surface }]) {
                 tracing::warn!("Media3 and the video surface: {err}");
@@ -96,6 +98,7 @@ impl Media3Player {
         let player = Self {
             bridge,
             shared,
+            surface,
             pending: Mutex::new((Vec::new(), 0.)),
         };
         Ok((player, events_rx, VideoOutput::external()))
@@ -161,7 +164,11 @@ impl Media3Player {
                 None => Err(rejected(name, value)),
             },
             // The UI draws the subtitles, in its own style and size, and shows the title.
-            "force-media-title" | "sub-scale" | "sub-color" | "sub-border-style" | "sub-back-color" => Ok(()),
+            "force-media-title" | "sub-scale" | "sub-pos" | "sub-color" | "sub-border-style" | "sub-back-color" => {
+                Ok(())
+            }
+            // Every session sets it before loading; Media3's decoders deinterlace on their own.
+            "deinterlace" => Ok(()),
             _ => {
                 tracing::warn!(name, ?value, "Media3 doesn't take this property");
                 Ok(())
@@ -177,7 +184,7 @@ impl Media3Player {
 impl Drop for Media3Player {
     fn drop(&mut self) {
         let _ = self.send(json!({"op": "release"}));
-        android::hide_surface();
+        android::hide_surface(self.surface);
     }
 }
 
@@ -273,7 +280,13 @@ extern "system" fn native_event(_env: *mut JNIEnv, _class: jclass, handle: jlong
         9 => PlayerEvent::EndFile(EndReason::Eof),
         _ => return,
     };
+    let ended = matches!(event, PlayerEvent::EndFile(_));
     let _ = shared.events.send(event);
+    // mpv exits when its file ends, which is what ends a session; ExoPlayer stays on the last
+    // frame, so the end of the file is the player's end here too.
+    if ended {
+        let _ = shared.events.send(PlayerEvent::Exited);
+    }
 }
 
 /// Playback failed.
@@ -282,6 +295,8 @@ extern "system" fn native_error(env: *mut JNIEnv, _class: jclass, handle: jlong,
     let shared = unsafe { &*(handle as *const Shared) };
     let message = unsafe { string(env, message) };
     let _ = shared.events.send(PlayerEvent::EndFile(EndReason::Error(message)));
+    // As at the end of the file: nothing else ends the session.
+    let _ = shared.events.send(PlayerEvent::Exited);
 }
 
 /// One cue, as the bridge describes it in JSON; an image's pixels are in the array beside it.

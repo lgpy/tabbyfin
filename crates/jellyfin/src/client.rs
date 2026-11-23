@@ -32,6 +32,17 @@ pub struct Client {
     token: Option<Arc<str>>,
 }
 
+const MAX_REDIRECTS: usize = 10;
+
+/// Whether a redirect from `from` to `to` is still the server: the same host, and either the same
+/// scheme and port or the step up from HTTP to HTTPS that a proxy asks for. A 307 or 308 carries
+/// the request's body along (the password, at sign-in) and a same-host redirect keeps the token
+/// header, so neither may be sent to another host or down to plain HTTP.
+fn stays(from: &Url, to: &Url) -> bool {
+    let upgrade = from.scheme() == "http" && to.scheme() == "https";
+    from.host() == to.host() && (upgrade || from.origin() == to.origin())
+}
+
 impl Client {
     pub fn new(server_url: &str, info: ClientInfo) -> Result<Self> {
         let base = parse_server_url(server_url)?;
@@ -39,6 +50,16 @@ impl Client {
             .user_agent(format!("{}/{}", info.client, info.version))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                let within_server = attempt.previous().last().is_some_and(|from| stays(from, attempt.url()));
+                if !within_server {
+                    attempt.error("a redirect that leaves the server")
+                } else if attempt.previous().len() >= MAX_REDIRECTS {
+                    attempt.error("too many redirects")
+                } else {
+                    attempt.follow()
+                }
+            }))
             .build()?;
         Ok(Self {
             http,
@@ -160,7 +181,8 @@ impl Client {
             StatusCode::SERVICE_UNAVAILABLE => Err(Error::ServerStarting),
             s => {
                 let mut message = resp.text().await.unwrap_or_default();
-                message.truncate(500);
+                // On a character's edge: `truncate` panics inside one, and the body is the server's.
+                message.truncate(message.floor_char_boundary(500));
                 Err(Error::Status {
                     status: s.as_u16(),
                     message,
@@ -285,15 +307,119 @@ mod tests {
             version: "1".into(),
         };
         let client = Client::new("https://example.com/jellyfin", info).unwrap();
-        let url = client.transcode_url("/videos/x/master.m3u8?MediaSourceId=s&ApiKey=secret&AudioCodec=aac,mp3");
+        let url = client
+            .transcode_url("/videos/x/master.m3u8?MediaSourceId=s&ApiKey=secret&AudioCodec=aac,mp3")
+            .unwrap();
         assert_eq!(
             url.as_str(),
             "https://example.com/jellyfin/videos/x/master.m3u8?MediaSourceId=s&AudioCodec=aac%2Cmp3"
         );
-        let url = client.transcode_url("/Videos/x/s/Subtitles/3/0/Stream.subrip?api_key=secret");
+        let url = client
+            .transcode_url("/Videos/x/s/Subtitles/3/0/Stream.subrip?api_key=secret")
+            .unwrap();
         assert_eq!(
             url.as_str(),
             "https://example.com/jellyfin/Videos/x/s/Subtitles/3/0/Stream.subrip"
+        );
+    }
+
+    fn client_at(server_url: &str) -> Client {
+        let info = ClientInfo {
+            client: "c".into(),
+            device: "d".into(),
+            device_id: "id".into(),
+            version: "1".into(),
+        };
+        Client::new(server_url, info).unwrap()
+    }
+
+    /// The server writes the string and the player sends it the token: only the server's own
+    /// origin is followed.
+    #[test]
+    fn transcode_url_refuses_what_leaves_the_server() {
+        let client = client_at("https://example.com");
+        for hostile in [
+            "https://other.example/x.m3u8",
+            "https://example.com:8443/x.m3u8",
+            "http://example.com/x.m3u8",
+            "file:///etc/passwd",
+            "http://[x",
+            r"\\other.example\x",
+            r"\\other.example/x",
+            "ytdl://x",
+            "data:text/plain,x",
+            "javascript:alert(1)",
+            "https://example.com@other.example/x",
+            "https://example.com.other.example/x",
+        ] {
+            assert!(
+                matches!(client.transcode_url(hostile), Err(Error::InvalidUrl(_))),
+                "{hostile} was followed: {:?}",
+                client.transcode_url(hostile)
+            );
+        }
+        // The same port written out is still the server.
+        assert!(client.transcode_url("https://example.com:443/x.m3u8").is_ok());
+
+        // Behind a proxy that gives the server a sub-path, the rest of the host isn't the server.
+        let client = client_at("https://example.com/jellyfin");
+        for hostile in [
+            "../other-app/x",
+            "%2e%2e/%2e%2e/admin",
+            "https://example.com/other-app/x",
+            "https://user:secret@example.com/jellyfin/x",
+            "..%2f..%2fadmin",
+            "%2e%2e%2F%2e%2e%2Fadmin",
+            "x%5c..%5c..%5cadmin",
+        ] {
+            assert!(
+                matches!(client.transcode_url(hostile), Err(Error::InvalidUrl(_))),
+                "{hostile} was followed: {:?}",
+                client.transcode_url(hostile)
+            );
+        }
+    }
+
+    #[test]
+    fn transcode_url_stays_on_the_server() {
+        let client = client_at("https://example.com/jellyfin");
+        for (given, expected) in [
+            (
+                "/videos/x/master.m3u8",
+                "https://example.com/jellyfin/videos/x/master.m3u8",
+            ),
+            (
+                "videos/x/master.m3u8",
+                "https://example.com/jellyfin/videos/x/master.m3u8",
+            ),
+            // The leading slashes are trimmed, so this is a path on the server, not a host.
+            ("//other.example/x", "https://example.com/jellyfin/other.example/x"),
+            ("///other.example/x", "https://example.com/jellyfin/other.example/x"),
+            ("/x?ApiKey=a&api_key=b&APIKEY=c", "https://example.com/jellyfin/x"),
+            (
+                "https://example.com/jellyfin/x.m3u8?ApiKey=a",
+                "https://example.com/jellyfin/x.m3u8",
+            ),
+        ] {
+            let url = client.transcode_url(given).unwrap();
+            assert_eq!(url.as_str(), expected, "for {given}");
+            assert_eq!(url.host_str(), Some("example.com"));
+        }
+        let url = client.transcode_url("//other.example/x").unwrap();
+        assert_eq!(url.origin(), client.base_url().origin());
+
+        // A server address with a login in it (basic auth at a proxy) keeps that login, and
+        // another one is refused.
+        let client = client_at("https://me:secret@example.com/jellyfin");
+        let url = client.transcode_url("/videos/x/master.m3u8?ApiKey=a").unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://me:secret@example.com/jellyfin/videos/x/master.m3u8"
+        );
+        assert!(
+            client
+                .transcode_url("https://you:secret@example.com/jellyfin/x")
+                .is_err()
         );
     }
 

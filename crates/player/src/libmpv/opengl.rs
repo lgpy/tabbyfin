@@ -10,7 +10,7 @@ use std::ptr;
 use tokio::sync::watch;
 
 use super::video::{
-    Frame, PARAM_API_TYPE, PARAM_INVALID, RenderControl, SharedFrame, UPDATE_FRAME, Wakeup, fit, on_update,
+    Frame, FreeContext, PARAM_API_TYPE, PARAM_INVALID, RenderControl, SharedFrame, UPDATE_FRAME, Wakeup, fit, on_update,
 };
 use super::{Core, RenderParam, cstring};
 use crate::{Error, Result};
@@ -36,10 +36,16 @@ const RING: usize = 3;
 /// libmpv's GL loader callback: `(ctx, name) -> function`.
 pub(crate) type GetProcAddress = unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void;
 
+/// mpv's `mpv_opengl_init_params`. The client API 1.x (`libmpv.so.1`, mpv up to 0.34) has a
+/// third field, `extra_exts`, which it reads; 2.x removed it, and the header there ends after
+/// `get_proc_address_ctx`.
 #[repr(C)]
 struct OpenGlInitParams {
     get_proc_address: GetProcAddress,
     get_proc_address_ctx: *mut c_void,
+    /// Always null. A 2.x libmpv never looks past the two fields above, so it's harmless there,
+    /// and a 1.x one would otherwise read whatever follows the struct on the stack.
+    extra_exts: *const c_char,
 }
 
 #[repr(C)]
@@ -97,6 +103,7 @@ impl<B: Backend> GlRenderer<B> {
         let mut init = OpenGlInitParams {
             get_proc_address,
             get_proc_address_ctx,
+            extra_exts: ptr::null(),
         };
         let mut params = [
             RenderParam {
@@ -133,6 +140,13 @@ impl<B: Backend> GlRenderer<B> {
     }
 
     pub fn run(&mut self, core: &Core, control: &RenderControl, frames: &watch::Sender<Option<Frame>>) {
+        // However this ends, a panic's unwind included, mpv's context is freed with the GL
+        // context still current on this thread (with ANGLE that releases its hold on the D3D11
+        // device) and before the backend, which drops with `self`.
+        let _free = FreeContext {
+            core,
+            context: self.mpv_context,
+        };
         let mut last_size = None;
         while control.wait() {
             // SAFETY: render context calls happen only on this thread.
@@ -149,23 +163,21 @@ impl<B: Backend> GlRenderer<B> {
                 Err(err) => tracing::warn!("GPU frame failed: {err}"),
             }
         }
-        // SAFETY: the GL context is current on this thread; free mpv's context (which, with
-        // ANGLE, releases its hold on the D3D11 device) before the backend's.
-        unsafe {
-            (core.api.render_set_update_callback)(self.mpv_context, None, ptr::null_mut());
-            (core.api.render_free)(self.mpv_context);
-        }
     }
 
     fn render(&mut self, core: &Core, (width, height): (u32, u32)) -> Result<SharedFrame> {
         if self.size != (width, height) || self.ring.is_empty() {
+            // Until every slot exists the renderer stays empty and unsized, so a failure here
+            // leaves nothing the next call would take for a finished ring (a short one would
+            // be indexed past its end, or hold textures of another size).
             self.release_ring();
+            self.size = (0, 0);
+            self.next = 0;
             for _ in 0..RING {
                 let slot = self.backend.create_slot(width, height)?;
                 self.ring.push(slot);
             }
             self.size = (width, height);
-            self.next = 0;
         }
         let slot = &self.ring[self.next];
         self.next = (self.next + 1) % RING;

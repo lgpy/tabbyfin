@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use jellyfin::models::{ChapterInfo, MediaSegmentDto, MediaSegmentType};
 
+use crate::config::{SkipAction, SkipActions};
 use crate::i18n::tr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,13 +115,24 @@ fn kind_for_name(name: &str) -> Option<SegmentKind> {
     }
 }
 
-/// The segment to offer skipping at `position`: not credits (the up-next card handles those),
-/// and not in its last second.
-pub fn skippable(segments: &[Segment], position: Duration) -> Option<Segment> {
+/// The segment at `position` whose kind's action is `action`, and not in its last second: with
+/// `Ask`, the one to offer skipping; with `Skip`, the one to skip now.
+pub fn at(segments: &[Segment], position: Duration, actions: &SkipActions, action: SkipAction) -> Option<Segment> {
     segments
         .iter()
-        .find(|s| s.kind != SegmentKind::Outro && s.start <= position && position + Duration::from_secs(1) < s.end)
+        .find(|s| actions.get(s.kind) == action && s.start <= position && position + Duration::from_secs(1) < s.end)
         .copied()
+}
+
+/// The skip notice's words: "Skipped intro".
+pub fn skipped_label(kind: SegmentKind) -> String {
+    match kind {
+        SegmentKind::Intro => tr!("player-skipped-intro"),
+        SegmentKind::Recap => tr!("player-skipped-recap"),
+        SegmentKind::Preview => tr!("player-skipped-preview"),
+        SegmentKind::Commercial => tr!("player-skipped-ad"),
+        SegmentKind::Outro => tr!("player-skipped-credits"),
+    }
 }
 
 /// PgDn: the next chapter's start. `None` in the last chapter (rather than ending the file).
@@ -151,9 +163,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Chapter, Segment, SegmentKind, current_chapter, from_chapters, kind_for_name, next_chapter, prev_chapter,
-        skippable,
+        Chapter, Segment, SegmentKind, at, current_chapter, from_chapters, kind_for_name, next_chapter, prev_chapter,
     };
+    use crate::config::{SkipAction, SkipActions};
 
     fn secs(s: u64) -> Duration {
         Duration::from_secs(s)
@@ -215,15 +227,39 @@ mod tests {
     }
 
     #[test]
-    fn skip_offered_inside_intro_only() {
+    fn each_kind_has_its_own_action() {
         let segments = from_chapters(
             &[chapter(0, "Intro"), chapter(10, "Episode"), chapter(45, "Credits")],
             Some(secs(60)),
         );
-        assert_eq!(skippable(&segments, secs(3)).map(|s| s.end), Some(secs(10)));
-        assert_eq!(skippable(&segments, Duration::from_millis(9500)), None);
-        assert_eq!(skippable(&segments, secs(20)), None);
-        assert_eq!(skippable(&segments, secs(50)), None);
+        let ask = SkipActions::default();
+        assert_eq!(
+            at(&segments, secs(3), &ask, SkipAction::Ask).map(|s| s.end),
+            Some(secs(10))
+        );
+        assert_eq!(at(&segments, Duration::from_millis(9500), &ask, SkipAction::Ask), None);
+        assert_eq!(at(&segments, secs(20), &ask, SkipAction::Ask), None);
+        // Credits are Off by default: the up-next card's business.
+        assert_eq!(at(&segments, secs(50), &ask, SkipAction::Ask), None);
+
+        let mut actions = SkipActions::default();
+        actions.set(SegmentKind::Intro, Some(SkipAction::Skip));
+        actions.set(SegmentKind::Outro, Some(SkipAction::Ask));
+        // An automatic kind has no button, and a button kind isn't skipped by itself.
+        assert_eq!(at(&segments, secs(3), &actions, SkipAction::Ask), None);
+        assert_eq!(
+            at(&segments, secs(3), &actions, SkipAction::Skip).map(|s| s.end),
+            Some(secs(10))
+        );
+        assert_eq!(
+            at(&segments, secs(50), &actions, SkipAction::Ask).map(|s| s.end),
+            Some(secs(60))
+        );
+        assert_eq!(at(&segments, secs(50), &actions, SkipAction::Skip), None);
+
+        actions.set(SegmentKind::Intro, Some(SkipAction::Off));
+        assert_eq!(at(&segments, secs(3), &actions, SkipAction::Ask), None);
+        assert_eq!(at(&segments, secs(3), &actions, SkipAction::Skip), None);
     }
 
     #[test]

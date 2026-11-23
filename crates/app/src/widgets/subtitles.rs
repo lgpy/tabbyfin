@@ -39,13 +39,16 @@ impl Subtitles {
     }
 
     /// Draws `cues` over the video, which is letterboxed in `rect`. `changed` counts the changes
-    /// of cues, so pictures are uploaded once; `scale` is the player's subtitle size.
-    pub fn show(&mut self, ui: &Ui, rect: Rect, cues: &Cues, changed: u64, scale: f32) {
+    /// of cues, so pictures are uploaded once; `scale` is the player's subtitle size, and
+    /// `position` its `sub-pos` (100 at the bottom, less is higher up).
+    pub fn show(&mut self, ui: &Ui, rect: Rect, cues: &Cues, changed: u64, scale: f32, position: u8) {
         if self.loaded != Some(changed) {
             self.load(ui, cues);
             self.loaded = Some(changed);
         }
         let video = fit(rect, cues.aspect);
+        // How far the position lifts subtitles from where they start, in points.
+        let lift = video.height() * (100. - f32::from(position)) / 100.;
         let text: Vec<&str> = cues
             .cues
             .iter()
@@ -55,7 +58,7 @@ impl Subtitles {
             })
             .collect();
         if !text.is_empty() {
-            self.text(ui, video, &text.join("\n"), scale);
+            self.text(ui, video, &text.join("\n"), scale, lift);
         }
         for (cue, texture) in cues.cues.iter().zip(&self.images) {
             if let (Cue::Image(image), Some(texture)) = (cue, texture) {
@@ -67,7 +70,7 @@ impl Subtitles {
                 } else {
                     vec2(size.x, size.x * image.height as f32 / image.width.max(1) as f32)
                 };
-                let min = video.min + vec2(left * video.width(), top * video.height());
+                let min = video.min + vec2(left * video.width(), top * video.height() - lift);
                 let uv = Rect::from_min_max(Pos2::ZERO, pos2(1., 1.));
                 ui.painter()
                     .image(texture.id(), Rect::from_min_size(min, size), uv, Color32::WHITE);
@@ -95,7 +98,7 @@ impl Subtitles {
     }
 
     /// Text at the bottom of the video, each line centred, wrapped to most of its width.
-    fn text(&self, ui: &Ui, video: Rect, text: &str, scale: f32) {
+    fn text(&self, ui: &Ui, video: Rect, text: &str, scale: f32, lift: f32) {
         let size = (video.height() * FONT_SIZE * scale).max(MIN_FONT);
         let painter = ui.painter();
         let mut job = egui::text::LayoutJob::simple(
@@ -109,7 +112,7 @@ impl Subtitles {
         // Centred lines are laid out around x = 0.
         let origin = pos2(
             video.center().x,
-            video.bottom() - video.height() * MARGIN - galley.size().y,
+            video.bottom() - video.height() * MARGIN - galley.size().y - lift,
         );
         match self.style {
             SubtitleStyle::Box => {

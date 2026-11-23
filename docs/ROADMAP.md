@@ -20,7 +20,7 @@ Done: license (GPL-3.0-or-later), package metadata, log files in release builds,
 
 ## 2. Playback
 
-Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay thumbnails, speed, subtitle and audio delay, subtitle size, the time-left clock, mouse niceties, previous and next, the resume prompt; transcoding (H.264 and HEVC, automatic bitrate), recovery from network drops and player crashes, volume and mute in reports, remote control from other clients; SyncPlay with group UI, queue and drift correction; downloads of the original file, played from disk, and offline mode (the downloads open when the server can't be reached, and their watch state reaches it once it answers); on Android, downloads that carry on in the background under a foreground service, Wi-Fi only as a setting, the files in app-specific external storage, and Media3 playing them.
+Done: skip intro and outro (each kind asks, skips with Undo, or is left alone), the up-next card and autoplay, chapters, trickplay thumbnails, speed, subtitle and audio delay, subtitle size and position, searching the server's subtitle providers and adding the result (from the player and the item page), a second subtitle track, the seek step and default speed as settings, aspect modes, deinterlacing, frame stepping and an A–B loop, the time-left clock, mouse niceties, previous and next, the display kept awake while a video plays, the system's media controls (media keys, Windows' overlay, MPRIS, Now Playing), the window's title and Windows' taskbar progress, the resume prompt, *Play next* and *Add to queue* in the item menu, the player's queue panel with repeat, shuffle and *Save as playlist*, *Play from here*; transcoding (H.264 and HEVC, automatic bitrate), recovery from network drops and player crashes, volume and mute in reports, the audio output device, channel layout, passthrough, exclusive mode and night mode, volume up to 150%, remote control from other clients; SyncPlay with group UI, queue and drift correction; downloads of the original file, played from disk, and offline mode (the downloads open when the server can't be reached, and their watch state reaches it once it answers); on Android, downloads that carry on in the background under a foreground service, Wi-Fi only as a setting, the files in app-specific external storage, and Media3 playing them.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
@@ -38,7 +38,7 @@ Done: skip intro and outro, the up-next card and autoplay, chapters, trickplay t
 
 ## 3. Browsing and library
 
-Done: keyboard navigation everywhere, library sort and filters, favorites, cast and crew, collections and playlists (with editing), blurhash placeholders, item page extras (trailers, extras, more like this), Home following the web client's settings, the alphabet jump, context menus, playing a series or season, loading an item's page ahead of the click.
+Done: keyboard navigation everywhere, library sort and filters, favorites, cast and crew, collections and playlists (with editing), blurhash placeholders, item page extras (trailers, extras, more like this), Home following the web client's settings, the alphabet jump, context menus, playing a series or season, loading an item's page ahead of the click, Remove from Continue Watching with an undo.
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
@@ -48,7 +48,7 @@ Done: keyboard navigation everywhere, library sort and filters, favorites, cast 
 
 ## 4. Accounts and settings
 
-Done: player preferences, subtitle appearance, theme, window size and position, several servers and users, Settings for this device and the server (languages, Home), 10.11 support (the API smoke test, and the app clicked through on 10.11.11).
+Done: spoiler protection (a setting), a watch history page, servers found on the network at sign-in, authorising another device's Quick Connect code from the account menu, player preferences, subtitle appearance, theme, window size and position, several servers and users, Settings for this device and the server (languages, Home), 10.11 support (the API smoke test, and the app clicked through on 10.11.11).
 
 ## 5. Platform and packaging
 
@@ -73,6 +73,7 @@ Done: an integration job in CI against 12.2 and 10.11, error messages for the co
 | 6.2 | **Screen readers** | P3 | L | Keyboard reach, contrast (WCAG AA) and text size are done, and every widget names itself to AccessKit, but no screen reader has been tried. |
 | 6.4 | **Performance on real hardware** | P3 | M | Profiled only in WSL debug builds (10,000-item fake library: about 640 MB, posters in view 0.5 s after a fast scroll). Check a release build on real hardware. |
 | 6.5 | **Expired token while browsing** | P3 | S | The error wording exists but hasn't been rechecked. |
+| 6.6 | **Keep mpv's token to the server** | P3 | M | mpv sends the `Authorization` header with every request for a file, so a server's HLS playlist or redirect can point it at another host, which then receives the token (the server's own, so the gain is small). ffmpeg has no per-host rule: the fix is a loopback proxy in the app that adds the header for the server's origin only and refuses the rest. |
 
 ## Suggested order
 

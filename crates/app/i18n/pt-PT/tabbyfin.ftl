@@ -106,8 +106,11 @@ item-play-all = Reproduzir tudo
 item-play-from-beginning = Reproduzir desde o início
 item-resume = Retomar
 item-resume-episode = Retomar { $episode }
+item-remove-from-continue = Remover de Continuar a ver
+item-removed-from-continue = «{ $name }» removido de Continuar a ver
+toast-undo = Anular
 item-resume-from = Retomar a partir de { $time }
-item-shuffle = Aleatório
+item-shuffle = Baralhar
 item-trailer = Trailer
 item-more = Mais
 item-favorite = Favorito
@@ -118,6 +121,20 @@ item-delete-playlist = Eliminar lista de reprodução…
 item-version = Versão
 item-version-number = Versão { $number }
 item-nothing-to-play = Não há nada para reproduzir.
+item-play-next = Reproduzir a seguir
+item-play-from-here = Reproduzir a partir daqui
+item-add-to-queue = Adicionar à fila
+item-nothing-to-queue = Não há nada para adicionar à fila.
+queue-played-next = { $name } será reproduzido a seguir.
+queue-added = { $name } adicionado à fila.
+queue-played-next-count = { $count ->
+    [one] { $count } item de { $name } será reproduzido a seguir.
+   *[other] { $count } itens de { $name } serão reproduzidos a seguir.
+    }
+queue-added-count = { $count ->
+    [one] { $count } item de { $name } adicionado à fila.
+   *[other] { $count } itens de { $name } adicionados à fila.
+    }
 item-download = Transferir
 item-downloading = A transferir
 item-downloaded = Transferido
@@ -135,11 +152,39 @@ item-waiting = A aguardar
 item-downloading-progress = A transferir, { $progress }. Cancelar transferência
 item-downloaded-size = Transferido, { $size }. Remover transferência
 item-download-failed = A transferência falhou: { $message } Tentar transferir novamente
-item-retry = Repetir
+item-retry = Tentar novamente
 item-cancel-download = Cancelar transferência
 item-remove-download = Remover transferência
 item-retry-download = Tentar transferir novamente
 item-left = Faltam { $time }
+item-runtime-hours-minutes = { $hours } h { $minutes } min
+item-runtime-hours = { $hours } h
+item-runtime-minutes = { $minutes } min
+item-episode-label = T{ $season }:E{ $episode }
+item-episode-label-short = E{ $episode }
+person-director = Realizador
+person-writer = Argumentista
+person-producer = Produtor
+person-guest-star = Convidado especial
+person-composer = Compositor
+person-conductor = Maestro
+person-lyricist = Letrista
+person-arranger = Arranjador
+person-engineer = Engenheiro
+person-mixer = Misturador
+person-remixer = Remisturador
+person-creator = Criador
+person-artist = Artista
+person-album-artist = Artista do álbum
+person-author = Autor
+person-illustrator = Ilustrador
+person-penciller = Desenhador
+person-inker = Arte-finalista
+person-colorist = Colorista
+person-letterer = Letrista de banda desenhada
+person-cover-artist = Artista da capa
+person-editor = Montador
+person-translator = Tradutor
 item-less = Menos
 item-show-less = Mostrar menos
 item-show-more = Mostrar mais
@@ -160,6 +205,7 @@ widget-copy-code = Copiar código
 widget-copied = Copiado
 widget-error = Erro
 widget-information = Informação
+widget-warning = Aviso
 widget-success = Sucesso
 widget-decrease = Diminuir { $label }
 widget-increase = Aumentar { $label }
@@ -174,8 +220,8 @@ player-back = Voltar (Esc)
 player-starting = A iniciar a reprodução…
 player-play = Reproduzir (Espaço)
 player-pause = Pausar (Espaço)
-player-back-10s = Recuar 10 s (Esquerda)
-player-forward-10s = Avançar 10 s (Direita)
+player-back-seconds = Recuar { $seconds } s (Esquerda)
+player-forward-seconds = Avançar { $seconds } s (Direita)
 player-mute = Desativar o som (M)
 player-unmute = Ativar o som (M)
 player-fullscreen = Ecrã inteiro (F)
@@ -184,12 +230,13 @@ player-settings = Definições de reprodução
 player-subtitles = Legendas
 player-audio = Áudio
 player-chapters = Capítulos
+player-queue = Fila (Q)
+player-queue-empty = Não há nada na fila a seguir a este.
+player-queue-save = Guardar como lista de reprodução…
 player-seek = Posição
 player-volume = Volume
 player-cast = Transmitir para uma TV
 player-cast-to-device = A transmitir para { $device }
-player-playing-on = A reproduzir em { $device }
-player-reconnecting-to = A restabelecer a ligação a { $device }…
 player-resumed-from = Retomado a partir de { $time }
 player-start-over = Começar de novo
 player-up-next = A seguir
@@ -210,11 +257,19 @@ player-no-subtitles = Sem legendas
 player-speed = Velocidade
 player-size = Tamanho
 player-delay = Atraso
+player-night-mode = Modo noturno
+player-night-mode-passthrough = Desligado com a passagem direta ligada
+player-aspect = Formato da imagem
+player-aspect-fit = Ajustar
+player-aspect-fill = Preencher
+player-aspect-stretch = Esticar
+player-deinterlace = Desentrelaçar
 player-normal-in-syncplay = Normal em SyncPlay
 player-badge-syncplay = SyncPlay
 player-badge-transcoding = Transcodificação
 player-sheet-settings = Definições
 player-close = Fechar
+player-second-subtitle = Segunda legenda
 player-subtitles-off = Desligadas
 player-track-number = Faixa { $index }
 player-skip-intro = Saltar genérico
@@ -222,6 +277,78 @@ player-skip-recap = Saltar resumo
 player-skip-preview = Saltar antevisão
 player-skip-ad = Saltar anúncio
 player-skip-credits = Saltar créditos
+player-skipped-intro = Genérico saltado
+player-skipped-recap = Resumo saltado
+player-skipped-preview = Antevisão saltada
+player-skipped-ad = Anúncio saltado
+player-skipped-credits = Créditos saltados
+player-undo = Anular
+player-sleep = Temporizador de sono
+player-sleep-off = Desativado
+player-sleep-left = { $minutes } min
+player-sleep-end = No fim
+player-sleep-paused = Temporizador de sono: reprodução em pausa
+player-info-title = Informação de reprodução
+player-info-playing = A reproduzir
+player-info-direct-play = Reprodução direta
+player-info-direct-stream = Transmissão direta
+player-info-transcoding = Transcodificação
+player-info-because = Porque
+player-info-container = Contentor
+player-info-video = Vídeo
+player-info-resolution = Resolução
+player-info-frame-rate = Taxa de fotogramas
+player-info-video-bitrate = Taxa de bits do vídeo
+player-info-range = Gama
+player-info-audio = Áudio
+player-info-channels = Canais
+player-info-audio-bitrate = Taxa de bits do áudio
+player-info-decoder = Descodificador
+player-info-decoder-software = Software
+player-info-dropped = Fotogramas perdidos
+player-info-buffered = Em memória intermédia
+player-info-output = Saída
+player-info-output-zero-copy = GPU, sem cópia
+player-info-output-gpu = GPU
+player-info-output-software = Software
+player-info-output-surface = Superfície própria do leitor
+player-info-fps = { $fps } fps
+player-info-seconds = { $seconds } s
+player-info-channel-count = { $count ->
+    [one] { $count } canal
+   *[other] { $count } canais
+    }
+player-info-reason =
+    { $reason ->
+        [ContainerNotSupported] O contentor não é suportado por este leitor
+        [VideoCodecNotSupported] O codec de vídeo não é suportado por este leitor
+        [AudioCodecNotSupported] O codec de áudio não é suportado por este leitor
+        [SubtitleCodecNotSupported] O formato das legendas não é suportado por este leitor
+        [AudioIsExternal] O áudio está num ficheiro à parte
+        [SecondaryAudioNotSupported] Uma segunda faixa de áudio não é suportada
+        [VideoProfileNotSupported] O perfil do vídeo não é suportado
+        [VideoLevelNotSupported] O nível do vídeo não é suportado
+        [VideoResolutionNotSupported] A resolução do vídeo é demasiado alta para este leitor
+        [VideoBitDepthNotSupported] A profundidade de cor do vídeo não é suportada
+        [VideoFramerateNotSupported] A taxa de fotogramas do vídeo não é suportada
+        [VideoRangeTypeNotSupported] O formato HDR do vídeo não é suportado
+        [VideoCodecTagNotSupported] A etiqueta do codec do vídeo não é suportada
+        [RefFramesNotSupported] O vídeo usa demasiados fotogramas de referência
+        [AnamorphicVideoNotSupported] Vídeo anamórfico não é suportado
+        [InterlacedVideoNotSupported] Vídeo entrelaçado não é suportado
+        [AudioChannelsNotSupported] O áudio tem mais canais do que este leitor aceita
+        [AudioProfileNotSupported] O perfil do áudio não é suportado
+        [AudioSampleRateNotSupported] A taxa de amostragem do áudio não é suportada
+        [AudioBitDepthNotSupported] A profundidade de bits do áudio não é suportada
+        [ContainerBitrateExceedsLimit] A taxa de bits excede o limite de transmissão
+        [VideoBitrateNotSupported] A taxa de bits do vídeo é demasiado alta
+        [AudioBitrateNotSupported] A taxa de bits do áudio é demasiado alta
+        [UnknownVideoStreamInfo] O servidor não conseguiu ler os detalhes do vídeo
+        [UnknownAudioStreamInfo] O servidor não conseguiu ler os detalhes do áudio
+        [DirectPlayError] A reprodução direta falhou
+        [StreamCountExceedsLimit] O ficheiro tem mais fluxos do que este leitor aceita
+       *[other] { $reason }
+    }
 player-restarting = O leitor parou inesperadamente. A reiniciá-lo…
 player-reconnecting = Perdeu-se a ligação ao servidor. A restabelecer a ligação…
 player-crashing = O leitor está sempre a falhar neste item. O registo pode explicar porquê.
@@ -246,6 +373,8 @@ settings-section-appearance = Aspeto
 settings-section-appearance-summary = Tema, tamanho do texto, animações e idioma
 settings-section-playback = Reprodução
 settings-section-playback-summary = Episódio seguinte, genéricos, qualidade e o leitor
+settings-section-audio = Áudio
+settings-section-audio-summary = Dispositivo de saída, canais, passagem direta e modo noturno
 settings-section-subtitles = Legendas
 settings-section-subtitles-summary = Cor, estilo e tamanho
 settings-section-downloads = Transferências
@@ -277,13 +406,37 @@ settings-text-size-system = Seguir o sistema ({ $scale }%)
 settings-animations = Animações
 settings-animations-description = Animações e deslocamento suave. Aplica-se de imediato.
 settings-animations-unset = ativadas
+settings-spoilers = Proteção contra spoilers
+settings-spoilers-description = Oculta as imagens e as sinopses dos episódios que ainda não viu. Aplica-se de imediato.
+settings-spoilers-unset = desativada
 settings-tracks-note = As faixas de áudio e de legendas com que um item começa ficam guardadas no servidor, para todas as aplicações que utilizar.
 settings-autoplay = Reproduzir o episódio seguinte automaticamente
 settings-autoplay-description = Quando um episódio termina, para o leitor ficar aberto. A partir do item seguinte.
 settings-autoplay-unset = ativado
-settings-skip-intro = Saltar genéricos e resumos automaticamente
-settings-skip-intro-description = Cada genérico ou resumo uma vez, ao começar, nunca num grupo SyncPlay. A partir do item seguinte.
-settings-skip-intro-unset = desativado
+settings-seek-step = Intervalo de salto
+settings-seek-step-description = Quanto saltam as setas, os botões de saltar, o toque duplo e o avanço rápido de um comando remoto. Aplica-se logo.
+settings-seek-step-unset = 10 s
+settings-default-speed = Velocidade predefinida
+settings-default-speed-description = A velocidade com que a reprodução começa ao abrir a aplicação. Uma velocidade escolhida no leitor passa para os itens seguintes.
+settings-default-speed-unset = 1×
+settings-skip-intro = Genéricos
+settings-skip-intro-description = Perguntar mostra um botão para saltar, Saltar salta sozinho e permite anular, Desativado não faz nenhuma das duas. Nunca salta sozinho num grupo SyncPlay. A partir do item seguinte.
+settings-skip-intro-unset = perguntar
+settings-skip-recap = Resumos
+settings-skip-recap-description = Perguntar mostra um botão para saltar, Saltar salta sozinho e permite anular, Desativado não faz nenhuma das duas. Nunca salta sozinho num grupo SyncPlay. A partir do item seguinte.
+settings-skip-recap-unset = perguntar
+settings-skip-preview = Antevisões
+settings-skip-preview-description = Perguntar mostra um botão para saltar, Saltar salta sozinho e permite anular, Desativado não faz nenhuma das duas. Nunca salta sozinho num grupo SyncPlay. A partir do item seguinte.
+settings-skip-preview-unset = perguntar
+settings-skip-commercial = Anúncios
+settings-skip-commercial-description = Perguntar mostra um botão para saltar, Saltar salta sozinho e permite anular, Desativado não faz nenhuma das duas. Nunca salta sozinho num grupo SyncPlay. A partir do item seguinte.
+settings-skip-commercial-unset = perguntar
+settings-skip-credits = Créditos
+settings-skip-credits-description = Perguntar mostra um botão para saltar quando não há episódio seguinte para propor. Saltar vai para o fim dos créditos, o que reproduz o episódio seguinte. Desativado deixa a proposta ao cartão do episódio seguinte. A partir do item seguinte.
+settings-skip-credits-unset = desativado
+settings-skip-ask = Perguntar
+settings-skip-skip = Saltar
+settings-skip-off = Desativado
 settings-bitrate = Taxa de bits máxima de transmissão
 settings-bitrate-description = Os vídeos acima desta taxa de bits são transcodificados pelo servidor. Reduza-a para ligações lentas. Automática mede a ligação antes de reproduzir (no máximo a cada 10 minutos) e usa 80% dela, mantendo o limite para quando for desativada. Aplica-se quando o item seguinte começar.
 settings-bitrate-unset = sem limite
@@ -299,6 +452,33 @@ settings-player-unset = Media3
 settings-hevc = Pedir HEVC quando o servidor transcodificar
 settings-hevc-description = O HEVC precisa de metade da largura de banda do H.264 para a mesma imagem, mas é muito mais difícil de codificar pelo servidor. Usado apenas se o servidor o permitir (Painel › Reprodução › Transcodificação). Aplica-se quando o item seguinte começar.
 settings-hevc-unset = desativado
+settings-audio-device = Dispositivo de saída
+settings-audio-device-description = Onde o som é reproduzido. Se o dispositivo escolhido não existir quando um vídeo começar, o som sai pelo automático. Aplica-se quando o item seguinte começar.
+settings-audio-device-unset = Automático
+settings-audio-device-auto = Automático
+settings-audio-device-missing = { $name } (não encontrado)
+settings-audio-channels = Canais
+settings-audio-channels-description = Quantos canais vão para o dispositivo. O automático usa o que o sistema diz que o dispositivo aceita (estéreo quando não o sabe dizer). Escolha 5.1 ou 7.1 para um sistema surround que o mpv toma por estéreo, ou Estéreo para misturar tudo em dois canais. Aplica-se quando o item seguinte começar.
+settings-audio-channels-unset = Automático
+settings-audio-channels-auto = Automático
+settings-audio-channels-stereo = Estéreo
+settings-passthrough-ac3 = Passar AC-3 diretamente
+settings-passthrough-ac3-description = Envia o Dolby Digital ao recetor tal como está, para ele o descodificar, em vez de o descodificar aqui. Precisa de um recetor em HDMI ou S/PDIF que aceite o formato, e desliga o modo noturno. Aplica-se quando o item seguinte começar.
+settings-passthrough-eac3 = Passar E-AC-3 diretamente
+settings-passthrough-eac3-description = Envia o Dolby Digital Plus ao recetor tal como está. Precisa de um recetor que o aceite por HDMI, e desliga o modo noturno. Um vídeo transcodificado também mantém o E-AC-3. Aplica-se quando o item seguinte começar.
+settings-passthrough-dts = Passar DTS diretamente
+settings-passthrough-dts-description = Envia o DTS (o núcleo, não o DTS-HD) ao recetor tal como está. Precisa de um recetor em HDMI ou S/PDIF que o aceite, e desliga o modo noturno. Aplica-se quando o item seguinte começar.
+settings-passthrough-dts-hd = Passar DTS-HD diretamente
+settings-passthrough-dts-hd-description = Envia o DTS-HD Master Audio ao recetor tal como está. Precisa de um recetor e de uma ligação HDMI que o aceitem, e desliga o modo noturno. Aplica-se quando o item seguinte começar.
+settings-passthrough-truehd = Passar TrueHD diretamente
+settings-passthrough-truehd-description = Envia o Dolby TrueHD ao recetor tal como está. Precisa de um recetor e de uma ligação HDMI que o aceitem, e desliga o modo noturno. Aplica-se quando o item seguinte começar.
+settings-passthrough-unset = desativado
+settings-audio-exclusive = Modo exclusivo
+settings-audio-exclusive-description = Fica com o dispositivo de áudio só para esta aplicação enquanto reproduz, o que a passagem direta e a saída sem alterações costumam exigir. Os outros programas ficam sem som entretanto. Só algumas saídas o têm (WASAPI no Windows, PipeWire e CoreAudio nos outros). Aplica-se quando o item seguinte começar.
+settings-audio-exclusive-unset = desativado
+settings-night-mode = Modo noturno
+settings-night-mode-description = Uniformiza as partes altas e baixas, para a fala se perceber com o volume baixo. O menu do leitor liga-o ou desliga-o para o que está a ser reproduzido. Não pode atuar num formato passado diretamente ao recetor, por isso fica desligado enquanto houver passagem direta ligada. Aplica-se quando o item seguinte começar.
+settings-night-mode-unset = desativado
 settings-subtitles-note = O aspeto das legendas de texto como as SRT; as legendas com estilo (ASS) mantêm o seu aspeto e só mudam de tamanho. O menu de definições do leitor também muda o tamanho durante a reprodução.
 settings-subtitle-tracks-note = As legendas que se ativam sozinhas, e em que idioma, ficam guardadas no servidor.
 settings-subtitle-color = Cor
@@ -372,6 +552,7 @@ settings-image-cache-cleared = Cache de imagens limpa.
 settings-image-cache-failed = Não foi possível limpar a cache de imagens. Feche o que estiver a usar a pasta e tente novamente.
 settings-logs-folder-failed = Não foi possível abrir a pasta dos registos ({ $path }).
 settings-save-failed = Não foi possível guardar as suas definições no servidor. Voltaram a estar como o servidor as tem.
+settings-config-save-failed = Não foi possível guardar esta definição neste dispositivo. Verifique se a pasta das definições aceita escrita e tem espaço livre.
 settings-load-failed = Não foi possível carregar as suas definições do servidor.
 settings-loading = A carregar as suas definições do servidor…
 settings-retry = Tentar novamente
@@ -392,6 +573,11 @@ menu-no-matches = Nada corresponde a “{ $search }”.
 shell-account-on = { $name } em { $server }
 shell-downloads = Transferências
 shell-add-account = Adicionar conta…
+shell-history = Histórico de visualização
+history-title = Histórico de visualização
+history-empty = Ainda não viu nada.
+history-undated = Data desconhecida
+shell-authorise-device = Autorizar um dispositivo…
 shell-sign-out = Terminar sessão
 
 shell-syncplay-title = Ver em conjunto
@@ -416,8 +602,8 @@ shell-queue = Fila
 shell-queue-repeat-off = Repetição desativada
 shell-queue-repeat-all = A repetir a fila
 shell-queue-repeat-one = A repetir um
-shell-queue-shuffle-on = Aleatório ativado
-shell-queue-shuffle-off = Aleatório desativado
+shell-queue-shuffle-on = Baralhar ativado
+shell-queue-shuffle-off = Baralhar desativado
 shell-queue-playing = { $name }, a reproduzir
 shell-queue-remove = Remover (Delete)
 shell-new-group-name = Grupo de { $user }
@@ -458,7 +644,7 @@ login-to-server = Iniciar sessão em { $server }
 login-server-line = Jellyfin { $version } em { $host }
 login-welcome-back = Olá de novo
 login-welcome-back-subtitle = Escolha uma conta para continuar a ver.
-login-welcome = Boas-vindas ao Tabbyfin
+login-welcome = Bem-vindo ao Tabbyfin
 login-welcome-subtitle = Vamos encontrar o seu servidor Jellyfin.
 login-address-required = Introduza o endereço do servidor.
 login-username-required = Introduza o nome de utilizador.
@@ -469,6 +655,8 @@ login-reconnect = A sessão será retomada automaticamente assim que o servidor 
 login-remove-account = Remover esta conta
 login-server-address = Endereço do servidor
 login-other-server = Ou ligue-se a outro servidor
+login-found-servers = Servidores encontrados na sua rede
+login-found-server = { $name } em { $address }
 login-address-hint = jellyfin.example.com ou 192.168.1.10:8096
 login-connect = Ligar
 login-username = Nome de utilizador
@@ -482,12 +670,21 @@ login-no-version = O servidor não indicou a versão.
 login-version-too-old = Este servidor tem o Jellyfin { $version }. O Tabbyfin precisa da versão { $needed } ou mais recente.
 login-server-starting = O servidor está a arrancar. A aguardar…
 login-not-jellyfin = Esse endereço não parece ser um servidor Jellyfin.
+login-error-certificate = O certificado do servidor não é de confiança. Verifique o endereço ou o certificado no servidor.
+login-unencrypted-title = Ligar sem encriptação?
+login-unencrypted-notice = Este servidor não respondeu por HTTPS, por isso a palavra-passe e o que vê seguiriam sem encriptação. É habitual num servidor da sua própria rede e um risco em qualquer outro lado.
+login-connect-anyway = Ligar mesmo assim
 login-unreachable = Não foi possível contactar o servidor.
 
 dialog-sharing = Todos neste servidor podem vê-la
 dialog-delete-note = A lista de reprodução é removida do servidor para todos com quem está partilhada. O que está nela fica nas suas bibliotecas.
 dialog-added = Adicionado a { $name }.
 dialog-created = Lista de reprodução { $name } criada.
+dialog-save-queue = Guardar a fila como lista de reprodução
+dialog-save-queue-count = { $count ->
+    [one] Uma lista com { $count } item: o que está a reproduzir e o que está na fila.
+   *[other] Uma lista com { $count } itens: o que está a reproduzir e o que está na fila.
+    }
 dialog-already-there = { $item } já está em { $name }.
 dialog-cant-change = Não pode alterar { $name }; pertence a outra pessoa.
 dialog-add-to-playlist = Adicionar à lista de reprodução
@@ -501,6 +698,14 @@ dialog-checking-sharing = A verificar quem a pode ver…
 dialog-save = Guardar
 dialog-deleted = { $name } eliminada.
 dialog-delete-forbidden = { $name } pertence a outra pessoa e não pode ser eliminada.
+dialog-authorise-title = Autorizar um dispositivo
+dialog-authorise-note = Introduza o código que o outro dispositivo mostra no Quick Connect. O dispositivo iniciará sessão como { $name }.
+dialog-authorise-code = Código
+dialog-authorise = Autorizar
+dialog-authorise-done = O dispositivo iniciou sessão.
+dialog-authorise-wrong = Esse código não está certo ou expirou. Verifique o outro dispositivo e tente novamente.
+dialog-authorise-off = O Quick Connect está desativado neste servidor.
+dialog-authorise-failed = Não foi possível autorizar esse código. Pode já ter sido utilizado.
 dialog-delete-title = Eliminar “{ $name }”?
 dialog-delete = Eliminar
 dialog-new-playlist = Nova lista de reprodução “{ $name }”
@@ -533,7 +738,7 @@ downloads-status-so-far = { $done } até agora
 downloads-status-failed = Falhou: { $message }
 downloads-action-play = Reproduzir
 downloads-action-remove = Remover transferência
-downloads-action-retry = Tentar novamente
+downloads-action-retry = Tentar transferir novamente
 downloads-action-remove-queued = Remover das transferências
 downloads-action-cancel = Cancelar transferência
 downloads-activity-waiting-wifi = À espera de Wi-Fi
@@ -557,7 +762,7 @@ downloads-error-open = não foi possível abrir o ficheiro: { $error }
 downloads-error-restart = não foi possível recomeçar o ficheiro: { $error }
 downloads-error-continue = não foi possível continuar o ficheiro: { $error }
 downloads-error-write = não foi possível escrever o ficheiro: { $error }
-downloads-error-partial = só chegaram { $done } de { $total } bytes
+downloads-error-partial = recebidos { $done } de { $total } bytes
 downloads-error-finish = não foi possível concluir o ficheiro: { $error }
 downloads-error-no-space = não há espaço livre suficiente: são necessários { $needed } e há { $free } livres
 
@@ -612,3 +817,27 @@ syncplay-user-joined = { $user } juntou-se ao grupo
 syncplay-user-left = { $user } saiu do grupo
 syncplay-error = SyncPlay: { $message }
 syncplay-load-failed = Não foi possível carregar o item do grupo: { $message }
+
+item-search-subtitles = Procurar legendas…
+player-search-subtitles = Procurar legendas…
+subtitle-search-title = Procurar legendas
+subtitle-search-language = Idioma
+subtitle-search-searching = A procurar…
+subtitle-search-none = Não foram encontradas legendas em { $language }. Se uma pesquisa nunca encontrar nenhuma, o servidor pode não ter um fornecedor de legendas configurado; um administrador pode adicionar um, como o Open Subtitles, nos plugins do painel de controlo.
+subtitle-search-forbidden = A sua conta não tem permissão para procurar legendas.
+subtitle-search-downloading = A transferir…
+subtitle-search-added = Legenda adicionada
+subtitle-search-not-downloaded = O servidor não conseguiu transferir essa legenda. Experimente outra.
+subtitle-search-exact = Correspondência exata
+subtitle-search-downloads = { $count ->
+    [one] { $digits } transferência
+   *[other] { $digits } transferências
+  }
+subtitle-search-rating = Classificação { $rating }
+subtitle-search-row-label = { $name }, { $detail }
+player-position = Posição
+settings-subtitle-position = Posição
+settings-subtitle-position-description = A que altura do ecrã ficam as legendas. Partilhada com o menu de definições do leitor. Chega de imediato ao gestor de reprodução, por isso uma sessão em curso muda com ela.
+settings-subtitle-position-unset = Em baixo
+settings-subtitle-position-bottom = Em baixo
+settings-subtitle-position-raised = { $percent } % mais acima

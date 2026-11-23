@@ -106,6 +106,9 @@ item-play-all = Play all
 item-play-from-beginning = Play from beginning
 item-resume = Resume
 item-resume-episode = Resume { $episode }
+item-remove-from-continue = Remove from Continue Watching
+item-removed-from-continue = Removed “{ $name }” from Continue Watching
+toast-undo = Undo
 item-resume-from = Resume from { $time }
 item-shuffle = Shuffle
 item-trailer = Trailer
@@ -118,6 +121,20 @@ item-delete-playlist = Delete playlist…
 item-version = Version
 item-version-number = Version { $number }
 item-nothing-to-play = Nothing here to play.
+item-play-next = Play next
+item-play-from-here = Play from here
+item-add-to-queue = Add to queue
+item-nothing-to-queue = Nothing here to add to the queue.
+queue-played-next = { $name } plays next.
+queue-added = Added { $name } to the queue.
+queue-played-next-count = { $count ->
+    [one] { $count } item from { $name } plays next.
+   *[other] { $count } items from { $name } play next.
+    }
+queue-added-count = { $count ->
+    [one] Added { $count } item from { $name } to the queue.
+   *[other] Added { $count } items from { $name } to the queue.
+    }
 item-download = Download
 item-downloading = Downloading
 item-downloaded = Downloaded
@@ -140,6 +157,34 @@ item-cancel-download = Cancel download
 item-remove-download = Remove download
 item-retry-download = Retry download
 item-left = { $time } left
+item-runtime-hours-minutes = { $hours }h { $minutes }m
+item-runtime-hours = { $hours }h
+item-runtime-minutes = { $minutes }m
+item-episode-label = S{ $season }:E{ $episode }
+item-episode-label-short = E{ $episode }
+person-director = Director
+person-writer = Writer
+person-producer = Producer
+person-guest-star = Guest star
+person-composer = Composer
+person-conductor = Conductor
+person-lyricist = Lyricist
+person-arranger = Arranger
+person-engineer = Engineer
+person-mixer = Mixer
+person-remixer = Remixer
+person-creator = Creator
+person-artist = Artist
+person-album-artist = Album artist
+person-author = Author
+person-illustrator = Illustrator
+person-penciller = Penciller
+person-inker = Inker
+person-colorist = Colorist
+person-letterer = Letterer
+person-cover-artist = Cover artist
+person-editor = Editor
+person-translator = Translator
 item-less = Less
 item-show-less = Show less
 item-show-more = Show more
@@ -160,6 +205,7 @@ widget-copy-code = Copy code
 widget-copied = Copied
 widget-error = Error
 widget-information = Information
+widget-warning = Warning
 widget-success = Success
 widget-decrease = Decrease { $label }
 widget-increase = Increase { $label }
@@ -174,8 +220,8 @@ player-back = Back (Esc)
 player-starting = Starting playback…
 player-play = Play (Space)
 player-pause = Pause (Space)
-player-back-10s = Back 10 s (Left)
-player-forward-10s = Forward 10 s (Right)
+player-back-seconds = Back { $seconds } s (Left)
+player-forward-seconds = Forward { $seconds } s (Right)
 player-mute = Mute (M)
 player-unmute = Unmute (M)
 player-fullscreen = Fullscreen (F)
@@ -184,12 +230,13 @@ player-settings = Playback settings
 player-subtitles = Subtitles
 player-audio = Audio
 player-chapters = Chapters
+player-queue = Queue (Q)
+player-queue-empty = Nothing is queued after this.
+player-queue-save = Save as playlist…
 player-seek = Seek
 player-volume = Volume
 player-cast = Cast to a TV
 player-cast-to-device = Casting to { $device }
-player-playing-on = Playing on { $device }
-player-reconnecting-to = Reconnecting to { $device }…
 player-resumed-from = Resumed from { $time }
 player-start-over = Start over
 player-up-next = Up next
@@ -210,11 +257,19 @@ player-no-subtitles = No subtitles
 player-speed = Speed
 player-size = Size
 player-delay = Delay
+player-night-mode = Night mode
+player-night-mode-passthrough = Off while passthrough is on
+player-aspect = Aspect ratio
+player-aspect-fit = Fit
+player-aspect-fill = Fill
+player-aspect-stretch = Stretch
+player-deinterlace = Deinterlace
 player-normal-in-syncplay = Normal in SyncPlay
 player-badge-syncplay = SyncPlay
 player-badge-transcoding = Transcoding
 player-sheet-settings = Settings
 player-close = Close
+player-second-subtitle = Second subtitle
 player-subtitles-off = Off
 player-track-number = Track { $index }
 player-skip-intro = Skip intro
@@ -222,6 +277,75 @@ player-skip-recap = Skip recap
 player-skip-preview = Skip preview
 player-skip-ad = Skip ad
 player-skip-credits = Skip credits
+player-skipped-intro = Skipped intro
+player-skipped-recap = Skipped recap
+player-skipped-preview = Skipped preview
+player-skipped-ad = Skipped ad
+player-skipped-credits = Skipped credits
+player-undo = Undo
+player-sleep = Sleep timer
+player-sleep-off = Off
+player-sleep-left = { $minutes } min
+player-sleep-end = At end
+player-sleep-paused = Sleep timer: playback paused
+player-info-title = Playback info
+player-info-playing = Playing
+player-info-direct-play = Direct play
+player-info-direct-stream = Direct stream
+player-info-transcoding = Transcoding
+player-info-because = Because
+player-info-container = Container
+player-info-video = Video
+player-info-resolution = Resolution
+player-info-frame-rate = Frame rate
+player-info-video-bitrate = Video bitrate
+player-info-range = Range
+player-info-audio = Audio
+player-info-channels = Channels
+player-info-audio-bitrate = Audio bitrate
+player-info-decoder = Decoder
+player-info-decoder-software = Software
+player-info-dropped = Dropped frames
+player-info-buffered = Buffered
+player-info-output = Output
+player-info-output-zero-copy = GPU, zero-copy
+player-info-output-gpu = GPU
+player-info-output-software = Software
+player-info-output-surface = Player's own surface
+player-info-fps = { $fps } fps
+player-info-seconds = { $seconds } s
+player-info-channel-count = { $count } ch
+player-info-reason =
+    { $reason ->
+        [ContainerNotSupported] The container isn't supported by this player
+        [VideoCodecNotSupported] The video codec isn't supported by this player
+        [AudioCodecNotSupported] The audio codec isn't supported by this player
+        [SubtitleCodecNotSupported] The subtitle format isn't supported by this player
+        [AudioIsExternal] The audio is in a separate file
+        [SecondaryAudioNotSupported] A second audio track isn't supported
+        [VideoProfileNotSupported] The video profile isn't supported
+        [VideoLevelNotSupported] The video level isn't supported
+        [VideoResolutionNotSupported] The video resolution is too high for this player
+        [VideoBitDepthNotSupported] The video's bit depth isn't supported
+        [VideoFramerateNotSupported] The video's frame rate isn't supported
+        [VideoRangeTypeNotSupported] The video's HDR format isn't supported
+        [VideoCodecTagNotSupported] The video's codec tag isn't supported
+        [RefFramesNotSupported] The video uses too many reference frames
+        [AnamorphicVideoNotSupported] Anamorphic video isn't supported
+        [InterlacedVideoNotSupported] Interlaced video isn't supported
+        [AudioChannelsNotSupported] The audio has more channels than this player takes
+        [AudioProfileNotSupported] The audio profile isn't supported
+        [AudioSampleRateNotSupported] The audio's sample rate isn't supported
+        [AudioBitDepthNotSupported] The audio's bit depth isn't supported
+        [ContainerBitrateExceedsLimit] The bitrate is over the streaming limit
+        [VideoBitrateNotSupported] The video bitrate is too high
+        [AudioBitrateNotSupported] The audio bitrate is too high
+        [UnknownVideoStreamInfo] The server couldn't read the video's details
+        [UnknownAudioStreamInfo] The server couldn't read the audio's details
+        [DirectPlayError] Direct play failed
+        [StreamCountExceedsLimit] The file has more streams than this player takes
+       *[other] { $reason }
+    }
 player-restarting = The player stopped unexpectedly. Restarting it…
 player-reconnecting = Lost the connection to the server. Reconnecting…
 player-crashing = The player keeps crashing on this item. The log may say why.
@@ -246,6 +370,8 @@ settings-section-appearance = Appearance
 settings-section-appearance-summary = Theme, text size, animations and language
 settings-section-playback = Playback
 settings-section-playback-summary = Next episode, intros, quality and the player
+settings-section-audio = Audio
+settings-section-audio-summary = Output device, channels, passthrough and night mode
 settings-section-subtitles = Subtitles
 settings-section-subtitles-summary = Colour, style and size
 settings-section-downloads = Downloads
@@ -277,13 +403,37 @@ settings-text-size-system = Follow the system ({ $scale }%)
 settings-animations = Animations
 settings-animations-description = Animations and smooth scrolling. Applies at once.
 settings-animations-unset = on
+settings-spoilers = Spoiler protection
+settings-spoilers-description = Hide the pictures and summaries of episodes you haven't watched. Applies at once.
+settings-spoilers-unset = off
 settings-tracks-note = Which audio and subtitle tracks an item starts with is kept on the server, for every app you use.
 settings-autoplay = Play the next episode automatically
 settings-autoplay-description = When an episode ends, so the player stays open. From the next item on.
 settings-autoplay-unset = on
-settings-skip-intro = Skip intros and recaps automatically
-settings-skip-intro-description = Each intro or recap once as it starts, never in a SyncPlay group. From the next item on.
-settings-skip-intro-unset = off
+settings-seek-step = Seek step
+settings-seek-step-description = How far the arrow keys, the skip buttons, a double tap and a remote's fast-forward jump. Takes effect at once.
+settings-seek-step-unset = 10 s
+settings-default-speed = Default speed
+settings-default-speed-description = The speed playback starts at when the app opens. A speed picked in the player carries on to the next items.
+settings-default-speed-unset = 1×
+settings-skip-intro = Intros
+settings-skip-intro-description = Ask shows a skip button, Skip jumps by itself and offers Undo, Off does neither. Never skipped by itself in a SyncPlay group. From the next item on.
+settings-skip-intro-unset = ask
+settings-skip-recap = Recaps
+settings-skip-recap-description = Ask shows a skip button, Skip jumps by itself and offers Undo, Off does neither. Never skipped by itself in a SyncPlay group. From the next item on.
+settings-skip-recap-unset = ask
+settings-skip-preview = Previews
+settings-skip-preview-description = Ask shows a skip button, Skip jumps by itself and offers Undo, Off does neither. Never skipped by itself in a SyncPlay group. From the next item on.
+settings-skip-preview-unset = ask
+settings-skip-commercial = Ads
+settings-skip-commercial-description = Ask shows a skip button, Skip jumps by itself and offers Undo, Off does neither. Never skipped by itself in a SyncPlay group. From the next item on.
+settings-skip-commercial-unset = ask
+settings-skip-credits = Credits
+settings-skip-credits-description = Ask shows a skip button when there's no next episode to offer. Skip jumps to the end of the credits, which plays the next episode. Off leaves it to the up-next card. From the next item on.
+settings-skip-credits-unset = off
+settings-skip-ask = Ask
+settings-skip-skip = Skip
+settings-skip-off = Off
 settings-bitrate = Max streaming bitrate
 settings-bitrate-description = Videos above this bitrate are transcoded by the server. Lower it for slow connections. Automatic measures the connection before playing (at most every 10 minutes) and uses 80% of it, keeping the cap for when it's turned off. Read when the next item starts.
 settings-bitrate-unset = no limit
@@ -299,6 +449,33 @@ settings-player-unset = Media3
 settings-hevc = Ask for HEVC when the server transcodes
 settings-hevc-description = HEVC needs half the bandwidth of H.264 for the same picture, but is much harder for the server to encode. Used only if the server allows it (Dashboard › Playback › Transcoding). Read when the next item starts.
 settings-hevc-unset = off
+settings-audio-device = Output device
+settings-audio-device-description = Where the sound plays. If the device you picked isn't there when a video starts, the sound plays through Automatic instead. Read when the next item starts.
+settings-audio-device-unset = Automatic
+settings-audio-device-auto = Automatic
+settings-audio-device-missing = { $name } (not found)
+settings-audio-channels = Channels
+settings-audio-channels-description = How many channels go to the device. Automatic uses what the system says the device takes (stereo where it can't say). Pick 5.1 or 7.1 for a surround system that mpv takes for stereo, or Stereo to fold everything down. Read when the next item starts.
+settings-audio-channels-unset = Automatic
+settings-audio-channels-auto = Automatic
+settings-audio-channels-stereo = Stereo
+settings-passthrough-ac3 = Pass AC-3 through
+settings-passthrough-ac3-description = Sends Dolby Digital to the receiver as it is, for it to decode, instead of decoding it here. Needs a receiver on HDMI or S/PDIF that takes the format, and turns night mode off. Read when the next item starts.
+settings-passthrough-eac3 = Pass E-AC-3 through
+settings-passthrough-eac3-description = Sends Dolby Digital Plus to the receiver as it is. Needs a receiver that takes it over HDMI, and turns night mode off. A transcoded video keeps its E-AC-3 too. Read when the next item starts.
+settings-passthrough-dts = Pass DTS through
+settings-passthrough-dts-description = Sends DTS (the core, not DTS-HD) to the receiver as it is. Needs a receiver on HDMI or S/PDIF that takes it, and turns night mode off. Read when the next item starts.
+settings-passthrough-dts-hd = Pass DTS-HD through
+settings-passthrough-dts-hd-description = Sends DTS-HD Master Audio to the receiver as it is. Needs a receiver and an HDMI connection that take it, and turns night mode off. Read when the next item starts.
+settings-passthrough-truehd = Pass TrueHD through
+settings-passthrough-truehd-description = Sends Dolby TrueHD to the receiver as it is. Needs a receiver and an HDMI connection that take it, and turns night mode off. Read when the next item starts.
+settings-passthrough-unset = off
+settings-audio-exclusive = Exclusive mode
+settings-audio-exclusive-description = Takes the audio device for this app alone while it plays, which passthrough and bit-perfect output usually need. Other programs have no sound meanwhile. Only some outputs have it (WASAPI on Windows, PipeWire and CoreAudio elsewhere). Read when the next item starts.
+settings-audio-exclusive-unset = off
+settings-night-mode = Night mode
+settings-night-mode-description = Evens out loud and quiet parts, so speech stays clear at a low volume. The player's menu turns it on or off for what's playing. It can't act on a format passed through to a receiver, so it stays off while any passthrough is on. Read when the next item starts.
+settings-night-mode-unset = off
 settings-subtitles-note = How text subtitles such as SRT look; styled (ASS) subtitles keep their own look and only change size. The player's settings menu also changes the size while watching.
 settings-subtitle-tracks-note = Which subtitles turn on by themselves, and in which language, is kept on the server.
 settings-subtitle-color = Colour
@@ -372,6 +549,7 @@ settings-image-cache-cleared = Image cache cleared.
 settings-image-cache-failed = Couldn't clear the image cache. Close anything using its folder and try again.
 settings-logs-folder-failed = Couldn't open the logs folder ({ $path }).
 settings-save-failed = Couldn't save your settings to the server. They're back as the server has them.
+settings-config-save-failed = Couldn't save this setting on this device. Check that the settings folder can be written to and has room left.
 settings-load-failed = Couldn't load your settings from the server.
 settings-loading = Loading your settings from the server…
 settings-retry = Retry
@@ -392,6 +570,11 @@ menu-no-matches = Nothing matches “{ $search }”.
 shell-account-on = { $name } on { $server }
 shell-downloads = Downloads
 shell-add-account = Add account…
+shell-history = Watch history
+history-title = Watch history
+history-empty = Nothing watched yet.
+history-undated = Date unknown
+shell-authorise-device = Authorise a device…
 shell-sign-out = Sign out
 
 shell-syncplay-title = Watch together
@@ -469,6 +652,8 @@ login-reconnect = You'll be signed back in automatically as soon as the server a
 login-remove-account = Remove this account
 login-server-address = Server address
 login-other-server = Or connect to another server
+login-found-servers = Servers found on your network
+login-found-server = { $name } at { $address }
 login-address-hint = jellyfin.example.com or 192.168.1.10:8096
 login-connect = Connect
 login-username = Username
@@ -482,12 +667,21 @@ login-no-version = The server didn't report its version.
 login-version-too-old = This server runs Jellyfin { $version }. Tabbyfin needs { $needed } or newer.
 login-server-starting = The server is starting up. Waiting…
 login-not-jellyfin = That address doesn't look like a Jellyfin server.
+login-error-certificate = The server's certificate isn't trusted. Check the address, or the certificate on the server.
+login-unencrypted-title = Connect without encryption?
+login-unencrypted-notice = This server didn't answer over HTTPS, so your password and what you watch would travel unencrypted. That's usual for a server on your own network, and a risk anywhere else.
+login-connect-anyway = Connect anyway
 login-unreachable = Couldn't reach the server.
 
 dialog-sharing = Everyone on this server can see it
 dialog-delete-note = The playlist is removed from the server for everyone it's shared with. What's in it stays in your libraries.
 dialog-added = Added to { $name }.
 dialog-created = Made the playlist { $name }.
+dialog-save-queue = Save the queue as a playlist
+dialog-save-queue-count = { $count ->
+    [one] A playlist of { $count } item: what's playing and what's queued.
+   *[other] A playlist of { $count } items: what's playing and what's queued.
+    }
 dialog-already-there = { $item } is already in { $name }.
 dialog-cant-change = You can't change { $name }; it belongs to someone else.
 dialog-add-to-playlist = Add to playlist
@@ -501,6 +695,14 @@ dialog-checking-sharing = Checking who can see it…
 dialog-save = Save
 dialog-deleted = Deleted { $name }.
 dialog-delete-forbidden = { $name } belongs to someone else; it can't be deleted.
+dialog-authorise-title = Authorise a device
+dialog-authorise-note = Enter the code the other device shows under Quick Connect. It signs in as { $name }.
+dialog-authorise-code = Code
+dialog-authorise = Authorise
+dialog-authorise-done = The device is signed in.
+dialog-authorise-wrong = That code isn't right, or it has expired. Check the other device and try again.
+dialog-authorise-off = Quick Connect is turned off on this server.
+dialog-authorise-failed = That code couldn't be authorised. It may already have been used.
 dialog-delete-title = Delete “{ $name }”?
 dialog-delete = Delete
 dialog-new-playlist = New playlist “{ $name }”
@@ -512,9 +714,6 @@ dialog-item-count = { $count ->
 dialog-playlist-forbidden = This playlist belongs to someone else; it can't be changed.
 
 ## downloads-and-casting
-
-# A select's closing brace is indented: `i18n::tests` reads a line that starts at the left margin
-# as a new message.
 
 # The downloads page, and the platform's notice of the transfers (Android's notification).
 downloads-title = Downloads
@@ -615,3 +814,27 @@ syncplay-user-joined = { $user } joined
 syncplay-user-left = { $user } left
 syncplay-error = SyncPlay: { $message }
 syncplay-load-failed = Couldn't load the group's item: { $message }
+
+item-search-subtitles = Search for subtitles…
+player-search-subtitles = Search for subtitles…
+subtitle-search-title = Search for subtitles
+subtitle-search-language = Language
+subtitle-search-searching = Searching…
+subtitle-search-none = No subtitles found in { $language }. If a search never finds any, the server may have no subtitle provider set up; an administrator can add one, such as Open Subtitles, under the dashboard's plugins.
+subtitle-search-forbidden = Your account isn't allowed to search for subtitles.
+subtitle-search-downloading = Downloading…
+subtitle-search-added = Subtitle added
+subtitle-search-not-downloaded = The server couldn't download that subtitle. Try another one.
+subtitle-search-exact = Exact match
+subtitle-search-downloads = { $count ->
+    [one] { $digits } download
+   *[other] { $digits } downloads
+  }
+subtitle-search-rating = Rated { $rating }
+subtitle-search-row-label = { $name }, { $detail }
+player-position = Position
+settings-subtitle-position = Position
+settings-subtitle-position-description = How high up the picture subtitles sit. Shared with the player's settings menu. Goes to the playback manager at once, so a running session changes with it.
+settings-subtitle-position-unset = Bottom
+settings-subtitle-position-bottom = Bottom
+settings-subtitle-position-raised = { $percent } % higher

@@ -4,7 +4,10 @@
 
 use std::time::Duration;
 
-use jellyfin::{Client, ClientInfo, Download, Error, PlayMethod, PlaybackInfoRequest, PlaybackReport, Ticks};
+use jellyfin::{
+    Client, ClientInfo, Download, Error, PlayMethod, PlaybackInfoRequest, PlaybackOrder, PlaybackReport, RepeatMode,
+    Ticks,
+};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -39,6 +42,8 @@ fn report() -> PlaybackReport {
         play_method: PlayMethod::DirectPlay,
         volume_level: 80,
         is_muted: false,
+        repeat_mode: RepeatMode::RepeatAll,
+        playback_order: PlaybackOrder::Shuffle,
     }
 }
 
@@ -95,17 +100,20 @@ async fn playback_reports_carry_the_session_and_position() {
     assert_eq!(start["SubtitleStreamIndex"], json!(-1));
     assert_eq!(start["VolumeLevel"], json!(80));
     assert_eq!(start["CanSeek"], json!(true));
+    // The queue's modes, which the dashboard's remote shows.
+    assert_eq!(start["RepeatMode"], "RepeatAll");
+    assert_eq!(start["PlaybackOrder"], "Shuffle");
 
     let progress = body(&requests[1]);
     assert_eq!(progress["IsPaused"], json!(true));
     assert_eq!(progress["PositionTicks"], json!(950_000_000));
 
-    // `PlaybackStopInfo` has no paused, volume or track fields.
+    // `PlaybackStopInfo` has no paused, volume, track or queue mode fields.
     let stop = body(&requests[2]);
     assert_eq!(stop["PositionTicks"], json!(950_000_000));
     assert_eq!(stop["PlaySessionId"], "session");
     assert!(
-        stop.get("IsPaused").is_none() && stop.get("VolumeLevel").is_none(),
+        stop.get("IsPaused").is_none() && stop.get("VolumeLevel").is_none() && stop.get("RepeatMode").is_none(),
         "{stop}"
     );
 }
@@ -132,6 +140,7 @@ async fn playback_info_offers_direct_play_under_the_bitrate_cap() {
         subtitle_stream_index: None,
         max_streaming_bitrate: Some(8_000_000),
         prefer_hevc: false,
+        passthrough_eac3: false,
     };
     let info = client.playback_info("item", &request).await.expect("playback info");
     assert!(info.play_session_id.is_some());
@@ -211,7 +220,10 @@ async fn the_bitrate_test_times_the_download() {
         .mount(&server)
         .await;
     let bits = client(&server).await.bitrate_test(500_000).await.expect("bitrate test");
-    assert!((3_000_000..4_100_000).contains(&bits), "{bits} bit/s");
+    // The upper bound proves the timing: with no delay measured, 500 kB would read as many
+    // times 4 Mbit/s. The lower one only has to survive a slow runner (the download may take
+    // several times the 1 s delay), so it is far under the nominal 4 Mbit/s.
+    assert!((1_000_000..4_100_000).contains(&bits), "{bits} bit/s");
 }
 
 /// The server replaces the whole user configuration, so an update sends back what it read with
@@ -344,4 +356,299 @@ async fn a_failed_download_maps_to_the_error() {
     let client = client(&server).await;
     let err = client.download(client.download_url("item"), 0).await.err();
     assert!(matches!(err, Some(Error::Unauthorized)), "{err:?}");
+}
+
+/// Taking an item out of Continue Watching sends only the position, so the watched state stays.
+#[tokio::test]
+async fn clearing_a_resume_position_sends_only_the_position() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/UserItems/item/UserData"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "PlaybackPositionTicks": 0, "Played": false })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    client.set_resume_position("item", Ticks(0)).await.expect("cleared");
+    let requests = server.received_requests().await.expect("recording is on");
+    assert_eq!(body(&requests[0]), json!({ "PlaybackPositionTicks": 0 }));
+}
+
+/// Approving a device sends its code as a query parameter, and the server's refusals keep their
+/// meaning: `404` for a code it doesn't know, `401` when Quick Connect is off.
+#[tokio::test]
+async fn authorising_a_device_sends_the_code_and_maps_the_refusals() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "123456"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(true))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "000000"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/QuickConnect/Authorize"))
+        .and(query_param("code", "off"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("Quick connect is disabled"))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    client.quick_connect_authorize("123456").await.expect("approved");
+    assert!(matches!(
+        client.quick_connect_authorize("000000").await,
+        Err(Error::NotFound)
+    ));
+    assert!(matches!(
+        client.quick_connect_authorize("off").await,
+        Err(Error::Unauthorized)
+    ));
+}
+
+/// The search names the language in the path and asks for exact matches only when told to;
+/// the result's optional fields may be missing or `null`.
+#[tokio::test]
+async fn subtitle_search_decodes_results() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/por"))
+        .and(query_param("isPerfectMatch", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"Id": "os_a/b+c==", "Name": "Movie.2020.1080p", "ProviderName": "Open Subtitles", "Format": "srt",
+             "ThreeLetterISOLanguageName": "por", "DownloadCount": 1200, "CommunityRating": 7.5, "IsHashMatch": true},
+            {"Id": "x", "Name": "Other", "ProviderName": null, "DownloadCount": null, "IsHashMatch": null}
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/eng"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = client(&server).await;
+    let found = client.search_subtitles("item1", "por", true).await.unwrap();
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0].id, "os_a/b+c==");
+    assert_eq!(found[0].download_count, Some(1200));
+    assert!(found[0].is_hash_match);
+    assert_eq!(found[1].provider_name, None);
+    assert!(!found[1].is_hash_match);
+
+    assert!(client.search_subtitles("item1", "eng", false).await.unwrap().is_empty());
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests[1].url.query(), None, "no isPerfectMatch unless asked");
+}
+
+/// The download id is one path segment, however odd, and a user without the permission
+/// gets `Forbidden`.
+#[tokio::test]
+async fn subtitle_download_posts_the_encoded_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/Items/item1/RemoteSearch/Subtitles/os_a%2Fb%2Bc%3D%3D"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item2/RemoteSearch/Subtitles/eng"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+
+    let client = client(&server).await;
+    client.download_subtitle("item1", "os_a/b+c==").await.unwrap();
+    let err = client.search_subtitles("item2", "eng", false).await.unwrap_err();
+    assert!(matches!(err, Error::Forbidden), "{err:?}");
+}
+
+/// The server's text is cut to 500 bytes for the error, and the cut can fall inside a
+/// character: `String::truncate` panics there.
+#[tokio::test]
+async fn an_error_body_is_cut_on_a_character_boundary() {
+    let server = MockServer::start().await;
+    // 600 two-byte characters: byte 500 is a boundary, so shift it with a one-byte prefix.
+    for (route, text) in [("a", "é".repeat(600)), ("b", format!("x{}", "é".repeat(600)))] {
+        Mock::given(path(format!("/Items/{route}")))
+            .respond_with(ResponseTemplate::new(500).set_body_string(text))
+            .mount(&server)
+            .await;
+    }
+    let client = client(&server).await;
+    for (id, kept) in [("a", 500), ("b", 499)] {
+        match client.delete_item(id).await {
+            Err(Error::Status { status, message }) => {
+                assert_eq!(status, 500);
+                assert_eq!(message.len(), kept, "{id}");
+                assert!(message.chars().all(|c| c == 'é' || c == 'x'));
+            }
+            other => panic!("expected a status error, got {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_short_error_body_comes_back_whole() {
+    let server = MockServer::start().await;
+    let text = "é".repeat(249); // 498 bytes
+    Mock::given(path("/Items/a"))
+        .respond_with(ResponseTemplate::new(500).set_body_string(text.clone()))
+        .mount(&server)
+        .await;
+    match client(&server).await.delete_item("a").await {
+        Err(Error::Status { message, .. }) => assert_eq!(message, text),
+        other => panic!("expected a status error, got {other:?}"),
+    }
+}
+
+/// A redirect is followed within the server only: another host (or port) would get the request's
+/// body, at sign-in the password.
+#[tokio::test]
+async fn a_redirect_that_leaves_the_server_is_refused() {
+    let server = MockServer::start().await;
+    let elsewhere = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/System/Info/Public"))
+        .respond_with(ResponseTemplate::new(307).insert_header("Location", format!("{}/x", elsewhere.uri())))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Users/Me"))
+        .respond_with(ResponseTemplate::new(307).insert_header("Location", "/moved"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/moved"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+
+    let err = client.public_info().await.expect_err("the redirect is refused");
+    assert!(matches!(&err, Error::Http(e) if e.is_redirect()), "{err:?}");
+    assert!(elsewhere.received_requests().await.expect("recorded").is_empty());
+
+    // Within the server it is followed, to whatever answers there.
+    assert!(matches!(client.current_user().await, Err(Error::NotFound)));
+}
+
+/// A server that takes the request and never answers: the wait for its headers ends as a stall
+/// instead of holding the download for the whole transfer's limit. The stall limit is
+/// `Client::download_with`'s, so the test needn't wait the real 30 s.
+#[tokio::test]
+async fn a_server_that_never_answers_stalls_the_download() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(b"late")
+                .set_delay(Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    let started = std::time::Instant::now();
+    let err = client
+        .download_with(client.download_url("item"), 0, None, Duration::from_millis(200))
+        .await
+        .err();
+    assert!(matches!(err, Some(Error::Stalled)), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(3), "it gave up at the limit");
+}
+
+/// A resume asks with `If-Range`, the validator the first response gave: a strong `ETag`, else
+/// `Last-Modified`, and never a weak `ETag`, which a range request can't compare.
+#[tokio::test]
+async fn a_download_gives_its_validator_and_resumes_with_it() {
+    let server = MockServer::start().await;
+    for (route, headers) in [
+        (
+            "etag",
+            vec![("etag", "\"abc\""), ("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")],
+        ),
+        ("date", vec![("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")]),
+        (
+            "weak",
+            vec![
+                ("etag", "W/\"abc\""),
+                ("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT"),
+            ],
+        ),
+        ("none", vec![]),
+    ] {
+        let mut reply = ResponseTemplate::new(200).set_body_bytes(b"hello");
+        for (name, value) in headers {
+            reply = reply.insert_header(name, value);
+        }
+        Mock::given(method("GET"))
+            .and(path(format!("/Items/{route}/Download")))
+            .respond_with(reply)
+            .mount(&server)
+            .await;
+    }
+    let client = client(&server).await;
+    let mut validators = Vec::new();
+    for route in ["etag", "date", "weak", "none"] {
+        let download = client
+            .download(client.download_url(route), 0)
+            .await
+            .expect("a download");
+        validators.push(download.validator);
+    }
+    assert_eq!(
+        validators,
+        [
+            Some("\"abc\"".to_owned()),
+            Some("Wed, 21 Oct 2026 07:28:00 GMT".to_owned()),
+            Some("Wed, 21 Oct 2026 07:28:00 GMT".to_owned()),
+            None,
+        ]
+    );
+
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .and(header("range", "bytes=3-"))
+        .and(header("if-range", "\"abc\""))
+        .respond_with(
+            ResponseTemplate::new(206)
+                .insert_header("content-range", "bytes 3-4/5")
+                .set_body_bytes(b"lo"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let download = client
+        .download_resuming(client.download_url("item"), 3, Some("\"abc\""))
+        .await
+        .expect("a download");
+    assert!(download.partial);
+    assert_eq!(body_of(download).await, b"lo");
+}
+
+/// A range the server can't satisfy is a status error the caller can tell from a failure.
+#[tokio::test]
+async fn a_range_past_the_end_is_told_apart() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Items/item/Download"))
+        .respond_with(ResponseTemplate::new(416))
+        .mount(&server)
+        .await;
+    let client = client(&server).await;
+    let err = client
+        .download(client.download_url("item"), 5)
+        .await
+        .err()
+        .expect("an error");
+    assert!(err.is_range_not_satisfiable(), "{err:?}");
+    assert!(!Error::NotFound.is_range_not_satisfiable());
 }

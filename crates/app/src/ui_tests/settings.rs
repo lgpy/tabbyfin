@@ -6,6 +6,8 @@
 //! filters the page. The server's settings load from the user's configuration and save back to
 //! it.
 
+use std::time::Duration;
+
 use egui::Key;
 use egui::accesskit::{Role, Toggled};
 use egui_kittest::Harness;
@@ -13,8 +15,10 @@ use egui_kittest::kittest::{NodeT as _, Queryable};
 
 use crate::config::{Config, ThemePreference};
 use crate::nav::Route;
+use crate::services::AppEvent;
 use crate::ui_tests::{ConfigDir, FixtureServer, PageHarness, PageRun, fixture_json, session};
 use crate::views::settings::Section;
+use crate::views::{Page, PageCx};
 
 fn settings_harness(server: &FixtureServer) -> PageHarness {
     PageHarness::new(session(server), |cx| crate::views::open(Route::Settings, cx))
@@ -162,6 +166,38 @@ fn the_menu_scrolls_to_a_section() {
     });
 }
 
+/// The audio devices are asked of mpv (a player host process) once the Audio section is on
+/// screen, not when the page opens, and once per visit however the page is scrolled after.
+#[test]
+fn the_audio_devices_are_asked_once_the_audio_section_is_on_screen() {
+    use crate::views::settings::DEVICES_ASKED;
+
+    let _config = ConfigDir::new("settings-audio-devices");
+    let server = FixtureServer::start();
+    serve_the_users_settings(&server);
+    DEVICES_ASKED.with(|asked| asked.set(0));
+    let asked = || DEVICES_ASKED.with(std::cell::Cell::get);
+    let mut ui = settings_harness(&server);
+    for _ in 0..5 {
+        ui.step();
+    }
+    let (audio_top, _) = section_state(ui.harness(), "Audio");
+    assert!(audio_top > 720., "Audio starts below the window: {audio_top}");
+    assert_eq!(asked(), 0, "opening Settings doesn't ask");
+
+    click_menu_entry(&mut ui, "Audio");
+    ui.step_until("Audio at the top", |harness| section_state(harness, "Audio").0 < 80.);
+    assert_eq!(asked(), 1, "the Audio section on screen asks");
+
+    click_menu_entry(&mut ui, "Appearance");
+    ui.step_until("Appearance at the top", |harness| {
+        section_state(harness, "Appearance").0 < 80.
+    });
+    click_menu_entry(&mut ui, "Audio");
+    ui.step_until("Audio at the top", |harness| section_state(harness, "Audio").0 < 80.);
+    assert_eq!(asked(), 1, "once per visit");
+}
+
 /// A setting off its default has an undo button, and the button leaves its key out of the file
 /// again, so the default applies; a setting on its default has none.
 #[test]
@@ -275,6 +311,144 @@ fn a_searched_server_setting_saves_to_the_server() {
     assert_eq!(Config::load().theme, ThemePreference::System);
 }
 
+/// What replaces the Settings page when a test leaves it: nothing to draw, and nothing to
+/// cancel the services' work.
+struct Elsewhere;
+
+impl Page for Elsewhere {
+    fn title(&self) -> String {
+        "Elsewhere".to_owned()
+    }
+
+    fn show(&mut self, _ui: &mut egui::Ui, _cx: &mut PageCx) {}
+}
+
+/// The server's side of the page with a slow user: reading the configuration takes `delay`, so a
+/// save (which reads it first) is still out when the test leaves the page. `save` answers the
+/// write.
+fn serve_slowly(server: &FixtureServer, delay: Duration, save: u16) {
+    let auth: serde_json::Value = fixture_json("authenticate");
+    server.json_value_after("GET", "/Users/Me", &auth["User"], delay);
+    server.json("GET", "/Localization/Cultures", "cultures");
+    server.status("POST", "/Users/Configuration", save);
+}
+
+/// Opens the server's subtitle mode alone, ready for Right to step it.
+fn open_subtitle_mode(server: &FixtureServer) -> PageHarness {
+    let mut ui = settings_harness(server);
+    ui.step();
+    ui.search("smart");
+    ui.step_until("the subtitle mode", |harness| {
+        harness.query_all_by_label("Subtitle mode").next().is_some()
+            && harness.query_all_by_label("Theme").next().is_none()
+    });
+    tab_past_the_menu(&mut ui);
+    ui
+}
+
+/// Takes the page off the screen, as Back does: it's dropped, the services stay.
+fn leave_the_page(ui: &mut PageHarness) {
+    ui.harness_mut().state_mut().page = Some(Box::new(Elsewhere));
+    ui.step();
+}
+
+/// Changes made and the page left at once are still saved: the one that was out and the one that
+/// queued behind it, in the order they were made, one request at a time.
+#[test]
+fn server_settings_are_saved_though_the_page_was_left() {
+    let _config = ConfigDir::new("settings-leave");
+    let server = FixtureServer::start();
+    serve_slowly(&server, Duration::from_millis(300), 204);
+    let mut ui = open_subtitle_mode(&server);
+
+    ui.press(Key::ArrowRight);
+    ui.press(Key::ArrowRight);
+    leave_the_page(&mut ui);
+    assert_eq!(server.requests("POST", "/Users/Configuration"), 0, "not out yet");
+
+    ui.step_until("both saves", |_| server.requests("POST", "/Users/Configuration") == 2);
+    let saved = server.bodies("POST", "/Users/Configuration");
+    assert_eq!(saved[0]["SubtitleMode"], "Smart");
+    assert_eq!(saved[1]["SubtitleMode"], "OnlyForced");
+    // The second was only read from the server once the first was back.
+    assert_eq!(
+        server.requests("GET", "/Users/Me"),
+        3,
+        "the page's read, then one per save"
+    );
+    assert!(ui.toasts().is_empty(), "nothing failed: {:?}", ui.toasts());
+}
+
+/// A save that fails after the page was left is still a toast.
+#[test]
+fn a_failed_server_save_after_leaving_is_a_toast() {
+    let _config = ConfigDir::new("settings-leave-failed");
+    let server = FixtureServer::start();
+    serve_slowly(&server, Duration::from_millis(100), 500);
+    let mut ui = open_subtitle_mode(&server);
+
+    ui.press(Key::ArrowRight);
+    leave_the_page(&mut ui);
+    ui.step_until("the toast", |harness| !harness.state().toasts().is_empty());
+    assert!(ui.toasts()[0].contains("Couldn't save your settings to the server"));
+    assert_eq!(server.requests("POST", "/Users/Configuration"), 1);
+}
+
+/// A device setting that can't be written to the config folder is a toast, and the control stays
+/// on the value that's still in effect. Failing again says nothing more, and what the running
+/// app would apply for the change (the appearance) isn't applied.
+#[test]
+fn a_config_that_cant_be_written_says_so() {
+    let _config = ConfigDir::new("settings-unwritable");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    // A folder where the file is written aside before the rename: the write fails.
+    let aside = crate::config::dir().join("config.toml.tmp");
+    std::fs::create_dir_all(&aside).expect("a folder in the file's place");
+
+    let failures = |ui: &PageHarness| {
+        ui.toasts()
+            .iter()
+            .filter(|toast| toast.contains("Couldn't save this setting"))
+            .count()
+    };
+    let appearance_changes = |ui: &PageHarness| {
+        let services = ui.state().services.as_ref().expect("the services are made");
+        services
+            .events
+            .iter()
+            .filter(|event| matches!(event, AppEvent::AppearanceChanged))
+            .count()
+    };
+
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Animations");
+    assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::True));
+    switch.click();
+    ui.step();
+    ui.step();
+    assert_eq!(failures(&ui), 1, "no toast: {:?}", ui.toasts());
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Animations");
+    assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::True), "still on");
+
+    // Failing again, as a second change in a row: no second toast.
+    ui.harness().get_by_role_and_label(Role::Switch, "Animations").click();
+    ui.step();
+    ui.step();
+    assert_eq!(failures(&ui), 1, "one toast for the failed saves: {:?}", ui.toasts());
+    assert_eq!(appearance_changes(&ui), 0, "a change that wasn't saved isn't applied");
+
+    // Once the folder is gone a save works again, and the same change takes effect.
+    std::fs::remove_dir_all(&aside).expect("the folder goes");
+    ui.harness().get_by_role_and_label(Role::Switch, "Animations").click();
+    ui.step();
+    ui.step();
+    assert_eq!(appearance_changes(&ui), 1, "applied once it saved");
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Animations");
+    assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::False), "off now");
+}
+
 /// Enter on a picker egui's focus is on opens its list from the keyboard, on its first row; Down
 /// and Enter pick from it as from any menu, and the choice saves as a step would.
 #[test]
@@ -295,4 +469,56 @@ fn enter_opens_a_pickers_list_and_the_keyboard_picks_from_it() {
     ui.step();
     assert_eq!(Config::load().theme, ThemePreference::Light);
     assert!(ui.harness().query_by_label("Dark").is_none(), "the list closed");
+}
+
+/// Spoiler protection is off by default, and its switch saves and applies at once to the
+/// widgets that draw episodes (`spoilers`).
+#[test]
+fn the_spoiler_protection_switch_saves_and_applies() {
+    let _config = ConfigDir::new("settings-spoilers");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    let episode: jellyfin::models::BaseItemDto = serde_json::from_value(serde_json::json!({
+        "Id": "e", "Name": "e", "Type": "Episode",
+        "UserData": { "Played": false, "PlaybackPositionTicks": 0 },
+    }))
+    .expect("an episode");
+    let ctx = ui.harness().ctx.clone();
+    assert!(!crate::spoilers::hides(&ctx, &episode));
+    let switch = ui.harness().get_by_role_and_label(Role::Switch, "Spoiler protection");
+    assert_eq!(
+        switch.accesskit_node().toggled(),
+        Some(Toggled::False),
+        "off by default"
+    );
+    switch.click();
+    ui.step();
+    assert_eq!(Config::load().hide_spoilers, Some(true));
+    assert!(crate::spoilers::hides(&ctx, &episode));
+}
+
+/// The subtitle position is a picker beside the size; stepping it saves mpv's `sub-pos` to the
+/// config, where the bottom (its default) is the key's absence, and the undo button puts it back.
+#[test]
+fn the_subtitle_position_saves_to_the_config() {
+    let _config = ConfigDir::new("settings-sub-pos");
+    let server = FixtureServer::start();
+    let mut ui = settings_harness(&server);
+    ui.step();
+
+    // The word is in this row's description only among the device's settings.
+    ui.search("how high");
+    ui.step_until("the position row", |harness| {
+        harness.query_all_by_label("Position").next().is_some() && harness.query_all_by_label("Theme").next().is_none()
+    });
+    tab_past_the_menu(&mut ui);
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().subtitle_position, Some(95));
+    ui.press(Key::ArrowRight);
+    assert_eq!(Config::load().subtitle_position, Some(90));
+    ui.press(Key::ArrowLeft);
+    ui.press(Key::ArrowLeft);
+    assert_eq!(Config::load().subtitle_position, None, "the bottom is the default");
 }
