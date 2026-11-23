@@ -15,8 +15,15 @@ mkdir -p "$out/screenshots"
 
 for shot in docs/screenshots/*.jpg; do
   name=$(basename "$shot" .jpg)
-  magick "$shot" -quality 82 -define webp:method=6 "$out/screenshots/$name.webp"
-  magick "$shot" -resize 640x -quality 80 -define webp:method=6 "$out/screenshots/$name-640.webp"
+  magick "$shot" -quality 90 -define webp:method=6 "$out/screenshots/$name.webp"
+  magick "$shot" -resize 640x -quality 86 -define webp:method=6 "$out/screenshots/$name-640.webp"
+done
+
+# The light theme's copies. The player stays dark in both themes, so it has none.
+for shot in docs/screenshots/light/*.jpg; do
+  name=$(basename "$shot" .jpg)
+  magick "$shot" -quality 90 -define webp:method=6 "$out/screenshots/$name-light.webp"
+  magick "$shot" -resize 640x -quality 86 -define webp:method=6 "$out/screenshots/$name-light-640.webp"
 done
 
 cp packaging/tabbyfin.svg "$out/icon.svg"

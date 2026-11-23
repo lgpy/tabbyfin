@@ -4,9 +4,45 @@
   // Each part of the page stands alone: if one fails, the others still run.
   const part = run => { try { run(); } catch (e) { console.error(e); } };
 
+  // A speech bubble for the mascot. Its chatter is decoration, so screen readers skip it; what a
+  // visitor has to know is in the page's text.
+  const bubble = kind => {
+    const el = document.createElement('div');
+    el.className = 'speech ' + kind;
+    el.setAttribute('aria-hidden', 'true');
+    let timer = 0;
+    return {
+      el,
+      say(text) {
+        // A word at a time, all laid out from the start so the bubble keeps its size as they appear.
+        el.textContent = '';
+        text.split(' ').forEach((word, i) => {
+          const span = document.createElement('span');
+          span.textContent = word;
+          span.style.setProperty('--n', i);
+          el.append(span, ' ');
+        });
+        el.classList.remove('on');
+        void el.offsetWidth; // so a new line pops again even while the last is showing
+        el.classList.add('on');
+        clearTimeout(timer);
+        timer = setTimeout(() => el.classList.remove('on'), 2400 + text.length * 45);
+      },
+      hush() { clearTimeout(timer); el.classList.remove('on'); },
+    };
+  };
+  // Set while the lurking mascot is out: it takes the line when the hero's is off screen.
+  let lurkerSay = null;
+  // The next line of a list, so nothing repeats until they've all been said.
+  const turns = new Map();
+  const next = list => {
+    const i = turns.get(list) || 0;
+    turns.set(list, i + 1);
+    return list[i % list.length];
+  };
+
   part(() => {
     /* ---------- Downloads: the latest release's files, as soon as GitHub answers ---------- */
-    const RELEASES = 'https://github.com/lgpy/tabbyfin/releases/latest';
     const PATTERNS = {
       'win-setup': n => n.endsWith('-windows-x86_64-setup.exe'),
       'win-zip': n => n.endsWith('-windows-x86_64.zip'),
@@ -16,30 +52,41 @@
       'tar': n => n.endsWith('-linux-x86_64.tar.gz'),
       'mac-arm': n => n.endsWith('-macos-aarch64.zip'),
       'mac-intel': n => n.endsWith('-macos-x86_64.zip'),
+      'android': n => n.endsWith('.apk'),
     };
     // Which package or processor the visitor has can't be told, so only the system is guessed.
     const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
     const agent = navigator.userAgent || '';
     let os = null;
-    if (/android|iphone|ipad|ipod/i.test(agent) || (/mac/i.test(platform) && navigator.maxTouchPoints > 1)) os = null;
+    if (/android/i.test(agent)) os = 'android';
+    else if (/iphone|ipad|ipod/i.test(agent) || (/mac/i.test(platform) && navigator.maxTouchPoints > 1)) os = null;
     else if (/win/i.test(platform)) os = 'windows';
     else if (/mac/i.test(platform)) os = 'macos';
     else if (/linux|x11|cros/i.test(platform) || /linux/i.test(agent)) os = 'linux';
 
-    const NOTES = {
-      windows: 'The installer for Windows 10 and 11.',
-      linux: 'Debian and Ubuntu, other distributions, Flatpak or a tarball.',
-      macos: 'For Apple silicon or Intel; playback needs mpv from Homebrew.',
-    };
     const mainBtn = document.getElementById('download-main');
-    const mainNote = document.getElementById('main-note');
+    // The system's mark stands in for its name on the button; screen readers get the name.
+    const SVG = 'http://www.w3.org/2000/svg';
+    if (os) {
+      const mark = document.createElementNS(SVG, 'svg');
+      mark.setAttribute('aria-hidden', 'true');
+      mark.setAttribute('focusable', 'false');
+      const use = document.createElementNS(SVG, 'use');
+      use.setAttribute('href', '#b-' + { windows: 'windows', linux: 'linux', macos: 'apple', android: 'android' }[os]);
+      mark.append(use);
+      mark.classList.add('btn-os');
+      mainBtn.append(mark);
+    }
     function setMain(assets) {
       if (!os) return;
-      document.getElementById('main-label').textContent = 'Download for ' + { windows: 'Windows', linux: 'Linux', macos: 'macOS' }[os];
-      document.getElementById('download-' + os).classList.add('yours');
-      const a = os === 'windows' && assets && assets['win-setup'];
-      mainBtn.href = os === 'windows' ? (a ? a.url : RELEASES) : '#download-' + os;
-      mainNote.textContent = NOTES[os] + (a && a.size ? ' ' + a.size + '.' : '');
+      document.getElementById('main-label').textContent = 'Download for';
+      mainBtn.setAttribute('aria-label', 'Download for ' + { windows: 'Windows', linux: 'Linux', macos: 'Mac', android: 'Android' }[os]);
+      const card = document.getElementById('download-' + os);
+      card.classList.add('yours');
+      card.parentElement.prepend(card);
+      // One obvious file on Windows and Android; the others have a choice to make in their card.
+      const direct = assets && assets[{ windows: 'win-setup', android: 'android' }[os]];
+      mainBtn.href = direct ? direct.url : '#download-' + os;
     }
     const size = bytes => {
       const kb = Math.round(bytes / 1024);
@@ -48,19 +95,16 @@
     function apply(rel) {
       const assets = {};
       for (const [key, test] of Object.entries(PATTERNS)) {
-        const a = rel.assets.find(a => test(a.name));
+        // Where a release has an APK per processor, phones want the arm64 one.
+        const a = (key === 'android' && rel.assets.find(a => /arm64.*\.apk$/i.test(a.name))) || rel.assets.find(a => test(a.name));
         if (a) assets[key] = { url: a.browser_download_url, size: size(a.size), name: a.name };
       }
       document.querySelectorAll('[data-asset]').forEach(link => {
         const a = assets[link.dataset.asset];
         if (!a) return;
         link.href = a.url;
-        link.querySelector('.file').textContent = a.name;
         if (a.size) link.querySelector('[data-size]').textContent = a.size;
       });
-      for (const key of ['deb', 'flatpak']) {
-        document.querySelectorAll(`[data-name="${key}"]`).forEach(s => { if (assets[key]) s.textContent = assets[key].name; });
-      }
       const version = (rel.tag_name || '').replace(/^v/, '');
       if (version) document.querySelectorAll('[data-version]').forEach(s => { s.textContent = version; });
       const date = (rel.published_at || '').slice(0, 10);
@@ -104,10 +148,17 @@
   part(() => {
     /* ---------- Theme: system, light or dark, kept in localStorage (theme.js applies it before first paint) ---------- */
     const picks = [...document.querySelectorAll('[data-theme-pick]')];
+    const lightShots = [...document.querySelectorAll('source[data-light]')];
+    // The browser's own bar follows a choice made here, not just the system's setting.
+    const bars = [...document.querySelectorAll('meta[name="theme-color"]')];
+    const barColor = { light: '#fcfaff', dark: '#0e0b16' };
     const setTheme = value => {
       if (value === 'system') delete document.documentElement.dataset.theme;
       else document.documentElement.dataset.theme = value;
       picks.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themePick === value)));
+      // The screenshots follow the page. The player has no light one: it stays dark in the app too.
+      bars.forEach(bar => { bar.content = barColor[value] || (bar.media.includes('light') ? barColor.light : barColor.dark); });
+      lightShots.forEach(shot => { shot.media = value === 'light' ? 'all' : value === 'dark' ? 'not all' : '(prefers-color-scheme: light)'; });
       try { value === 'system' ? localStorage.removeItem('tabbyfin-theme') : localStorage.setItem('tabbyfin-theme', value); } catch (e) {}
     };
     picks.forEach(b => b.addEventListener('click', () => setTheme(b.dataset.themePick)));
@@ -126,7 +177,6 @@
     const panes = Object.fromEntries(tabs.map(t => [t.dataset.screen, document.getElementById('screen-' + t.dataset.screen)]));
     const stage = document.getElementById('stage');
     const winTitle = document.getElementById('win-title');
-    const caption = document.getElementById('stage-caption');
     strip.setAttribute('role', 'tablist');
     strip.setAttribute('aria-label', 'Screens of the app');
     strip.querySelectorAll('li').forEach(li => li.setAttribute('role', 'presentation'));
@@ -153,7 +203,6 @@
         if (current !== name) return; // another screen was chosen while this one loaded
         tabs.forEach(t => { panes[t.dataset.screen].hidden = t.dataset.screen !== name; });
         winTitle.textContent = pane.dataset.name;
-        caption.textContent = img.alt.replace(/^Tabbyfin's /, '');
         // The player is dark over the video, so the lights go down for it.
         stage.classList.toggle('lights-down', name === 'player');
       };
@@ -355,5 +404,202 @@
       }, { passive: true });
       show('home');
     }
+  });
+
+  part(() => {
+    /* ---------- Effects: all of them are extras, and none run for visitors who asked for less motion ---------- */
+    if (reduce) return;
+
+    // Sections rise in as they arrive. The class comes from here, so without this script nothing is hidden.
+    if ('IntersectionObserver' in window) {
+      const seen = new IntersectionObserver(entries => entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        seen.unobserve(entry.target);
+        entry.target.classList.add('in');
+        // Handed back afterwards, so the cards' own hover movement isn't held by the reveal.
+        setTimeout(() => entry.target.classList.remove('reveal', 'in'), 1100);
+      }), { rootMargin: '0px 0px -6% 0px' });
+      // On a phone the cards are a row to swipe, so the row arrives as one: a card still off to the side would never count as seen.
+      const cards = matchMedia('(max-width: 720px)').matches ? '.feature-grid' : '.feature-grid > li';
+      document.querySelectorAll(`#features-h, ${cards}, #download .section-head, .os`).forEach((el, i) => {
+        el.style.setProperty('--i', el.matches('.feature-grid > li') ? i % 4 : 0);
+        el.classList.add('reveal');
+        seen.observe(el);
+      });
+    }
+
+    // The app's window leans toward the mouse, with the mascot drifting a little in front of it.
+    const stage = document.getElementById('stage');
+    const roomy = matchMedia('(hover: hover) and (pointer: fine) and (min-width: 1081px)');
+    let target = null, queued = false;
+    const lean = () => {
+      queued = false;
+      const [x, y] = target || [0, 0];
+      stage.style.setProperty('--ry', (x * 5).toFixed(2) + 'deg');
+      stage.style.setProperty('--rx', (y * -4).toFixed(2) + 'deg');
+      stage.style.setProperty('--px', (x * 12).toFixed(1) + 'px');
+      stage.style.setProperty('--py', (y * 9).toFixed(1) + 'px');
+    };
+    const queue = () => { if (!queued) { queued = true; requestAnimationFrame(lean); } };
+    stage.addEventListener('pointermove', e => {
+      if (!roomy.matches || e.pointerType !== 'mouse') return;
+      const r = stage.getBoundingClientRect();
+      target = [(e.clientX - r.left) / r.width - .5, (e.clientY - r.top) / r.height - .5];
+      queue();
+    }, { passive: true });
+    stage.addEventListener('pointerleave', () => { target = null; queue(); });
+
+    // Whenever the hero's mascot is out of view it lurks instead: it ducks while the page moves, then peeks in from a bottom corner, clear of the text.
+    const art = document.querySelector('#mascot svg');
+    if (art) {
+      const lurker = document.createElement('div');
+      lurker.className = 'lurker';
+      lurker.setAttribute('aria-hidden', 'true');
+      const copy = art.cloneNode(true);
+      copy.querySelector('defs').remove();
+      ['.all', '.bodyg', '.look'].forEach(c => copy.querySelector(c).removeAttribute('transform'));
+      lurker.append(copy);
+      document.body.append(lurker);
+      const speech = bubble('speech-lurk');
+      document.body.append(speech.el);
+      const LINES = {
+        features: ["I'm not following you. Promise.", "Movie night? I'll bring the snacks.", 'Psst. I can skip the intro for you.'],
+        download: ['That one. Click that one.', "Go on, it's free!", "I'll wait right here."],
+        footer: ['You found me!', 'You read all the way down here?', 'Nothing else down here. Just me.'],
+      };
+      const here = () => {
+        if (innerHeight + scrollY >= document.documentElement.scrollHeight - 6) return 'footer';
+        return document.getElementById('download').getBoundingClientRect().top < innerHeight * .55 ? 'download' : 'features';
+      };
+      // It has something to say now and then, not at every stop.
+      let spokeAt = -Infinity, speakSoon = 0;
+      const eyes = copy.querySelector('.look'), open = copy.querySelector('.open'), shut = copy.querySelector('.closed');
+      const SPOTS = [98, 2];
+      let spot = 0, settle = 0;
+      // Its button, not the stage: the stage can still be on screen with the mascot gone.
+      const gone = () => {
+        const r = document.getElementById('mascot').getBoundingClientRect();
+        return r.bottom <= 0 || r.top >= innerHeight;
+      };
+      const peek = () => {
+        if (!gone()) return;
+        // At the very bottom of the page it comes up in the middle, with nowhere left to hide.
+        const end = here() === 'footer';
+        if (!end) spot = (spot + 1) % SPOTS.length;
+        lurker.style.setProperty('--spot', (end ? 50 : SPOTS[spot]) + '%');
+        lurker.style.setProperty('--lean', (end ? 0 : SPOTS[spot] > 50 ? -14 : 14) + 'deg');
+        lurker.classList.toggle('center', end);
+        speech.el.classList.toggle('center', end);
+        lurker.classList.add('peek');
+        speech.el.classList.toggle('left', !end && SPOTS[spot] < 50);
+        // Counted once it's said, so a line cut off by more scrolling doesn't use up the turn.
+        if (end || performance.now() - spokeAt > 7000) {
+          speakSoon = setTimeout(() => {
+            spokeAt = performance.now();
+            speech.say(next(LINES[here()]));
+          }, 420);
+        }
+      };
+      lurkerSay = text => {
+        if (!lurker.classList.contains('peek')) return false;
+        clearTimeout(speakSoon);
+        spokeAt = performance.now();
+        speech.say(text);
+        return true;
+      };
+      const duck = () => {
+        lurker.classList.remove('peek');
+        clearTimeout(speakSoon);
+        speech.hush();
+        clearTimeout(settle);
+        settle = setTimeout(peek, 420);
+      };
+      addEventListener('scroll', duck, { passive: true });
+      addEventListener('resize', duck, { passive: true });
+      addEventListener('pointermove', e => {
+        if (e.pointerType !== 'mouse' || !lurker.classList.contains('peek')) return;
+        const r = copy.getBoundingClientRect();
+        const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height * .33), d = Math.hypot(dx, dy) || 1;
+        eyes.setAttribute('transform', `translate(${(dx / d * 46).toFixed(1)} ${(dy / d * 38).toFixed(1)})`);
+      }, { passive: true });
+      setInterval(() => {
+        if (!lurker.classList.contains('peek')) return;
+        open.setAttribute('display', 'none');
+        shut.setAttribute('display', 'inline');
+        setTimeout(() => { open.setAttribute('display', 'inline'); shut.setAttribute('display', 'none'); }, 150);
+      }, 3600);
+      settle = setTimeout(peek, 420);
+    }
+  });
+
+  part(() => {
+    /* ---------- The hero mascot talks: hello, a word on each screen, and when it's petted ---------- */
+    const stage = document.getElementById('stage');
+    const strip = document.getElementById('strip');
+    const speech = bubble('speech-hero');
+    stage.append(speech.el);
+
+    // On a phone the mascot stands beside the download button, and the swipeable cards take keyboard focus.
+    const hero = document.querySelector('.hero'), cta = document.querySelector('.cta');
+    const mascot = document.getElementById('mascot'), row = document.querySelector('.feature-grid');
+    const small = matchMedia('(max-width: 720px)');
+    const place = () => {
+      hero.classList.toggle('mascot-by-button', small.matches);
+      if (small.matches) {
+        cta.append(mascot, speech.el);
+        row.tabIndex = 0;
+      } else {
+        stage.prepend(mascot);
+        stage.append(speech.el);
+        row.removeAttribute('tabindex');
+      }
+    };
+    small.addEventListener('change', place);
+    place();
+
+    const SCREENS = {
+      home: 'Everything you were watching, right here.',
+      library: 'So many movies. Pick one!',
+      item: 'Ooh, I love this one.',
+      player: "Shh, the movie's starting.",
+      settings: 'Make yourself at home.',
+    };
+    const PETS = ['Hehe, that tickles!', 'Purrrr.', 'Again! Again!'];
+    const hello = setTimeout(() => speech.say('Hi! Wanna look around?'), 1300);
+    // Scrolled away and come back to it: it noticed. Only once it's been seen, and properly back in view.
+    const BACK = ["Oh, you're back!", 'Missed me?', 'Find anything good?', 'I knew you\'d come back.'];
+    let seen = false, away = false, welcome = 0;
+    new IntersectionObserver(([entry]) => {
+      clearTimeout(welcome);
+      if (!entry.isIntersecting) {
+        if (seen) away = true;
+        return;
+      }
+      if (entry.intersectionRatio < .6) return;
+      seen = true;
+      if (!away) return;
+      welcome = setTimeout(() => {
+        away = false;
+        clearTimeout(hello);
+        speech.say(next(BACK));
+      }, 350);
+    }, { threshold: [0, .6] }).observe(mascot);
+
+    let shown = 'home';
+    const onScreen = () => setTimeout(() => {
+      const tab = strip.querySelector('[aria-selected="true"]');
+      if (!tab || tab.dataset.screen === shown) return;
+      shown = tab.dataset.screen;
+      clearTimeout(hello);
+      const r = document.getElementById('mascot').getBoundingClientRect();
+      const away = r.bottom <= 0 || r.top >= innerHeight;
+      if (!(away && lurkerSay && lurkerSay(SCREENS[shown]))) speech.say(SCREENS[shown]);
+    });
+    strip.addEventListener('click', onScreen);
+    strip.addEventListener('keydown', onScreen);
+    mascot.addEventListener('click', () => {
+      clearTimeout(hello);
+      speech.say(next(PETS));
+    });
   });
 })();
