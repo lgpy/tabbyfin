@@ -68,14 +68,25 @@ impl ServerClock {
     }
 }
 
-/// `None` outside what a `SystemTime` holds (Windows stops at the year 30828), where `+` and
-/// `-` would panic: the offset is the server's.
+/// The last microsecond of the year 9999, and how far before the epoch the year 1 starts: the
+/// range of the server's own dates.
+const LATEST: Duration = Duration::from_micros(253_402_300_799_999_999);
+const EARLIEST: Duration = Duration::from_secs(62_135_596_800);
+
+/// `None` outside the server's range of dates. `+` and `-` would panic past what a `SystemTime`
+/// holds, which differs per system (Windows stops at the year 30828, Linux and macOS go far
+/// beyond it), and the offset is the server's.
 fn shift(time: SystemTime, by_us: i64) -> Option<SystemTime> {
-    if by_us >= 0 {
+    let shifted = if by_us >= 0 {
         time.checked_add(Duration::from_micros(by_us as u64))
     } else {
         time.checked_sub(Duration::from_micros(by_us.unsigned_abs()))
-    }
+    }?;
+    let in_range = match shifted.duration_since(UNIX_EPOCH) {
+        Ok(since) => since <= LATEST,
+        Err(before) => before.duration() <= EARLIEST,
+    };
+    in_range.then_some(shifted)
 }
 
 fn micros(time: SystemTime) -> i64 {
