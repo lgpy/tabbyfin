@@ -1,8 +1,9 @@
 name: Website
 
-# Publishes site/ to GitHub Pages (https://lgpy.github.io/tabbyfin/). The site is plain files
+# Publishes site/ to GitHub Pages (https://tabbyfin.lgpy.dev/). The site is plain files
 # with no build step, so the folder is uploaded as it is. Pages has to be set to deploy from
-# GitHub Actions once (Settings → Pages → Source).
+# GitHub Actions once (Settings → Pages → Source). The custom domain lives in that same
+# settings page, because a deployment from Actions ignores a CNAME file.
 
 on:
   push:

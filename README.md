@@ -8,7 +8,7 @@ Runs on **Linux**, **Windows** and **macOS**. Needs Jellyfin **10.11 or newer**;
 
 > Early days: version 0.3. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's missing.
 
-**Website:** [lgpy.github.io/tabbyfin](https://lgpy.github.io/tabbyfin/)
+**Website:** [tabbyfin.lgpy.dev](https://tabbyfin.lgpy.dev/)
 
 ## Screenshots
 
